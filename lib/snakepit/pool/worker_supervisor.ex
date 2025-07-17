@@ -90,7 +90,6 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   def restart_worker(worker_id) do
     case stop_worker(worker_id) do
       :ok ->
-        Process.sleep(100)
         start_worker(worker_id)
 
       {:error, :worker_not_found} ->

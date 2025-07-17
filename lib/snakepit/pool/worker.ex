@@ -428,16 +428,19 @@ defmodule Snakepit.Pool.Worker do
         {_output, 0} ->
           Logger.warning("✅ Sent SIGTERM to Python process #{python_pid}")
 
-          # Wait briefly for graceful shutdown
-          Process.sleep(500)
-
-          # Force kill if still alive
-          case System.cmd("kill", ["-KILL", "#{python_pid}"], stderr_to_stdout: true) do
+          # Check if process is still alive before force killing
+          case System.cmd("kill", ["-0", "#{python_pid}"], stderr_to_stdout: true) do
             {_output, 0} ->
-              Logger.warning("✅ Force killed Python process #{python_pid}")
-
+              # Process still alive, force kill it
+              case System.cmd("kill", ["-KILL", "#{python_pid}"], stderr_to_stdout: true) do
+                {_output, 0} ->
+                  Logger.warning("✅ Force killed Python process #{python_pid}")
+                {_error, _} ->
+                  Logger.warning("⚠️ Failed to force kill Python process #{python_pid}")
+              end
             {_error, _} ->
-              Logger.warning("⚠️ Python process #{python_pid} already dead")
+              # Process already dead from SIGTERM
+              Logger.warning("✅ Python process #{python_pid} terminated gracefully")
           end
 
         {_error, _} ->
