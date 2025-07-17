@@ -1,8 +1,13 @@
 # Snakepit Examples
 
-The main examples have been moved to `snakepit_dspy/examples/` which demonstrate real-world usage with DSPy integration.
+## Basic Adapter Examples
 
-## Available Examples
+- **`generic_demo_python.exs`** - Python adapter demonstration with compute operations
+- **`generic_demo_javascript.exs`** - JavaScript adapter demonstration with extended features
+
+## Advanced DSPy Examples
+
+The main examples have been moved to `snakepit_dspy/examples/` which demonstrate real-world usage with DSPy integration.
 
 See `../snakepit_dspy/examples/` for:
 
@@ -14,6 +19,18 @@ See `../snakepit_dspy/examples/` for:
 These examples show real Gemini API integration through DSPy with actual language model responses.
 
 ## Usage
+
+### Basic Adapter Demos
+
+```bash
+# Test Python adapter functionality
+elixir examples/generic_demo_python.exs
+
+# Test JavaScript adapter functionality  
+elixir examples/generic_demo_javascript.exs
+```
+
+### Advanced DSPy Demos
 
 ```bash
 cd ../snakepit_dspy

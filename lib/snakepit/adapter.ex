@@ -8,6 +8,7 @@ defmodule Snakepit.Adapter do
 
   ## Required Callbacks
 
+  - `executable_path/0` - Returns the path to the runtime executable (python3, node, etc.)
   - `script_path/0` - Returns the path to the external script to execute
   - `script_args/0` - Returns additional arguments for the script
   - `supported_commands/0` - Returns list of commands this adapter supports
@@ -23,6 +24,7 @@ defmodule Snakepit.Adapter do
       defmodule MyApp.PythonMLAdapter do
         @behaviour Snakepit.Adapter
         
+        def executable_path, do: System.find_executable("python3") || System.find_executable("python")
         def script_path, do: Path.join(:code.priv_dir(:my_app), "python/ml_bridge.py")
         def script_args, do: ["--mode", "pool-worker"]
         def supported_commands, do: ["predict", "train", "ping"]
@@ -34,6 +36,14 @@ defmodule Snakepit.Adapter do
         def validate_command(cmd, _), do: {:error, {:unsupported_command, cmd}}
       end
   """
+
+  @doc """
+  Returns the path to the runtime executable.
+
+  This is the interpreter or runtime that will execute the script.
+  Examples: "python3", "node", "ruby", "R", etc.
+  """
+  @callback executable_path() :: String.t()
 
   @doc """
   Returns the path to the external script that will be executed.

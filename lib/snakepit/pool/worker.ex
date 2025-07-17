@@ -1,9 +1,9 @@
 defmodule Snakepit.Pool.Worker do
   @moduledoc """
-  GenServer that manages a single Python process via Port.
+  GenServer that manages a single external process via Port.
 
   Each worker:
-  - Owns one Python process
+  - Owns one external process (Python, Node.js, etc.)
   - Handles request/response communication
   - Manages health checks
   - Reports metrics
@@ -34,7 +34,7 @@ defmodule Snakepit.Pool.Worker do
   # Client API
 
   @doc """
-  Starts a Python worker process.
+  Starts an external worker process.
   """
   def start_link(opts) do
     worker_id = Keyword.fetch!(opts, :id)
@@ -384,7 +384,7 @@ defmodule Snakepit.Pool.Worker do
       {:error,
        "No adapter_module configured. Please set config :snakepit, :adapter_module, YourAdapter"}
     else
-      python_path = System.find_executable("python3") || System.find_executable("python")
+      executable_path = adapter_module.executable_path()
       script_path = adapter_module.script_path()
       script_args = adapter_module.script_args()
 
@@ -397,16 +397,16 @@ defmodule Snakepit.Pool.Worker do
       ]
 
       try do
-        port = Port.open({:spawn_executable, python_path}, port_opts)
+        port = Port.open({:spawn_executable, executable_path}, port_opts)
 
-        # Extract Python process PID
-        python_pid =
+        # Extract external process PID
+        process_pid =
           case Port.info(port, :os_pid) do
             {:os_pid, pid} -> pid
             _ -> nil
           end
 
-        {:ok, port, python_pid}
+        {:ok, port, process_pid}
       rescue
         e -> {:error, e}
       end
@@ -435,9 +435,11 @@ defmodule Snakepit.Pool.Worker do
               case System.cmd("kill", ["-KILL", "#{python_pid}"], stderr_to_stdout: true) do
                 {_output, 0} ->
                   Logger.warning("✅ Force killed Python process #{python_pid}")
+
                 {_error, _} ->
                   Logger.warning("⚠️ Failed to force kill Python process #{python_pid}")
               end
+
             {_error, _} ->
               # Process already dead from SIGTERM
               Logger.warning("✅ Python process #{python_pid} terminated gracefully")

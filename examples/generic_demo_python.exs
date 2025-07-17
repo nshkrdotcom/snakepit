@@ -1,7 +1,7 @@
 #!/usr/bin/env elixir
 
-# Generic Snakepit Demo
-# Run with: elixir examples/generic_demo.exs
+# Generic Snakepit Python Demo
+# Run with: elixir examples/generic_demo_python.exs
 
 # Configure the generic adapter BEFORE loading Snakepit
 Application.put_env(:snakepit, :pooling_enabled, true)
@@ -16,9 +16,9 @@ Mix.install([
 
 Logger.configure(level: :info)
 
-defmodule SnakepitGenericDemo do
+defmodule SnakepitPythonDemo do
   def run do
-    IO.puts("\n🐍 Snakepit Generic Adapter Demo")
+    IO.puts("\n🐍 Snakepit Python Adapter Demo")
     IO.puts("=" |> String.duplicate(60))
 
     # Start the application
@@ -207,7 +207,7 @@ defmodule SnakepitGenericDemo do
 end
 
 # Run the demo
-SnakepitGenericDemo.run()
+SnakepitPythonDemo.run()
 
 # Clean shutdown
 IO.puts("\n🛑 Stopping Snakepit application...")

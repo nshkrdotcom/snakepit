@@ -43,6 +43,11 @@ defmodule Snakepit.Adapters.GenericPython do
   @behaviour Snakepit.Adapter
 
   @impl true
+  def executable_path do
+    System.find_executable("python3") || System.find_executable("python")
+  end
+
+  @impl true
   def script_path do
     Path.join(:code.priv_dir(:snakepit), "python/generic_bridge.py")
   end

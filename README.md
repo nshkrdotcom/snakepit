@@ -1,16 +1,16 @@
 # Snakepit
 
-A high-performance, generalized pooler and session manager.
+A high-performance, generalized process pooler and session manager for external language integrations.
 
 ## Overview
 
-Snakepit provides:
+Snakepit is a general-purpose pooling system that can manage workers for any external process through its adapter pattern. It provides:
 
 - **Concurrent worker initialization** - All workers start in parallel using `Task.async_stream`
 - **High-performance OTP-based process management** - Built on DynamicSupervisor, Registry, and GenServer
 - **Stateless pool system** - Workers are stateless; all session data lives in centralized SessionStore
 - **Session affinity** - Support for session-based execution with automatic worker affinity
-- **Generalized adapter pattern** - Designed to support multiple ML frameworks beyond just Python/DSPy
+- **Multi-language adapter support** - Currently supports Python and JavaScript/Node.js with easy extensibility
 - **Process tracking and cleanup** - Robust process lifecycle management with automatic cleanup
 
 ## Architecture
@@ -35,17 +35,23 @@ Key performance improvements over traditional pooling approaches:
 ## Basic Usage
 
 ```elixir
-# Configure and start
+# Configure with Python adapter
 Application.put_env(:snakepit, :pooling_enabled, true)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPython)
 Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
 
 {:ok, _} = Application.ensure_all_started(:snakepit)
 
 # Execute commands
 {:ok, result} = Snakepit.execute("ping", %{test: true})
+{:ok, result} = Snakepit.execute("compute", %{operation: "add", a: 5, b: 3})
 
 # Session-based execution  
-{:ok, result} = Snakepit.execute_in_session("my_session", "command", %{})
+{:ok, result} = Snakepit.execute_in_session("my_session", "echo", %{message: "hello"})
+
+# Switch to JavaScript adapter
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericJavaScript)
+{:ok, result} = Snakepit.execute("random", %{type: "uniform", min: 1, max: 100})
 
 # Get pool statistics
 stats = Snakepit.get_stats()
@@ -54,8 +60,11 @@ stats = Snakepit.get_stats()
 ## Running the Demo
 
 ```bash
-# Generic functionality demo
-elixir examples/generic_demo.exs
+# Python adapter demo
+elixir examples/generic_demo_python.exs
+
+# JavaScript adapter demo  
+elixir examples/generic_demo_javascript.exs
 ```
 
 ## Configuration
@@ -68,28 +77,30 @@ config :snakepit,
   }
 ```
 
-## Architecture Benefits
+## Supported Adapters
 
-1. **Fast Startup**: All workers initialize concurrently
-2. **Simple Code**: Standard OTP patterns, no magic
-3. **OTP Reliability**: Automatic supervision and restart handling  
-4. **Clustering Ready**: Registry pattern enables distribution
-5. **Maintainable**: Clear separation of concerns
+Snakepit currently includes adapters for:
 
-## Development Status
+### Python Adapter (`Snakepit.Adapters.GenericPython`)
+- Framework-agnostic Python integration
+- Commands: `ping`, `echo`, `compute`, `info`
+- Simple computational tasks and health checks
+- Example usage for ML frameworks, data processing, etc.
 
-This is an extraction of the proven DSPex V3 pool implementation, which achieved:
+### JavaScript/Node.js Adapter (`Snakepit.Adapters.GenericJavaScript`)
+- Node.js integration without external dependencies
+- Commands: `ping`, `echo`, `compute`, `info`, `random`
+- Mathematical operations and random number generation
+- Perfect for web scraping, API calls, or JavaScript computations
 
-- 1000x+ performance improvements through concurrent initialization
-- Production stability with comprehensive error handling
-- Clean separation between pooling and ML framework logic
-- Extensible adapter pattern for multiple frameworks
+### Creating Custom Adapters
+See the `Snakepit.Adapter` behaviour documentation for implementing your own adapters for R, Ruby, Go, or any other language.
 
 ## Future Extensions
 
 The design supports easy evolution:
 
-1. **Multiple Adapters** - JavaScript, R, or other language integrations
+1. **Additional Language Adapters** - R, Ruby, Go, Rust, or other language integrations
 2. **Clustering** - Replace Registry with Horde.Registry for distribution  
 3. **Advanced Metrics** - Telemetry events for monitoring
 4. **Load Balancing** - Cross-pool request distribution
@@ -102,7 +113,7 @@ Add `snakepit` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.1.0"}
+    {:snakepit, "~> 0.0.1"}
   ]
 end
 ```
