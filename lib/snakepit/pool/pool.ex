@@ -491,7 +491,6 @@ defmodule Snakepit.Pool do
             error ->
               error
           end
-
       end
     else
       :ok

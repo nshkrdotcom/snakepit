@@ -164,7 +164,6 @@ defmodule Snakepit.Pool.Worker do
             Logger.error("   Port info: #{inspect(Port.info(state.port))}")
             {:stop, :initialization_timeout, state}
         end
-
     end
   end
 
@@ -239,7 +238,6 @@ defmodule Snakepit.Pool.Worker do
         )
 
         {:noreply, %{state | busy: true, pending_requests: pending}}
-
     end
   end
 
@@ -314,7 +312,6 @@ defmodule Snakepit.Pool.Worker do
 
         Process.send_after(self(), :health_check, @health_check_interval)
         {:noreply, %{state | pending_requests: pending}}
-
     end
   end
 

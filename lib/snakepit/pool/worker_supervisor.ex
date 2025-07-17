@@ -92,11 +92,11 @@ defmodule Snakepit.Pool.WorkerSupervisor do
       :ok ->
         Process.sleep(100)
         start_worker(worker_id)
-      
+
       {:error, :worker_not_found} ->
         # Worker doesn't exist, just start a new one
         start_worker(worker_id)
-      
+
       error ->
         error
     end
