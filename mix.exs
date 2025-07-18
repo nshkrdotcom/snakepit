@@ -40,7 +40,7 @@ defmodule Snakepit.MixProject do
       licenses: ["MIT"],
       maintainers: ["NSHkr <ZeroTrust@NSHkr.com>"],
       links: %{"GitHub" => "https://github.com/nshkrdotcom/snakepit"},
-      files: ~w(lib priv img .formatter.exs mix.exs README* LICENSE* CHANGELOG* DIAGS*),
+      files: ~w(lib priv assets .formatter.exs mix.exs README* LICENSE* CHANGELOG* DIAGS*),
       exclude_patterns: ["priv/plts", "priv/python/__pycache__"]
     ]
   end
@@ -57,8 +57,8 @@ defmodule Snakepit.MixProject do
     [
       main: "readme",
       extras: ["README.md", "DIAGS.md"],
-      assets: %{"img" => "assets"},
-      logo: "img/snakepit-logo.svg",
+      assets: %{"assets" => "assets"},
+      logo: "assets/snakepit-logo.svg",
       before_closing_head_tag: &docs_before_closing_head_tag/1,
       before_closing_body_tag: &docs_before_closing_body_tag/1
     ]
