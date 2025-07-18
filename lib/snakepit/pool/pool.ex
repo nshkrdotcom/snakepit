@@ -226,32 +226,40 @@ defmodule Snakepit.Pool do
     # Check for queued requests first
     case :queue.out(state.request_queue) do
       {{:value, {queued_from, command, args, opts, _queued_at}}, new_queue} ->
-        # A request was waiting! Give it the worker immediately
-        Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
-          # Extract the actual PID from the from tuple for monitoring
-          {client_pid, _tag} = queued_from
-          ref = Process.monitor(client_pid)
-          result = execute_on_worker(worker_id, command, args, opts)
+        # Check if the queued client is still alive before processing
+        {client_pid, _tag} = queued_from
 
-          # Check if the client is still alive
-          receive do
-            {:DOWN, ^ref, :process, ^client_pid, _reason} ->
-              # Client is dead, don't try to reply. Just check in the worker.
-              Logger.warning(
-                "Queued client #{inspect(client_pid)} died before receiving reply. Checking in worker #{worker_id}."
-              )
+        if Process.alive?(client_pid) do
+          # Client is alive, process the request normally
+          Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+            ref = Process.monitor(client_pid)
+            result = execute_on_worker(worker_id, command, args, opts)
 
-              GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
-          after
-            0 ->
-              # Client is alive. Clean up the monitor and proceed.
-              Process.demonitor(ref, [:flush])
-              GenServer.reply(queued_from, result)
-              GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
-          end
-        end)
+            # Check if the client is still alive after execution
+            receive do
+              {:DOWN, ^ref, :process, ^client_pid, _reason} ->
+                # Client died during execution, don't try to reply
+                Logger.warning(
+                  "Queued client #{inspect(client_pid)} died during execution. Checking in worker #{worker_id}."
+                )
 
-        {:noreply, %{state | request_queue: new_queue}}
+                GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
+            after
+              0 ->
+                # Client is alive, clean up monitor and reply
+                Process.demonitor(ref, [:flush])
+                GenServer.reply(queued_from, result)
+                GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
+            end
+          end)
+
+          {:noreply, %{state | request_queue: new_queue}}
+        else
+          # Client is dead, discard request and check for the next one
+          Logger.debug("Discarding request from dead client #{inspect(client_pid)}")
+          GenServer.cast(self(), {:checkin_worker, worker_id})
+          {:noreply, %{state | request_queue: new_queue}}
+        end
 
       {:empty, _} ->
         # No requests waiting, return worker to available set
@@ -263,26 +271,13 @@ defmodule Snakepit.Pool do
 
   @impl true
   def handle_info({:queue_timeout, from}, state) do
-    # Remove request from queue if still there
-    new_queue =
-      :queue.filter(
-        fn
-          {^from, _, _, _, _} -> false
-          _ -> true
-        end,
-        state.request_queue
-      )
+    # Since dead clients are now handled efficiently during dequeue,
+    # we only need to reply with timeout error. The queue filtering is
+    # handled naturally during normal processing via Process.alive? checks.
+    GenServer.reply(from, {:error, :queue_timeout})
 
-    # Reply with timeout error if request was still queued
-    if :queue.len(new_queue) < :queue.len(state.request_queue) do
-      GenServer.reply(from, {:error, :queue_timeout})
-
-      stats = Map.update!(state.stats, :queue_timeouts, &(&1 + 1))
-      {:noreply, %{state | request_queue: new_queue, stats: stats}}
-    else
-      # Request already processed
-      {:noreply, state}
-    end
+    stats = Map.update!(state.stats, :queue_timeouts, &(&1 + 1))
+    {:noreply, %{state | stats: stats}}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
