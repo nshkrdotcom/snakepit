@@ -83,7 +83,7 @@ defmodule Snakepit.Pool do
     state = %__MODULE__{
       size: size,
       workers: [],
-      available: :queue.new(),
+      available: MapSet.new(),
       busy: %{},
       request_queue: :queue.new(),
       stats: %{
@@ -117,11 +117,8 @@ defmodule Snakepit.Pool do
     if length(workers) == 0 do
       {:stop, :no_workers_started, state}
     else
-      # Initialize available queue with all workers
-      available =
-        Enum.reduce(workers, :queue.new(), fn worker_id, q ->
-          :queue.in(worker_id, q)
-        end)
+      # Initialize available set with all workers
+      available = MapSet.new(workers)
 
       {:noreply, %{state | workers: workers, available: available, initialized: true}}
     end
@@ -198,7 +195,7 @@ defmodule Snakepit.Pool do
     stats =
       Map.merge(state.stats, %{
         workers: length(state.workers),
-        available: :queue.len(state.available),
+        available: MapSet.size(state.available),
         busy: map_size(state.busy),
         queued: :queue.len(state.request_queue)
       })
@@ -217,16 +214,31 @@ defmodule Snakepit.Pool do
       {{:value, {queued_from, command, args, opts, _queued_at}}, new_queue} ->
         # A request was waiting! Give it the worker immediately
         Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+          # Extract the actual PID from the from tuple for monitoring
+          {client_pid, _tag} = queued_from
+          ref = Process.monitor(client_pid)
           result = execute_on_worker(worker_id, command, args, opts)
-          GenServer.reply(queued_from, result)
-          GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
+          
+          # Check if the client is still alive
+          receive do
+            {:DOWN, ^ref, :process, ^client_pid, _reason} ->
+              # Client is dead, don't try to reply. Just check in the worker.
+              Logger.warning("Queued client #{inspect(client_pid)} died before receiving reply. Checking in worker #{worker_id}.")
+              GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
+          after
+            0 ->
+              # Client is alive. Clean up the monitor and proceed.
+              Process.demonitor(ref, [:flush])
+              GenServer.reply(queued_from, result)
+              GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
+          end
         end)
 
         {:noreply, %{state | request_queue: new_queue}}
 
       {:empty, _} ->
-        # No requests waiting, return worker to available queue
-        new_available = :queue.in(worker_id, state.available)
+        # No requests waiting, return worker to available set
+        new_available = MapSet.put(state.available, worker_id)
         new_busy = Map.delete(state.busy, worker_id)
         {:noreply, %{state | available: new_available, busy: new_busy}}
     end
@@ -288,32 +300,10 @@ defmodule Snakepit.Pool do
 
   @impl true
   def terminate(reason, _state) do
-    Logger.warning(
-      "🛑 Pool is terminating with reason: #{inspect(reason)}. Shutting down workers gracefully."
-    )
-
-    # Get all worker PIDs supervised by our supervisor
-    worker_pids = Snakepit.Pool.WorkerSupervisor.list_workers()
-
-    Logger.warning("🔄 Requesting graceful shutdown of #{length(worker_pids)} workers...")
-
-    # Tell the supervisor to terminate each child gracefully
-    # This is a synchronous operation for each worker
-    terminated_count =
-      Enum.reduce(worker_pids, 0, fn pid, acc ->
-        Logger.debug("Pool requesting shutdown of worker #{inspect(pid)}")
-
-        case DynamicSupervisor.terminate_child(Snakepit.Pool.WorkerSupervisor, pid) do
-          :ok ->
-            acc + 1
-
-          {:error, :not_found} ->
-            # Worker already terminated
-            acc + 1
-        end
-      end)
-
-    Logger.warning("✅ Pool shutdown complete. #{terminated_count} workers terminated gracefully.")
+    Logger.info("🛑 Pool is terminating with reason: #{inspect(reason)}. Supervisor will handle worker shutdown.")
+    # No need to manually terminate workers. The main supervisor handles it through the OTP shutdown cascade.
+    # The WorkerSupervisor will automatically terminate all its children (Worker.Starter processes),
+    # which in turn will terminate their Worker children.
     :ok
   end
 
@@ -357,8 +347,9 @@ defmodule Snakepit.Pool do
 
       :no_preferred_worker ->
         # Fall back to any available worker
-        case :queue.out(state.available) do
-          {{:value, worker_id}, new_available} ->
+        case MapSet.to_list(state.available) do
+          [worker_id | _] ->
+            new_available = MapSet.delete(state.available, worker_id)
             new_busy = Map.put(state.busy, worker_id, true)
             new_state = %{state | available: new_available, busy: new_busy}
 
@@ -369,7 +360,7 @@ defmodule Snakepit.Pool do
 
             {:ok, worker_id, new_state}
 
-          {:empty, _} ->
+          [] ->
             {:error, :no_workers}
         end
     end
@@ -381,9 +372,9 @@ defmodule Snakepit.Pool do
     case get_preferred_worker(session_id) do
       {:ok, preferred_worker_id} ->
         # Check if the preferred worker is available
-        if queue_contains?(state.available, preferred_worker_id) do
-          # Remove the preferred worker from available queue
-          new_available = queue_remove(state.available, preferred_worker_id)
+        if MapSet.member?(state.available, preferred_worker_id) do
+          # Remove the preferred worker from available set
+          new_available = MapSet.delete(state.available, preferred_worker_id)
           new_busy = Map.put(state.busy, preferred_worker_id, true)
           new_state = %{state | available: new_available, busy: new_busy}
 
@@ -418,16 +409,6 @@ defmodule Snakepit.Pool do
     end)
   end
 
-  defp queue_contains?(queue, item) do
-    :queue.to_list(queue) |> Enum.member?(item)
-  end
-
-  defp queue_remove(queue, item) do
-    queue
-    |> :queue.to_list()
-    |> Enum.reject(&(&1 == item))
-    |> :queue.from_list()
-  end
 
   defp execute_on_worker(worker_id, command, args, opts) do
     timeout = get_command_timeout(command, args, opts)

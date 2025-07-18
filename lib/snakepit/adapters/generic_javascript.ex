@@ -58,7 +58,15 @@ defmodule Snakepit.Adapters.GenericJavaScript do
 
   @impl true
   def script_path do
-    Path.join(:code.priv_dir(:snakepit), "javascript/generic_bridge.js")
+    # Try application priv_dir first, fallback to relative path for development
+    case :code.priv_dir(:snakepit) do
+      {:error, :bad_name} ->
+        # Development mode - use relative path from current working directory
+        Path.join([File.cwd!(), "priv", "javascript", "generic_bridge.js"])
+      
+      priv_dir ->
+        Path.join(priv_dir, "javascript/generic_bridge.js")
+    end
   end
 
   @impl true

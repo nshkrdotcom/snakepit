@@ -48,6 +48,16 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @doc """
+  Gets all registered external process PIDs, regardless of worker status.
+  
+  This is useful during shutdown when workers may have been terminated
+  but external processes still need cleanup.
+  """
+  def get_all_process_pids() do
+    GenServer.call(__MODULE__, :get_all_process_pids)
+  end
+
+  @doc """
   Gets all registered worker information.
   """
   def list_all_workers() do
@@ -134,7 +144,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     }
 
     :ets.insert(state.table, {worker_id, worker_info})
-    Logger.debug("Registered worker #{worker_id} with external process PID #{process_pid}")
+    Logger.info("✅ Registered worker #{worker_id} with external process PID #{process_pid} in ProcessRegistry")
     {:noreply, state}
   end
 
@@ -143,7 +153,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     case :ets.lookup(state.table, worker_id) do
       [{^worker_id, %{process_pid: process_pid}}] ->
         :ets.delete(state.table, worker_id)
-        Logger.debug("Unregistered worker #{worker_id} with external process PID #{process_pid}")
+        Logger.info("🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}")
 
       [] ->
         Logger.warning("Attempted to unregister unknown worker #{worker_id}")
@@ -168,6 +178,15 @@ defmodule Snakepit.Pool.ProcessRegistry do
     pids =
       :ets.tab2list(state.table)
       |> Enum.filter(fn {_id, %{elixir_pid: pid}} -> Process.alive?(pid) end)
+      |> Enum.map(fn {_id, %{process_pid: process_pid}} -> process_pid end)
+      |> Enum.filter(&(&1 != nil))
+
+    {:reply, pids, state}
+  end
+
+  def handle_call(:get_all_process_pids, _from, state) do
+    pids =
+      :ets.tab2list(state.table)
       |> Enum.map(fn {_id, %{process_pid: process_pid}} -> process_pid end)
       |> Enum.filter(&(&1 != nil))
 

@@ -110,16 +110,17 @@ defmodule Snakepit.Pool.Worker do
 
           # Worker is already registered via via_tuple in start_link - no manual registration needed
 
-          # Register worker with process tracking
-          Snakepit.Pool.ProcessRegistry.register_worker(
-            worker_id,
-            self(),
-            process_pid,
-            fingerprint
-          )
-
-          # Register with application cleanup for hard guarantee
+          # Register worker with process tracking only if we have a valid process_pid
           if process_pid do
+            Snakepit.Pool.ProcessRegistry.register_worker(
+              worker_id,
+              self(),
+              process_pid,
+              fingerprint
+            )
+
+            # Register with application cleanup for hard guarantee
+            Logger.debug("Registering worker #{worker_id} with process PID #{process_pid}")
             try do
               Snakepit.Pool.ApplicationCleanup.register_worker_process(process_pid)
             rescue
@@ -320,8 +321,18 @@ defmodule Snakepit.Pool.Worker do
     end
   end
 
+  def handle_info({:EXIT, port, reason}, state) when port == state.port do
+    Logger.warning("🚨 Worker #{state.id} port exited with reason: #{inspect(reason)}")
+    {:stop, {:port_exit, reason}, state}
+  end
+
+  def handle_info({port, {:exit_status, status}}, state) when port == state.port do
+    Logger.warning("🚨 Worker #{state.id} port exited with status: #{status}")
+    {:stop, {:port_exit, status}, state}
+  end
+
   def handle_info(msg, state) do
-    Logger.debug("Worker #{state.id} received unexpected message: #{inspect(msg)}")
+    Logger.info("Worker #{state.id} received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -380,6 +391,12 @@ defmodule Snakepit.Pool.Worker do
     script_path = adapter_module.script_path()
     script_args = adapter_module.script_args()
 
+    Logger.info("🚀 Starting external process:")
+    Logger.info("  📁 Executable: #{executable_path}")
+    Logger.info("  📄 Script: #{script_path}")
+    Logger.info("  ⚙️ Args: #{inspect(script_args)}")
+    Logger.info("  ✅ Script exists? #{File.exists?(script_path)}")
+
     # Use packet mode for structured communication
     port_opts = [
       :binary,
@@ -394,10 +411,15 @@ defmodule Snakepit.Pool.Worker do
       # Extract external process PID
       process_pid =
         case Port.info(port, :os_pid) do
-          {:os_pid, pid} -> pid
-          _ -> nil
+          {:os_pid, pid} -> 
+            Logger.debug("Successfully started external process with PID #{pid}")
+            pid
+          error -> 
+            Logger.error("Failed to get external process PID: #{inspect(error)}")
+            nil
         end
 
+      Logger.debug("start_external_port result: port=#{inspect(port)}, process_pid=#{inspect(process_pid)}")
       {:ok, port, process_pid}
     rescue
       e -> {:error, e}
