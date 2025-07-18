@@ -9,7 +9,7 @@ defmodule Snakepit.Pool.Worker do
   - Reports metrics
   """
 
-  use GenServer, restart: :permanent
+  use GenServer, restart: :transient
   require Logger
 
   alias Snakepit.Bridge.Protocol
@@ -93,6 +93,8 @@ defmodule Snakepit.Pool.Worker do
             stats: %{requests: 0, errors: 0, total_time: 0},
             adapter_module: adapter_module
           }
+
+          # Worker is already registered via via_tuple in start_link - no manual registration needed
 
           # Register worker with process tracking
           Snakepit.Pool.ProcessRegistry.register_worker(
@@ -301,18 +303,20 @@ defmodule Snakepit.Pool.Worker do
 
   @impl true
   def terminate(reason, state) do
-    # Don't log warnings for normal pool shutdown (port exit with status 137)
-    case reason do
-      {:port_exit, 137} ->
-        Logger.debug("Worker #{state.id} terminated by pool shutdown")
-      _ ->
-        Logger.warning("🔥 Worker #{state.id} terminating: #{inspect(reason)}")
-    end
+    log_level =
+      case reason do
+        # This is a normal, coordinated shutdown requested by the supervisor
+        :shutdown -> :info
+        # Port exit with status 137 is also a coordinated shutdown
+        {:port_exit, 137} -> :debug
+        # Any other reason is a crash or unexpected stop
+        _ -> :warning
+      end
 
-    # Unregister from process tracking
+    Logger.log(log_level, "🔥 Worker #{state.id} terminating with reason: #{inspect(reason)}")
+
+    # Unregister from all tracking systems
     Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
-    
-    # Unregister from application cleanup tracking
     if state.process_pid do
       try do
         Snakepit.Pool.ApplicationCleanup.unregister_worker_process(state.process_pid)
@@ -321,20 +325,20 @@ defmodule Snakepit.Pool.Worker do
       end
     end
 
-    # Always kill external process when worker terminates
-    # ApplicationCleanup provides the hard guarantee for app shutdown
+    # CRITICAL: The worker is solely responsible for cleaning up its external process
     if state.port && Port.info(state.port) do
-      # Get the external process PID before closing port
-      process_pid = case Port.info(state.port, :os_pid) do
-        {:os_pid, pid} -> pid
-        _ -> state.process_pid  # Fallback to stored PID
-      end
-      
+      process_pid =
+        case Port.info(state.port, :os_pid) do
+          {:os_pid, pid} -> pid
+          _ -> state.process_pid  # Fallback to stored PID
+        end
+
       # Close the port first
       Port.close(state.port)
-      
-      # Then kill the external process if we have its PID
+
+      # Then gracefully terminate the external process if we have its PID
       if process_pid do
+        # Your robust termination logic is now in the right place
         terminate_external_process(process_pid, state.id)
       end
     end

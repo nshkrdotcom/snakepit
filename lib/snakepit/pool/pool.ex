@@ -252,18 +252,14 @@ defmodule Snakepit.Pool do
   end
 
   def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
-    # Worker died, remove from pool
-    case Enum.find(state.workers, fn worker_id ->
-           case Snakepit.Pool.Registry.get_worker_pid(worker_id) do
-             {:ok, ^pid} -> true
-             _ -> false
-           end
-         end) do
-      nil ->
+    # O(1) lookup of worker_id by PID using Registry
+    case Snakepit.Pool.Registry.get_worker_id_by_pid(pid) do
+      {:error, :not_found} ->
+        # Not a worker we are tracking, ignore
         {:noreply, state}
 
-      worker_id ->
-        Logger.error("Worker #{worker_id} died: #{inspect(reason)}")
+      {:ok, worker_id} ->
+        Logger.error("Worker #{worker_id} (pid: #{inspect(pid)}) died: #{inspect(reason)}")
 
         # Remove from all queues
         new_workers = List.delete(state.workers, worker_id)
@@ -291,72 +287,36 @@ defmodule Snakepit.Pool do
   end
 
   @impl true
-  def terminate(reason, state) do
-    Logger.warning("🛑 Pool.terminate/2 CALLED with reason: #{inspect(reason)}")
-    Logger.warning("🛑 Pool state: #{inspect(Map.take(state, [:workers, :process_pids]))}")
+  def terminate(reason, _state) do
+    Logger.warning("🛑 Pool is terminating with reason: #{inspect(reason)}. Shutting down workers gracefully.")
     
-    # Kill only OUR external processes, not all processes on the system
-    killed_count = kill_pool_worker_processes(state)
+    # Get all worker PIDs supervised by our supervisor
+    worker_pids = Snakepit.Pool.WorkerSupervisor.list_workers()
     
-    Logger.warning("✅ Pool shutdown completed - killed #{killed_count} worker processes")
+    Logger.warning("🔄 Requesting graceful shutdown of #{length(worker_pids)} workers...")
+    
+    # Tell the supervisor to terminate each child gracefully
+    # This is a synchronous operation for each worker
+    terminated_count = Enum.reduce(worker_pids, 0, fn pid, acc ->
+      Logger.debug("Pool requesting shutdown of worker #{inspect(pid)}")
+      case DynamicSupervisor.terminate_child(Snakepit.Pool.WorkerSupervisor, pid) do
+        :ok -> 
+          acc + 1
+        {:error, :not_found} -> 
+          # Worker already terminated
+          acc + 1
+        {:error, reason} ->
+          Logger.warning("Failed to terminate worker #{inspect(pid)}: #{inspect(reason)}")
+          acc
+      end
+    end)
+    
+    Logger.warning("✅ Pool shutdown complete. #{terminated_count} workers terminated gracefully.")
     :ok
   end
 
   # Private Functions
 
-  defp kill_pool_worker_processes(state) do
-    Logger.warning("🔥 Killing external processes for pool workers...")
-    
-    # Get all workers from this pool
-    worker_ids = state.workers || []
-    
-    killed_count = Enum.reduce(worker_ids, 0, fn worker_id, acc ->
-      # Get external process PID from ProcessRegistry
-      case Snakepit.Pool.ProcessRegistry.get_worker_info(worker_id) do
-        {:ok, %{python_pid: process_pid}} when is_integer(process_pid) ->
-          case kill_external_process(process_pid, worker_id) do
-            :ok -> 
-              Logger.warning("✅ Killed external process #{process_pid} for worker #{worker_id}")
-              acc + 1
-            :error -> 
-              Logger.warning("⚠️ Failed to kill external process #{process_pid} for worker #{worker_id}")
-              acc
-          end
-        _ ->
-          Logger.warning("⚠️ No external process PID found for worker #{worker_id}")
-          acc
-      end
-    end)
-    
-    # Also try to get external process PIDs from the tracked set if available
-    tracked_pids = MapSet.to_list(state.process_pids || MapSet.new())
-    
-    additional_killed = Enum.reduce(tracked_pids, 0, fn process_pid, acc ->
-      case kill_external_process(process_pid, "tracked") do
-        :ok -> 
-          Logger.warning("✅ Killed tracked external process #{process_pid}")
-          acc + 1
-        :error -> 
-          acc
-      end
-    end)
-    
-    killed_count + additional_killed
-  end
-  
-  defp kill_external_process(process_pid, _worker_id) when is_integer(process_pid) do
-    try do
-      # Use SIGKILL for immediate termination
-      case System.cmd("kill", ["-KILL", "#{process_pid}"], stderr_to_stdout: true) do
-        {_output, 0} ->
-          :ok
-        {_error, _} ->
-          :error
-      end
-    rescue
-      _ -> :error
-    end
-  end
 
   defp start_workers_concurrently(count) do
     1..count

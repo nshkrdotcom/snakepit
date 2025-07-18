@@ -30,41 +30,21 @@ defmodule Snakepit.Pool.ProcessRegistry do
   Registers a worker with its Python process information.
   """
   def register_worker(worker_id, elixir_pid, python_pid, fingerprint) do
-    worker_info = %{
-      elixir_pid: elixir_pid,
-      python_pid: python_pid,
-      fingerprint: fingerprint,
-      registered_at: System.system_time(:second)
-    }
-    
-    :ets.insert(@table_name, {worker_id, worker_info})
-    Logger.debug("Registered worker #{worker_id} with Python PID #{python_pid}")
-    :ok
+    GenServer.cast(__MODULE__, {:register, worker_id, elixir_pid, python_pid, fingerprint})
   end
   
   @doc """
   Unregisters a worker from tracking.
   """
   def unregister_worker(worker_id) do
-    case :ets.lookup(@table_name, worker_id) do
-      [{^worker_id, %{python_pid: python_pid}}] ->
-        :ets.delete(@table_name, worker_id)
-        Logger.debug("Unregistered worker #{worker_id} with Python PID #{python_pid}")
-        :ok
-      [] ->
-        Logger.warning("Attempted to unregister unknown worker #{worker_id}")
-        :ok
-    end
+    GenServer.cast(__MODULE__, {:unregister, worker_id})
   end
   
   @doc """
   Gets all active Python process PIDs from registered workers.
   """
   def get_active_python_pids() do
-    :ets.tab2list(@table_name)
-    |> Enum.filter(fn {_id, %{elixir_pid: pid}} -> Process.alive?(pid) end)
-    |> Enum.map(fn {_id, %{python_pid: python_pid}} -> python_pid end)
-    |> Enum.filter(& &1 != nil)
+    GenServer.call(__MODULE__, :get_active_python_pids)
   end
   
   @doc """
@@ -78,10 +58,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
   Gets information for a specific worker.
   """
   def get_worker_info(worker_id) do
-    case :ets.lookup(@table_name, worker_id) do
-      [{^worker_id, worker_info}] -> {:ok, worker_info}
-      [] -> {:error, :not_found}
-    end
+    GenServer.call(__MODULE__, {:get_worker_info, worker_id})
   end
   
   @doc """
@@ -106,14 +83,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
   Cleans up dead worker entries from the registry.
   """
   def cleanup_dead_workers() do
-    dead_workers = validate_workers()
-    
-    Enum.each(dead_workers, fn {worker_id, %{python_pid: python_pid}} ->
-      :ets.delete(@table_name, worker_id)
-      Logger.info("Cleaned up dead worker #{worker_id} with Python PID #{python_pid}")
-    end)
-    
-    length(dead_workers)
+    GenServer.call(__MODULE__, :cleanup_dead_workers)
   end
   
   @doc """
@@ -135,13 +105,12 @@ defmodule Snakepit.Pool.ProcessRegistry do
   
   @impl true
   def init(_opts) do
-    # Create ETS table for worker tracking
+    # Create ETS table for worker tracking - protected so only GenServer can write
     table = :ets.new(@table_name, [
       :set,
-      :public,
+      :protected,
       :named_table,
-      {:read_concurrency, true},
-      {:write_concurrency, true}
+      {:read_concurrency, true}
     ])
     
     Logger.info("Snakepit Pool Process Registry started with table #{@table_name}")
@@ -153,8 +122,58 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
   
   @impl true
+  def handle_cast({:register, worker_id, elixir_pid, python_pid, fingerprint}, state) do
+    worker_info = %{
+      elixir_pid: elixir_pid,
+      python_pid: python_pid,
+      fingerprint: fingerprint,
+      registered_at: System.system_time(:second)
+    }
+    
+    :ets.insert(state.table, {worker_id, worker_info})
+    Logger.debug("Registered worker #{worker_id} with Python PID #{python_pid}")
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:unregister, worker_id}, state) do
+    case :ets.lookup(state.table, worker_id) do
+      [{^worker_id, %{python_pid: python_pid}}] ->
+        :ets.delete(state.table, worker_id)
+        Logger.debug("Unregistered worker #{worker_id} with Python PID #{python_pid}")
+      [] ->
+        Logger.warning("Attempted to unregister unknown worker #{worker_id}")
+    end
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_call({:get_worker_info, worker_id}, _from, state) do
+    reply = case :ets.lookup(state.table, worker_id) do
+      [{^worker_id, worker_info}] -> {:ok, worker_info}
+      [] -> {:error, :not_found}
+    end
+    {:reply, reply, state}
+  end
+
+  @impl true
+  def handle_call(:get_active_python_pids, _from, state) do
+    pids = :ets.tab2list(state.table)
+           |> Enum.filter(fn {_id, %{elixir_pid: pid}} -> Process.alive?(pid) end)
+           |> Enum.map(fn {_id, %{python_pid: python_pid}} -> python_pid end)
+           |> Enum.filter(& &1 != nil)
+    {:reply, pids, state}
+  end
+
+  @impl true
+  def handle_call(:cleanup_dead_workers, _from, state) do
+    dead_count = do_cleanup_dead_workers(state.table)
+    {:reply, dead_count, state}
+  end
+
+  @impl true
   def handle_info(:cleanup_dead_workers, state) do
-    dead_count = cleanup_dead_workers()
+    dead_count = do_cleanup_dead_workers(state.table)
     
     if dead_count > 0 do
       Logger.info("Cleaned up #{dead_count} dead worker entries")
@@ -182,5 +201,18 @@ defmodule Snakepit.Pool.ProcessRegistry do
   defp schedule_cleanup do
     # Clean up dead workers every 30 seconds
     Process.send_after(self(), :cleanup_dead_workers, 30_000)
+  end
+
+  # Helper function for cleanup that operates on the table
+  defp do_cleanup_dead_workers(table) do
+    dead_workers = :ets.tab2list(table)
+                   |> Enum.filter(fn {_id, %{elixir_pid: pid}} -> not Process.alive?(pid) end)
+    
+    Enum.each(dead_workers, fn {worker_id, %{python_pid: python_pid}} ->
+      :ets.delete(table, worker_id)
+      Logger.info("Cleaned up dead worker #{worker_id} with Python PID #{python_pid}")
+    end)
+    
+    length(dead_workers)
   end
 end

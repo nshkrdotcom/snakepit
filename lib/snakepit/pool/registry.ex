@@ -65,4 +65,25 @@ defmodule Snakepit.Pool.Registry do
   def worker_count do
     Registry.count(@registry_name)
   end
+
+  @doc """
+  Register a worker with metadata for O(1) reverse lookups.
+  This is only used for manual registration - workers started with via_tuple are already registered.
+  """
+  def register_worker(_worker_id, _pid) do
+    # Workers started with via_tuple are already registered automatically
+    # This is a no-op for compatibility
+    :ok
+  end
+
+  @doc """
+  Get worker_id from PID for O(1) lookups in :DOWN messages.
+  """
+  def get_worker_id_by_pid(pid) do
+    # Use Registry's keys/2 function for O(1) reverse lookup
+    case Registry.keys(@registry_name, pid) do
+      [worker_id] -> {:ok, worker_id}
+      [] -> {:error, :not_found}
+    end
+  end
 end

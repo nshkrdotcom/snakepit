@@ -86,7 +86,15 @@ defmodule Snakepit.Pool.ApplicationCleanup do
             end
         end
       rescue
-        _ -> acc
+        # Only rescue specific, expected errors
+        e in [ArgumentError] ->
+          Logger.error("Failed to kill process with invalid PID #{inspect(pid)}: #{inspect(e)}")
+          acc # Continue, but log the problem
+        # Log other unexpected errors explicitly  
+        e ->
+          Logger.error("Unexpected exception during worker cleanup for PID #{inspect(pid)}: #{inspect(e)}")
+          # Continue cleanup for other processes
+          acc
       end
     end)
   end
