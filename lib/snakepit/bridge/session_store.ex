@@ -315,6 +315,7 @@ defmodule Snakepit.Bridge.SessionStore do
 
     cleanup_interval = Keyword.get(opts, :cleanup_interval, @cleanup_interval)
     default_ttl = Keyword.get(opts, :default_ttl, @default_ttl)
+    global_program_ttl = Keyword.get(opts, :global_program_ttl, 3600)  # 1 hour default
 
     # Schedule periodic cleanup
     Process.send_after(self(), :cleanup_expired_sessions, cleanup_interval)
@@ -326,13 +327,15 @@ defmodule Snakepit.Bridge.SessionStore do
       global_programs_table_name: global_programs_table_name,
       cleanup_interval: cleanup_interval,
       default_ttl: default_ttl,
+      global_program_ttl: global_program_ttl,
       stats: %{
         sessions_created: 0,
         sessions_deleted: 0,
         sessions_expired: 0,
         cleanup_runs: 0,
         global_programs_stored: 0,
-        global_programs_deleted: 0
+        global_programs_deleted: 0,
+        global_programs_expired: 0
       }
     }
 
@@ -487,11 +490,12 @@ defmodule Snakepit.Bridge.SessionStore do
   @impl true
   def handle_info(:cleanup_expired_sessions, state) do
     {_expired_count, new_stats} = do_cleanup_expired_sessions(state.table, state.stats)
+    {_expired_global_count, newer_stats} = do_cleanup_expired_global_programs(state.global_programs_table, state.global_program_ttl, new_stats)
 
     # Schedule next cleanup
     Process.send_after(self(), :cleanup_expired_sessions, state.cleanup_interval)
 
-    {:noreply, %{state | stats: new_stats}}
+    {:noreply, %{state | stats: newer_stats}}
   end
 
   @impl true
@@ -598,6 +602,29 @@ defmodule Snakepit.Bridge.SessionStore do
       |> Map.update(:sessions_expired, expired_count, &(&1 + expired_count))
       |> Map.update(:cleanup_runs, 1, &(&1 + 1))
 
+    {expired_count, new_stats}
+  end
+
+  # Clean up expired global programs using efficient ETS select_delete
+  defp do_cleanup_expired_global_programs(table, ttl, stats) do
+    current_time = System.monotonic_time(:second)
+    expiration_time = current_time - ttl
+    
+    # Match spec: {program_id, _program_data, timestamp} where timestamp < expiration_time
+    # In the tuple: program_id is at element 1, program_data is at element 2, timestamp is at element 3
+    match_spec = [
+      {{:_, :_, :"$1"}, [{:"<", :"$1", expiration_time}], [true]}
+    ]
+    
+    # Atomically find and delete all expired global programs
+    expired_count = :ets.select_delete(table, match_spec)
+    
+    if expired_count > 0 do
+      Logger.debug("Cleaned up #{expired_count} expired global programs")
+    end
+    
+    new_stats = Map.update(stats, :global_programs_expired, expired_count, &(&1 + expired_count))
+    
     {expired_count, new_stats}
   end
 end

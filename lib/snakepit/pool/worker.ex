@@ -383,16 +383,14 @@ defmodule Snakepit.Pool.Worker do
   end
 
   defp terminate_external_process(process_pid, worker_id) when is_integer(process_pid) do
-    Logger.warning("🔥 Terminating external process #{process_pid} for worker #{worker_id}")
+    Logger.warning("🔥 Sending SIGTERM to external process #{process_pid} for worker #{worker_id}")
     
     try do
-      # Try graceful termination first
+      # Send graceful termination signal but DO NOT wait
+      # ApplicationCleanup provides the hard guarantee with SIGKILL if needed
       case System.cmd("kill", ["-TERM", "#{process_pid}"], stderr_to_stdout: true) do
         {_output, 0} ->
-          Logger.warning("✅ Sent SIGTERM to external process #{process_pid}")
-          
-          # Wait for graceful shutdown using process monitoring instead of sleep
-          wait_for_process_termination(process_pid, 500)
+          Logger.warning("✅ Sent SIGTERM to external process #{process_pid} (non-blocking)")
           
         {_error, _} ->
           # Process already dead or kill failed
@@ -400,7 +398,7 @@ defmodule Snakepit.Pool.Worker do
       end
     rescue
       e ->
-        Logger.warning("💥 Exception killing external process #{process_pid}: #{inspect(e)}")
+        Logger.warning("💥 Exception sending SIGTERM to external process #{process_pid}: #{inspect(e)}")
     end
   end
 
@@ -408,66 +406,6 @@ defmodule Snakepit.Pool.Worker do
     Logger.warning("⚠️ No external process PID to terminate for worker #{worker_id}")
   end
 
-  # Wait for external process termination using proper process monitoring
-  defp wait_for_process_termination(process_pid, timeout_ms) do
-    # Spawn a task to monitor the process and force kill if needed
-    task = Task.async(fn ->
-      case wait_for_pid_exit(process_pid, timeout_ms) do
-        :exited ->
-          Logger.warning("✅ External process #{process_pid} exited gracefully")
-          :ok
-        :timeout ->
-          Logger.warning("⚠️ External process #{process_pid} did not exit gracefully, force killing")
-          # Force kill if still alive
-          case System.cmd("kill", ["-KILL", "#{process_pid}"], stderr_to_stdout: true) do
-            {_output, 0} ->
-              Logger.warning("✅ Force killed external process #{process_pid}")
-            {_error, _} ->
-              Logger.warning("⚠️ External process #{process_pid} already dead")
-          end
-          :force_killed
-      end
-    end)
-    
-    # Wait for the task with a reasonable timeout
-    case Task.yield(task, timeout_ms + 100) do
-      {:ok, result} -> result
-      nil -> 
-        Task.shutdown(task, :brutal_kill)
-        Logger.warning("⚠️ Timeout waiting for process #{process_pid} termination")
-        :timeout
-    end
-  end
-
-  # Check if a PID is still alive using OS-level process checking with proper OTP timing
-  defp wait_for_pid_exit(process_pid, timeout_ms) do
-    # Use a timer-based approach instead of sleep loops
-    start_time = System.monotonic_time(:millisecond)
-    check_interval = 50
-    
-    wait_for_pid_exit_with_timer(process_pid, start_time, timeout_ms, check_interval)
-  end
-
-  defp wait_for_pid_exit_with_timer(process_pid, start_time, timeout_ms, check_interval) do
-    current_time = System.monotonic_time(:millisecond)
-    
-    if current_time - start_time >= timeout_ms do
-      :timeout
-    else
-      # Check if process is still alive using kill -0 (no signal sent, just check)
-      case System.cmd("kill", ["-0", "#{process_pid}"], stderr_to_stdout: true) do
-        {_output, 0} ->
-          # Process still alive, use receive with timer instead of sleep
-          receive do
-          after check_interval ->
-            wait_for_pid_exit_with_timer(process_pid, start_time, timeout_ms, check_interval)
-          end
-        {_error, _} ->
-          # Process no longer exists
-          :exited
-      end
-    end
-  end
 
   defp handle_response(request_id, result, state) do
     case Map.pop(state.pending_requests, request_id) do
