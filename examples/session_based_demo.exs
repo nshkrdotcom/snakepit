@@ -1,12 +1,39 @@
 #!/usr/bin/env elixir
 
 # Session-Based Snakepit Demo
-# Run with: elixir examples/session_based_demo.exs
+# Run with: elixir examples/session_based_demo.exs [pool_size]
+# Example: elixir examples/session_based_demo.exs 8
+
+# Parse command line arguments
+pool_size = case System.argv() do
+  [size_str] ->
+    case Integer.parse(size_str) do
+      {size, ""} when size > 0 and size <= 200 ->
+        IO.puts("🔧 Using pool size: #{size}")
+        size
+      {size, ""} when size > 200 ->
+        IO.puts("⚠️ Pool size #{size} exceeds maximum of 200, using 200")
+        200
+      {size, ""} when size <= 0 ->
+        IO.puts("⚠️ Pool size must be positive, using default: 4")
+        4
+      _ ->
+        IO.puts("⚠️ Invalid pool size '#{size_str}', using default: 4")
+        4
+    end
+  [] ->
+    IO.puts("🔧 Using default pool size: 4")
+    4
+  _ ->
+    IO.puts("⚠️ Usage: elixir examples/session_based_demo.exs [pool_size]")
+    IO.puts("⚠️ Using default pool size: 4")
+    4
+end
 
 # Configure Snakepit for session-based execution
 Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :pool_config, %{
-  pool_size: 4
+  pool_size: pool_size
 })
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPython)
 
@@ -17,9 +44,10 @@ Mix.install([
 Logger.configure(level: :info)
 
 defmodule SnakepitSessionDemo do
-  def run do
+  def run(pool_size) do
     IO.puts("\n🔗 Snakepit Session-Based Execution Demo")
     IO.puts("=" |> String.duplicate(60))
+    IO.puts("🐍 Pool Size: #{pool_size} Python workers")
 
     # Start the application
     {:ok, _} = Application.ensure_all_started(:snakepit)
@@ -178,7 +206,7 @@ defmodule SnakepitSessionDemo do
 end
 
 # Run the demo
-SnakepitSessionDemo.run()
+SnakepitSessionDemo.run(pool_size)
 
 # Clean shutdown
 IO.puts("\n🛑 Stopping Snakepit application...")

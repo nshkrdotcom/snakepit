@@ -24,23 +24,8 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     {:ok, %{}}
   end
 
-  @doc """
-  Register a worker process for cleanup tracking.
-  Note: This is now a no-op since ProcessRegistry is the single source of truth.
-  """
-  def register_worker_process(pid) when is_integer(pid) do
-    # No-op: ProcessRegistry handles tracking
-    :ok
-  end
-
-  @doc """
-  Unregister a worker process (normal cleanup).
-  Note: This is now a no-op since ProcessRegistry handles cleanup.
-  """
-  def unregister_worker_process(pid) when is_integer(pid) do
-    # No-op: ProcessRegistry handles cleanup
-    :ok
-  end
+  # Note: Worker process tracking is handled entirely by ProcessRegistry.
+  # ApplicationCleanup queries ProcessRegistry during shutdown for process cleanup.
 
   @doc """
   Force cleanup all tracked worker processes.

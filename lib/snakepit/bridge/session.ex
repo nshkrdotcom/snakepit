@@ -13,6 +13,7 @@ defmodule Snakepit.Bridge.Session do
           metadata: map(),
           created_at: integer(),
           last_accessed: integer(),
+          last_worker_id: String.t() | nil,
           ttl: integer()
         }
 
@@ -21,6 +22,7 @@ defmodule Snakepit.Bridge.Session do
     :id,
     :created_at,
     :last_accessed,
+    :last_worker_id,
     :ttl,
     programs: %{},
     metadata: %{}
@@ -55,6 +57,7 @@ defmodule Snakepit.Bridge.Session do
       metadata: Keyword.get(opts, :metadata, %{}),
       created_at: now,
       last_accessed: now,
+      last_worker_id: Keyword.get(opts, :last_worker_id, nil),
       ttl: Keyword.get(opts, :ttl, 3600)
     }
   end
@@ -121,6 +124,9 @@ defmodule Snakepit.Bridge.Session do
 
       not is_integer(session.last_accessed) ->
         {:error, :invalid_last_accessed}
+
+      not (is_binary(session.last_worker_id) or is_nil(session.last_worker_id)) ->
+        {:error, :invalid_last_worker_id}
 
       not is_integer(session.ttl) or session.ttl <= 0 ->
         {:error, :invalid_ttl}

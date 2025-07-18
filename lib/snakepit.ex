@@ -5,7 +5,7 @@ defmodule Snakepit do
   Extracted from DSPex V3 pool implementation, Snakepit provides:
   - Concurrent worker initialization and management
   - Stateless pool system with session affinity 
-  - Generalized adapter pattern for multiple ML frameworks
+  - Generalized adapter pattern for any external process
   - High-performance OTP-based process management
 
   ## Basic Usage
@@ -15,11 +15,20 @@ defmodule Snakepit do
         pooling_enabled: true,
         adapter_module: YourAdapter
 
-      # Execute commands
+      # Execute commands on any available worker
       {:ok, result} = Snakepit.execute("ping", %{test: true})
       
-      # Session-based execution
+      # Session-based execution with worker affinity
       {:ok, result} = Snakepit.execute_in_session("my_session", "command", %{})
+
+  ## Domain-Specific Helpers
+
+  For ML/DSP workflows with program management, see `Snakepit.SessionHelpers`:
+
+      # ML program creation and execution
+      {:ok, result} = Snakepit.SessionHelpers.execute_program_command(
+        "session_id", "create_program", %{signature: "input -> output"}
+      )
   """
 
   @doc """
@@ -30,35 +39,21 @@ defmodule Snakepit do
   end
 
   @doc """
-  Executes a command in session context with enhanced args.
+  Executes a command in session context with worker affinity.
 
-  This function enhances the arguments with session data and handles
-  post-processing like storing program metadata for session continuity.
+  This function executes commands with session-based worker affinity,
+  ensuring that subsequent calls with the same session_id prefer
+  the same worker when possible for state continuity.
+
+  Args are passed through unchanged - no domain-specific enhancement.
+  For ML/DSP program workflows, use `Snakepit.SessionHelpers.execute_program_command/4`.
   """
   def execute_in_session(session_id, command, args, opts \\ []) do
-    # Enhance args with session data
-    enhanced_args = enhance_args_with_session_data(args, session_id, command)
-
     # Add session_id to opts for session affinity
     opts_with_session = Keyword.put(opts, :session_id, session_id)
 
-    case execute(command, enhanced_args, opts_with_session) do
-      {:ok, response} when command == "create_program" ->
-        # Store program data in SessionStore after creation
-        case store_program_data_after_creation(session_id, args, response) do
-          {:error, reason} ->
-            require Logger
-            Logger.warning("Program created but failed to store metadata: #{inspect(reason)}")
-
-          :ok ->
-            :ok
-        end
-
-        {:ok, response}
-
-      result ->
-        result
-    end
+    # Execute command with session affinity (no args enhancement)
+    execute(command, args, opts_with_session)
   end
 
   @doc """
@@ -75,78 +70,5 @@ defmodule Snakepit do
     Snakepit.Pool.list_workers(pool)
   end
 
-  # Private session-related helper functions
-
-  # Enhanced args with session data
-  defp enhance_args_with_session_data(args, session_id, command) do
-    base_args =
-      if session_id,
-        do: Map.put(args, :session_id, session_id),
-        else: Map.put(args, :session_id, "anonymous")
-
-    # For execute_program commands, fetch program data from SessionStore
-    if command == "execute_program" do
-      program_id = Map.get(args, :program_id)
-
-      case Snakepit.Bridge.SessionStore.get_program(session_id, program_id) do
-        {:ok, program_data} ->
-          Map.put(base_args, :program_data, program_data)
-
-        {:error, _reason} ->
-          # Program not found in session store - let external process handle the error
-          base_args
-      end
-    else
-      base_args
-    end
-  end
-
-  # Store program data after creation
-  defp store_program_data_after_creation(session_id, _create_args, create_response) do
-    if session_id != nil and session_id != "anonymous" do
-      program_id = Map.get(create_response, "program_id")
-
-      if program_id do
-        # Extract complete serializable program data from external process response
-        program_data = %{
-          program_id: program_id,
-          signature_def:
-            Map.get(create_response, "signature_def", Map.get(create_response, "signature", %{})),
-          signature_class: Map.get(create_response, "signature_class"),
-          field_mapping: Map.get(create_response, "field_mapping", %{}),
-          fallback_used: Map.get(create_response, "fallback_used", false),
-          created_at: System.system_time(:second),
-          execution_count: 0,
-          last_executed: nil,
-          program_type: Map.get(create_response, "program_type", "predict"),
-          signature: Map.get(create_response, "signature", %{})
-        }
-
-        store_program_in_session(session_id, program_id, program_data)
-      end
-    end
-  end
-
-  # Store program in SessionStore
-  defp store_program_in_session(session_id, program_id, program_data) do
-    if session_id != nil and session_id != "anonymous" do
-      case Snakepit.Bridge.SessionStore.get_session(session_id) do
-        {:ok, _session} ->
-          # Update existing session
-          Snakepit.Bridge.SessionStore.store_program(session_id, program_id, program_data)
-
-        {:error, :not_found} ->
-          # Create new session with program
-          case Snakepit.Bridge.SessionStore.create_session(session_id) do
-            {:ok, _session} ->
-              Snakepit.Bridge.SessionStore.store_program(session_id, program_id, program_data)
-
-            error ->
-              error
-          end
-      end
-    else
-      :ok
-    end
-  end
+  # Note: For ML/DSP program management functionality, see Snakepit.SessionHelpers
 end

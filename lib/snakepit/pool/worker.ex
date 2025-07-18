@@ -119,15 +119,8 @@ defmodule Snakepit.Pool.Worker do
               fingerprint
             )
 
-            # Register with application cleanup for hard guarantee
-            Logger.debug("Registering worker #{worker_id} with process PID #{process_pid}")
-
-            try do
-              Snakepit.Pool.ApplicationCleanup.register_worker_process(process_pid)
-            rescue
-              _ ->
-                Logger.warning("ApplicationCleanup not available during worker init")
-            end
+            # ProcessRegistry provides process tracking for ApplicationCleanup
+            Logger.debug("Registered worker #{worker_id} with process PID #{process_pid}")
           end
 
           # Send initialization command asynchronously
@@ -354,14 +347,7 @@ defmodule Snakepit.Pool.Worker do
     # Unregister from all tracking systems
     Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
 
-    if state.process_pid do
-      try do
-        Snakepit.Pool.ApplicationCleanup.unregister_worker_process(state.process_pid)
-      rescue
-        # ApplicationCleanup may have already shutdown
-        _ -> :ok
-      end
-    end
+    # ProcessRegistry automatically handles worker cleanup during termination
 
     # CRITICAL: The worker is solely responsible for cleaning up its external process
     if state.port && Port.info(state.port) do
