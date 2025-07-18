@@ -1,7 +1,7 @@
 # Snakepit 🐍
 
 <div align="center">
-  <img src="img/snakepit-logo.svg" alt="Snakepit Logo" width="200" height="200">
+  <img src="assets/snakepit-logo.svg" alt="Snakepit Logo" width="200" height="200">
 </div>
 
 > A high-performance, generalized process pooler and session manager for external language integrations in Elixir
