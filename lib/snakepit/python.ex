@@ -241,10 +241,6 @@ defmodule Snakepit.Python do
   end
   
   @doc """
-  Helper functions for common data science workflows.
-  """
-  
-  @doc """
   Load a pandas DataFrame from various sources.
   
   ## Examples

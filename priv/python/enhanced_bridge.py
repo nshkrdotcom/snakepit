@@ -337,12 +337,21 @@ class EnhancedCommandHandler(BaseCommandHandler):
             if namespace_name in self.namespaces:
                 namespace = self.namespaces[namespace_name]
             else:
-                # Try importing as module
+                # Try built-in types first
                 try:
-                    namespace = importlib.import_module(namespace_name)
-                    self.namespaces[namespace_name] = namespace
-                except ImportError:
-                    raise ValueError(f"Cannot import namespace: {namespace_name}")
+                    namespace = eval(namespace_name)
+                    # Only allow safe built-ins
+                    if namespace_name in ['str', 'int', 'float', 'list', 'dict', 'tuple', 'set', 'bool']:
+                        self.namespaces[namespace_name] = namespace
+                    else:
+                        raise ValueError(f"Built-in '{namespace_name}' not allowed")
+                except (NameError, ValueError):
+                    # Try importing as module
+                    try:
+                        namespace = importlib.import_module(namespace_name)
+                        self.namespaces[namespace_name] = namespace
+                    except ImportError:
+                        raise ValueError(f"Cannot import namespace: {namespace_name}")
             
             # Navigate to target
             current = namespace

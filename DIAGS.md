@@ -1,46 +1,46 @@
-I'll create several Mermaid diagrams to visualize the high-performance architecture of Snakepit, emphasizing the performance-critical aspects.
+I'll create several Mermaid diagrams to visualize the high-performance architecture of Snakepit, with proper quotes around all subgraph blocks.
 
 ## 1. Overall System Architecture - High Performance Overview
 
 ```mermaid
 graph TB
     subgraph "Elixir/OTP Layer"
-        Client[Client API]
-        Pool[Pool Manager<br/>⚡ Non-blocking async]
-        TaskSup[Task Supervisor<br/>⚡ Isolated execution]
+        Client["Client API"]
+        Pool["Pool Manager<br/>⚡ Non-blocking async"]
+        TaskSup["Task Supervisor<br/>⚡ Isolated execution"]
         
         subgraph "Worker Management"
-            WorkerSup[Worker Supervisor<br/>⚡ Dynamic workers]
-            Starter1[Worker Starter 1<br/>🔄 Auto-restart]
-            Starter2[Worker Starter 2<br/>🔄 Auto-restart]
-            StarterN[Worker Starter N<br/>🔄 Auto-restart]
-            Worker1[Worker 1<br/>GenServer]
-            Worker2[Worker 2<br/>GenServer]
-            WorkerN[Worker N<br/>GenServer]
+            WorkerSup["Worker Supervisor<br/>⚡ Dynamic workers"]
+            Starter1["Worker Starter 1<br/>🔄 Auto-restart"]
+            Starter2["Worker Starter 2<br/>🔄 Auto-restart"]
+            StarterN["Worker Starter N<br/>🔄 Auto-restart"]
+            Worker1["Worker 1<br/>GenServer"]
+            Worker2["Worker 2<br/>GenServer"]
+            WorkerN["Worker N<br/>GenServer"]
         end
         
         subgraph "High-Performance Registries"
-            Registry[Worker Registry<br/>⚡ O(1) lookups]
-            ProcReg[Process Registry<br/>⚡ PID tracking]
-            StarterReg[Starter Registry<br/>⚡ Supervisor tracking]
+            Registry["Worker Registry<br/>⚡ O(1) lookups"]
+            ProcReg["Process Registry<br/>⚡ PID tracking"]
+            StarterReg["Starter Registry<br/>⚡ Supervisor tracking"]
         end
         
         subgraph "Session Store (ETS)"
-            SessionStore[Session Store<br/>⚡ Concurrent R/W<br/>📊 Decentralized counters]
-            GlobalPrograms[Global Programs<br/>⚡ Public table access]
+            SessionStore["Session Store<br/>⚡ Concurrent R/W<br/>📊 Decentralized counters"]
+            GlobalPrograms["Global Programs<br/>⚡ Public table access"]
         end
     end
     
     subgraph "External Processes"
-        Python1[Python Process 1<br/>🐍 Port communication]
-        Python2[Python Process 2<br/>🐍 Port communication]
-        PythonN[Python Process N<br/>🐍 Port communication]
+        Python1["Python Process 1<br/>🐍 Port communication"]
+        Python2["Python Process 2<br/>🐍 Port communication"]
+        PythonN["Python Process N<br/>🐍 Port communication"]
     end
     
-    Client -->|⚡ Async call| Pool
-    Pool -->|⚡ O(1) checkout| Registry
-    Pool -->|🎯 Session affinity| SessionStore
-    Pool -->|⚡ Task.async_nolink| TaskSup
+    Client -->|"⚡ Async call"| Pool
+    Pool -->|"⚡ O(1) checkout"| Registry
+    Pool -->|"🎯 Session affinity"| SessionStore
+    Pool -->|"⚡ Task.async_nolink"| TaskSup
     TaskSup -->|Execute| Worker1
     TaskSup -->|Execute| Worker2
     TaskSup -->|Execute| WorkerN
@@ -65,10 +65,10 @@ graph TB
     Worker2 -->|Track PID| ProcReg
     WorkerN -->|Track PID| ProcReg
     
-    style Pool fill:#f9f,stroke:#333,stroke-width:4px
-    style SessionStore fill:#bbf,stroke:#333,stroke-width:4px
-    style Registry fill:#bfb,stroke:#333,stroke-width:4px
-    style TaskSup fill:#fbf,stroke:#333,stroke-width:4px
+    style Pool fill:#f9f,stroke:#333,stroke-width:4px,color:#000
+    style SessionStore fill:#bbf,stroke:#333,stroke-width:4px,color:#000
+    style Registry fill:#bfb,stroke:#333,stroke-width:4px,color:#000
+    style TaskSup fill:#fbf,stroke:#333,stroke-width:4px,color:#000
 ```
 
 ## 2. Request Flow - Performance Critical Path
@@ -154,11 +154,11 @@ graph LR
     Cleanup --> ST
     Cleanup --> GP
     
-    style ST fill:#bbf,stroke:#333,stroke-width:4px
-    style GP fill:#bbf,stroke:#333,stroke-width:4px
-    style Read fill:#bfb,stroke:#333,stroke-width:2px
-    style Write fill:#bfb,stroke:#333,stroke-width:2px
-    style Cleanup fill:#fbb,stroke:#333,stroke-width:2px
+    style ST fill:#bbf,stroke:#333,stroke-width:4px,color:#000
+    style GP fill:#bbf,stroke:#333,stroke-width:4px,color:#000
+    style Read fill:#bfb,stroke:#333,stroke-width:2px,color:#000
+    style Write fill:#bfb,stroke:#333,stroke-width:2px,color:#000
+    style Cleanup fill:#fbb,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ## 4. Worker Lifecycle - Performance & Reliability
@@ -207,31 +207,31 @@ stateDiagram-v2
 ```mermaid
 graph TD
     subgraph "Sequential Startup (Traditional)"
-        T0[Start] --> W1S[Worker 1<br/>2s]
-        W1S --> W2S[Worker 2<br/>2s]
-        W2S --> W3S[Worker 3<br/>2s]
-        W3S --> W4S[Worker 4<br/>2s]
-        W4S --> DoneS[Ready<br/>Total: 8s]
+        T0["Start"] --> W1S["Worker 1<br/>2s"]
+        W1S --> W2S["Worker 2<br/>2s"]
+        W2S --> W3S["Worker 3<br/>2s"]
+        W3S --> W4S["Worker 4<br/>2s"]
+        W4S --> DoneS["Ready<br/>Total: 8s"]
     end
     
     subgraph "Concurrent Startup (Snakepit)"
-        T0C[Start] --> Init[Task.async_stream]
-        Init --> W1C[Worker 1<br/>2s]
-        Init --> W2C[Worker 2<br/>2s]
-        Init --> W3C[Worker 3<br/>2s]
-        Init --> W4C[Worker 4<br/>2s]
+        T0C["Start"] --> Init["Task.async_stream"]
+        Init --> W1C["Worker 1<br/>2s"]
+        Init --> W2C["Worker 2<br/>2s"]
+        Init --> W3C["Worker 3<br/>2s"]
+        Init --> W4C["Worker 4<br/>2s"]
         
         W1C --> Collect
         W2C --> Collect
         W3C --> Collect
         W4C --> Collect
         
-        Collect --> DoneC[Ready<br/>Total: ~2s]
+        Collect --> DoneC["Ready<br/>Total: ~2s"]
     end
     
-    style Init fill:#f9f,stroke:#333,stroke-width:4px
-    style DoneC fill:#bfb,stroke:#333,stroke-width:4px
-    style DoneS fill:#fbb,stroke:#333,stroke-width:2px
+    style Init fill:#f9f,stroke:#333,stroke-width:4px,color:#000
+    style DoneC fill:#bfb,stroke:#333,stroke-width:4px,color:#000
+    style DoneS fill:#fbb,stroke:#333,stroke-width:2px,color:#000
 ```
 
 ## 6. Request Queueing & Load Distribution
@@ -241,27 +241,27 @@ graph TB
     subgraph "High-Performance Request Handling"
         subgraph "Request Queue"
             Q[":queue (Erlang)<br/>⚡ FIFO<br/>⚡ O(1) operations"]
-            R1[Request 1]
-            R2[Request 2]
-            R3[Request 3]
-            RN[Request N]
+            R1["Request 1"]
+            R2["Request 2"]
+            R3["Request 3"]
+            RN["Request N"]
         end
         
         subgraph "Worker Pool State"
             Available["MapSet<br/>⚡ O(1) member check<br/>⚡ O(1) add/remove"]
             Busy["Map<br/>⚡ O(1) lookup"]
             
-            AW1[Worker 1]
-            AW2[Worker 2]
-            BW3[Worker 3 🔴]
-            BW4[Worker 4 🔴]
+            AW1["Worker 1"]
+            AW2["Worker 2"]
+            BW3["Worker 3 🔴"]
+            BW4["Worker 4 🔴"]
         end
         
         subgraph "Load Distribution"
-            Check{Worker<br/>Available?}
-            Assign[Assign to worker<br/>⚡ O(1)]
-            Queue[Queue request<br/>⚡ O(1)]
-            Dequeue[Process from queue<br/>⚡ O(1)]
+            Check{"Worker<br/>Available?"}
+            Assign["Assign to worker<br/>⚡ O(1)"]
+            Queue["Queue request<br/>⚡ O(1)"]
+            Dequeue["Process from queue<br/>⚡ O(1)"]
         end
     end
     
@@ -285,9 +285,9 @@ graph TB
     
     Dequeue -->|Worker freed| Assign
     
-    style Q fill:#bbf,stroke:#333,stroke-width:4px
-    style Available fill:#bfb,stroke:#333,stroke-width:4px
-    style Check fill:#f9f,stroke:#333,stroke-width:4px
+    style Q fill:#bbf,stroke:#333,stroke-width:4px,color:#000
+    style Available fill:#bfb,stroke:#333,stroke-width:4px,color:#000
+    style Check fill:#f9f,stroke:#333,stroke-width:4px,color:#000
 ```
 
 ## 7. Process Registry - O(1) Performance
@@ -339,9 +339,9 @@ graph LR
     Op2 --> WR
     Op3 --> PR
     
-    style WR fill:#bfb,stroke:#333,stroke-width:4px
-    style PR fill:#bbf,stroke:#333,stroke-width:4px
-    style SR fill:#fbf,stroke:#333,stroke-width:4px
+    style WR fill:#bfb,stroke:#333,stroke-width:4px,color:#000
+    style PR fill:#bbf,stroke:#333,stroke-width:4px,color:#000
+    style SR fill:#fbf,stroke:#333,stroke-width:4px,color:#000
 ```
 
 These diagrams highlight the key performance features of Snakepit:

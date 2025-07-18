@@ -33,20 +33,28 @@ IO.puts("")
 # 2. Basic Python calls
 IO.puts("2. Basic Python Operations:")
 
-# Math operations
-case Snakepit.Python.call("math.sqrt", %{x: 16}) do
+# Math operations (use positional args)
+case Snakepit.Python.call("math.sqrt", %{}, args: [16]) do
   {:ok, result} ->
     IO.puts("   math.sqrt(16) = #{inspect(result)}")
   {:error, error} ->
     IO.puts("   Error: #{error}")
 end
 
-# String operations
-case Snakepit.Python.call("str.upper", %{self: "hello world"}) do
+# String operations (create string first, then call method)
+case Snakepit.Python.call("str", %{}, args: ["hello world"], store_as: "my_string") do
   {:ok, result} ->
-    IO.puts("   str.upper('hello world') = #{inspect(result)}")
+    IO.puts("   Created string: #{inspect(result)}")
+    
+    # Now call upper on the stored string
+    case Snakepit.Python.call("stored.my_string.upper", %{}) do
+      {:ok, upper_result} ->
+        IO.puts("   'hello world'.upper() = #{inspect(upper_result)}")
+      {:error, error} ->
+        IO.puts("   Error calling upper: #{error}")
+    end
   {:error, error} ->
-    IO.puts("   Error: #{error}")
+    IO.puts("   Error creating string: #{error}")
 end
 
 IO.puts("")
@@ -88,10 +96,10 @@ case Snakepit.Python.call("collections.defaultdict", %{default_factory: "list"},
   {:ok, result} ->
     IO.puts("   Created defaultdict: #{inspect(result)}")
     
-    # Add some data to it
-    case Snakepit.Python.call("stored.my_dict.__getitem__", %{key: "fruits"}) do
-      {:ok, _} ->
-        IO.puts("   Accessed my_dict['fruits']")
+    # Add some data to it (use positional args)
+    case Snakepit.Python.call("stored.my_dict.__getitem__", %{}, args: ["fruits"]) do
+      {:ok, fruits_list} ->
+        IO.puts("   Accessed my_dict['fruits']: #{inspect(fruits_list)}")
       {:error, error} ->
         IO.puts("   Error accessing dict: #{error}")
     end
@@ -125,17 +133,21 @@ IO.puts("")
 IO.puts("6. Pipeline Execution:")
 
 pipeline_steps = [
-  {:call, "str.lower", %{self: "HELLO WORLD"}},
-  {:call, "str.replace", %{self: "hello world", old: "world", new: "python"}}
+  {:call, "str", %{}, [args: ["HELLO WORLD"], store_as: "temp_string"]},
+  {:call, "stored.temp_string.lower", %{}}
 ]
 
 case Snakepit.Python.pipeline(pipeline_steps) do
   {:ok, result} ->
     IO.puts("   Pipeline completed: #{result["steps_completed"]} steps")
-    results = result["pipeline_results"]
-    Enum.with_index(results, fn step_result, index ->
-      IO.puts("   Step #{index + 1}: #{inspect(step_result["result"])}")
-    end)
+    results = result["pipeline_results"] || []
+    if length(results) > 0 do
+      Enum.with_index(results, fn step_result, index ->
+        IO.puts("   Step #{index + 1}: #{inspect(step_result["result"])}")
+      end)
+    else
+      IO.puts("   No results to display")
+    end
   {:error, error} ->
     IO.puts("   Pipeline error: #{error}")
 end
