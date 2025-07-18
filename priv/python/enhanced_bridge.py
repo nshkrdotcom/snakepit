@@ -84,7 +84,7 @@ class DSPyPlugin(FrameworkPlugin):
         """DSPy-specific Gemini configuration."""
         dspy = self.load()
         api_key = config.get("api_key")
-        model = config.get("model", "gemini-2.0-flash-exp")
+        model = config.get("model", "gemini-2.5-flash-lite-preview-06-17")
         
         lm = dspy.LM(f"gemini/{model}", api_key=api_key)
         dspy.configure(lm=lm)

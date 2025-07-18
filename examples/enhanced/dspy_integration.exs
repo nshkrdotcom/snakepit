@@ -10,7 +10,10 @@ Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.EnhancedPython
 Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
 
-# Start the application
+# Stop the application if it's running
+Application.stop(:snakepit)
+
+# Start the application with new configuration
 {:ok, _} = Application.ensure_all_started(:snakepit)
 
 IO.puts("=== DSPy Integration with Enhanced Python Bridge ===\n")
@@ -22,34 +25,21 @@ IO.puts("Created session: #{session_id}\n")
 # Step 1: Configure DSPy (you'll need to set your API key)
 IO.puts("1. DSPy Configuration:")
 
-api_key = System.get_env("GEMINI_API_KEY") || System.get_env("OPENAI_API_KEY")
+api_key = System.get_env("GEMINI_API_KEY")
 
 if api_key do
-  # Configure with Gemini (Google)
-  if System.get_env("GEMINI_API_KEY") do
-    case Snakepit.Python.configure_dspy(:gemini, %{
-      model: "gemini-2.0-flash-exp",
-      api_key: System.get_env("GEMINI_API_KEY")
-    }, session_id: session_id) do
-      {:ok, result} ->
-        IO.puts("   ✓ DSPy configured with Gemini")
-      {:error, error} ->
-        IO.puts("   ✗ Error configuring DSPy: #{error}")
-    end
-  # Configure with OpenAI
-  elsif System.get_env("OPENAI_API_KEY") do
-    case Snakepit.Python.configure_dspy(:openai, %{
-      model: "gpt-3.5-turbo",
-      api_key: System.get_env("OPENAI_API_KEY")
-    }, session_id: session_id) do
-      {:ok, result} ->
-        IO.puts("   ✓ DSPy configured with OpenAI")
-      {:error, error} ->
-        IO.puts("   ✗ Error configuring DSPy: #{error}")
-    end
+  # Configure with Gemini
+  case Snakepit.Python.configure_dspy(:gemini, %{
+    model: "gemini-2.5-flash-lite-preview-06-17",
+    api_key: api_key
+  }, session_id: session_id) do
+    {:ok, _result} ->
+      IO.puts("   ✓ DSPy configured with Gemini")
+    {:error, error} ->
+      IO.puts("   ✗ Error configuring DSPy: #{error}")
   end
 else
-  IO.puts("   ⚠ No API key found. Set GEMINI_API_KEY or OPENAI_API_KEY environment variable.")
+  IO.puts("   ⚠ No API key found. Set GEMINI_API_KEY environment variable.")
   IO.puts("   Continuing with examples that don't require LM calls...")
 end
 
@@ -62,7 +52,7 @@ IO.puts("2. Creating DSPy Programs:")
 case Snakepit.Python.create_dspy_program(:predict, %{
   signature: "question -> answer"
 }, [store_as: "qa_program", session_id: session_id]) do
-  {:ok, result} ->
+  {:ok, _result} ->
     IO.puts("   ✓ Created Q&A program")
   {:error, error} ->
     IO.puts("   ✗ Error creating Q&A program: #{error}")
@@ -72,7 +62,7 @@ end
 case Snakepit.Python.create_dspy_program(:chain_of_thought, %{
   signature: "context, question -> reasoning, answer"
 }, [store_as: "cot_program", session_id: session_id]) do
-  {:ok, result} ->
+  {:ok, _result} ->
     IO.puts("   ✓ Created Chain of Thought program")
   {:error, error} ->
     IO.puts("   ✗ Error creating CoT program: #{error}")
@@ -91,7 +81,7 @@ case Snakepit.execute_in_session(session_id, "create_program", %{
     outputs: [%{name: "answer"}]
   }
 }) do
-  {:ok, result} ->
+  {:ok, _result} ->
     IO.puts("   ✓ Legacy create_program works")
   {:error, error} ->
     IO.puts("   ✗ Error with legacy create_program: #{error}")
@@ -107,14 +97,15 @@ case Snakepit.Python.call("dspy.Signature", %{
   signature: "context, question -> step_by_step_reasoning, final_answer",
   instructions: "Think step by step and provide detailed reasoning."
 }, [store_as: "complex_signature", session_id: session_id]) do
-  {:ok, result} ->
+  {:ok, _result} ->
     IO.puts("   ✓ Created complex signature")
     
     # Use the signature with ChainOfThought
     case Snakepit.Python.call("dspy.ChainOfThought", %{
-      signature: "stored.complex_signature"
+      signature: "context, question -> step_by_step_reasoning, final_answer",
+      instructions: "Think step by step and provide detailed reasoning."
     }, [store_as: "advanced_cot", session_id: session_id]) do
-      {:ok, cot_result} ->
+      {:ok, _cot_result} ->
         IO.puts("   ✓ Created advanced Chain of Thought program")
       {:error, error} ->
         IO.puts("   ✗ Error creating advanced CoT: #{error}")
@@ -343,10 +334,9 @@ end
 IO.puts("\n=== DSPy Integration Complete ===")
 IO.puts("Session ID: #{session_id}")
 
-if not api_key do
-  IO.puts("\n📝 Note: To test actual LM calls, set either:")
+unless api_key do
+  IO.puts("\n📝 Note: To test actual LM calls, set:")
   IO.puts("   export GEMINI_API_KEY=your_gemini_api_key")
-  IO.puts("   export OPENAI_API_KEY=your_openai_api_key")
 end
 
 IO.puts("\n=== Complete ===")

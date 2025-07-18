@@ -194,7 +194,7 @@ defmodule Snakepit.Python do
       # DSPy with Gemini
       Snakepit.Python.configure("dspy", %{
         provider: "google",
-        model: "gemini-2.0-flash-exp", 
+        model: "gemini-2.5-flash-lite-preview-06-17", 
         api_key: System.get_env("GEMINI_API_KEY")
       })
       
@@ -429,7 +429,7 @@ defmodule Snakepit.Python do
       
       # Google Gemini
       Snakepit.Python.configure_dspy(:gemini, %{
-        model: "gemini-2.0-flash-exp",
+        model: "gemini-2.5-flash-lite-preview-06-17",
         api_key: System.get_env("GEMINI_API_KEY")
       })
       
@@ -452,7 +452,7 @@ defmodule Snakepit.Python do
         }, opts)
       
       :gemini ->
-        model = Map.get(config, :model, "gemini-2.0-flash-exp")
+        model = Map.get(config, :model, "gemini-2.5-flash-lite-preview-06-17")
         api_key = Map.get(config, :api_key)
         configure("dspy", %{
           provider: "google",
