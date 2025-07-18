@@ -506,6 +506,9 @@ defmodule Snakepit.Pool.Worker do
     if Map.get(response, "status") == "ok" do
       Logger.info("✅ Worker #{state.id} initialized successfully")
 
+      # Notify pool that worker is ready (critical for auto-healing after crashes)
+      GenServer.cast(Snakepit.Pool, {:worker_ready, state.id})
+
       # Schedule health checks
       Process.send_after(self(), :health_check, state.health_check_interval)
 

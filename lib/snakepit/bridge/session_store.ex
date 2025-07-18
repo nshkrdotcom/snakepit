@@ -384,7 +384,10 @@ defmodule Snakepit.Bridge.SessionStore do
               # Touch the session to update last_accessed
               touched_session = Session.touch(updated_session)
               # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
-              ets_record = {session_id, {touched_session.last_accessed, touched_session.ttl, touched_session}}
+              ets_record =
+                {session_id,
+                 {touched_session.last_accessed, touched_session.ttl, touched_session}}
+
               :ets.insert(state.table, ets_record)
               {:reply, {:ok, touched_session}, state}
 
@@ -430,7 +433,9 @@ defmodule Snakepit.Bridge.SessionStore do
         # Touch the session to update last_accessed
         touched_session = Session.touch(session)
         # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
-        ets_record = {session_id, {touched_session.last_accessed, touched_session.ttl, touched_session}}
+        ets_record =
+          {session_id, {touched_session.last_accessed, touched_session.ttl, touched_session}}
+
         :ets.insert(state.table, ets_record)
         {:reply, {:ok, touched_session}, state}
 
@@ -505,7 +510,9 @@ defmodule Snakepit.Bridge.SessionStore do
           |> Session.touch()
 
         # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
-        ets_record = {session_id, {updated_session.last_accessed, updated_session.ttl, updated_session}}
+        ets_record =
+          {session_id, {updated_session.last_accessed, updated_session.ttl, updated_session}}
+
         :ets.insert(state.table, ets_record)
         {:reply, :ok, state}
 
@@ -624,7 +631,9 @@ defmodule Snakepit.Bridge.SessionStore do
     expired_count = :ets.select_delete(table, match_spec)
 
     if expired_count > 0 do
-      Logger.debug("Cleaned up #{expired_count} expired sessions using high-performance select_delete")
+      Logger.debug(
+        "Cleaned up #{expired_count} expired sessions using high-performance select_delete"
+      )
     end
 
     new_stats =

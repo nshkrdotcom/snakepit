@@ -208,6 +208,20 @@ defmodule Snakepit.Pool do
   end
 
   @impl true
+  def handle_cast({:worker_ready, worker_id}, state) do
+    Logger.info("Worker #{worker_id} reported ready, adding back to pool.")
+
+    new_workers =
+      if Enum.member?(state.workers, worker_id) do
+        state.workers
+      else
+        [worker_id | state.workers]
+      end
+
+    new_available = MapSet.put(state.available, worker_id)
+    {:noreply, %{state | workers: new_workers, available: new_available}}
+  end
+
   def handle_cast({:checkin_worker, worker_id}, state) do
     # Check for queued requests first
     case :queue.out(state.request_queue) do
@@ -407,8 +421,8 @@ defmodule Snakepit.Pool do
   end
 
   defp store_session_affinity(session_id, worker_id) do
-    # Store the worker affinity asynchronously to avoid blocking
-    Task.start(fn ->
+    # Store the worker affinity in a supervised task for better error logging
+    Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
       Snakepit.Bridge.SessionStore.store_worker_session(session_id, worker_id)
     end)
   end
