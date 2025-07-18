@@ -4,10 +4,10 @@ defmodule Snakepit.MixProject do
   def project do
     [
       app: :snakepit,
-      version: "0.0.1",
+      version: "0.1.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
-      description: "High-performance pooler and session manager",
+      description: "High-performance pooler and session manager for external language integrations",
       package: package(),
       deps: deps(),
       dialyzer: dialyzer(),
@@ -34,11 +34,12 @@ defmodule Snakepit.MixProject do
 
   defp package do
     [
-      description: "High-performance pooler and session manager",
+      description: "High-performance pooler and session manager for external language integrations",
       licenses: ["MIT"],
       maintainers: ["NSHkr <ZeroTrust@NSHkr.com>"],
       links: %{"GitHub" => "https://github.com/nshkrdotcom/snakepit"},
-      files: ~w(lib priv .formatter.exs mix.exs README* LICENSE* CHANGELOG*)
+      files: ~w(lib priv .formatter.exs mix.exs README* LICENSE* CHANGELOG*),
+      exclude_patterns: ["priv/plts", "priv/python/__pycache__"]
     ]
   end
 
