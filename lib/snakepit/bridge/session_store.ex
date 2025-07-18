@@ -493,18 +493,19 @@ defmodule Snakepit.Bridge.SessionStore do
     case :ets.lookup(state.table, session_id) do
       [{^session_id, session}] ->
         # Session exists, update it
-        updated_session = 
+        updated_session =
           session
           |> Map.put(:last_worker_id, worker_id)
           |> Session.touch()
-        
+
         :ets.insert(state.table, {session_id, updated_session})
         {:reply, :ok, state}
 
       [] ->
         # Session doesn't exist, create it with worker affinity
         opts = [ttl: state.default_ttl]
-        session = 
+
+        session =
           Session.new(session_id, opts)
           |> Map.put(:last_worker_id, worker_id)
 

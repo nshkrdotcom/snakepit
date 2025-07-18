@@ -38,7 +38,7 @@ defmodule Snakepit do
   def execute_in_session(session_id, command, args, opts \\ []) do
     # Enhance args with session data
     enhanced_args = enhance_args_with_session_data(args, session_id, command)
-    
+
     # Add session_id to opts for session affinity
     opts_with_session = Keyword.put(opts, :session_id, session_id)
 

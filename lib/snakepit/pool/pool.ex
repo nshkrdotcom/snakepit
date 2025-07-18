@@ -133,6 +133,7 @@ defmodule Snakepit.Pool do
       {:reply, {:error, :pool_not_initialized}, state}
     else
       session_id = opts[:session_id]
+
       case checkout_worker(state, session_id) do
         {:ok, worker_id, new_state} ->
           # Execute in a supervised, unlinked task
@@ -141,12 +142,15 @@ defmodule Snakepit.Pool do
             {client_pid, _tag} = from
             ref = Process.monitor(client_pid)
             result = execute_on_worker(worker_id, command, args, opts)
-            
+
             # Check if the client is still alive
             receive do
               {:DOWN, ^ref, :process, ^client_pid, _reason} ->
                 # Client is dead, don't try to reply. Just check in the worker.
-                Logger.warning("Client #{inspect(client_pid)} died before receiving reply. Checking in worker #{worker_id}.")
+                Logger.warning(
+                  "Client #{inspect(client_pid)} died before receiving reply. Checking in worker #{worker_id}."
+                )
+
                 GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
             after
               0 ->
@@ -165,6 +169,7 @@ defmodule Snakepit.Pool do
         {:error, :no_workers} ->
           # Check if queue is at max capacity
           current_queue_size = :queue.len(state.request_queue)
+
           if current_queue_size >= state.max_queue_size do
             # Pool is saturated, reject request immediately
             stats = Map.update!(state.stats, :pool_saturated, &(&1 + 1))
@@ -349,19 +354,19 @@ defmodule Snakepit.Pool do
     case try_checkout_preferred_worker(state, session_id) do
       {:ok, worker_id, new_state} ->
         {:ok, worker_id, new_state}
-      
+
       :no_preferred_worker ->
         # Fall back to any available worker
         case :queue.out(state.available) do
           {{:value, worker_id}, new_available} ->
             new_busy = Map.put(state.busy, worker_id, true)
             new_state = %{state | available: new_available, busy: new_busy}
-            
+
             # Store session affinity if we have a session_id
             if session_id do
               store_session_affinity(session_id, worker_id)
             end
-            
+
             {:ok, worker_id, new_state}
 
           {:empty, _} ->
@@ -369,9 +374,9 @@ defmodule Snakepit.Pool do
         end
     end
   end
-  
+
   defp try_checkout_preferred_worker(_state, nil), do: :no_preferred_worker
-  
+
   defp try_checkout_preferred_worker(state, session_id) do
     case get_preferred_worker(session_id) do
       {:ok, preferred_worker_id} ->
@@ -381,18 +386,18 @@ defmodule Snakepit.Pool do
           new_available = queue_remove(state.available, preferred_worker_id)
           new_busy = Map.put(state.busy, preferred_worker_id, true)
           new_state = %{state | available: new_available, busy: new_busy}
-          
+
           Logger.debug("Using preferred worker #{preferred_worker_id} for session #{session_id}")
           {:ok, preferred_worker_id, new_state}
         else
           :no_preferred_worker
         end
-      
+
       {:error, :not_found} ->
         :no_preferred_worker
     end
   end
-  
+
   defp get_preferred_worker(session_id) do
     case Snakepit.Bridge.SessionStore.get_session(session_id) do
       {:ok, session} ->
@@ -400,23 +405,23 @@ defmodule Snakepit.Pool do
           nil -> {:error, :not_found}
           worker_id -> {:ok, worker_id}
         end
-      
+
       {:error, :not_found} ->
         {:error, :not_found}
     end
   end
-  
+
   defp store_session_affinity(session_id, worker_id) do
     # Store the worker affinity asynchronously to avoid blocking
     Task.start(fn ->
       Snakepit.Bridge.SessionStore.store_worker_session(session_id, worker_id)
     end)
   end
-  
+
   defp queue_contains?(queue, item) do
     :queue.to_list(queue) |> Enum.member?(item)
   end
-  
+
   defp queue_remove(queue, item) do
     queue
     |> :queue.to_list()
@@ -443,10 +448,11 @@ defmodule Snakepit.Pool do
     case opts[:timeout] do
       nil ->
         case get_adapter_timeout(command, args) do
-          nil -> 30_000  # Global default
+          # Global default
+          nil -> 30_000
           adapter_timeout -> adapter_timeout
         end
-      
+
       client_timeout ->
         client_timeout
     end
@@ -456,13 +462,14 @@ defmodule Snakepit.Pool do
     case Application.get_env(:snakepit, :adapter_module) do
       nil ->
         nil
-      
+
       adapter_module ->
         if function_exported?(adapter_module, :command_timeout, 2) do
           try do
             adapter_module.command_timeout(command, args)
           rescue
-            _ -> nil  # Fall back to default if adapter timeout fails
+            # Fall back to default if adapter timeout fails
+            _ -> nil
           end
         else
           nil
