@@ -350,9 +350,9 @@ defmodule Snakepit.Pool do
         {:ok, worker_id, new_state}
 
       :no_preferred_worker ->
-        # Fall back to any available worker
-        case MapSet.to_list(state.available) do
-          [worker_id | _] ->
+        # Fall back to any available worker  
+        case Enum.take(state.available, 1) do
+          [worker_id] ->
             new_available = MapSet.delete(state.available, worker_id)
             new_busy = Map.put(state.busy, worker_id, true)
             new_state = %{state | available: new_available, busy: new_busy}

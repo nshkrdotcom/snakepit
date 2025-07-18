@@ -360,7 +360,9 @@ defmodule Snakepit.Bridge.SessionStore do
 
         case Session.validate(session) do
           :ok ->
-            :ets.insert(state.table, {session_id, session})
+            # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
+            ets_record = {session_id, {session.last_accessed, session.ttl, session}}
+            :ets.insert(state.table, ets_record)
             new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
             {:reply, {:ok, session}, %{state | stats: new_stats}}
 
@@ -373,7 +375,7 @@ defmodule Snakepit.Bridge.SessionStore do
   @impl true
   def handle_call({:update_session, session_id, update_fn}, _from, state) do
     case :ets.lookup(state.table, session_id) do
-      [{^session_id, session}] ->
+      [{^session_id, {_last_accessed, _ttl, session}}] ->
         try do
           updated_session = update_fn.(session)
 
@@ -381,7 +383,9 @@ defmodule Snakepit.Bridge.SessionStore do
             :ok ->
               # Touch the session to update last_accessed
               touched_session = Session.touch(updated_session)
-              :ets.insert(state.table, {session_id, touched_session})
+              # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
+              ets_record = {session_id, {touched_session.last_accessed, touched_session.ttl, touched_session}}
+              :ets.insert(state.table, ets_record)
               {:reply, {:ok, touched_session}, state}
 
             {:error, reason} ->
@@ -422,10 +426,12 @@ defmodule Snakepit.Bridge.SessionStore do
   @impl true
   def handle_call({:get_session, session_id}, _from, state) do
     case :ets.lookup(state.table, session_id) do
-      [{^session_id, session}] ->
+      [{^session_id, {_last_accessed, _ttl, session}}] ->
         # Touch the session to update last_accessed
         touched_session = Session.touch(session)
-        :ets.insert(state.table, {session_id, touched_session})
+        # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
+        ets_record = {session_id, {touched_session.last_accessed, touched_session.ttl, touched_session}}
+        :ets.insert(state.table, ets_record)
         {:reply, {:ok, touched_session}, state}
 
       [] ->
@@ -491,14 +497,16 @@ defmodule Snakepit.Bridge.SessionStore do
   @impl true
   def handle_call({:upsert_worker_session, session_id, worker_id}, _from, state) do
     case :ets.lookup(state.table, session_id) do
-      [{^session_id, session}] ->
+      [{^session_id, {_last_accessed, _ttl, session}}] ->
         # Session exists, update it
         updated_session =
           session
           |> Map.put(:last_worker_id, worker_id)
           |> Session.touch()
 
-        :ets.insert(state.table, {session_id, updated_session})
+        # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
+        ets_record = {session_id, {updated_session.last_accessed, updated_session.ttl, updated_session}}
+        :ets.insert(state.table, ets_record)
         {:reply, :ok, state}
 
       [] ->
@@ -511,7 +519,9 @@ defmodule Snakepit.Bridge.SessionStore do
 
         case Session.validate(session) do
           :ok ->
-            :ets.insert(state.table, {session_id, session})
+            # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
+            ets_record = {session_id, {session.last_accessed, session.ttl, session}}
+            :ets.insert(state.table, ets_record)
             new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
             {:reply, :ok, %{state | stats: new_stats}}
 
@@ -600,30 +610,21 @@ defmodule Snakepit.Bridge.SessionStore do
   defp do_cleanup_expired_sessions(table, stats) do
     current_time = System.monotonic_time(:second)
 
-    # ETS match specs don't work with struct field access, so we use foldl
-    # to efficiently find expired sessions and collect their keys
-    expired_keys =
-      :ets.foldl(
-        fn {session_id, session}, acc ->
-          if session.last_accessed + session.ttl < current_time do
-            [session_id | acc]
-          else
-            acc
-          end
-        end,
-        [],
-        table
-      )
+    # High-performance cleanup using ETS select_delete with optimized storage format
+    # Match on {session_id, {last_accessed, ttl, _session}} where last_accessed + ttl < current_time
+    match_spec = [
+      {{:_, {:"$1", :"$2", :_}},
+       [
+         {:<, {:+, :"$1", :"$2"}, current_time}
+       ], [true]}
+    ]
 
-    # Delete all expired sessions
-    expired_count = length(expired_keys)
-
-    Enum.each(expired_keys, fn session_id ->
-      :ets.delete(table, session_id)
-    end)
+    # Atomically find and delete all expired sessions using native ETS operations
+    # This runs in C code and doesn't block the GenServer process
+    expired_count = :ets.select_delete(table, match_spec)
 
     if expired_count > 0 do
-      Logger.debug("Cleaned up #{expired_count} expired sessions using foldl-based cleanup")
+      Logger.debug("Cleaned up #{expired_count} expired sessions using high-performance select_delete")
     end
 
     new_stats =

@@ -90,18 +90,20 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   Restarts a worker by ID.
   """
   def restart_worker(worker_id) do
-    with {:ok, old_pid} <- Snakepit.Pool.Registry.get_worker_pid(worker_id),
-         :ok <- DynamicSupervisor.terminate_child(__MODULE__, old_pid),
-         :ok <- wait_for_worker_cleanup(old_pid),
-         {:ok, new_pid} <- start_worker(worker_id) do
-      {:ok, new_pid}
-    else
-      {:error, :not_found} ->
-        # Worker doesn't exist, just start a new one
-        start_worker(worker_id)
+    case Snakepit.Pool.Registry.get_worker_pid(worker_id) do
+      {:ok, old_pid} ->
+        # Worker exists, terminate it and wait for cleanup before starting new one
+        with :ok <- DynamicSupervisor.terminate_child(__MODULE__, old_pid),
+             :ok <- wait_for_worker_cleanup(old_pid) do
+          start_worker(worker_id)
+        else
+          # Propagate termination/cleanup errors
+          error -> error
+        end
 
-      error ->
-        error
+      {:error, :not_found} ->
+        # Worker doesn't exist, so we just need to start it
+        start_worker(worker_id)
     end
   end
 
