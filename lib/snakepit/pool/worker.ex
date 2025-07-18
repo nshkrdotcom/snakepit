@@ -14,8 +14,8 @@ defmodule Snakepit.Pool.Worker do
 
   alias Snakepit.Bridge.Protocol
 
-  @health_check_interval 30_000
-  @init_timeout 20_000
+  @default_health_check_interval 30_000
+  @default_init_timeout 20_000
 
   defstruct [
     :id,
@@ -28,7 +28,9 @@ defmodule Snakepit.Pool.Worker do
     :health_status,
     :last_health_check,
     :stats,
-    :adapter_module
+    :adapter_module,
+    :init_timeout,
+    :health_check_interval
   ]
 
   # Client API
@@ -72,7 +74,17 @@ defmodule Snakepit.Pool.Worker do
   def init(opts) do
     worker_id = Keyword.fetch!(opts, :id)
     adapter_module = Application.get_env(:snakepit, :adapter_module)
-    
+
+    # Get configurable timeouts
+    init_timeout = Application.get_env(:snakepit, :worker_init_timeout, @default_init_timeout)
+
+    health_check_interval =
+      Application.get_env(
+        :snakepit,
+        :worker_health_check_interval,
+        @default_health_check_interval
+      )
+
     if adapter_module == nil do
       {:stop, {:error, :no_adapter_configured}}
     else
@@ -91,7 +103,9 @@ defmodule Snakepit.Pool.Worker do
             pending_requests: %{},
             health_status: :initializing,
             stats: %{requests: 0, errors: 0, total_time: 0},
-            adapter_module: adapter_module
+            adapter_module: adapter_module,
+            init_timeout: init_timeout,
+            health_check_interval: health_check_interval
           }
 
           # Worker is already registered via via_tuple in start_link - no manual registration needed
@@ -103,13 +117,13 @@ defmodule Snakepit.Pool.Worker do
             process_pid,
             fingerprint
           )
-          
+
           # Register with application cleanup for hard guarantee
           if process_pid do
             try do
               Snakepit.Pool.ApplicationCleanup.register_worker_process(process_pid)
             rescue
-              _ -> 
+              _ ->
                 Logger.warning("ApplicationCleanup not available during worker init")
             end
           end
@@ -128,8 +142,10 @@ defmodule Snakepit.Pool.Worker do
 
   @impl true
   def handle_cast(:initialize, state) do
-    Logger.info("🔄 Worker #{state.id} starting initialization with process PID #{state.process_pid}")
-    
+    Logger.info(
+      "🔄 Worker #{state.id} starting initialization with process PID #{state.process_pid}"
+    )
+
     # Send initialization ping
     request_id = System.unique_integer([:positive])
 
@@ -145,8 +161,8 @@ defmodule Snakepit.Pool.Worker do
       true ->
         # Set a timer for the initialization timeout
         # We'll use the request_id to correlate the timeout message
-        Process.send_after(self(), {:initialization_timeout, request_id}, @init_timeout)
-        
+        Process.send_after(self(), {:initialization_timeout, request_id}, state.init_timeout)
+
         # Track the ping request so we can validate it in handle_info
         pending_reqs = Map.put(state.pending_requests, request_id, {:init, self()})
         {:noreply, %{state | pending_requests: pending_reqs}}
@@ -226,7 +242,10 @@ defmodule Snakepit.Pool.Worker do
         handle_response(request_id, {:error, error}, state)
 
       other ->
-        Logger.error("Worker #{state.id} - Invalid response from external process: #{inspect(other)}")
+        Logger.error(
+          "Worker #{state.id} - Invalid response from external process: #{inspect(other)}"
+        )
+
         {:noreply, state}
     end
   end
@@ -246,18 +265,21 @@ defmodule Snakepit.Pool.Worker do
       Logger.error("🔥 Worker #{state.id} port exited with status #{status}")
       Logger.error("   Process PID: #{state.process_pid}")
       Logger.error("   Worker was in state: #{state.health_status}")
-      
+
       # Check if external process is still alive
       if state.process_pid do
         case System.cmd("kill", ["-0", "#{state.process_pid}"], stderr_to_stdout: true) do
-          {_, 0} -> 
-            Logger.error("   ⚠️ External process #{state.process_pid} is STILL ALIVE after port death!")
-          {_, _} -> 
+          {_, 0} ->
+            Logger.error(
+              "   ⚠️ External process #{state.process_pid} is STILL ALIVE after port death!"
+            )
+
+          {_, _} ->
             Logger.error("   💀 External process #{state.process_pid} is dead")
         end
       end
     end
-    
+
     {:stop, {:port_exit, status}, state}
   end
 
@@ -272,7 +294,7 @@ defmodule Snakepit.Pool.Worker do
         pending =
           Map.put(state.pending_requests, request_id, {:health_check, System.monotonic_time()})
 
-        Process.send_after(self(), :health_check, @health_check_interval)
+        Process.send_after(self(), :health_check, state.health_check_interval)
         {:noreply, %{state | pending_requests: pending}}
 
       false ->
@@ -285,7 +307,7 @@ defmodule Snakepit.Pool.Worker do
   def handle_info({:initialization_timeout, request_id}, state) do
     # Check if the init request is still pending. If so, we timed out.
     if Map.has_key?(state.pending_requests, request_id) do
-      Logger.error("⏰ Worker #{state.id} initialization timeout after #{@init_timeout}ms")
+      Logger.error("⏰ Worker #{state.id} initialization timeout after #{state.init_timeout}ms")
       Logger.error("   Process PID: #{state.process_pid}")
       Logger.error("   Port info: #{inspect(Port.info(state.port))}")
       {:stop, :initialization_timeout, state}
@@ -299,7 +321,6 @@ defmodule Snakepit.Pool.Worker do
     Logger.debug("Worker #{state.id} received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
-
 
   @impl true
   def terminate(reason, state) do
@@ -317,11 +338,13 @@ defmodule Snakepit.Pool.Worker do
 
     # Unregister from all tracking systems
     Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
+
     if state.process_pid do
       try do
         Snakepit.Pool.ApplicationCleanup.unregister_worker_process(state.process_pid)
       rescue
-        _ -> :ok  # ApplicationCleanup may have already shutdown
+        # ApplicationCleanup may have already shutdown
+        _ -> :ok
       end
     end
 
@@ -330,7 +353,8 @@ defmodule Snakepit.Pool.Worker do
       process_pid =
         case Port.info(state.port, :os_pid) do
           {:os_pid, pid} -> pid
-          _ -> state.process_pid  # Fallback to stored PID
+          # Fallback to stored PID
+          _ -> state.process_pid
         end
 
       # Close the port first
@@ -363,13 +387,14 @@ defmodule Snakepit.Pool.Worker do
 
     try do
       port = Port.open({:spawn_executable, executable_path}, port_opts)
-      
+
       # Extract external process PID
-      process_pid = case Port.info(port, :os_pid) do
-        {:os_pid, pid} -> pid
-        _ -> nil
-      end
-      
+      process_pid =
+        case Port.info(port, :os_pid) do
+          {:os_pid, pid} -> pid
+          _ -> nil
+        end
+
       {:ok, port, process_pid}
     rescue
       e -> {:error, e}
@@ -384,21 +409,23 @@ defmodule Snakepit.Pool.Worker do
 
   defp terminate_external_process(process_pid, worker_id) when is_integer(process_pid) do
     Logger.warning("🔥 Sending SIGTERM to external process #{process_pid} for worker #{worker_id}")
-    
+
     try do
       # Send graceful termination signal but DO NOT wait
       # ApplicationCleanup provides the hard guarantee with SIGKILL if needed
       case System.cmd("kill", ["-TERM", "#{process_pid}"], stderr_to_stdout: true) do
         {_output, 0} ->
           Logger.warning("✅ Sent SIGTERM to external process #{process_pid} (non-blocking)")
-          
+
         {_error, _} ->
           # Process already dead or kill failed
           Logger.warning("⚠️ External process #{process_pid} already dead or kill failed")
       end
     rescue
       e ->
-        Logger.warning("💥 Exception sending SIGTERM to external process #{process_pid}: #{inspect(e)}")
+        Logger.warning(
+          "💥 Exception sending SIGTERM to external process #{process_pid}: #{inspect(e)}"
+        )
     end
   end
 
@@ -406,12 +433,14 @@ defmodule Snakepit.Pool.Worker do
     Logger.warning("⚠️ No external process PID to terminate for worker #{worker_id}")
   end
 
-
   defp handle_response(request_id, result, state) do
     case Map.pop(state.pending_requests, request_id) do
       {nil, _pending} ->
         # Unknown request ID
-        Logger.warning("Received response for unknown request: #{request_id}. Pending requests: #{inspect(Map.keys(state.pending_requests))}")
+        Logger.warning(
+          "Received response for unknown request: #{request_id}. Pending requests: #{inspect(Map.keys(state.pending_requests))}"
+        )
+
         {:noreply, state}
 
       {{:health_check, start_time}, pending} ->
@@ -468,7 +497,7 @@ defmodule Snakepit.Pool.Worker do
       Logger.info("✅ Worker #{state.id} initialized successfully")
 
       # Schedule health checks
-      Process.send_after(self(), :health_check, @health_check_interval)
+      Process.send_after(self(), :health_check, state.health_check_interval)
 
       {:noreply, %{state | health_status: :healthy}}
     else

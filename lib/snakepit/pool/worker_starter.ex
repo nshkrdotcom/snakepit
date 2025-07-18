@@ -1,0 +1,63 @@
+defmodule Snakepit.Pool.Worker.Starter do
+  @moduledoc """
+  Supervisor wrapper for individual workers that provides automatic restart capability.
+
+  This module implements the "Permanent Wrapper" pattern that allows DynamicSupervisor
+  to automatically restart workers when they crash, while keeping the actual worker
+  process as :transient (so it doesn't restart during coordinated shutdown).
+
+  ## Architecture
+
+  ```
+  DynamicSupervisor (WorkerSupervisor)
+  └── Worker.Starter (permanent, one per worker)
+      └── Worker (transient, actual worker process)
+  ```
+
+  When a Worker crashes:
+  1. Worker.Starter detects the crash via its :one_for_one strategy
+  2. Worker.Starter automatically restarts the Worker (because Worker is :permanent in this context)
+  3. Pool is notified via :DOWN message but doesn't need to manage restarts
+  4. New Worker re-registers itself automatically
+
+  This decouples the Pool from worker replacement logic.
+  """
+
+  use Supervisor
+  require Logger
+
+  @doc """
+  Starts a worker starter supervisor.
+
+  ## Parameters
+
+    * `worker_id` - Unique identifier for the worker
+  """
+  def start_link(worker_id) when is_binary(worker_id) do
+    Supervisor.start_link(__MODULE__, worker_id, name: via_name(worker_id))
+  end
+
+  @doc """
+  Returns a via tuple for this starter supervisor.
+  """
+  def via_name(worker_id) do
+    {:via, Registry, {Snakepit.Pool.Registry, "starter_#{worker_id}"}}
+  end
+
+  @impl true
+  def init(worker_id) do
+    Logger.debug("Starting worker starter for #{worker_id}")
+
+    children = [
+      %{
+        id: worker_id,
+        start: {Snakepit.Pool.Worker, :start_link, [[id: worker_id]]},
+        # Within this supervisor, the worker is permanent
+        restart: :permanent,
+        type: :worker
+      }
+    ]
+
+    Supervisor.init(children, strategy: :one_for_one)
+  end
+end

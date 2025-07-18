@@ -192,5 +192,4 @@ defmodule Snakepit.Adapters.GenericJavaScript do
   def process_response(_command, response) do
     {:ok, response}
   end
-
 end

@@ -35,22 +35,24 @@ defmodule Snakepit.Pool.WorkerSupervisor do
       {:ok, #PID<0.123.0>}
   """
   def start_worker(worker_id) when is_binary(worker_id) do
-    child_spec = {
-      Snakepit.Pool.Worker,
-      id: worker_id
-    }
+    # Start the permanent starter supervisor, not the transient worker directly
+    # This gives us automatic worker restarts without Pool intervention
+    child_spec = {Snakepit.Pool.Worker.Starter, worker_id}
 
     case DynamicSupervisor.start_child(__MODULE__, child_spec) do
-      {:ok, pid} ->
-        Logger.info("Started pool worker #{worker_id} with PID #{inspect(pid)}")
-        {:ok, pid}
+      {:ok, starter_pid} ->
+        Logger.info("Started worker starter for #{worker_id} with PID #{inspect(starter_pid)}")
+        {:ok, starter_pid}
 
-      {:error, {:already_started, pid}} ->
-        Logger.debug("Worker #{worker_id} already running with PID #{inspect(pid)}")
-        {:ok, pid}
+      {:error, {:already_started, starter_pid}} ->
+        Logger.debug(
+          "Worker starter for #{worker_id} already running with PID #{inspect(starter_pid)}"
+        )
+
+        {:ok, starter_pid}
 
       {:error, reason} = error ->
-        Logger.error("Failed to start worker #{worker_id}: #{inspect(reason)}")
+        Logger.error("Failed to start worker starter for #{worker_id}: #{inspect(reason)}")
         error
     end
   end
@@ -98,20 +100,23 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   # Wait for worker to be fully cleaned up using proper OTP monitoring
   defp wait_for_worker_cleanup(worker_id, retries \\ 10) do
     case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [] -> 
+      [] ->
         # Worker fully cleaned up
         :ok
+
       [{pid, _}] when retries > 0 ->
         # Worker still exists, set up monitor and wait
         ref = Process.monitor(pid)
+
         receive do
           {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
         after
-          100 -> 
+          100 ->
             Process.demonitor(ref, [:flush])
             wait_for_worker_cleanup(worker_id, retries - 1)
         end
-      _ -> 
+
+      _ ->
         # Timeout waiting for cleanup
         {:error, :cleanup_timeout}
     end

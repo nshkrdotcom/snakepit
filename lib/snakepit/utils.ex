@@ -1,19 +1,19 @@
 defmodule Snakepit.Utils do
   @moduledoc """
   Utility functions for Snakepit.
-  
+
   This module contains common helper functions used across the Snakepit codebase
   to avoid code duplication and provide consistent behavior.
   """
 
   @doc """
   Recursively converts atom keys to string keys in maps and lists.
-  
+
   This is useful when preparing data for JSON serialization where all keys
   need to be strings.
-  
+
   ## Examples
-  
+
       iex> Snakepit.Utils.stringify_keys(%{foo: "bar", baz: %{nested: "value"}})
       %{"foo" => "bar", "baz" => %{"nested" => "value"}}
       

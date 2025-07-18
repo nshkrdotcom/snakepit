@@ -14,8 +14,8 @@ defmodule Snakepit.Pool do
   require Logger
 
   @default_size System.schedulers_online() * 2
-  @startup_timeout 10_000
-  @queue_timeout 5_000
+  @default_startup_timeout 10_000
+  @default_queue_timeout 5_000
 
   defstruct [
     :size,
@@ -25,7 +25,9 @@ defmodule Snakepit.Pool do
     :request_queue,
     :stats,
     :initialized,
-    :process_pids  # Track external process PIDs for cleanup
+    :startup_timeout,
+    :queue_timeout
+    # Note: process_pids removed - ProcessRegistry is the single source of truth
   ]
 
   # Client API
@@ -48,31 +50,6 @@ defmodule Snakepit.Pool do
   end
 
   @doc """
-  Executes a command in session context with enhanced args.
-  """
-  def execute_in_session(session_id, command, args, opts \\ []) do
-    # Enhance args with session data like V2 pool does
-    enhanced_args = enhance_args_with_session_data(args, session_id, command)
-
-    case execute(command, enhanced_args, opts) do
-      {:ok, response} when command == "create_program" ->
-        # Store program data in SessionStore after creation
-        case store_program_data_after_creation(session_id, args, response) do
-          {:error, reason} ->
-            Logger.warning("Program created but failed to store metadata: #{inspect(reason)}")
-
-          :ok ->
-            :ok
-        end
-
-        {:ok, response}
-
-      result ->
-        result
-    end
-  end
-
-  @doc """
   Gets pool statistics.
   """
   def get_stats(pool \\ __MODULE__) do
@@ -92,8 +69,13 @@ defmodule Snakepit.Pool do
   def init(opts) do
     # CRITICAL: Trap exits to ensure terminate/2 is called
     Process.flag(:trap_exit, true)
-    
+
     size = opts[:size] || @default_size
+
+    startup_timeout =
+      Application.get_env(:snakepit, :pool_startup_timeout, @default_startup_timeout)
+
+    queue_timeout = Application.get_env(:snakepit, :pool_queue_timeout, @default_queue_timeout)
 
     state = %__MODULE__{
       size: size,
@@ -108,7 +90,8 @@ defmodule Snakepit.Pool do
         queue_timeouts: 0
       },
       initialized: false,
-      process_pids: MapSet.new()  # Track external process PIDs
+      startup_timeout: startup_timeout,
+      queue_timeout: queue_timeout
     }
 
     # Start concurrent worker initialization
@@ -121,7 +104,7 @@ defmodule Snakepit.Pool do
     start_time = System.monotonic_time(:millisecond)
 
     # Start all workers concurrently
-    workers = start_workers_concurrently(state.size)
+    workers = start_workers_concurrently(state.size, state.startup_timeout)
 
     elapsed = System.monotonic_time(:millisecond) - start_time
     Logger.info("✅ Initialized #{length(workers)}/#{state.size} workers in #{elapsed}ms")
@@ -146,16 +129,18 @@ defmodule Snakepit.Pool do
     else
       case checkout_worker(state) do
         {:ok, worker_id, new_state} ->
-          # Execute asynchronously
-          pool_pid = self()
-
-          Task.start(fn ->
+          # Execute in a supervised, unlinked task
+          Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
             result = execute_on_worker(worker_id, command, args, opts)
-            GenServer.cast(pool_pid, {:worker_complete, worker_id, from, result})
+            # Reply to the original caller from the Task
+            GenServer.reply(from, result)
+            # Return the worker to the pool from the Task
+            GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
           end)
 
           # Update stats
           stats = Map.update!(state.stats, :requests, &(&1 + 1))
+          # We reply :noreply immediately, the task will reply to the caller later
           {:noreply, %{new_state | stats: stats}}
 
         {:error, :no_workers} ->
@@ -170,7 +155,7 @@ defmodule Snakepit.Pool do
             |> Map.update!(:queued, &(&1 + 1))
 
           # Set queue timeout
-          Process.send_after(self(), {:queue_timeout, from}, @queue_timeout)
+          Process.send_after(self(), {:queue_timeout, from}, state.queue_timeout)
 
           {:noreply, %{state | request_queue: new_queue, stats: stats}}
       end
@@ -194,36 +179,24 @@ defmodule Snakepit.Pool do
   end
 
   @impl true
-  def handle_cast({:worker_complete, worker_id, from, result}, state) do
-    # Reply to original caller
-    GenServer.reply(from, result)
-
-    # Update error stats if needed
-    stats =
-      case result do
-        {:error, _} -> Map.update!(state.stats, :errors, &(&1 + 1))
-        _ -> state.stats
-      end
-
-    # Check for queued requests
+  def handle_cast({:checkin_worker, worker_id}, state) do
+    # Check for queued requests first
     case :queue.out(state.request_queue) do
       {{:value, {queued_from, command, args, opts, _queued_at}}, new_queue} ->
-        # Give worker to queued request
-        pool_pid = self()
-
-        Task.start(fn ->
+        # A request was waiting! Give it the worker immediately
+        Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
           result = execute_on_worker(worker_id, command, args, opts)
-          GenServer.cast(pool_pid, {:worker_complete, worker_id, queued_from, result})
+          GenServer.reply(queued_from, result)
+          GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
         end)
 
-        {:noreply, %{state | request_queue: new_queue, stats: stats}}
+        {:noreply, %{state | request_queue: new_queue}}
 
       {:empty, _} ->
-        # Return worker to available pool
+        # No requests waiting, return worker to available queue
         new_available = :queue.in(worker_id, state.available)
         new_busy = Map.delete(state.busy, worker_id)
-
-        {:noreply, %{state | available: new_available, busy: new_busy, stats: stats}}
+        {:noreply, %{state | available: new_available, busy: new_busy}}
     end
   end
 
@@ -261,21 +234,16 @@ defmodule Snakepit.Pool do
       {:ok, worker_id} ->
         Logger.error("Worker #{worker_id} (pid: #{inspect(pid)}) died: #{inspect(reason)}")
 
-        # Remove from all queues
+        # Just remove the dead worker from the pool's state
+        # The Worker.Starter will automatically restart it via supervisor tree
+        # The new worker will re-register itself when ready
         new_workers = List.delete(state.workers, worker_id)
         new_available = :queue.filter(&(&1 != worker_id), state.available)
         new_busy = Map.delete(state.busy, worker_id)
 
-        # Try to start replacement worker
-        Task.start(fn ->
-          case Snakepit.Pool.WorkerSupervisor.start_worker(worker_id) do
-            {:ok, _} ->
-              GenServer.cast(self(), {:worker_restarted, worker_id})
-
-            _ ->
-              :ok
-          end
-        end)
+        Logger.debug(
+          "Pool updated state after worker death. Worker.Starter will handle restart automatically."
+        )
 
         {:noreply, %{state | workers: new_workers, available: new_available, busy: new_busy}}
     end
@@ -288,37 +256,42 @@ defmodule Snakepit.Pool do
 
   @impl true
   def terminate(reason, _state) do
-    Logger.warning("🛑 Pool is terminating with reason: #{inspect(reason)}. Shutting down workers gracefully.")
-    
+    Logger.warning(
+      "🛑 Pool is terminating with reason: #{inspect(reason)}. Shutting down workers gracefully."
+    )
+
     # Get all worker PIDs supervised by our supervisor
     worker_pids = Snakepit.Pool.WorkerSupervisor.list_workers()
-    
+
     Logger.warning("🔄 Requesting graceful shutdown of #{length(worker_pids)} workers...")
-    
+
     # Tell the supervisor to terminate each child gracefully
     # This is a synchronous operation for each worker
-    terminated_count = Enum.reduce(worker_pids, 0, fn pid, acc ->
-      Logger.debug("Pool requesting shutdown of worker #{inspect(pid)}")
-      case DynamicSupervisor.terminate_child(Snakepit.Pool.WorkerSupervisor, pid) do
-        :ok -> 
-          acc + 1
-        {:error, :not_found} -> 
-          # Worker already terminated
-          acc + 1
-        {:error, reason} ->
-          Logger.warning("Failed to terminate worker #{inspect(pid)}: #{inspect(reason)}")
-          acc
-      end
-    end)
-    
+    terminated_count =
+      Enum.reduce(worker_pids, 0, fn pid, acc ->
+        Logger.debug("Pool requesting shutdown of worker #{inspect(pid)}")
+
+        case DynamicSupervisor.terminate_child(Snakepit.Pool.WorkerSupervisor, pid) do
+          :ok ->
+            acc + 1
+
+          {:error, :not_found} ->
+            # Worker already terminated
+            acc + 1
+
+          {:error, reason} ->
+            Logger.warning("Failed to terminate worker #{inspect(pid)}: #{inspect(reason)}")
+            acc
+        end
+      end)
+
     Logger.warning("✅ Pool shutdown complete. #{terminated_count} workers terminated gracefully.")
     :ok
   end
 
   # Private Functions
 
-
-  defp start_workers_concurrently(count) do
+  defp start_workers_concurrently(count, startup_timeout) do
     1..count
     |> Task.async_stream(
       fn i ->
@@ -334,7 +307,7 @@ defmodule Snakepit.Pool do
             nil
         end
       end,
-      timeout: @startup_timeout,
+      timeout: startup_timeout,
       max_concurrency: count,
       on_timeout: :kill_task
     )
@@ -371,82 +344,6 @@ defmodule Snakepit.Pool do
 
       :exit, reason ->
         {:error, {:worker_exit, reason}}
-    end
-  end
-
-  # Enhanced args with session data (from V2 pool)
-  defp enhance_args_with_session_data(args, session_id, command) do
-    base_args =
-      if session_id,
-        do: Map.put(args, :session_id, session_id),
-        else: Map.put(args, :session_id, "anonymous")
-
-    # For execute_program commands, fetch program data from SessionStore
-    if command == "execute_program" do
-      program_id = Map.get(args, :program_id)
-
-      case Snakepit.Bridge.SessionStore.get_program(session_id, program_id) do
-        {:ok, program_data} ->
-          Map.put(base_args, :program_data, program_data)
-
-        {:error, _reason} ->
-          # Program not found in session store - let external process handle the error
-          base_args
-      end
-    else
-      base_args
-    end
-  end
-
-  # Store program data after creation (from V2 pool)
-  defp store_program_data_after_creation(session_id, _create_args, create_response) do
-    if session_id != nil and session_id != "anonymous" do
-      program_id = Map.get(create_response, "program_id")
-
-      if program_id do
-        # Extract complete serializable program data from external process response
-        program_data = %{
-          program_id: program_id,
-          signature_def:
-            Map.get(create_response, "signature_def", Map.get(create_response, "signature", %{})),
-          signature_class: Map.get(create_response, "signature_class"),
-          field_mapping: Map.get(create_response, "field_mapping", %{}),
-          fallback_used: Map.get(create_response, "fallback_used", false),
-          created_at: System.system_time(:second),
-          execution_count: 0,
-          last_executed: nil,
-          program_type: Map.get(create_response, "program_type", "predict"),
-          signature: Map.get(create_response, "signature", %{})
-        }
-
-        store_program_in_session(session_id, program_id, program_data)
-      end
-    end
-  end
-
-  # Store program in SessionStore
-  defp store_program_in_session(session_id, program_id, program_data) do
-    if session_id != nil and session_id != "anonymous" do
-      case Snakepit.Bridge.SessionStore.get_session(session_id) do
-        {:ok, _session} ->
-          # Update existing session
-          Snakepit.Bridge.SessionStore.store_program(session_id, program_id, program_data)
-
-        {:error, :not_found} ->
-          # Create new session with program
-          case Snakepit.Bridge.SessionStore.create_session(session_id) do
-            {:ok, _session} ->
-              Snakepit.Bridge.SessionStore.store_program(session_id, program_id, program_data)
-
-            error ->
-              error
-          end
-
-        error ->
-          error
-      end
-    else
-      :ok
     end
   end
 end
