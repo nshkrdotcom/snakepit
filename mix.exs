@@ -4,7 +4,7 @@ defmodule Snakepit.MixProject do
   def project do
     [
       app: :snakepit,
-      version: "0.1.0",
+      version: "0.1.1",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       description:
@@ -56,7 +56,7 @@ defmodule Snakepit.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md"]
+      extras: ["README.md", "DIAGS.md"]
     ]
   end
 end
