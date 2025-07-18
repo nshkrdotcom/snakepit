@@ -92,6 +92,11 @@ class GenericBridge {
                     throw new Error(`Unsupported operation: ${operation}`);
             }
             
+            // Additional validation
+            if (!isFinite(result)) {
+                throw new Error(`Invalid result: ${result}`);
+            }
+            
             return {
                 status: "ok",
                 operation: operation,
@@ -100,11 +105,7 @@ class GenericBridge {
                 timestamp: Date.now() / 1000
             };
         } catch (error) {
-            return {
-                status: "error",
-                error: error.message,
-                timestamp: Date.now() / 1000
-            };
+            throw error;  // Let the protocol handler catch and format the error
         }
     }
     
@@ -152,11 +153,7 @@ class GenericBridge {
                 timestamp: Date.now() / 1000
             };
         } catch (error) {
-            return {
-                status: "error",
-                error: error.message,
-                timestamp: Date.now() / 1000
-            };
+            throw error;  // Let the protocol handler catch and format the error
         }
     }
     
@@ -199,12 +196,7 @@ class GenericBridge {
         if (handler) {
             return handler(args);
         } else {
-            return {
-                status: "error",
-                error: `Unknown command: ${command}`,
-                supported_commands: Object.keys(handlers),
-                timestamp: Date.now() / 1000
-            };
+            throw new Error(`Unknown command: ${command}`);
         }
     }
 }
@@ -228,6 +220,10 @@ class ProtocolHandler {
             this.stdin.setRawMode(true);
         }
         this.readBuffer = Buffer.alloc(0);
+        
+        // Increase max listeners to handle high concurrency
+        this.stdin.setMaxListeners(50);
+        this.stdout.setMaxListeners(50);
     }
     
     readMessage() {
@@ -337,13 +333,23 @@ class ProtocolHandler {
                     // Process command
                     const result = this.bridge.processCommand(command, args);
                     
-                    // Send success response
-                    response = {
-                        id: requestId,
-                        success: true,
-                        result: result,
-                        timestamp: new Date().toISOString()
-                    };
+                    // Check if result indicates an error status
+                    if (result && result.status === "error") {
+                        response = {
+                            id: requestId,
+                            success: false,
+                            error: result.error,
+                            timestamp: new Date().toISOString()
+                        };
+                    } else {
+                        // Send success response
+                        response = {
+                            id: requestId,
+                            success: true,
+                            result: result,
+                            timestamp: new Date().toISOString()
+                        };
+                    }
                 } catch (error) {
                     // Send error response
                     response = {
@@ -388,18 +394,30 @@ function main() {
     
     // Handle graceful shutdown
     process.on('SIGINT', () => {
-        console.error("Bridge shutting down");
+        console.error("Bridge shutting down (SIGINT)");
         process.exit(0);
     });
     
     process.on('SIGTERM', () => {
-        console.error("Bridge shutting down");
+        console.error("Bridge shutting down (SIGTERM)");
+        process.exit(0);
+    });
+    
+    // Handle pipe errors gracefully
+    process.on('SIGPIPE', () => {
+        console.error("Bridge pipe closed");
         process.exit(0);
     });
     
     // Handle uncaught errors
     process.on('uncaughtException', (error) => {
         console.error(`Bridge error: ${error}`);
+        process.exit(1);
+    });
+    
+    // Handle unhandled promise rejections
+    process.on('unhandledRejection', (reason, promise) => {
+        console.error(`Unhandled rejection at: ${promise}, reason: ${reason}`);
         process.exit(1);
     });
     

@@ -63,10 +63,10 @@ defmodule Snakepit.Bridge.Protocol do
 
   ## Examples
 
-      iex> DSPex.PythonBridge.Protocol.encode_request(1, :ping, %{})
+      iex> Snakepit.Bridge.Protocol.encode_request(1, :ping, %{})
       ~s({"id":1,"command":"ping","args":{},"timestamp":"2024-01-01T00:00:00Z"})
 
-      iex> DSPex.PythonBridge.Protocol.encode_request(2, "create_program", %{signature: %{}})
+      iex> Snakepit.Bridge.Protocol.encode_request(2, "create_program", %{signature: %{}})
       ~s({"id":2,"command":"create_program","args":{"signature":{}},"timestamp":"2024-01-01T00:00:00Z"})
   """
   @spec encode_request(request_id(), command(), args()) :: binary()
@@ -97,14 +97,14 @@ defmodule Snakepit.Bridge.Protocol do
   ## Examples
 
       iex> json = ~s({"id":1,"success":true,"result":{"status":"ok"}})
-      iex> DSPex.PythonBridge.Protocol.decode_response(json)
+      iex> Snakepit.Bridge.Protocol.decode_response(json)
       {:ok, 1, %{"status" => "ok"}}
 
       iex> json = ~s({"id":2,"success":false,"error":"Something went wrong"})
-      iex> DSPex.PythonBridge.Protocol.decode_response(json)
+      iex> Snakepit.Bridge.Protocol.decode_response(json)
       {:error, 2, "Something went wrong"}
 
-      iex> DSPex.PythonBridge.Protocol.decode_response("invalid json")
+      iex> Snakepit.Bridge.Protocol.decode_response("invalid json")
       {:error, :decode_error}
   """
   @spec decode_response(binary()) ::
@@ -190,10 +190,10 @@ defmodule Snakepit.Bridge.Protocol do
   ## Examples
 
       iex> request = %{"id" => 1, "command" => "ping", "args" => %{}}
-      iex> DSPex.PythonBridge.Protocol.validate_request(request)
+      iex> Snakepit.Bridge.Protocol.validate_request(request)
       :ok
 
-      iex> DSPex.PythonBridge.Protocol.validate_request(%{"id" => 1})
+      iex> Snakepit.Bridge.Protocol.validate_request(%{"id" => 1})
       {:error, "Missing required field: command"}
   """
   @spec validate_request(map()) ::
@@ -227,14 +227,14 @@ defmodule Snakepit.Bridge.Protocol do
   ## Examples
 
       iex> response = %{"id" => 1, "success" => true, "result" => %{}}
-      iex> DSPex.PythonBridge.Protocol.validate_response(response)
+      iex> Snakepit.Bridge.Protocol.validate_response(response)
       :ok
 
       iex> response = %{"id" => 1, "success" => false, "error" => "Failed"}
-      iex> DSPex.PythonBridge.Protocol.validate_response(response)
+      iex> Snakepit.Bridge.Protocol.validate_response(response)
       :ok
 
-      iex> DSPex.PythonBridge.Protocol.validate_response(%{"id" => 1})
+      iex> Snakepit.Bridge.Protocol.validate_response(%{"id" => 1})
       {:error, "Missing required field: success"}
   """
   @spec validate_response(map()) ::
@@ -279,7 +279,7 @@ defmodule Snakepit.Bridge.Protocol do
 
   ## Examples
 
-      iex> DSPex.PythonBridge.Protocol.create_error_response(1, "Command failed")
+      iex> Snakepit.Bridge.Protocol.create_error_response(1, "Command failed")
       %{"id" => 1, "success" => false, "error" => "Command failed", "timestamp" => _}
   """
   @spec create_error_response(request_id(), error_reason()) :: map()
@@ -300,7 +300,7 @@ defmodule Snakepit.Bridge.Protocol do
 
   ## Examples
 
-      iex> DSPex.PythonBridge.Protocol.create_success_response(1, %{"status" => "ok"})
+      iex> Snakepit.Bridge.Protocol.create_success_response(1, %{"status" => "ok"})
       %{"id" => 1, "success" => true, "result" => %{"status" => "ok"}, "timestamp" => _}
   """
   @spec create_success_response(request_id(), result()) :: map()
@@ -321,10 +321,10 @@ defmodule Snakepit.Bridge.Protocol do
 
   ## Examples
 
-      iex> DSPex.PythonBridge.Protocol.extract_request_id(%{"id" => 42})
+      iex> Snakepit.Bridge.Protocol.extract_request_id(%{"id" => 42})
       42
 
-      iex> DSPex.PythonBridge.Protocol.extract_request_id(%{"command" => "ping"})
+      iex> Snakepit.Bridge.Protocol.extract_request_id(%{"command" => "ping"})
       nil
   """
   @spec extract_request_id(map()) :: request_id() | nil
@@ -335,20 +335,12 @@ defmodule Snakepit.Bridge.Protocol do
   Generates a unique request ID.
 
   Creates a monotonically increasing request ID that can be used for
-  request/response correlation. Thread-safe through the use of an Agent.
+  request/response correlation. The Agent is guaranteed to be running
+  by the application supervisor.
   """
   @spec generate_request_id() :: request_id()
   def generate_request_id do
-    case Agent.start_link(fn -> 0 end, name: __MODULE__.RequestIdGenerator) do
-      {:ok, _} ->
-        Agent.get_and_update(__MODULE__.RequestIdGenerator, &{&1 + 1, &1 + 1})
-
-      {:error, {:already_started, _}} ->
-        Agent.get_and_update(__MODULE__.RequestIdGenerator, &{&1 + 1, &1 + 1})
-    end
-  rescue
-    _ ->
-      # Fallback to timestamp-based ID if Agent fails
-      System.system_time(:millisecond)
+    # The Agent is now guaranteed to be running by the supervisor.
+    Agent.get_and_update(__MODULE__.RequestIdGenerator, &{&1, &1 + 1})
   end
 end

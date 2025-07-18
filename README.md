@@ -72,6 +72,7 @@ elixir examples/generic_demo_javascript.exs
 ```elixir
 config :snakepit,
   pooling_enabled: true,
+  adapter_module: YourAdapter,
   pool_config: %{
     pool_size: 8  # Default: System.schedulers_online() * 2
   }

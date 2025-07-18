@@ -1,8 +1,8 @@
 defmodule Snakepit.Pool.WorkerSupervisor do
   @moduledoc """
-  DynamicSupervisor for Python worker processes.
+  DynamicSupervisor for pool worker processes.
 
-  This supervisor manages the lifecycle of Python workers:
+  This supervisor manages the lifecycle of workers:
   - Starts workers on demand
   - Handles crashes with automatic restarts
   - Provides clean shutdown of workers
@@ -27,7 +27,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   end
 
   @doc """
-  Starts a new Python worker with the given ID.
+  Starts a new pool worker with the given ID.
 
   ## Examples
 
@@ -42,7 +42,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
 
     case DynamicSupervisor.start_child(__MODULE__, child_spec) do
       {:ok, pid} ->
-        Logger.info("Started Python worker #{worker_id} with PID #{inspect(pid)}")
+        Logger.info("Started pool worker #{worker_id} with PID #{inspect(pid)}")
         {:ok, pid}
 
       {:error, {:already_started, pid}} ->
@@ -88,16 +88,32 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   Restarts a worker by ID.
   """
   def restart_worker(worker_id) do
-    case stop_worker(worker_id) do
-      :ok ->
-        start_worker(worker_id)
+    with {:ok, _} <- stop_worker(worker_id),
+         :ok <- wait_for_worker_cleanup(worker_id),
+         {:ok, pid} <- start_worker(worker_id) do
+      {:ok, pid}
+    end
+  end
 
-      {:error, :worker_not_found} ->
-        # Worker doesn't exist, just start a new one
-        start_worker(worker_id)
-
-      error ->
-        error
+  # Wait for worker to be fully cleaned up using proper OTP monitoring
+  defp wait_for_worker_cleanup(worker_id, retries \\ 10) do
+    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
+      [] -> 
+        # Worker fully cleaned up
+        :ok
+      [{pid, _}] when retries > 0 ->
+        # Worker still exists, set up monitor and wait
+        ref = Process.monitor(pid)
+        receive do
+          {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+        after
+          100 -> 
+            Process.demonitor(ref, [:flush])
+            wait_for_worker_cleanup(worker_id, retries - 1)
+        end
+      _ -> 
+        # Timeout waiting for cleanup
+        {:error, :cleanup_timeout}
     end
   end
 end

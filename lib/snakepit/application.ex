@@ -26,14 +26,23 @@ defmodule Snakepit.Application do
         Logger.info("🚀 Starting Snakepit with pooling enabled (size: #{pool_size})")
 
         [
-          # Registry for worker process registration
-          Snakepit.Pool.Registry,
-
-          # Process registry for Python PID tracking
-          Snakepit.Pool.ProcessRegistry,
+          # Request ID generator for unique request correlation
+          %{
+            id: Snakepit.Bridge.Protocol.RequestIdGenerator,
+            start: {Agent, :start_link, [fn -> 0 end, [name: Snakepit.Bridge.Protocol.RequestIdGenerator]]}
+          },
 
           # Session store for session management
           Snakepit.Bridge.SessionStore,
+
+          # Registry for worker process registration
+          Snakepit.Pool.Registry,
+
+          # Process registry for PID tracking
+          Snakepit.Pool.ProcessRegistry,
+
+          # Application cleanup for hard process termination guarantees
+          Snakepit.Pool.ApplicationCleanup,
 
           # Worker supervisor for managing worker processes
           Snakepit.Pool.WorkerSupervisor,

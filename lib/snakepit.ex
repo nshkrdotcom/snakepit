@@ -10,18 +10,20 @@ defmodule Snakepit do
 
   ## Basic Usage
 
-      # Start a pool
-      {:ok, _} = Snakepit.Pool.start_link(size: 4)
-      
+      # Configure in config/config.exs
+      config :snakepit,
+        pooling_enabled: true,
+        adapter_module: YourAdapter
+
       # Execute commands
-      {:ok, result} = Snakepit.Pool.execute("ping", %{test: true})
+      {:ok, result} = Snakepit.execute("ping", %{test: true})
       
       # Session-based execution
-      {:ok, result} = Snakepit.Pool.execute_in_session("my_session", "command", %{})
+      {:ok, result} = Snakepit.execute_in_session("my_session", "command", %{})
   """
 
   @doc """
-  Convenience function to execute commands on the default pool.
+  Convenience function to execute commands on the pool.
   """
   def execute(command, args, opts \\ []) do
     Snakepit.Pool.execute(command, args, opts)
@@ -39,5 +41,12 @@ defmodule Snakepit do
   """
   def get_stats(pool \\ Snakepit.Pool) do
     Snakepit.Pool.get_stats(pool)
+  end
+
+  @doc """
+  List workers from the pool.
+  """
+  def list_workers(pool \\ Snakepit.Pool) do
+    Snakepit.Pool.list_workers(pool)
   end
 end

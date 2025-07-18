@@ -1,6 +1,6 @@
 defmodule Snakepit.Pool.Registry do
   @moduledoc """
-  Registry for Python worker processes.
+  Registry for pool worker processes.
 
   This is a thin wrapper around Elixir's Registry that provides:
   - Consistent naming for worker processes
@@ -25,8 +25,8 @@ defmodule Snakepit.Pool.Registry do
 
   ## Examples
 
-      iex> DSPex.Python.Registry.via_tuple("worker_123")
-      {:via, Registry, {DSPex.Python.Registry, "worker_123"}}
+      iex> Snakepit.Pool.Registry.via_tuple("worker_123")
+      {:via, Registry, {Snakepit.Pool.Registry, "worker_123"}}
   """
   def via_tuple(worker_id) when is_binary(worker_id) do
     {:via, Registry, {@registry_name, worker_id}}

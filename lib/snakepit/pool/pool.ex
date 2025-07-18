@@ -1,12 +1,13 @@
 defmodule Snakepit.Pool do
   @moduledoc """
-  Pool manager for Python workers with concurrent initialization.
+  Pool manager for external workers with concurrent initialization.
 
   Features:
   - Concurrent worker startup (all workers start in parallel)
   - Simple queue-based request distribution
   - Non-blocking async execution
   - Automatic request queueing when workers are busy
+  - Adapter-based support for any external process
   """
 
   use GenServer
@@ -24,8 +25,7 @@ defmodule Snakepit.Pool do
     :request_queue,
     :stats,
     :initialized,
-    # Track Python PIDs for cleanup
-    :python_pids
+    :process_pids  # Track external process PIDs for cleanup
   ]
 
   # Client API
@@ -92,7 +92,7 @@ defmodule Snakepit.Pool do
   def init(opts) do
     # CRITICAL: Trap exits to ensure terminate/2 is called
     Process.flag(:trap_exit, true)
-
+    
     size = opts[:size] || @default_size
 
     state = %__MODULE__{
@@ -108,8 +108,7 @@ defmodule Snakepit.Pool do
         queue_timeouts: 0
       },
       initialized: false,
-      # Track Python PIDs
-      python_pids: MapSet.new()
+      process_pids: MapSet.new()  # Track external process PIDs
     }
 
     # Start concurrent worker initialization
@@ -294,11 +293,11 @@ defmodule Snakepit.Pool do
   @impl true
   def terminate(reason, state) do
     Logger.warning("🛑 Pool.terminate/2 CALLED with reason: #{inspect(reason)}")
-    Logger.warning("🛑 Pool state: #{inspect(Map.take(state, [:workers, :python_pids]))}")
-
-    # Kill only OUR Python processes, not all processes on the system
+    Logger.warning("🛑 Pool state: #{inspect(Map.take(state, [:workers, :process_pids]))}")
+    
+    # Kill only OUR external processes, not all processes on the system
     killed_count = kill_pool_worker_processes(state)
-
+    
     Logger.warning("✅ Pool shutdown completed - killed #{killed_count} worker processes")
     :ok
   end
@@ -306,60 +305,51 @@ defmodule Snakepit.Pool do
   # Private Functions
 
   defp kill_pool_worker_processes(state) do
-    Logger.warning("🔥 Killing Python processes for pool workers...")
-
+    Logger.warning("🔥 Killing external processes for pool workers...")
+    
     # Get all workers from this pool
     worker_ids = state.workers || []
-
-    killed_count =
-      Enum.reduce(worker_ids, 0, fn worker_id, acc ->
-        # Get Python PID from ProcessRegistry
-        case Snakepit.Pool.ProcessRegistry.get_worker_info(worker_id) do
-          {:ok, %{python_pid: python_pid}} when is_integer(python_pid) ->
-            case kill_python_process(python_pid, worker_id) do
-              :ok ->
-                Logger.warning("✅ Killed Python process #{python_pid} for worker #{worker_id}")
-                acc + 1
-
-              :error ->
-                Logger.warning(
-                  "⚠️ Failed to kill Python process #{python_pid} for worker #{worker_id}"
-                )
-
-                acc
-            end
-
-          _ ->
-            Logger.warning("⚠️ No Python PID found for worker #{worker_id}")
-            acc
-        end
-      end)
-
-    # Also try to get Python PIDs from the tracked set if available
-    tracked_pids = MapSet.to_list(state.python_pids || MapSet.new())
-
-    additional_killed =
-      Enum.reduce(tracked_pids, 0, fn python_pid, acc ->
-        case kill_python_process(python_pid, "tracked") do
-          :ok ->
-            Logger.warning("✅ Killed tracked Python process #{python_pid}")
-            acc + 1
-
-          :error ->
-            acc
-        end
-      end)
-
+    
+    killed_count = Enum.reduce(worker_ids, 0, fn worker_id, acc ->
+      # Get external process PID from ProcessRegistry
+      case Snakepit.Pool.ProcessRegistry.get_worker_info(worker_id) do
+        {:ok, %{python_pid: process_pid}} when is_integer(process_pid) ->
+          case kill_external_process(process_pid, worker_id) do
+            :ok -> 
+              Logger.warning("✅ Killed external process #{process_pid} for worker #{worker_id}")
+              acc + 1
+            :error -> 
+              Logger.warning("⚠️ Failed to kill external process #{process_pid} for worker #{worker_id}")
+              acc
+          end
+        _ ->
+          Logger.warning("⚠️ No external process PID found for worker #{worker_id}")
+          acc
+      end
+    end)
+    
+    # Also try to get external process PIDs from the tracked set if available
+    tracked_pids = MapSet.to_list(state.process_pids || MapSet.new())
+    
+    additional_killed = Enum.reduce(tracked_pids, 0, fn process_pid, acc ->
+      case kill_external_process(process_pid, "tracked") do
+        :ok -> 
+          Logger.warning("✅ Killed tracked external process #{process_pid}")
+          acc + 1
+        :error -> 
+          acc
+      end
+    end)
+    
     killed_count + additional_killed
   end
-
-  defp kill_python_process(python_pid, _worker_id) when is_integer(python_pid) do
+  
+  defp kill_external_process(process_pid, _worker_id) when is_integer(process_pid) do
     try do
       # Use SIGKILL for immediate termination
-      case System.cmd("kill", ["-KILL", "#{python_pid}"], stderr_to_stdout: true) do
+      case System.cmd("kill", ["-KILL", "#{process_pid}"], stderr_to_stdout: true) do
         {_output, 0} ->
           :ok
-
         {_error, _} ->
           :error
       end
@@ -372,7 +362,7 @@ defmodule Snakepit.Pool do
     1..count
     |> Task.async_stream(
       fn i ->
-        worker_id = "python_worker_#{i}_#{:erlang.unique_integer([:positive])}"
+        worker_id = "pool_worker_#{i}_#{:erlang.unique_integer([:positive])}"
 
         case Snakepit.Pool.WorkerSupervisor.start_worker(worker_id) do
           {:ok, _pid} ->
@@ -440,7 +430,7 @@ defmodule Snakepit.Pool do
           Map.put(base_args, :program_data, program_data)
 
         {:error, _reason} ->
-          # Program not found in session store - let Python handle the error
+          # Program not found in session store - let external process handle the error
           base_args
       end
     else
@@ -454,7 +444,7 @@ defmodule Snakepit.Pool do
       program_id = Map.get(create_response, "program_id")
 
       if program_id do
-        # Extract complete serializable program data from Python response
+        # Extract complete serializable program data from external process response
         program_data = %{
           program_id: program_id,
           signature_def:
@@ -491,6 +481,9 @@ defmodule Snakepit.Pool do
             error ->
               error
           end
+
+        error ->
+          error
       end
     else
       :ok

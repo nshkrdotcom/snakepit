@@ -26,7 +26,7 @@ defmodule Snakepit.Bridge.SessionStore do
   ## Options
 
   - `:name` - The name to register the GenServer (default: __MODULE__)
-  - `:table_name` - The ETS table name (default: :dspex_sessions)
+  - `:table_name` - The ETS table name (default: :snakepit_sessions)
   - `:cleanup_interval` - Cleanup interval in milliseconds (default: 60_000)
   - `:default_ttl` - Default TTL for sessions in seconds (default: 3600)
   """
@@ -572,24 +572,25 @@ defmodule Snakepit.Bridge.SessionStore do
   defp do_cleanup_expired_sessions(table, stats) do
     current_time = System.monotonic_time(:second)
 
-    # Instead of using complex ETS match specs, let's use a simpler approach
-    # Get all sessions and filter expired ones manually for now
-    all_sessions = :ets.tab2list(table)
+    # Use ETS select_delete for efficient, scalable cleanup without copying data
+    # Match spec to find expired sessions in tuples of {session_id, session_struct}
+    # Guard: session_struct.last_accessed + session_struct.ttl < current_time
+    # In session struct: last_accessed is at element 4, ttl is at element 5
+    match_spec = [
+      {{:_, :"$1"},
+       [
+         {:"<",
+          {:"+", {:element, 4, :"$1"}, {:element, 5, :"$1"}},
+          current_time}
+       ], [true]}
+    ]
 
-    expired_sessions =
-      Enum.filter(all_sessions, fn {_session_id, session} ->
-        Session.expired?(session, current_time)
-      end)
-
-    # Delete expired sessions
-    Enum.each(expired_sessions, fn {session_id, _session} ->
-      :ets.delete(table, session_id)
-    end)
-
-    expired_count = length(expired_sessions)
+    # Atomically find and delete all matching (expired) sessions
+    # This operates directly on ETS without copying any data to the GenServer
+    expired_count = :ets.select_delete(table, match_spec)
 
     if expired_count > 0 do
-      Logger.debug("Cleaned up #{expired_count} expired sessions")
+      Logger.debug("Cleaned up #{expired_count} expired sessions using efficient select_delete")
     end
 
     new_stats =
