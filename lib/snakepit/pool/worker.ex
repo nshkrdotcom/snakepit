@@ -162,20 +162,14 @@ defmodule Snakepit.Pool.Worker do
     Logger.debug("📤 Worker #{state.id} sending init ping with request_id #{request_id}")
 
     try do
-      case Port.command(state.port, request) do
-        true ->
-          # Set a timer for the initialization timeout
-          # We'll use the request_id to correlate the timeout message
-          Process.send_after(self(), {:initialization_timeout, request_id}, state.init_timeout)
+      Port.command(state.port, request)
+      # Set a timer for the initialization timeout
+      # We'll use the request_id to correlate the timeout message
+      Process.send_after(self(), {:initialization_timeout, request_id}, state.init_timeout)
 
-          # Track the ping request so we can validate it in handle_info
-          pending_reqs = Map.put(state.pending_requests, request_id, {:init, self()})
-          {:noreply, %{state | pending_requests: pending_reqs}}
-
-        false ->
-          # Port is open but unresponsive/busy
-          {:stop, :port_unresponsive, state}
-      end
+      # Track the ping request so we can validate it in handle_info
+      pending_reqs = Map.put(state.pending_requests, request_id, {:init, self()})
+      {:noreply, %{state | pending_requests: pending_reqs}}
     rescue
       ArgumentError ->
         # Port is closed/invalid
@@ -206,21 +200,15 @@ defmodule Snakepit.Pool.Worker do
     request = Protocol.encode_request(request_id, command, args)
 
     try do
-      case Port.command(state.port, request) do
-        true ->
-          # Track pending request
-          pending = Map.put(state.pending_requests, request_id, {from, System.monotonic_time()})
+      Port.command(state.port, request)
+      # Track pending request
+      pending = Map.put(state.pending_requests, request_id, {from, System.monotonic_time()})
 
-          Logger.debug(
-            "Worker #{state.id} sent request #{request_id}, pending count: #{map_size(pending)}"
-          )
+      Logger.debug(
+        "Worker #{state.id} sent request #{request_id}, pending count: #{map_size(pending)}"
+      )
 
-          {:noreply, %{state | busy: true, pending_requests: pending}}
-
-        false ->
-          # Port is open but unresponsive/busy
-          {:reply, {:error, :port_unresponsive}, state}
-      end
+      {:noreply, %{state | busy: true, pending_requests: pending}}
     rescue
       ArgumentError ->
         # Port is closed/invalid
@@ -309,19 +297,13 @@ defmodule Snakepit.Pool.Worker do
     request = Protocol.encode_request(request_id, "ping", %{"health_check" => true})
 
     try do
-      case Port.command(state.port, request) do
-        true ->
-          # Store health check request
-          pending =
-            Map.put(state.pending_requests, request_id, {:health_check, System.monotonic_time()})
+      Port.command(state.port, request)
+      # Store health check request
+      pending =
+        Map.put(state.pending_requests, request_id, {:health_check, System.monotonic_time()})
 
-          Process.send_after(self(), :health_check, state.health_check_interval)
-          {:noreply, %{state | pending_requests: pending}}
-
-        false ->
-          # Port is open but unresponsive/busy
-          {:stop, :health_check_failed, state}
-      end
+      Process.send_after(self(), :health_check, state.health_check_interval)
+      {:noreply, %{state | pending_requests: pending}}
     rescue
       ArgumentError ->
         # Port is dead
