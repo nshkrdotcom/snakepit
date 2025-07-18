@@ -30,14 +30,6 @@ defmodule Snakepit.Application do
           # Task supervisor for async pool operations
           {Task.Supervisor, name: Snakepit.TaskSupervisor},
 
-          # Request ID generator for unique request correlation
-          %{
-            id: Snakepit.Bridge.Protocol.RequestIdGenerator,
-            start:
-              {Agent, :start_link,
-               [fn -> 0 end, [name: Snakepit.Bridge.Protocol.RequestIdGenerator]]}
-          },
-
           # Session store for session management
           Snakepit.Bridge.SessionStore,
 

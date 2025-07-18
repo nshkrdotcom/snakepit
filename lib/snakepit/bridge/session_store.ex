@@ -603,11 +603,11 @@ defmodule Snakepit.Bridge.SessionStore do
     # Use ETS select_delete for efficient, scalable cleanup without copying data
     # Match spec to find expired sessions in tuples of {session_id, session_struct}
     # Guard: session_struct.last_accessed + session_struct.ttl < current_time
-    # In session struct: last_accessed is at element 4, ttl is at element 5
+    # In session struct (after the struct tag): last_accessed is at element 4, ttl is at element 6
     match_spec = [
       {{:_, :"$1"},
        [
-         {:<, {:+, {:element, 4, :"$1"}, {:element, 5, :"$1"}}, current_time}
+         {:<, {:+, {:element, 4, :"$1"}, {:element, 6, :"$1"}}, current_time}
        ], [true]}
     ]
 

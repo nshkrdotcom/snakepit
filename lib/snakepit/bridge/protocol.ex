@@ -114,11 +114,14 @@ defmodule Snakepit.Bridge.Protocol do
           | {:error, :malformed_response}
           | {:error, :binary_data}
   def decode_response(data) when is_binary(data) do
-    # Check if data looks like Erlang term format (starts with 131)
+    # Only accept JSON data - reject any Erlang term data for security
     case data do
       <<131, _rest::binary>> ->
-        Logger.warning("Received Erlang term data instead of JSON: #{byte_size(data)} bytes")
-        try_decode_erlang_term(data)
+        Logger.warning(
+          "Received Erlang term data instead of JSON: #{byte_size(data)} bytes - rejecting for security"
+        )
+
+        {:error, :binary_data}
 
       _ ->
         decode_json_response(data)
@@ -157,27 +160,6 @@ defmodule Snakepit.Bridge.Protocol do
         )
 
         {:error, :decode_error}
-    end
-  end
-
-  defp try_decode_erlang_term(data) do
-    try do
-      # Attempt to decode as Erlang term and extract JSON
-      term = :erlang.binary_to_term(data)
-
-      case term do
-        json_string when is_binary(json_string) ->
-          Logger.debug("Decoded Erlang term containing JSON string")
-          decode_json_response(json_string)
-
-        _ ->
-          Logger.warning("Erlang term is not a JSON string: #{inspect(term)}")
-          {:error, :binary_data}
-      end
-    rescue
-      ArgumentError ->
-        Logger.warning("Invalid Erlang term format in #{byte_size(data)} bytes")
-        {:error, :binary_data}
     end
   end
 
@@ -335,12 +317,11 @@ defmodule Snakepit.Bridge.Protocol do
   Generates a unique request ID.
 
   Creates a monotonically increasing request ID that can be used for
-  request/response correlation. The Agent is guaranteed to be running
-  by the application supervisor.
+  request/response correlation. Uses System.unique_integer for 
+  high performance without serialization bottlenecks.
   """
   @spec generate_request_id() :: request_id()
   def generate_request_id do
-    # The Agent is now guaranteed to be running by the supervisor.
-    Agent.get_and_update(__MODULE__.RequestIdGenerator, &{&1, &1 + 1})
+    System.unique_integer([:positive])
   end
 end
