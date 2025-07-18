@@ -23,7 +23,7 @@ examples/**/erl_crash.dump
 examples/**/*.ez
 
 # Ignore package tarball (built via "mix hex.build").
-dspex-*.tar
+snakepit-*.tar
 *.tar
 examples/**/*.tar
 
