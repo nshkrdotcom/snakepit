@@ -3,7 +3,7 @@ I'll create several Mermaid diagrams to visualize the high-performance architect
 ## 1. Overall System Architecture - High Performance Overview
 
 ```mermaid
-graph TB
+graph LR
     subgraph "Elixir/OTP Layer"
         Client["Client API"]
         Pool["Pool Manager<br/>⚡ Non-blocking async"]
