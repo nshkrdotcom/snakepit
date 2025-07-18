@@ -186,7 +186,11 @@ defmodule SnakepitStatelessDemo do
     ]
     
     Enum.each(validations, fn {test_name, args} ->
-      command = if test_name == "invalid_command", do: "invalid_cmd", else: "compute"
+      command = case test_name do
+        "invalid_command" -> "invalid_cmd"
+        "valid_ping" -> "ping" 
+        _ -> "compute"
+      end
       
       case Snakepit.execute(command, args) do
         {:ok, _result} ->

@@ -304,13 +304,83 @@ defmodule Snakepit.Pool do
   @impl true
   def terminate(reason, _state) do
     Logger.info(
-      "🛑 Pool is terminating with reason: #{inspect(reason)}. Supervisor will handle worker shutdown."
+      "🛑 Pool is terminating with reason: #{inspect(reason)}. Orchestrating graceful worker shutdown."
     )
 
-    # No need to manually terminate workers. The main supervisor handles it through the OTP shutdown cascade.
-    # The WorkerSupervisor will automatically terminate all its children (Worker.Starter processes),
-    # which in turn will terminate their Worker children.
+    # No need to check if the supervisor is alive; which_children handles it.
+    worker_starter_pids =
+      DynamicSupervisor.which_children(Snakepit.Pool.WorkerSupervisor)
+      |> Enum.map(fn {_, pid, _, _} -> pid end)
+
+    if Enum.empty?(worker_starter_pids) do
+      Logger.info("✅ No active workers to shut down.")
+      :ok
+    else
+      Logger.info("Requesting graceful shutdown for #{length(worker_starter_pids)} workers...")
+
+      # 1. Monitor each worker's starter supervisor *before* telling it to stop.
+      refs = Enum.map(worker_starter_pids, &Process.monitor/1)
+
+      # 2. Tell each worker's parent supervisor to stop it gracefully.
+      #    This starts the terminate cascade down to the Python process.
+      Enum.each(worker_starter_pids, fn starter_pid ->
+        # It's possible the child terminates between `which_children` and here.
+        # We can ignore the {:error, :not_found} as it means our job is already done.
+        case DynamicSupervisor.terminate_child(Snakepit.Pool.WorkerSupervisor, starter_pid) do
+          :ok -> :ok
+          {:error, :not_found} -> :ok
+          error -> Logger.warning("Error terminating child #{inspect(starter_pid)}: #{inspect(error)}")
+        end
+      end)
+      
+      # 3. Now, wait for all monitored processes to go DOWN.
+      #    This makes the shutdown synchronous and blocks until completion.
+      #    We'll give a generous timeout (e.g., 5 seconds) for all workers.
+      wait_for_all_down(refs, 5000)
+
+      Logger.info("✅ Pool shutdown orchestration complete.")
+    end
     :ok
+  end
+
+  # Helper function to wait for all monitored processes to exit.
+  defp wait_for_all_down(refs, timeout) do
+    # Use a MapSet for efficient removal of refs as we receive :DOWN messages.
+    remaining_refs = MapSet.new(refs)
+
+    # Set a timer for the overall timeout.
+    timer = Process.send_after(self(), :pool_shutdown_timeout, timeout)
+
+    # Loop until all refs are accounted for or we time out.
+    do_wait_for_all_down(remaining_refs, timer)
+
+    # We're done, cancel the timer to clean up the message queue.
+    Process.cancel_timer(timer)
+  end
+
+  defp do_wait_for_all_down(remaining_refs, _timer) when map_size(remaining_refs) == 0 do
+    # Base case: all processes are down.
+    :ok
+  end
+
+  defp do_wait_for_all_down(remaining_refs, timer) do
+    receive do
+      {:DOWN, ref, :process, _pid, _reason} ->
+        # A process we were watching has died. Remove it from the set and continue waiting.
+        do_wait_for_all_down(MapSet.delete(remaining_refs, ref), timer)
+      
+      :pool_shutdown_timeout ->
+        # The overall timeout was hit.
+        Logger.error(
+          "⏰ Timed out waiting for #{map_size(remaining_refs)} workers to shut down. ApplicationCleanup will now take over."
+        )
+        :timeout
+    after
+      0 ->
+        # This is a safety check in case the receive block is entered with an empty set.
+        # It should not happen due to the guard clause on the primary function head.
+        :ok
+    end
   end
 
   # Private Functions

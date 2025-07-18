@@ -73,65 +73,74 @@ defmodule Snakepit.Pool.Worker do
   @impl true
   def init(opts) do
     worker_id = Keyword.fetch!(opts, :id)
-    adapter_module = Application.get_env(:snakepit, :adapter_module)
 
-    # Get configurable timeouts
-    init_timeout = Application.get_env(:snakepit, :worker_init_timeout, @default_init_timeout)
+    # Check if Pool is still alive - if not, abort worker creation
+    case Process.whereis(Snakepit.Pool) do
+      nil ->
+        Logger.debug("Aborting worker #{worker_id} - Pool is dead")
+        {:stop, :pool_dead}
 
-    health_check_interval =
-      Application.get_env(
-        :snakepit,
-        :worker_health_check_interval,
-        @default_health_check_interval
-      )
+      _pid ->
+        adapter_module = Application.get_env(:snakepit, :adapter_module)
 
-    if adapter_module == nil do
-      {:stop, {:error, :no_adapter_configured}}
-    else
-      fingerprint = generate_fingerprint(worker_id)
+        # Get configurable timeouts
+        init_timeout = Application.get_env(:snakepit, :worker_init_timeout, @default_init_timeout)
 
-      # Start external process using adapter
-      case start_external_port(fingerprint, adapter_module) do
-        {:ok, port, process_pid} ->
-          state = %__MODULE__{
-            id: worker_id,
-            port: port,
-            process_pid: process_pid,
-            fingerprint: fingerprint,
-            start_time: System.system_time(:second),
-            busy: false,
-            pending_requests: %{},
-            health_status: :initializing,
-            stats: %{requests: 0, errors: 0, total_time: 0},
-            adapter_module: adapter_module,
-            init_timeout: init_timeout,
-            health_check_interval: health_check_interval
-          }
+        health_check_interval =
+          Application.get_env(
+            :snakepit,
+            :worker_health_check_interval,
+            @default_health_check_interval
+          )
 
-          # Worker is already registered via via_tuple in start_link - no manual registration needed
+        if adapter_module == nil do
+          {:stop, {:error, :no_adapter_configured}}
+        else
+          fingerprint = generate_fingerprint(worker_id)
 
-          # Register worker with process tracking only if we have a valid process_pid
-          if process_pid do
-            Snakepit.Pool.ProcessRegistry.register_worker(
-              worker_id,
-              self(),
-              process_pid,
-              fingerprint
-            )
+          # Start external process using adapter
+          case start_external_port(fingerprint, adapter_module) do
+            {:ok, port, process_pid} ->
+              state = %__MODULE__{
+                id: worker_id,
+                port: port,
+                process_pid: process_pid,
+                fingerprint: fingerprint,
+                start_time: System.system_time(:second),
+                busy: false,
+                pending_requests: %{},
+                health_status: :initializing,
+                stats: %{requests: 0, errors: 0, total_time: 0},
+                adapter_module: adapter_module,
+                init_timeout: init_timeout,
+                health_check_interval: health_check_interval
+              }
 
-            # ProcessRegistry provides process tracking for ApplicationCleanup
-            Logger.debug("Registered worker #{worker_id} with process PID #{process_pid}")
+              # Worker is already registered via via_tuple in start_link - no manual registration needed
+
+              # Register worker with process tracking only if we have a valid process_pid
+              if process_pid do
+                Snakepit.Pool.ProcessRegistry.register_worker(
+                  worker_id,
+                  self(),
+                  process_pid,
+                  fingerprint
+                )
+
+                # ProcessRegistry provides process tracking for ApplicationCleanup
+                Logger.debug("Registered worker #{worker_id} with process PID #{process_pid}")
+              end
+
+              # Send initialization command asynchronously
+              GenServer.cast(self(), :initialize)
+
+              # Return state immediately
+              {:ok, state}
+
+            {:error, reason} ->
+              {:stop, {:failed_to_start_port, reason}}
           end
-
-          # Send initialization command asynchronously
-          GenServer.cast(self(), :initialize)
-
-          # Return state immediately
-          {:ok, state}
-
-        {:error, reason} ->
-          {:stop, {:failed_to_start_port, reason}}
-      end
+        end
     end
   end
 
@@ -332,42 +341,46 @@ defmodule Snakepit.Pool.Worker do
 
   @impl true
   def terminate(reason, state) do
-    log_level =
-      case reason do
-        # This is a normal, coordinated shutdown requested by the supervisor
-        :shutdown -> :info
-        # Port exit with status 137 is also a coordinated shutdown
-        {:port_exit, 137} -> :debug
-        # Any other reason is a crash or unexpected stop
-        _ -> :warning
+    # We only perform the graceful shutdown dance if this is a normal shutdown.
+    # For crashes, we let the system burn it down immediately.
+    if reason == :shutdown and state.process_pid do
+      Logger.info("🔥 Worker #{state.id} beginning graceful shutdown of PID #{state.process_pid}...")
+
+      # Send the polite SIGTERM request
+      case System.cmd("kill", ["-TERM", "#{state.process_pid}"], stderr_to_stdout: true) do
+        {_, 0} ->
+          Logger.debug("SIGTERM sent to PID #{state.process_pid}")
+        {error, _} ->
+          Logger.warning("Failed to send SIGTERM to PID #{state.process_pid}: #{error}")
       end
 
-    Logger.log(log_level, "🔥 Worker #{state.id} terminating with reason: #{inspect(reason)}")
+      # Close the port. This is CRITICAL. The BEAM will now monitor the OS process
+      # and send this GenServer an :EXIT message when it dies.
+      if state.port do
+        Port.close(state.port)
+      end
 
-    # Unregister from all tracking systems
-    Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
-
-    # ProcessRegistry automatically handles worker cleanup during termination
-
-    # CRITICAL: The worker is solely responsible for cleaning up its external process
-    if state.port && Port.info(state.port) do
-      process_pid =
-        case Port.info(state.port, :os_pid) do
-          {:os_pid, pid} -> pid
-          # Fallback to stored PID
-          _ -> state.process_pid
-        end
-
-      # Close the port first
-      Port.close(state.port)
-
-      # Then gracefully terminate the external process if we have its PID
-      if process_pid do
-        # Your robust termination logic is now in the right place
-        terminate_external_process(process_pid, state.id)
+      # NO SLEEP. We now wait for the event that confirms the process is dead.
+      # We give it a 2-second timeout.
+      receive do
+        {:EXIT, port, _reason} when port == state.port ->
+          Logger.info("✅ Worker #{state.id} confirmed graceful exit of PID #{state.process_pid}.")
+      after
+        2000 ->
+          Logger.warning(
+            "⏰ Worker #{state.id} timed out waiting for graceful exit of PID #{state.process_pid}. ApplicationCleanup will take over."
+          )
+      end
+    else
+      Logger.warning("🔥 Worker #{state.id} terminating abnormally with reason: #{inspect(reason)}")
+      # For crashes or missing PIDs, just close the port.
+      if state.port do
+        Port.close(state.port)
       end
     end
 
+    # Unregister from the central tracker regardless of how we terminated.
+    Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
     :ok
   end
 
@@ -421,32 +434,6 @@ defmodule Snakepit.Pool.Worker do
     timestamp = System.system_time(:nanosecond)
     random = :rand.uniform(1_000_000)
     "snakepit_worker_#{worker_id}_#{timestamp}_#{random}"
-  end
-
-  defp terminate_external_process(process_pid, worker_id) when is_integer(process_pid) do
-    Logger.warning("🔥 Sending SIGTERM to external process #{process_pid} for worker #{worker_id}")
-
-    try do
-      # Send graceful termination signal but DO NOT wait
-      # ApplicationCleanup provides the hard guarantee with SIGKILL if needed
-      case System.cmd("kill", ["-TERM", "#{process_pid}"], stderr_to_stdout: true) do
-        {_output, 0} ->
-          Logger.warning("✅ Sent SIGTERM to external process #{process_pid} (non-blocking)")
-
-        {_error, _} ->
-          # Process already dead or kill failed
-          Logger.warning("⚠️ External process #{process_pid} already dead or kill failed")
-      end
-    rescue
-      e ->
-        Logger.warning(
-          "💥 Exception sending SIGTERM to external process #{process_pid}: #{inspect(e)}"
-        )
-    end
-  end
-
-  defp terminate_external_process(nil, worker_id) do
-    Logger.warning("⚠️ No external process PID to terminate for worker #{worker_id}")
   end
 
   defp handle_response(request_id, result, state) do

@@ -12,6 +12,7 @@ import sys
 import json
 import struct
 import time
+import signal
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -216,6 +217,19 @@ class ProtocolHandler:
 
 def main():
     """Main entry point."""
+    
+    # Set up graceful shutdown handler for SIGTERM
+    def graceful_shutdown_handler(signum, frame):
+        """Handle SIGTERM by exiting cleanly."""
+        print("Graceful shutdown requested via SIGTERM. Exiting cleanly.", file=sys.stderr)
+        # Flush all buffers to prevent broken pipe errors
+        sys.stdout.flush()
+        sys.stderr.flush()
+        sys.exit(0)
+    
+    # Register the signal handler for SIGTERM
+    signal.signal(signal.SIGTERM, graceful_shutdown_handler)
+    
     if len(sys.argv) > 1 and sys.argv[1] == "--help":
         print("Generic Snakepit Bridge")
         print("Usage: python generic_bridge.py [--mode pool-worker]")
@@ -232,7 +246,9 @@ def main():
     try:
         handler.run()
     except KeyboardInterrupt:
-        print("Bridge shutting down", file=sys.stderr)
+        print("Bridge shutting down via KeyboardInterrupt", file=sys.stderr)
+        sys.stdout.flush()
+        sys.stderr.flush()
     except Exception as e:
         print(f"Bridge error: {e}", file=sys.stderr)
         sys.exit(1)

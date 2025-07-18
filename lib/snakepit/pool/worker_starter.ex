@@ -46,18 +46,27 @@ defmodule Snakepit.Pool.Worker.Starter do
 
   @impl true
   def init(worker_id) do
-    Logger.debug("Starting worker starter for #{worker_id}")
+    # Check if the Pool is already terminating
+    case Process.whereis(Snakepit.Pool) do
+      nil ->
+        # Pool is dead, don't start workers
+        Logger.debug("Aborting worker starter for #{worker_id} - Pool is dead")
+        :ignore
 
-    children = [
-      %{
-        id: worker_id,
-        start: {Snakepit.Pool.Worker, :start_link, [[id: worker_id]]},
-        # Within this supervisor, the worker is permanent
-        restart: :permanent,
-        type: :worker
-      }
-    ]
+      _pid ->
+        Logger.debug("Starting worker starter for #{worker_id}")
 
-    Supervisor.init(children, strategy: :one_for_one)
+        children = [
+          %{
+            id: worker_id,
+            start: {Snakepit.Pool.Worker, :start_link, [[id: worker_id]]},
+            # Within this supervisor, the worker restarts on crashes but not during shutdown
+            restart: :transient,
+            type: :worker
+          }
+        ]
+
+        Supervisor.init(children, strategy: :one_for_one)
+    end
   end
 end
