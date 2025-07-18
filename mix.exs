@@ -7,7 +7,8 @@ defmodule Snakepit.MixProject do
       version: "0.1.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
-      description: "High-performance pooler and session manager for external language integrations",
+      description:
+        "High-performance pooler and session manager for external language integrations",
       package: package(),
       deps: deps(),
       dialyzer: dialyzer(),
@@ -34,7 +35,8 @@ defmodule Snakepit.MixProject do
 
   defp package do
     [
-      description: "High-performance pooler and session manager for external language integrations",
+      description:
+        "High-performance pooler and session manager for external language integrations",
       licenses: ["MIT"],
       maintainers: ["NSHkr <ZeroTrust@NSHkr.com>"],
       links: %{"GitHub" => "https://github.com/nshkrdotcom/snakepit"},
