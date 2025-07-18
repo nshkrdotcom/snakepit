@@ -57,7 +57,7 @@ IO.puts("2. Data Exploration:")
 
 # Get basic info about the DataFrame
 case Snakepit.Python.call("stored.df.describe", %{}, session_id: session_id) do
-  {:ok, result} ->
+  {:ok, _result} ->
     IO.puts("   ✓ Data description available")
   {:error, error} ->
     IO.puts("   ✗ Error describing data: #{error}")
@@ -65,7 +65,7 @@ end
 
 # Get data types
 case Snakepit.Python.call("stored.df.dtypes", %{}, session_id: session_id) do
-  {:ok, result} ->
+  {:ok, _result} ->
     IO.puts("   ✓ Data types retrieved")
   {:error, error} ->
     IO.puts("   ✗ Error getting dtypes: #{error}")
@@ -78,7 +78,7 @@ IO.puts("3. Feature Preparation:")
 
 # Extract features (all columns except 'target')
 case Snakepit.Python.call("stored.df.drop", %{columns: ["target"], axis: 1}, [store_as: "X", session_id: session_id]) do
-  {:ok, result} ->
+  {:ok, _result} ->
     IO.puts("   ✓ Features extracted (X)")
   {:error, error} ->
     IO.puts("   ✗ Error extracting features: #{error}")
@@ -86,7 +86,7 @@ end
 
 # Extract target variable
 case Snakepit.Python.call("stored.df.__getitem__", %{key: "target"}, [store_as: "y", session_id: session_id]) do
-  {:ok, result} ->
+  {:ok, _result} ->
     IO.puts("   ✓ Target extracted (y)")
   {:error, error} ->
     IO.puts("   ✗ Error extracting target: #{error}")
@@ -99,7 +99,7 @@ IO.puts("4. Model Training:")
 
 # Create a Random Forest Classifier
 case Snakepit.Python.create_model(:random_forest, %{n_estimators: 10, random_state: 42}, [store_as: "model", session_id: session_id]) do
-  {:ok, result} ->
+  {:ok, _result} ->
     IO.puts("   ✓ Random Forest model created")
   {:error, error} ->
     IO.puts("   ✗ Error creating model: #{error}")
@@ -107,7 +107,7 @@ end
 
 # Train the model
 case Snakepit.Python.train_model("model", %{X: "stored.X", y: "stored.y"}, session_id: session_id) do
-  {:ok, result} ->
+  {:ok, _result} ->
     IO.puts("   ✓ Model trained successfully")
   {:error, error} ->
     IO.puts("   ✗ Error training model: #{error}")
@@ -285,9 +285,9 @@ IO.puts("Created new session: #{new_session}")
 
 # Try to access objects from the previous session (should fail)
 case Snakepit.Python.retrieve("model", session_id: new_session) do
-  {:ok, result} ->
+  {:ok, _result} ->
     IO.puts("   Unexpected: Found model in new session")
-  {:error, error} ->
+  {:error, _error} ->
     IO.puts("   ✓ Expected: Model not found in new session - sessions are isolated")
 end
 
