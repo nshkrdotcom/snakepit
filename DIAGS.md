@@ -237,7 +237,7 @@ graph TD
 ## 6. Request Queueing & Load Distribution
 
 ```mermaid
-graph TB
+graph LR
     subgraph "High-Performance Request Handling"
         subgraph "Request Queue"
             Q[":queue (Erlang)<br/>⚡ FIFO<br/>⚡ O(1) operations"]
