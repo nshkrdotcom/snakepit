@@ -90,35 +90,41 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   Restarts a worker by ID.
   """
   def restart_worker(worker_id) do
-    with :ok <- stop_worker(worker_id),
-         :ok <- wait_for_worker_cleanup(worker_id),
-         {:ok, pid} <- start_worker(worker_id) do
-      {:ok, pid}
+    with {:ok, old_pid} <- Snakepit.Pool.Registry.get_worker_pid(worker_id),
+         :ok <- DynamicSupervisor.terminate_child(__MODULE__, old_pid),
+         :ok <- wait_for_worker_cleanup(old_pid),
+         {:ok, new_pid} <- start_worker(worker_id) do
+      {:ok, new_pid}
+    else
+      {:error, :not_found} ->
+        # Worker doesn't exist, just start a new one
+        start_worker(worker_id)
+
+      error ->
+        error
     end
   end
 
-  # Wait for worker to be fully cleaned up using proper OTP monitoring
-  defp wait_for_worker_cleanup(worker_id, retries \\ 10) do
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [] ->
-        # Worker fully cleaned up
-        :ok
+  # Wait for a specific PID to terminate to avoid race conditions
+  defp wait_for_worker_cleanup(pid, retries \\ 10) do
+    if retries > 0 and Process.alive?(pid) do
+      # Monitor the specific PID we want to wait for
+      ref = Process.monitor(pid)
 
-      [{pid, _}] when retries > 0 ->
-        # Worker still exists, set up monitor and wait
-        ref = Process.monitor(pid)
-
-        receive do
-          {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
-        after
-          100 ->
-            Process.demonitor(ref, [:flush])
-            wait_for_worker_cleanup(worker_id, retries - 1)
-        end
-
-      _ ->
-        # Timeout waiting for cleanup
+      receive do
+        {:DOWN, ^ref, :process, ^pid, _reason} ->
+          :ok
+      after
+        100 ->
+          Process.demonitor(ref, [:flush])
+          wait_for_worker_cleanup(pid, retries - 1)
+      end
+    else
+      if Process.alive?(pid) do
         {:error, :cleanup_timeout}
+      else
+        :ok
+      end
     end
   end
 end
