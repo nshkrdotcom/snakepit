@@ -154,8 +154,46 @@ examples/**/lcov.info
 docs/ashDocs/
 
 
-priv/python/__pycache__/
+# Python cache files and directories
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
+# PyInstaller
+*.manifest
+*.spec
+
+# Python virtual environments
+venv/
+ENV/
+env/
+.venv/
+.ENV/
+.env/
+
+# Python cache in all subdirectories
+priv/python/__pycache__/
+priv/python/**/__pycache__/
+examples/**/priv/python/__pycache__/
+examples/**/priv/python/**/__pycache__/
 
 repomix*.xml
 
