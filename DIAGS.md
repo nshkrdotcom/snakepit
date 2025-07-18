@@ -1,5 +1,3 @@
-I'll create several Mermaid diagrams to visualize the high-performance architecture of Snakepit, with proper quotes around all subgraph blocks.
-
 ## 1. Overall System Architecture - High Performance Overview
 
 ```mermaid
@@ -343,15 +341,3 @@ graph LR
     style PR fill:#bbf,stroke:#333,stroke-width:4px,color:#000
     style SR fill:#fbf,stroke:#333,stroke-width:4px,color:#000
 ```
-
-These diagrams highlight the key performance features of Snakepit:
-
-1. **Concurrent Operations**: Worker initialization, request handling, and cleanup all leverage Elixir's concurrent capabilities
-2. **O(1) Lookups**: Registry and ETS tables provide constant-time operations for worker management
-3. **Non-blocking Architecture**: The pool never blocks on worker operations thanks to Task.Supervisor
-4. **Optimized Storage**: ETS tables with read/write concurrency and decentralized counters
-5. **Efficient Protocols**: Binary communication with 4-byte framing for fast message parsing
-6. **Auto-scaling**: Queue management with configurable limits and timeouts
-7. **Zero-downtime Recovery**: Automatic worker restart without pool disruption
-
-The architecture achieves high performance through careful use of OTP primitives and avoiding bottlenecks in the critical path.
