@@ -12,6 +12,7 @@ Snakepit is a general-purpose pooling system that can manage workers for any ext
 - **Session affinity** - Support for session-based execution with automatic worker affinity
 - **Multi-language adapter support** - Currently supports Python and JavaScript/Node.js with easy extensibility
 - **Process tracking and cleanup** - Robust process lifecycle management with automatic cleanup
+- **Telemetry integration** - Built-in monitoring events for observability and performance tracking
 
 ## Architecture
 
@@ -75,7 +76,11 @@ config :snakepit,
   adapter_module: YourAdapter,
   pool_config: %{
     pool_size: 8  # Default: System.schedulers_online() * 2
-  }
+  },
+  # Performance tuning (optional)
+  cleanup_retry_interval: 100,      # ms between worker cleanup retries
+  cleanup_max_retries: 10,          # max cleanup retry attempts  
+  worker_shutdown_grace_period: 2000 # ms for graceful worker shutdown
 ```
 
 ## Supported Adapters
@@ -97,15 +102,79 @@ Snakepit currently includes adapters for:
 ### Creating Custom Adapters
 See the `Snakepit.Adapter` behaviour documentation for implementing your own adapters for R, Ruby, Go, or any other language.
 
+## Telemetry and Monitoring
+
+Snakepit emits telemetry events for comprehensive monitoring and observability. Add `:telemetry` to your dependencies to enable these events:
+
+```elixir
+# In mix.exs
+def deps do
+  [
+    {:snakepit, "~> 0.0.1"},
+    {:telemetry, "~> 1.0"}  # Optional: enables telemetry events
+  ]
+end
+```
+
+### Available Telemetry Events
+
+1. **Worker Request Events** - `[:snakepit, :worker, :request]`
+   - **Measurements**: `%{duration: milliseconds}`
+   - **Metadata**: `%{result: :ok | :error}`
+   - **Purpose**: Track individual worker request performance and success rates
+
+2. **Worker Initialization Events** - `[:snakepit, :worker, :initialized]`
+   - **Measurements**: `%{initialization_time: seconds}`
+   - **Metadata**: `%{worker_id: string}`
+   - **Purpose**: Monitor worker startup times and auto-healing after crashes
+
+### Example Telemetry Handler
+
+```elixir
+# In your application startup
+:telemetry.attach_many(
+  "snakepit-monitoring",
+  [
+    [:snakepit, :worker, :request],
+    [:snakepit, :worker, :initialized]
+  ],
+  &MyApp.TelemetryHandler.handle_event/4,
+  %{}
+)
+
+defmodule MyApp.TelemetryHandler do
+  require Logger
+
+  def handle_event([:snakepit, :worker, :request], %{duration: duration}, %{result: result}, _config) do
+    Logger.info("Worker request completed in #{duration}ms with result: #{result}")
+    # Send to your monitoring system (Prometheus, DataDog, etc.)
+  end
+
+  def handle_event([:snakepit, :worker, :initialized], %{initialization_time: time}, %{worker_id: worker_id}, _config) do
+    Logger.info("Worker #{worker_id} initialized in #{time}s")
+    # Track worker lifecycle metrics
+  end
+end
+```
+
+### Integration with Monitoring Systems
+
+The telemetry events work seamlessly with popular monitoring libraries:
+
+- **Prometheus**: Use `telemetry_metrics_prometheus`
+- **StatsD**: Use `telemetry_metrics_statsd`
+- **DataDog**: Use `telemetry_metrics_datadog`
+- **Custom**: Implement your own handler as shown above
+
 ## Future Extensions
 
 The design supports easy evolution:
 
 1. **Additional Language Adapters** - R, Ruby, Go, Rust, or other language integrations
 2. **Clustering** - Replace Registry with Horde.Registry for distribution  
-3. **Advanced Metrics** - Telemetry events for monitoring
-4. **Load Balancing** - Cross-pool request distribution
-5. **Dynamic Scaling** - Automatic pool size adjustment
+3. **Load Balancing** - Cross-pool request distribution
+4. **Dynamic Scaling** - Automatic pool size adjustment
+5. **Advanced Metrics Dashboards** - Pre-built monitoring dashboards for popular tools
 
 ## Installation
 

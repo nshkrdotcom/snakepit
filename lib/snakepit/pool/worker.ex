@@ -16,6 +16,12 @@ defmodule Snakepit.Pool.Worker do
 
   @default_health_check_interval 30_000
   @default_init_timeout 20_000
+  @default_graceful_shutdown_timeout Application.compile_env(
+                                       :snakepit,
+                                       :worker_shutdown_grace_period,
+                                       2000
+                                     )
+  @telemetry_available Code.ensure_loaded?(:telemetry)
 
   defstruct [
     :id,
@@ -171,9 +177,17 @@ defmodule Snakepit.Pool.Worker do
       pending_reqs = Map.put(state.pending_requests, request_id, {:init, self()})
       {:noreply, %{state | pending_requests: pending_reqs}}
     rescue
-      ArgumentError ->
-        # Port is closed/invalid
+      e in [ArgumentError, ErlangError] ->
+        Logger.error("Port command failed during initialization: #{inspect(e)}")
         {:stop, :port_command_failed, state}
+    catch
+      :error, :badarg ->
+        Logger.error("Port closed during initialization command")
+        {:stop, :port_closed, state}
+
+      kind, reason ->
+        Logger.error("Unexpected error during port command: #{inspect({kind, reason})}")
+        {:stop, {:port_error, {kind, reason}}, state}
     end
   end
 
@@ -210,9 +224,17 @@ defmodule Snakepit.Pool.Worker do
 
       {:noreply, %{state | busy: true, pending_requests: pending}}
     rescue
-      ArgumentError ->
-        # Port is closed/invalid
+      e in [ArgumentError, ErlangError] ->
+        Logger.error("Port command failed during execution: #{inspect(e)}")
         {:reply, {:error, :port_command_failed}, state}
+    catch
+      :error, :badarg ->
+        Logger.error("Port closed during command execution")
+        {:reply, {:error, :port_closed}, state}
+
+      kind, reason ->
+        Logger.error("Unexpected error during port command: #{inspect({kind, reason})}")
+        {:reply, {:error, {:port_error, {kind, reason}}}, state}
     end
   end
 
@@ -305,9 +327,17 @@ defmodule Snakepit.Pool.Worker do
       Process.send_after(self(), :health_check, state.health_check_interval)
       {:noreply, %{state | pending_requests: pending}}
     rescue
-      ArgumentError ->
-        # Port is dead
+      e in [ArgumentError, ErlangError] ->
+        Logger.error("Port command failed during health check: #{inspect(e)}")
         {:stop, :health_check_failed, state}
+    catch
+      :error, :badarg ->
+        Logger.error("Port closed during health check")
+        {:stop, :port_closed, state}
+
+      kind, reason ->
+        Logger.error("Unexpected error during health check: #{inspect({kind, reason})}")
+        {:stop, {:health_check_error, {kind, reason}}, state}
     end
   end
 
@@ -372,8 +402,8 @@ defmodule Snakepit.Pool.Worker do
             "✅ Worker #{state.id} confirmed graceful exit of external PID #{state.process_pid}."
           )
       after
-        # Short timeout since we closed the port first
-        2000 ->
+        # Configurable timeout for graceful shutdown
+        @default_graceful_shutdown_timeout ->
           Logger.warning(
             "⏰ Worker #{state.id} timed out waiting for exit confirmation. Forcing SIGKILL."
           )
@@ -433,7 +463,13 @@ defmodule Snakepit.Pool.Worker do
 
       {:ok, port, process_pid}
     rescue
-      e -> {:error, e}
+      e in [ArgumentError, ErlangError] ->
+        Logger.error("Failed to start external port: #{inspect(e)}")
+        {:error, e}
+    catch
+      kind, reason ->
+        Logger.error("Unexpected error starting external port: #{inspect({kind, reason})}")
+        {:error, {kind, reason}}
     end
   end
 
@@ -490,6 +526,9 @@ defmodule Snakepit.Pool.Worker do
   end
 
   defp update_stats(stats, result, duration) do
+    # Emit telemetry for monitoring
+    emit_telemetry(:request, %{duration: duration}, %{result: elem(result, 0)})
+
     stats
     |> Map.update!(:requests, &(&1 + 1))
     |> Map.update!(:errors, fn errors ->
@@ -505,6 +544,13 @@ defmodule Snakepit.Pool.Worker do
   defp handle_initialization_response(_request_id, {:ok, response}, state) do
     if Map.get(response, "status") == "ok" do
       Logger.info("✅ Worker #{state.id} initialized successfully")
+
+      # Emit telemetry for worker initialization
+      emit_telemetry(
+        :initialized,
+        %{initialization_time: System.system_time(:second) - state.start_time},
+        %{worker_id: state.id}
+      )
 
       # Notify pool that worker is ready (critical for auto-healing after crashes)
       GenServer.cast(Snakepit.Pool, {:worker_ready, state.id})
@@ -522,5 +568,14 @@ defmodule Snakepit.Pool.Worker do
   defp handle_initialization_response(_request_id, error, state) do
     Logger.error("Failed to initialize worker: #{inspect(error)}")
     {:stop, {:initialization_failed, error}, state}
+  end
+
+  # Telemetry helper functions that avoid compile-time warnings
+  if @telemetry_available do
+    defp emit_telemetry(event, measurements, metadata) do
+      :telemetry.execute([:snakepit, :worker, event], measurements, metadata)
+    end
+  else
+    defp emit_telemetry(_event, _measurements, _metadata), do: :ok
   end
 end

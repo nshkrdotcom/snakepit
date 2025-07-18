@@ -107,8 +107,11 @@ defmodule Snakepit.Pool.WorkerSupervisor do
     end
   end
 
+  @cleanup_retry_interval Application.compile_env(:snakepit, :cleanup_retry_interval, 100)
+  @cleanup_max_retries Application.compile_env(:snakepit, :cleanup_max_retries, 10)
+
   # Wait for a specific PID to terminate to avoid race conditions
-  defp wait_for_worker_cleanup(pid, retries \\ 10) do
+  defp wait_for_worker_cleanup(pid, retries \\ @cleanup_max_retries) do
     if retries > 0 and Process.alive?(pid) do
       # Monitor the specific PID we want to wait for
       ref = Process.monitor(pid)
@@ -117,7 +120,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
         {:DOWN, ^ref, :process, ^pid, _reason} ->
           :ok
       after
-        100 ->
+        @cleanup_retry_interval ->
           Process.demonitor(ref, [:flush])
           wait_for_worker_cleanup(pid, retries - 1)
       end

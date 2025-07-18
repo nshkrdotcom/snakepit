@@ -533,7 +533,9 @@ defmodule Snakepit.Bridge.SessionStore do
             {:reply, :ok, %{state | stats: new_stats}}
 
           {:error, reason} ->
-            {:reply, {:error, reason}, state}
+            # Session affinity is best-effort; log validation errors but don't fail
+            Logger.warning("Failed to validate session for worker affinity: #{inspect(reason)}")
+            {:reply, :ok, state}
         end
     end
   end

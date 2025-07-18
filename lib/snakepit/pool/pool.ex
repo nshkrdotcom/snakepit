@@ -418,7 +418,9 @@ defmodule Snakepit.Pool do
   defp store_session_affinity(session_id, worker_id) do
     # Store the worker affinity in a supervised task for better error logging
     Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
-      Snakepit.Bridge.SessionStore.store_worker_session(session_id, worker_id)
+      :ok = Snakepit.Bridge.SessionStore.store_worker_session(session_id, worker_id)
+      Logger.debug("Stored session affinity: #{session_id} -> #{worker_id}")
+      :ok
     end)
   end
 
