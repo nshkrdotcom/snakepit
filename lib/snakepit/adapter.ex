@@ -93,7 +93,15 @@ defmodule Snakepit.Adapter do
   """
   @callback prepare_args(command :: String.t(), args :: map()) :: map()
 
-  @optional_callbacks [process_response: 2, prepare_args: 2]
+  @doc """
+  Optional callback to get a command-specific timeout in milliseconds.
+
+  This allows adapters to specify appropriate timeouts for different
+  commands based on their expected execution time.
+  """
+  @callback command_timeout(command :: String.t(), args :: map()) :: pos_integer()
+
+  @optional_callbacks [process_response: 2, prepare_args: 2, command_timeout: 2]
 
   @doc """
   Default implementation for process_response - just returns the response as-is.
@@ -104,4 +112,9 @@ defmodule Snakepit.Adapter do
   Default implementation for prepare_args - just returns args as-is.
   """
   def default_prepare_args(_command, args), do: args
+
+  @doc """
+  Default implementation for command_timeout - returns 30 seconds.
+  """
+  def default_command_timeout(_command, _args), do: 30_000
 end
