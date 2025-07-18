@@ -360,7 +360,7 @@ defmodule Snakepit.Adapters.EnhancedPython do
   defp add_metadata(args, command) do
     Map.merge(args, %{
       "bridge_version" => "enhanced-v2",
-      "command_type" => if command in @legacy_commands, do: "legacy", else: "dynamic",
+      "command_type" => (if command in @legacy_commands, do: "legacy", else: "dynamic"),
       "timestamp" => System.system_time(:millisecond)
     })
   end

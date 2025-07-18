@@ -10,7 +10,10 @@ Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.EnhancedPython
 Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
 
-# Start the application
+# Stop the application if it's running
+Application.stop(:snakepit)
+
+# Start the application with new configuration
 {:ok, _} = Application.ensure_all_started(:snakepit)
 
 IO.puts("=== Enhanced Python Bridge Examples ===\n")

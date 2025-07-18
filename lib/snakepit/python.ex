@@ -362,8 +362,7 @@ defmodule Snakepit.Python do
       }, store_as: "cot")
       
       # Custom program with multiple steps
-      Snakepit.Python.create_dspy_program(:module, %{
-        class_definition: """
+      class_definition = ~S'''
         class CustomProgram(dspy.Module):
             def __init__(self):
                 super().__init__()
@@ -374,7 +373,10 @@ defmodule Snakepit.Python do
                 query = self.generate_query(context=context)
                 answer = self.answer(query=query.query, context=context)
                 return answer
-        """
+      '''
+      
+      Snakepit.Python.create_dspy_program(:module, %{
+        class_definition: class_definition
       }, store_as: "custom_program")
   """
   def create_dspy_program(program_type, params, opts \\ []) do
