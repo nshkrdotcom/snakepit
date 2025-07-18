@@ -48,7 +48,7 @@ end
 
 # Configure and start
 Application.put_env(:snakepit, :pooling_enabled, true)
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPython)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
 Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
 
 {:ok, _} = Application.ensure_all_started(:snakepit)
@@ -127,7 +127,7 @@ Sessions provide:
 # config/config.exs
 config :snakepit,
   pooling_enabled: true,
-  adapter_module: Snakepit.Adapters.GenericPython,
+  adapter_module: Snakepit.Adapters.GenericPythonV2,
   pool_config: %{
     pool_size: 8  # Default: System.schedulers_online() * 2
   }
@@ -262,17 +262,58 @@ results = Task.await_many(tasks, 30_000)
 
 ## 🔌 Built-in Adapters
 
-### Python Adapter
+### Python Adapter V2 (Recommended)
 
 ```elixir
-# Configure
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPython)
+# Configure with robust V2 adapter
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
+
+# Install the bridge package (recommended for production)
+# cd priv/python && pip install -e .
 
 # Available commands
 {:ok, _} = Snakepit.execute("ping", %{})
 {:ok, _} = Snakepit.execute("echo", %{message: "hello"})
 {:ok, _} = Snakepit.execute("compute", %{operation: "multiply", a: 10, b: 5})
 {:ok, _} = Snakepit.execute("info", %{})
+
+# Check if package is installed
+Snakepit.Adapters.GenericPythonV2.package_installed?()  # true/false
+
+# Get installation instructions
+Snakepit.Adapters.GenericPythonV2.installation_instructions()
+```
+
+#### V2 Features
+- ✅ **Proper package structure** - No fragile sys.path manipulation
+- ✅ **Production deployment** - pip install support with console scripts
+- ✅ **Dual mode operation** - Automatic fallback to development scripts
+- ✅ **Enhanced error handling** - Robust shutdown and broken pipe management
+- ✅ **Type checking support** - Includes py.typed marker
+
+#### Installation Options
+
+```bash
+# Option 1: Development install (recommended)
+cd priv/python && pip install -e .
+
+# Option 2: Regular install
+cd priv/python && pip install .
+
+# Option 3: Development mode (no installation)
+# Uses V2 scripts with automatic package detection
+```
+
+#### Console Scripts (after installation)
+
+```bash
+# Test installed bridges
+snakepit-generic-bridge --help
+snakepit-custom-bridge --help
+
+# Run in pool-worker mode
+snakepit-generic-bridge  # Production mode
+python3 priv/python/generic_bridge_v2.py  # Development mode
 ```
 
 ### JavaScript/Node.js Adapter
@@ -287,6 +328,45 @@ Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericJavaScr
 ```
 
 ## 🛠️ Creating Custom Adapters
+
+### Python Bridge V2 Pattern (Recommended)
+
+```python
+# my_custom_bridge.py
+from snakepit_bridge import BaseCommandHandler, ProtocolHandler
+from snakepit_bridge.core import setup_graceful_shutdown, setup_broken_pipe_suppression
+
+class MyCustomHandler(BaseCommandHandler):
+    def _register_commands(self):
+        self.register_command("my_command", self.handle_my_command)
+        self.register_command("process_data", self.handle_process_data)
+    
+    def handle_my_command(self, args):
+        return {"result": "processed", "input": args}
+    
+    def handle_process_data(self, args):
+        data = args.get("data", "")
+        return {"processed": data.upper(), "length": len(data)}
+
+def main():
+    setup_broken_pipe_suppression()
+    
+    command_handler = MyCustomHandler()
+    protocol_handler = ProtocolHandler(command_handler)
+    setup_graceful_shutdown(protocol_handler)
+    
+    protocol_handler.run()
+
+if __name__ == "__main__":
+    main()
+```
+
+#### Key Benefits of V2 Approach
+- ✅ **No sys.path manipulation** - proper package imports
+- ✅ **Location independent** - works from any directory  
+- ✅ **Production ready** - can be packaged and installed
+- ✅ **Enhanced error handling** - robust shutdown and signal management
+- ✅ **Type checking** - full IDE support with proper imports
 
 ### Elixir Adapter Implementation
 
