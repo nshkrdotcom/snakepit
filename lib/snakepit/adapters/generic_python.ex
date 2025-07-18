@@ -54,7 +54,7 @@ defmodule Snakepit.Adapters.GenericPython do
       {:error, :bad_name} ->
         # Development mode - use relative path from current working directory
         Path.join([File.cwd!(), "priv", "python", "generic_bridge.py"])
-      
+
       priv_dir ->
         Path.join(priv_dir, "python/generic_bridge.py")
     end

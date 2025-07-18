@@ -121,6 +121,7 @@ defmodule Snakepit.Pool.Worker do
 
             # Register with application cleanup for hard guarantee
             Logger.debug("Registering worker #{worker_id} with process PID #{process_pid}")
+
             try do
               Snakepit.Pool.ApplicationCleanup.register_worker_process(process_pid)
             rescue
@@ -411,15 +412,19 @@ defmodule Snakepit.Pool.Worker do
       # Extract external process PID
       process_pid =
         case Port.info(port, :os_pid) do
-          {:os_pid, pid} -> 
+          {:os_pid, pid} ->
             Logger.debug("Successfully started external process with PID #{pid}")
             pid
-          error -> 
+
+          error ->
             Logger.error("Failed to get external process PID: #{inspect(error)}")
             nil
         end
 
-      Logger.debug("start_external_port result: port=#{inspect(port)}, process_pid=#{inspect(process_pid)}")
+      Logger.debug(
+        "start_external_port result: port=#{inspect(port)}, process_pid=#{inspect(process_pid)}"
+      )
+
       {:ok, port, process_pid}
     rescue
       e -> {:error, e}

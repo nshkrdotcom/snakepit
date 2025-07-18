@@ -218,12 +218,15 @@ defmodule Snakepit.Pool do
           {client_pid, _tag} = queued_from
           ref = Process.monitor(client_pid)
           result = execute_on_worker(worker_id, command, args, opts)
-          
+
           # Check if the client is still alive
           receive do
             {:DOWN, ^ref, :process, ^client_pid, _reason} ->
               # Client is dead, don't try to reply. Just check in the worker.
-              Logger.warning("Queued client #{inspect(client_pid)} died before receiving reply. Checking in worker #{worker_id}.")
+              Logger.warning(
+                "Queued client #{inspect(client_pid)} died before receiving reply. Checking in worker #{worker_id}."
+              )
+
               GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
           after
             0 ->
@@ -300,7 +303,10 @@ defmodule Snakepit.Pool do
 
   @impl true
   def terminate(reason, _state) do
-    Logger.info("🛑 Pool is terminating with reason: #{inspect(reason)}. Supervisor will handle worker shutdown.")
+    Logger.info(
+      "🛑 Pool is terminating with reason: #{inspect(reason)}. Supervisor will handle worker shutdown."
+    )
+
     # No need to manually terminate workers. The main supervisor handles it through the OTP shutdown cascade.
     # The WorkerSupervisor will automatically terminate all its children (Worker.Starter processes),
     # which in turn will terminate their Worker children.
@@ -408,7 +414,6 @@ defmodule Snakepit.Pool do
       Snakepit.Bridge.SessionStore.store_worker_session(session_id, worker_id)
     end)
   end
-
 
   defp execute_on_worker(worker_id, command, args, opts) do
     timeout = get_command_timeout(command, args, opts)

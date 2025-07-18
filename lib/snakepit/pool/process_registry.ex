@@ -49,7 +49,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @doc """
   Gets all registered external process PIDs, regardless of worker status.
-  
+
   This is useful during shutdown when workers may have been terminated
   but external processes still need cleanup.
   """
@@ -144,7 +144,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
     }
 
     :ets.insert(state.table, {worker_id, worker_info})
-    Logger.info("✅ Registered worker #{worker_id} with external process PID #{process_pid} in ProcessRegistry")
+
+    Logger.info(
+      "✅ Registered worker #{worker_id} with external process PID #{process_pid} in ProcessRegistry"
+    )
+
     {:noreply, state}
   end
 
