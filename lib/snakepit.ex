@@ -141,9 +141,6 @@ defmodule Snakepit do
             error ->
               error
           end
-
-        error ->
-          error
       end
     else
       :ok

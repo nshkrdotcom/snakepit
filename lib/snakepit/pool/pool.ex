@@ -278,10 +278,6 @@ defmodule Snakepit.Pool do
           {:error, :not_found} ->
             # Worker already terminated
             acc + 1
-
-          {:error, reason} ->
-            Logger.warning("Failed to terminate worker #{inspect(pid)}: #{inspect(reason)}")
-            acc
         end
       end)
 

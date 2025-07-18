@@ -90,7 +90,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   Restarts a worker by ID.
   """
   def restart_worker(worker_id) do
-    with {:ok, _} <- stop_worker(worker_id),
+    with :ok <- stop_worker(worker_id),
          :ok <- wait_for_worker_cleanup(worker_id),
          {:ok, pid} <- start_worker(worker_id) do
       {:ok, pid}
