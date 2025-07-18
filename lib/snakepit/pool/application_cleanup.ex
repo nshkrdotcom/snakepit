@@ -53,11 +53,14 @@ defmodule Snakepit.Pool.ApplicationCleanup do
       Logger.warning(
         "🔥 ApplicationCleanup found #{length(all_pids)} surviving processes. Forcefully terminating with SIGKILL."
       )
+
       # No more grace. Just kill everything that's left.
       sigkill_count = send_signal_to_processes(all_pids, "KILL")
       Logger.warning("✅ SIGKILL sent to #{sigkill_count} surviving processes")
     else
-      Logger.info("✅ ApplicationCleanup confirms all external processes were shut down correctly.")
+      Logger.info(
+        "✅ ApplicationCleanup confirms all external processes were shut down correctly."
+      )
     end
 
     :ok
@@ -83,19 +86,6 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     rescue
       _ -> :error
     end
-  end
-
-  # Check which PIDs are still alive
-  defp get_alive_pids(pids) do
-    Enum.filter(pids, fn pid ->
-      # "kill -0" is a standard way to check if a process exists without sending a signal
-      case System.cmd("kill", ["-0", "#{pid}"], stderr_to_stdout: true) do
-        # Process exists
-        {_output, 0} -> true
-        # Process doesn't exist
-        {_error, _} -> false
-      end
-    end)
   end
 
   # Keep the old function for manual cleanup calls

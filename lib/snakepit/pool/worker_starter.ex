@@ -41,7 +41,7 @@ defmodule Snakepit.Pool.Worker.Starter do
   Returns a via tuple for this starter supervisor.
   """
   def via_name(worker_id) do
-    {:via, Registry, {Snakepit.Pool.Registry, "starter_#{worker_id}"}}
+    Snakepit.Pool.Worker.StarterRegistry.via_tuple(worker_id)
   end
 
   @impl true

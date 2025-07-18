@@ -162,17 +162,23 @@ defmodule Snakepit.Pool.Worker do
     Logger.debug("📤 Worker #{state.id} sending init ping with request_id #{request_id}")
 
     try do
-      Port.command(state.port, request)
+      case Port.command(state.port, request) do
+        true ->
+          # Set a timer for the initialization timeout
+          # We'll use the request_id to correlate the timeout message
+          Process.send_after(self(), {:initialization_timeout, request_id}, state.init_timeout)
 
-      # Set a timer for the initialization timeout
-      # We'll use the request_id to correlate the timeout message
-      Process.send_after(self(), {:initialization_timeout, request_id}, state.init_timeout)
+          # Track the ping request so we can validate it in handle_info
+          pending_reqs = Map.put(state.pending_requests, request_id, {:init, self()})
+          {:noreply, %{state | pending_requests: pending_reqs}}
 
-      # Track the ping request so we can validate it in handle_info
-      pending_reqs = Map.put(state.pending_requests, request_id, {:init, self()})
-      {:noreply, %{state | pending_requests: pending_reqs}}
+        false ->
+          # Port is open but unresponsive/busy
+          {:stop, :port_unresponsive, state}
+      end
     rescue
       ArgumentError ->
+        # Port is closed/invalid
         {:stop, :port_command_failed, state}
     end
   end
@@ -200,18 +206,24 @@ defmodule Snakepit.Pool.Worker do
     request = Protocol.encode_request(request_id, command, args)
 
     try do
-      Port.command(state.port, request)
+      case Port.command(state.port, request) do
+        true ->
+          # Track pending request
+          pending = Map.put(state.pending_requests, request_id, {from, System.monotonic_time()})
 
-      # Track pending request
-      pending = Map.put(state.pending_requests, request_id, {from, System.monotonic_time()})
+          Logger.debug(
+            "Worker #{state.id} sent request #{request_id}, pending count: #{map_size(pending)}"
+          )
 
-      Logger.debug(
-        "Worker #{state.id} sent request #{request_id}, pending count: #{map_size(pending)}"
-      )
+          {:noreply, %{state | busy: true, pending_requests: pending}}
 
-      {:noreply, %{state | busy: true, pending_requests: pending}}
+        false ->
+          # Port is open but unresponsive/busy
+          {:reply, {:error, :port_unresponsive}, state}
+      end
     rescue
       ArgumentError ->
+        # Port is closed/invalid
         {:reply, {:error, :port_command_failed}, state}
     end
   end
@@ -227,6 +239,8 @@ defmodule Snakepit.Pool.Worker do
   def handle_call(:get_process_pid, _from, state) do
     {:reply, state.process_pid, state}
   end
+
+  # REMOVE the handle_call(:graceful_shutdown, ...) function.
 
   @impl true
   def handle_info({port, {:data, data}}, %{port: port} = state) do
@@ -295,14 +309,19 @@ defmodule Snakepit.Pool.Worker do
     request = Protocol.encode_request(request_id, "ping", %{"health_check" => true})
 
     try do
-      Port.command(state.port, request)
+      case Port.command(state.port, request) do
+        true ->
+          # Store health check request
+          pending =
+            Map.put(state.pending_requests, request_id, {:health_check, System.monotonic_time()})
 
-      # Store health check request
-      pending =
-        Map.put(state.pending_requests, request_id, {:health_check, System.monotonic_time()})
+          Process.send_after(self(), :health_check, state.health_check_interval)
+          {:noreply, %{state | pending_requests: pending}}
 
-      Process.send_after(self(), :health_check, state.health_check_interval)
-      {:noreply, %{state | pending_requests: pending}}
+        false ->
+          # Port is open but unresponsive/busy
+          {:stop, :health_check_failed, state}
+      end
     rescue
       ArgumentError ->
         # Port is dead
@@ -341,48 +360,54 @@ defmodule Snakepit.Pool.Worker do
 
   @impl true
   def terminate(reason, state) do
-    # We only perform the graceful shutdown dance if this is a normal shutdown.
-    # For crashes, we let the system burn it down immediately.
+    # We only perform this graceful shutdown for a normal :shutdown.
+    # For crashes or other reasons, we want to exit immediately.
     if reason == :shutdown and state.process_pid do
-      Logger.info("🔥 Worker #{state.id} beginning graceful shutdown of PID #{state.process_pid}...")
+      Logger.debug(
+        "Worker #{state.id} starting graceful shutdown of external PID #{state.process_pid}..."
+      )
 
-      # Send the polite SIGTERM request
-      case System.cmd("kill", ["-TERM", "#{state.process_pid}"], stderr_to_stdout: true) do
-        {_, 0} ->
-          Logger.debug("SIGTERM sent to PID #{state.process_pid}")
-        {error, _} ->
-          Logger.warning("Failed to send SIGTERM to PID #{state.process_pid}: #{error}")
+      port_to_monitor = state.port
+
+      # 1. Close the port first. This will cause the read() in Python
+      #    to receive an EOF and unblock it immediately.
+      if port_to_monitor do
+        try do
+          Port.close(port_to_monitor)
+        rescue
+          # Port already closed.
+          ArgumentError -> :ok
+        end
       end
 
-      # Close the port. This is CRITICAL. The BEAM will now monitor the OS process
-      # and send this GenServer an :EXIT message when it dies.
-      if state.port do
-        Port.close(state.port)
-      end
+      # 2. Send SIGTERM as a secondary, guaranteed way to tell it to shut down.
+      System.cmd("kill", ["-TERM", to_string(state.process_pid)])
 
-      # NO SLEEP. We now wait for the event that confirms the process is dead.
-      # We give it a 2-second timeout.
+      # 3. Wait for confirmation that the process has actually exited.
       receive do
-        {:EXIT, port, _reason} when port == state.port ->
-          Logger.info("✅ Worker #{state.id} confirmed graceful exit of PID #{state.process_pid}.")
+        {:EXIT, ^port_to_monitor, _exit_reason} ->
+          Logger.debug(
+            "✅ Worker #{state.id} confirmed graceful exit of external PID #{state.process_pid}."
+          )
       after
+        # Short timeout since we closed the port first
         2000 ->
           Logger.warning(
-            "⏰ Worker #{state.id} timed out waiting for graceful exit of PID #{state.process_pid}. ApplicationCleanup will take over."
+            "⏰ Worker #{state.id} timed out waiting for exit confirmation. Forcing SIGKILL."
           )
-      end
-    else
-      Logger.warning("🔥 Worker #{state.id} terminating abnormally with reason: #{inspect(reason)}")
-      # For crashes or missing PIDs, just close the port.
-      if state.port do
-        Port.close(state.port)
+
+          System.cmd("kill", ["-KILL", to_string(state.process_pid)], stderr_to_stdout: true)
       end
     end
 
-    # Unregister from the central tracker regardless of how we terminated.
+    # Unregister from the process registry as the very last step.
     Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
     :ok
   end
+
+  # Private Functions
+
+  # REMOVE the trigger_graceful_shutdown/1 helper function.
 
   # Private Functions
 

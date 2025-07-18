@@ -13,6 +13,8 @@ import json
 import struct
 import time
 import signal
+import select
+import os
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -122,6 +124,16 @@ class GenericBridge:
             }
 
 
+def safe_print(message: str, file=sys.stderr):
+    """Safely print a message, ignoring broken pipe errors."""
+    try:
+        print(message, file=file)
+        file.flush()
+    except (BrokenPipeError, IOError):
+        # Silently ignore broken pipe errors
+        pass
+
+
 class ProtocolHandler:
     """
     Handles the wire protocol for communication with Snakepit.
@@ -133,14 +145,19 @@ class ProtocolHandler:
     
     def __init__(self):
         self.bridge = GenericBridge()
+        self.shutdown_requested = False
+        # Disable Python's broken pipe error handling
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL) if hasattr(signal, 'SIGPIPE') else None
     
     def read_message(self) -> Optional[Dict[str, Any]]:
-        """Read a message from stdin using the 4-byte length protocol."""
+        """Read a message from stdin using 4-byte length protocol."""
         try:
+            
             # Read 4-byte length header
             length_data = sys.stdin.buffer.read(4)
             if len(length_data) != 4:
-                return None
+                # EOF or pipe closed, return empty dict to signal shutdown
+                return {}
             
             # Unpack length (big-endian)
             length = struct.unpack('>I', length_data)[0]
@@ -148,12 +165,15 @@ class ProtocolHandler:
             # Read JSON payload
             json_data = sys.stdin.buffer.read(length)
             if len(json_data) != length:
-                return None
+                return {}
             
             # Parse JSON
             return json.loads(json_data.decode('utf-8'))
+        except (BrokenPipeError, IOError, OSError):
+            # Pipe closed, return empty dict to signal shutdown
+            return {}
         except Exception as e:
-            print(f"Error reading message: {e}", file=sys.stderr)
+            safe_print(f"Error reading message: {e}")
             return None
     
     def write_message(self, message: Dict[str, Any]) -> bool:
@@ -171,18 +191,42 @@ class ProtocolHandler:
             sys.stdout.buffer.flush()
             
             return True
+        except (BrokenPipeError, IOError, OSError):
+            # Pipe closed, exit silently
+            return False
         except Exception as e:
-            print(f"Error writing message: {e}", file=sys.stderr)
+            safe_print(f"Error writing message: {e}")
             return False
     
+    def request_shutdown(self):
+        """Request graceful shutdown of the main loop."""
+        self.shutdown_requested = True
+    
     def run(self):
-        """Main message loop."""
-        print("Generic Bridge started in pool-worker mode", file=sys.stderr)
+        """Main message loop with non-blocking reads."""
+        # Only print startup message if stderr is still connected
+        if not os.isatty(sys.stderr.fileno()):
+            try:
+                # Check if we can write to stderr
+                sys.stderr.write("")
+                sys.stderr.flush()
+                safe_print("Generic Bridge started in pool-worker mode")
+            except:
+                # stderr is closed, skip the message
+                pass
+        else:
+            safe_print("Generic Bridge started in pool-worker mode")
         
-        while True:
+        while not self.shutdown_requested:
             # Read request
             request = self.read_message()
+            
             if request is None:
+                # Error reading message, continue
+                continue
+            
+            if not request:
+                # Empty dict signals EOF or pipe closed, exit cleanly
                 break
             
             # Extract request details
@@ -213,22 +257,54 @@ class ProtocolHandler:
             # Write response
             if not self.write_message(response):
                 break
+        
+        # Exit cleanly
+        sys.exit(0)
 
 
 def main():
     """Main entry point."""
     
+    # Suppress broken pipe errors globally
+    try:
+        # Redirect stderr to devnull on shutdown to avoid broken pipe errors
+        import atexit
+        def suppress_broken_pipe():
+            try:
+                sys.stderr.close()
+            except:
+                pass
+            try:
+                sys.stdout.close()
+            except:
+                pass
+        atexit.register(suppress_broken_pipe)
+    except:
+        pass
+    
+    # Create protocol handler
+    handler = ProtocolHandler()
+    
     # Set up graceful shutdown handler for SIGTERM
     def graceful_shutdown_handler(signum, frame):
-        """Handle SIGTERM by exiting cleanly."""
-        print("Graceful shutdown requested via SIGTERM. Exiting cleanly.", file=sys.stderr)
-        # Flush all buffers to prevent broken pipe errors
-        sys.stdout.flush()
-        sys.stderr.flush()
-        sys.exit(0)
+        """Handle SIGTERM by requesting shutdown and exiting cleanly."""
+        # Request shutdown of the main loop
+        handler.request_shutdown()
+        # Close streams to prevent broken pipe errors
+        try:
+            sys.stdout.close()
+        except:
+            pass
+        try:
+            sys.stderr.close()
+        except:
+            pass
+        # Exit cleanly
+        os._exit(0)
     
-    # Register the signal handler for SIGTERM
+    # Register the signal handler for SIGTERM and SIGINT
     signal.signal(signal.SIGTERM, graceful_shutdown_handler)
+    signal.signal(signal.SIGINT, graceful_shutdown_handler)
     
     if len(sys.argv) > 1 and sys.argv[1] == "--help":
         print("Generic Snakepit Bridge")
@@ -242,15 +318,13 @@ def main():
         return
     
     # Start protocol handler
-    handler = ProtocolHandler()
     try:
         handler.run()
-    except KeyboardInterrupt:
-        print("Bridge shutting down via KeyboardInterrupt", file=sys.stderr)
-        sys.stdout.flush()
-        sys.stderr.flush()
+    except (KeyboardInterrupt, BrokenPipeError, IOError):
+        # Clean shutdown, suppress errors
+        os._exit(0)
     except Exception as e:
-        print(f"Bridge error: {e}", file=sys.stderr)
+        safe_print(f"Bridge error: {e}")
         sys.exit(1)
 
 

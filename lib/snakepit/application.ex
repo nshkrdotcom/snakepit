@@ -4,7 +4,8 @@ defmodule Snakepit.Application do
 
   Starts the core infrastructure:
   - Registry for worker process registration
-  - ProcessRegistry for Python PID tracking
+  - StarterRegistry for worker starter supervisors
+  - ProcessRegistry for external PID tracking
   - SessionStore for session management
   - WorkerSupervisor for managing worker processes
   - Pool manager for request distribution
@@ -42,6 +43,9 @@ defmodule Snakepit.Application do
 
           # Registry for worker process registration
           Snakepit.Pool.Registry,
+
+          # Registry for worker starter supervisors
+          Snakepit.Pool.Worker.StarterRegistry,
 
           # Process registry for PID tracking
           Snakepit.Pool.ProcessRegistry,
