@@ -7,27 +7,129 @@
  * without dependencies on any specific external packages.
  * 
  * This can serve as a template for creating your own JavaScript adapters.
+ * 
+ * To create a custom adapter:
+ * 1. Create a new class that inherits from BaseCommandHandler
+ * 2. Override getCommands() to define your command mapping
+ * 3. Implement your command handler methods
+ * 4. Pass an instance of your handler to ProtocolHandler
+ * 
+ * Example:
+ *     class MyCustomHandler extends BaseCommandHandler {
+ *         getCommands() {
+ *             return {
+ *                 ...super.getCommands(),
+ *                 myCommand: this.handleMyCommand.bind(this)
+ *             };
+ *         }
+ *         
+ *         handleMyCommand(args) {
+ *             return { result: "processed", input: args };
+ *         }
+ *     }
+ *     
+ *     const handler = new ProtocolHandler(new MyCustomHandler());
+ *     handler.run();
  */
 
 const process = require('process');
 const Buffer = require('buffer').Buffer;
 
-class GenericBridge {
-    /**
-     * Generic bridge that handles basic commands without external dependencies.
-     */
-    
+/**
+ * Abstract base class for command handlers.
+ * 
+ * This provides a clean interface for creating custom adapters that can
+ * be plugged into the ProtocolHandler without modifying the core bridge logic.
+ */
+class BaseCommandHandler {
     constructor() {
         this.startTime = Date.now();
         this.requestCount = 0;
     }
     
-    handlePing(args) {
-        /**
-         * Handle ping command - basic health check.
-         */
+    /**
+     * Define the command mapping. Subclasses should override this
+     * to add or modify command handlers.
+     * 
+     * @returns {Object} Map of command names to handler functions
+     */
+    getCommands() {
+        return {
+            ping: this.handlePing.bind(this)
+        };
+    }
+    
+    /**
+     * Get list of supported commands.
+     * 
+     * @returns {Array} List of command names
+     */
+    getSupportedCommands() {
+        return Object.keys(this.getCommands());
+    }
+    
+    /**
+     * Process a command and return the result.
+     * 
+     * @param {string} command - The command name
+     * @param {Object} args - Command arguments
+     * @returns {Object} Command result
+     * @throws {Error} If command is unknown
+     */
+    processCommand(command, args) {
         this.requestCount++;
         
+        const commands = this.getCommands();
+        const handler = commands[command];
+        
+        if (handler) {
+            return handler(args);
+        } else {
+            throw new Error(`Unknown command: ${command}`);
+        }
+    }
+    
+    /**
+     * Default ping handler that all adapters can use.
+     * 
+     * @param {Object} args - Command arguments
+     * @returns {Object} Ping response
+     */
+    handlePing(args) {
+        return {
+            status: "ok",
+            pid: process.pid,
+            echo: args
+        };
+    }
+}
+
+/**
+ * Generic command handler that provides basic commands without external dependencies.
+ * This serves as both a working implementation and an example for custom adapters.
+ */
+class GenericCommandHandler extends BaseCommandHandler {
+    constructor() {
+        super();
+    }
+    
+    /**
+     * Define all commands supported by the generic handler.
+     */
+    getCommands() {
+        return {
+            ...super.getCommands(),
+            echo: this.handleEcho.bind(this),
+            compute: this.handleCompute.bind(this),
+            random: this.handleRandom.bind(this),
+            info: this.handleInfo.bind(this)
+        };
+    }
+    
+    handlePing(args) {
+        /**
+         * Enhanced ping with additional info.
+         */
         return {
             status: "ok",
             bridge_type: "generic_javascript",
@@ -166,7 +268,7 @@ class GenericBridge {
             bridge_info: {
                 name: "Generic Snakepit JavaScript Bridge",
                 version: "1.0.0",
-                supported_commands: ["ping", "echo", "compute", "info", "random"],
+                supported_commands: this.getSupportedCommands(),
                 uptime: (Date.now() - this.startTime) / 1000,
                 total_requests: this.requestCount
             },
@@ -179,26 +281,6 @@ class GenericBridge {
             timestamp: Date.now() / 1000
         };
     }
-    
-    processCommand(command, args) {
-        /**
-         * Process a command and return the result.
-         */
-        const handlers = {
-            "ping": this.handlePing.bind(this),
-            "echo": this.handleEcho.bind(this),
-            "compute": this.handleCompute.bind(this),
-            "info": this.handleInfo.bind(this),
-            "random": this.handleRandom.bind(this)
-        };
-        
-        const handler = handlers[command];
-        if (handler) {
-            return handler(args);
-        } else {
-            throw new Error(`Unknown command: ${command}`);
-        }
-    }
 }
 
 class ProtocolHandler {
@@ -210,8 +292,14 @@ class ProtocolHandler {
      * - JSON payload
      */
     
-    constructor() {
-        this.bridge = new GenericBridge();
+    constructor(commandHandler = null) {
+        /**
+         * Initialize the protocol handler.
+         * 
+         * @param {BaseCommandHandler} commandHandler - An instance of BaseCommandHandler or its subclasses.
+         *                                              If null, uses GenericCommandHandler as default.
+         */
+        this.commandHandler = commandHandler || new GenericCommandHandler();
         this.stdin = process.stdin;
         this.stdout = process.stdout;
         
@@ -331,7 +419,7 @@ class ProtocolHandler {
                 let response;
                 try {
                     // Process command
-                    const result = this.bridge.processCommand(command, args);
+                    const result = this.commandHandler.processCommand(command, args);
                     
                     // Check if result indicates an error status
                     if (result && result.status === "error") {
@@ -380,12 +468,14 @@ function main() {
         console.log("Generic Snakepit JavaScript Bridge");
         console.log("Usage: node generic_bridge.js [--mode pool-worker]");
         console.log("");
-        console.log("Supported commands:");
-        console.log("  ping    - Health check");
-        console.log("  echo    - Echo arguments back");
-        console.log("  compute - Simple math operations");
-        console.log("  info    - Bridge information");
-        console.log("  random  - Generate random numbers");
+        console.log("This bridge provides an extensible architecture for creating custom adapters.");
+        console.log("See the module docstring for examples on how to create your own adapter.");
+        console.log("");
+        console.log("Default supported commands:");
+        const handler = new GenericCommandHandler();
+        handler.getSupportedCommands().forEach(cmd => {
+            console.log(`  ${cmd}`);
+        });
         return;
     }
     

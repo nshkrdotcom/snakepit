@@ -6,6 +6,23 @@ A minimal, framework-agnostic bridge that demonstrates the protocol
 without dependencies on any specific ML framework like DSPy.
 
 This can serve as a template for creating your own adapters.
+
+To create a custom adapter:
+1. Create a new class that inherits from BaseCommandHandler
+2. Override _register_commands() to register your command handlers
+3. Implement your command handler methods
+4. Pass an instance of your handler to ProtocolHandler
+
+Example:
+    class MyCustomHandler(BaseCommandHandler):
+        def _register_commands(self):
+            self.register_command("my_command", self.handle_my_command)
+        
+        def handle_my_command(self, args):
+            return {"result": "processed", "input": args}
+    
+    handler = ProtocolHandler(MyCustomHandler())
+    handler.run()
 """
 
 import sys
@@ -16,22 +33,79 @@ import signal
 import select
 import os
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
+from abc import ABC, abstractmethod
 
 
-class GenericBridge:
+class BaseCommandHandler(ABC):
     """
-    Generic bridge that handles basic commands without external dependencies.
+    Abstract base class for command handlers.
+    
+    This provides a clean interface for creating custom adapters that can
+    be plugged into the ProtocolHandler without modifying the core bridge logic.
     """
     
     def __init__(self):
         self.start_time = time.time()
         self.request_count = 0
+        self._command_registry = {}
+        self._register_commands()
+    
+    @abstractmethod
+    def _register_commands(self):
+        """
+        Register all supported commands. Subclasses should override this
+        to register their command handlers.
+        
+        Example:
+            self.register_command("ping", self.handle_ping)
+            self.register_command("compute", self.handle_compute)
+        """
+        pass
+    
+    def register_command(self, command: str, handler: Callable[[Dict[str, Any]], Dict[str, Any]]):
+        """Register a command handler."""
+        self._command_registry[command] = handler
+    
+    def get_supported_commands(self) -> list:
+        """Get list of supported commands."""
+        return list(self._command_registry.keys())
+    
+    def process_command(self, command: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a command and return the result."""
+        self.request_count += 1
+        
+        handler = self._command_registry.get(command)
+        if handler:
+            return handler(args)
+        else:
+            return self._handle_unknown_command(command)
+    
+    def _handle_unknown_command(self, command: str) -> Dict[str, Any]:
+        """Handle unknown commands. Can be overridden by subclasses."""
+        return {
+            "status": "error",
+            "error": f"Unknown command: {command}",
+            "supported_commands": self.get_supported_commands(),
+            "timestamp": time.time()
+        }
+
+
+class GenericCommandHandler(BaseCommandHandler):
+    """
+    Generic command handler that provides basic commands without external dependencies.
+    This serves as both a working implementation and an example for custom adapters.
+    """
+    
+    def _register_commands(self):
+        """Register all generic commands."""
+        self.register_command("ping", self.handle_ping)
+        self.register_command("echo", self.handle_echo)
+        self.register_command("compute", self.handle_compute)
+        self.register_command("info", self.handle_info)
         
     def handle_ping(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Handle ping command - basic health check."""
-        self.request_count += 1
-        
         return {
             "status": "ok",
             "bridge_type": "generic",
@@ -92,7 +166,7 @@ class GenericBridge:
             "bridge_info": {
                 "name": "Generic Snakepit Bridge",
                 "version": "1.0.0",
-                "supported_commands": ["ping", "echo", "compute", "info"],
+                "supported_commands": self.get_supported_commands(),
                 "uptime": time.time() - self.start_time,
                 "total_requests": self.request_count
             },
@@ -102,26 +176,6 @@ class GenericBridge:
             },
             "timestamp": time.time()
         }
-    
-    def process_command(self, command: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        """Process a command and return the result."""
-        handlers = {
-            "ping": self.handle_ping,
-            "echo": self.handle_echo, 
-            "compute": self.handle_compute,
-            "info": self.handle_info
-        }
-        
-        handler = handlers.get(command)
-        if handler:
-            return handler(args)
-        else:
-            return {
-                "status": "error",
-                "error": f"Unknown command: {command}",
-                "supported_commands": list(handlers.keys()),
-                "timestamp": time.time()
-            }
 
 
 def safe_print(message: str, file=sys.stderr):
@@ -143,8 +197,15 @@ class ProtocolHandler:
     - JSON payload
     """
     
-    def __init__(self):
-        self.bridge = GenericBridge()
+    def __init__(self, command_handler: Optional[BaseCommandHandler] = None):
+        """
+        Initialize the protocol handler.
+        
+        Args:
+            command_handler: An instance of BaseCommandHandler or its subclasses.
+                           If None, uses GenericCommandHandler as default.
+        """
+        self.command_handler = command_handler or GenericCommandHandler()
         self.shutdown_requested = False
         # Disable Python's broken pipe error handling
         signal.signal(signal.SIGPIPE, signal.SIG_DFL) if hasattr(signal, 'SIGPIPE') else None
@@ -236,7 +297,7 @@ class ProtocolHandler:
             
             try:
                 # Process command
-                result = self.bridge.process_command(command, args)
+                result = self.command_handler.process_command(command, args)
                 
                 # Send success response
                 response = {
@@ -310,11 +371,13 @@ def main():
         print("Generic Snakepit Bridge")
         print("Usage: python generic_bridge.py [--mode pool-worker]")
         print("")
-        print("Supported commands:")
-        print("  ping    - Health check")
-        print("  echo    - Echo arguments back") 
-        print("  compute - Simple math operations")
-        print("  info    - Bridge information")
+        print("This bridge provides an extensible architecture for creating custom adapters.")
+        print("See the module docstring for examples on how to create your own adapter.")
+        print("")
+        print("Default supported commands:")
+        handler = GenericCommandHandler()
+        for cmd in handler.get_supported_commands():
+            print(f"  {cmd}")
         return
     
     # Start protocol handler
