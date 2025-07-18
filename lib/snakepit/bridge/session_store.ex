@@ -489,6 +489,38 @@ defmodule Snakepit.Bridge.SessionStore do
   end
 
   @impl true
+  def handle_call({:upsert_worker_session, session_id, worker_id}, _from, state) do
+    case :ets.lookup(state.table, session_id) do
+      [{^session_id, session}] ->
+        # Session exists, update it
+        updated_session = 
+          session
+          |> Map.put(:last_worker_id, worker_id)
+          |> Session.touch()
+        
+        :ets.insert(state.table, {session_id, updated_session})
+        {:reply, :ok, state}
+
+      [] ->
+        # Session doesn't exist, create it with worker affinity
+        opts = [ttl: state.default_ttl]
+        session = 
+          Session.new(session_id, opts)
+          |> Map.put(:last_worker_id, worker_id)
+
+        case Session.validate(session) do
+          :ok ->
+            :ets.insert(state.table, {session_id, session})
+            new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
+            {:reply, :ok, %{state | stats: new_stats}}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+    end
+  end
+
+  @impl true
   def handle_info(:cleanup_expired_sessions, state) do
     {_expired_count, new_stats} = do_cleanup_expired_sessions(state.table, state.stats)
 
@@ -559,23 +591,7 @@ defmodule Snakepit.Bridge.SessionStore do
   """
   @spec store_worker_session(String.t(), String.t()) :: :ok
   def store_worker_session(session_id, worker_id) do
-    update_session(session_id, fn session ->
-      Map.put(session, :last_worker_id, worker_id)
-    end)
-    |> case do
-      {:ok, _} ->
-        :ok
-
-      {:error, _} ->
-        # Create session if it doesn't exist
-        create_session(session_id)
-
-        update_session(session_id, fn session ->
-          Map.put(session, :last_worker_id, worker_id)
-        end)
-
-        :ok
-    end
+    GenServer.call(__MODULE__, {:upsert_worker_session, session_id, worker_id})
   end
 
   ## Private Functions

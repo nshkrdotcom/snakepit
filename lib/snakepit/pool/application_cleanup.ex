@@ -51,7 +51,7 @@ defmodule Snakepit.Pool.ApplicationCleanup do
 
   def handle_call(:force_cleanup_all, _from, state) do
     # Query ProcessRegistry for current active PIDs
-    all_pids = Snakepit.Pool.ProcessRegistry.get_active_python_pids()
+    all_pids = Snakepit.Pool.ProcessRegistry.get_active_process_pids()
     killed_count = force_kill_worker_processes(all_pids)
     {:reply, killed_count, state}
   end
@@ -61,7 +61,7 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     Logger.warning("🛑 Application shutting down: #{inspect(reason)}")
 
     # Query the single source of truth for active process PIDs
-    all_pids = Snakepit.Pool.ProcessRegistry.get_active_python_pids()
+    all_pids = Snakepit.Pool.ProcessRegistry.get_active_process_pids()
     Logger.warning("🔥 Force killing #{length(all_pids)} worker processes found in registry")
 
     killed_count = force_kill_worker_processes(all_pids)

@@ -1,11 +1,11 @@
 defmodule Snakepit.Pool.ProcessRegistry do
   @moduledoc """
-  Registry for tracking Python worker processes with OS-level PID management.
+  Registry for tracking external worker processes with OS-level PID management.
 
   This module maintains a mapping between:
   - Worker IDs
   - Elixir worker PIDs
-  - Python process PIDs
+  - External process PIDs
   - Process fingerprints
 
   Enables robust orphaned process detection and cleanup.
@@ -27,10 +27,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @doc """
-  Registers a worker with its Python process information.
+  Registers a worker with its external process information.
   """
-  def register_worker(worker_id, elixir_pid, python_pid, fingerprint) do
-    GenServer.cast(__MODULE__, {:register, worker_id, elixir_pid, python_pid, fingerprint})
+  def register_worker(worker_id, elixir_pid, process_pid, fingerprint) do
+    GenServer.cast(__MODULE__, {:register, worker_id, elixir_pid, process_pid, fingerprint})
   end
 
   @doc """
@@ -41,10 +41,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @doc """
-  Gets all active Python process PIDs from registered workers.
+  Gets all active external process PIDs from registered workers.
   """
-  def get_active_python_pids() do
-    GenServer.call(__MODULE__, :get_active_python_pids)
+  def get_active_process_pids() do
+    GenServer.call(__MODULE__, :get_active_process_pids)
   end
 
   @doc """
@@ -99,7 +99,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
       total_registered: length(all_workers),
       alive_workers: length(alive_workers),
       dead_workers: length(all_workers) - length(alive_workers),
-      active_python_pids: length(get_active_python_pids())
+      active_process_pids: length(get_active_process_pids())
     }
   end
 
@@ -125,25 +125,25 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @impl true
-  def handle_cast({:register, worker_id, elixir_pid, python_pid, fingerprint}, state) do
+  def handle_cast({:register, worker_id, elixir_pid, process_pid, fingerprint}, state) do
     worker_info = %{
       elixir_pid: elixir_pid,
-      python_pid: python_pid,
+      process_pid: process_pid,
       fingerprint: fingerprint,
       registered_at: System.system_time(:second)
     }
 
     :ets.insert(state.table, {worker_id, worker_info})
-    Logger.debug("Registered worker #{worker_id} with Python PID #{python_pid}")
+    Logger.debug("Registered worker #{worker_id} with external process PID #{process_pid}")
     {:noreply, state}
   end
 
   @impl true
   def handle_cast({:unregister, worker_id}, state) do
     case :ets.lookup(state.table, worker_id) do
-      [{^worker_id, %{python_pid: python_pid}}] ->
+      [{^worker_id, %{process_pid: process_pid}}] ->
         :ets.delete(state.table, worker_id)
-        Logger.debug("Unregistered worker #{worker_id} with Python PID #{python_pid}")
+        Logger.debug("Unregistered worker #{worker_id} with external process PID #{process_pid}")
 
       [] ->
         Logger.warning("Attempted to unregister unknown worker #{worker_id}")
@@ -164,11 +164,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @impl true
-  def handle_call(:get_active_python_pids, _from, state) do
+  def handle_call(:get_active_process_pids, _from, state) do
     pids =
       :ets.tab2list(state.table)
       |> Enum.filter(fn {_id, %{elixir_pid: pid}} -> Process.alive?(pid) end)
-      |> Enum.map(fn {_id, %{python_pid: python_pid}} -> python_pid end)
+      |> Enum.map(fn {_id, %{process_pid: process_pid}} -> process_pid end)
       |> Enum.filter(&(&1 != nil))
 
     {:reply, pids, state}
@@ -218,9 +218,9 @@ defmodule Snakepit.Pool.ProcessRegistry do
       :ets.tab2list(table)
       |> Enum.filter(fn {_id, %{elixir_pid: pid}} -> not Process.alive?(pid) end)
 
-    Enum.each(dead_workers, fn {worker_id, %{python_pid: python_pid}} ->
+    Enum.each(dead_workers, fn {worker_id, %{process_pid: process_pid}} ->
       :ets.delete(table, worker_id)
-      Logger.info("Cleaned up dead worker #{worker_id} with Python PID #{python_pid}")
+      Logger.info("Cleaned up dead worker #{worker_id} with external process PID #{process_pid}")
     end)
 
     length(dead_workers)
