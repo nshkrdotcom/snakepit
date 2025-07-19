@@ -1,32 +1,31 @@
 defmodule Snakepit.Adapters.GenericPythonV2Test do
   use ExUnit.Case, async: true
-  
+
   alias Snakepit.Adapters.GenericPythonV2
 
   describe "adapter configuration" do
     test "executable_path returns python executable" do
       executable = GenericPythonV2.executable_path()
-      assert executable in ["python3", "python"] or String.ends_with?(executable, "python3") or String.ends_with?(executable, "python")
+
+      assert executable in ["python3", "python"] or String.ends_with?(executable, "python3") or
+               String.ends_with?(executable, "python")
     end
 
     test "script_path returns valid path" do
       script_path = GenericPythonV2.script_path()
       assert is_binary(script_path)
-      
+
       # Should either be console script or development script
-      assert String.ends_with?(script_path, "snakepit-generic-bridge") or 
-             String.ends_with?(script_path, "generic_bridge_v2.py")
+      assert String.ends_with?(script_path, "snakepit-generic-bridge") or
+               String.ends_with?(script_path, "generic_bridge_v2.py")
     end
 
     test "script_args returns appropriate arguments" do
       args = GenericPythonV2.script_args()
       assert is_list(args)
-      
-      # Arguments depend on whether console script is available
-      case GenericPythonV2.package_installed?() do
-        true -> assert args == []
-        false -> assert args == ["--mode", "pool-worker"]
-      end
+
+      # Script args always returns development mode arguments
+      assert args == ["--mode", "pool-worker"]
     end
 
     test "supported_commands returns expected commands" do
@@ -97,13 +96,13 @@ defmodule Snakepit.Adapters.GenericPythonV2Test do
     test "prepare_args converts atom keys to strings" do
       args = %{operation: :add, a: 5, b: 3, nested: %{key: :value}}
       result = GenericPythonV2.prepare_args("compute", args)
-      
+
       assert result == %{
-        "operation" => :add,
-        "a" => 5,
-        "b" => 3,
-        "nested" => %{"key" => :value}
-      }
+               "operation" => :add,
+               "a" => 5,
+               "b" => 3,
+               "nested" => %{"key" => :value}
+             }
     end
 
     test "prepare_args handles string keys unchanged" do
@@ -120,9 +119,9 @@ defmodule Snakepit.Adapters.GenericPythonV2Test do
         "operation" => "add",
         "inputs" => %{"a" => 5, "b" => 3},
         "result" => 8,
-        "timestamp" => 1234567890
+        "timestamp" => 1_234_567_890
       }
-      
+
       assert {:ok, ^response} = GenericPythonV2.process_response("compute", response)
     end
 
@@ -130,9 +129,9 @@ defmodule Snakepit.Adapters.GenericPythonV2Test do
       response = %{
         "status" => "error",
         "error" => "Division by zero",
-        "timestamp" => 1234567890
+        "timestamp" => 1_234_567_890
       }
-      
+
       assert {:error, msg} = GenericPythonV2.process_response("compute", response)
       assert msg == "computation failed: Division by zero"
     end
@@ -146,9 +145,9 @@ defmodule Snakepit.Adapters.GenericPythonV2Test do
       response = %{
         "status" => "ok",
         "echoed" => %{"message" => "hello"},
-        "timestamp" => 1234567890
+        "timestamp" => 1_234_567_890
       }
-      
+
       assert {:ok, ^response} = GenericPythonV2.process_response("echo", response)
     end
   end
@@ -179,23 +178,24 @@ defmodule Snakepit.Adapters.GenericPythonV2Test do
 
     test "package structure exists" do
       # Check that the new package structure exists
-      priv_dir = case :code.priv_dir(:snakepit) do
-        {:error, :bad_name} -> Path.join([File.cwd!(), "priv"])
-        priv_dir -> priv_dir
-      end
-      
+      priv_dir =
+        case :code.priv_dir(:snakepit) do
+          {:error, :bad_name} -> Path.join([File.cwd!(), "priv"])
+          priv_dir -> priv_dir
+        end
+
       package_dir = Path.join(priv_dir, "python/snakepit_bridge")
       assert File.exists?(package_dir), "Package directory should exist"
-      
+
       init_file = Path.join(package_dir, "__init__.py")
       assert File.exists?(init_file), "Package __init__.py should exist"
-      
+
       core_file = Path.join(package_dir, "core.py")
       assert File.exists?(core_file), "Core module should exist"
-      
+
       adapters_dir = Path.join(package_dir, "adapters")
       assert File.exists?(adapters_dir), "Adapters directory should exist"
-      
+
       generic_adapter = Path.join(adapters_dir, "generic.py")
       assert File.exists?(generic_adapter), "Generic adapter should exist"
     end

@@ -73,23 +73,25 @@ defmodule Snakepit.Adapters.GenericPythonV2 do
           nil ->
             # Package available but console script not found, use development script
             script_path_development()
-          
+
           executable_path ->
             # Verify it's not a shell shim by checking if it contains Python code
             case File.read(executable_path) do
               {:ok, content} ->
-                if String.contains?(content, "python") and not String.contains?(content, "#!/bin/bash") do
+                if String.contains?(content, "python") and
+                     not String.contains?(content, "#!/bin/bash") do
                   executable_path
                 else
                   # It's a shell shim, fall back to development mode
                   script_path_development()
                 end
+
               {:error, _} ->
                 # Can't read file, fall back to development mode
                 script_path_development()
             end
         end
-        
+
       false ->
         # Package not available, use development mode
         script_path_development()
@@ -118,8 +120,10 @@ defmodule Snakepit.Adapters.GenericPythonV2 do
   defp check_python_package_available do
     # Check if snakepit_bridge package can be imported
     python_executable = executable_path()
-    
-    case System.cmd(python_executable, ["-c", "import snakepit_bridge; print('available')"], stderr_to_stdout: true) do
+
+    case System.cmd(python_executable, ["-c", "import snakepit_bridge; print('available')"],
+           stderr_to_stdout: true
+         ) do
       {"available\n", 0} -> true
       _ -> false
     end
@@ -194,7 +198,7 @@ defmodule Snakepit.Adapters.GenericPythonV2 do
 
   @doc """
   Check if the snakepit-bridge package is installed.
-  
+
   Returns true if the package is available and can be imported,
   false if fallback to development mode is required.
   """
