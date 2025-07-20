@@ -70,5 +70,57 @@ defmodule Snakepit do
     Snakepit.Pool.list_workers(pool)
   end
 
+  @doc """
+  Execute a command with streaming results.
+
+  The callback function is called for each chunk received from the stream.
+
+  ## Examples
+
+      Snakepit.execute_stream("batch_inference", %{
+        items: ["img1.jpg", "img2.jpg"]
+      }, fn chunk ->
+        IO.puts("Processed: \#{chunk["item"]}")
+      end)
+  """
+  @spec execute_stream(String.t(), map(), function(), keyword()) :: :ok | {:error, term()}
+  def execute_stream(command, args \\ %{}, callback, opts \\ []) do
+    ensure_started!()
+
+    adapter = Application.get_env(:snakepit, :adapter_module)
+
+    unless function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+      {:error, :streaming_not_supported}
+    else
+      Snakepit.Pool.execute_stream(command, args, callback, opts)
+    end
+  end
+
+  @doc """
+  Execute a command in a session with streaming results.
+  """
+  @spec execute_in_session_stream(String.t(), String.t(), map(), function(), keyword()) ::
+          :ok | {:error, term()}
+  def execute_in_session_stream(session_id, command, args \\ %{}, callback, opts \\ []) do
+    ensure_started!()
+
+    adapter = Application.get_env(:snakepit, :adapter_module)
+
+    unless function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+      {:error, :streaming_not_supported}
+    else
+      # Add session_id to opts for worker affinity
+      opts_with_session = Keyword.put(opts, :session_id, session_id)
+      Snakepit.Pool.execute_stream(command, args, callback, opts_with_session)
+    end
+  end
+
+  defp ensure_started! do
+    case Application.ensure_all_started(:snakepit) do
+      {:ok, _} -> :ok
+      {:error, _} -> raise "Snakepit application not started"
+    end
+  end
+
   # Note: For ML/DSP program management functionality, see Snakepit.SessionHelpers
 end

@@ -97,11 +97,13 @@ class SnakepitBridgeServicer(snakepit_pb2_grpc.SnakepitBridgeServicer):
             args = self._convert_args(request.args)
             
             # Execute command using existing handler
-            if hasattr(self.command_handler, 'handle_command'):
+            if hasattr(self.command_handler, 'process_command'):
+                result = self.command_handler.process_command(request.command, args)
+            elif hasattr(self.command_handler, 'handle_command'):
                 result = self.command_handler.handle_command(request.command, args)
             else:
                 # Fallback to direct method dispatch
-                handlers = self.command_handler.get_commands() if hasattr(self.command_handler, 'get_commands') else {}
+                handlers = self.command_handler._command_registry if hasattr(self.command_handler, '_command_registry') else {}
                 handler = handlers.get(request.command)
                 if not handler:
                     raise ValueError(f"Unknown command: {request.command}")
@@ -130,16 +132,25 @@ class SnakepitBridgeServicer(snakepit_pb2_grpc.SnakepitBridgeServicer):
         try:
             args = self._convert_args(request.args)
             
-            # Check if command supports streaming
-            streaming_commands = {
-                'batch_inference': self._handle_batch_inference_stream,
-                'process_large_dataset': self._handle_large_dataset_stream,
-                'tail_and_analyze': self._handle_log_analysis_stream,
-                'ping_stream': self._handle_ping_stream,
-            }
-            
-            if request.command in streaming_commands:
-                yield from streaming_commands[request.command](args, request.request_id, context)
+            # Check if command handler supports streaming
+            if hasattr(self.command_handler, 'process_stream_command'):
+                # Handler supports streaming - delegate to it
+                chunk_index = 0
+                for result_chunk in self.command_handler.process_stream_command(request.command, args):
+                    # *** CRITICAL: Check if gRPC context is still active ***
+                    if not context.is_active():
+                        print(f"gRPC context became inactive. Terminating stream for request {request.request_id}.", file=sys.stderr)
+                        break  # Exit the loop gracefully
+                    
+                    yield snakepit_pb2.StreamResponse(
+                        is_final=result_chunk.get('is_final', False),
+                        chunk=self._convert_result(result_chunk.get('data', {})),
+                        error=result_chunk.get('error', ''),
+                        timestamp=int(time.time() * 1_000_000_000),
+                        request_id=request.request_id,
+                        chunk_index=chunk_index
+                    )
+                    chunk_index += 1
             else:
                 # Fallback: execute normally and return single result
                 result = self.Execute(request, context)
@@ -163,123 +174,6 @@ class SnakepitBridgeServicer(snakepit_pb2_grpc.SnakepitBridgeServicer):
                 request_id=request.request_id,
                 chunk_index=0
             )
-    
-    def _handle_ping_stream(self, args: Dict[str, Any], request_id: str, context: ServicerContext) -> Iterator[snakepit_pb2.StreamResponse]:
-        """Simple ping stream for testing."""
-        count = args.get('count', 5)
-        interval = args.get('interval', 1.0)
-        
-        for i in range(count):
-            if context.is_active():
-                yield snakepit_pb2.StreamResponse(
-                    is_final=(i == count - 1),
-                    chunk={
-                        "ping_number": str(i + 1).encode(),
-                        "timestamp": str(time.time()).encode(),
-                        "message": f"Ping {i + 1} of {count}".encode()
-                    },
-                    timestamp=int(time.time() * 1_000_000_000),
-                    request_id=request_id,
-                    chunk_index=i
-                )
-                if i < count - 1:  # Don't sleep after last ping
-                    time.sleep(interval)
-            else:
-                break
-    
-    def _handle_batch_inference_stream(self, args: Dict[str, Any], request_id: str, context: ServicerContext) -> Iterator[snakepit_pb2.StreamResponse]:
-        """Example ML batch inference streaming."""
-        # Simulate batch processing
-        batch_items = args.get('batch_items', ['item1', 'item2', 'item3'])
-        
-        for i, item in enumerate(batch_items):
-            if context.is_active():
-                # Simulate processing time
-                time.sleep(0.5)
-                
-                # Simulate inference result
-                confidence = 0.85 + (i * 0.05)
-                result = {
-                    "item": str(item).encode(),
-                    "prediction": f"class_{i % 3}".encode(),
-                    "confidence": str(confidence).encode(),
-                    "processed_at": str(time.time()).encode()
-                }
-                
-                yield snakepit_pb2.StreamResponse(
-                    is_final=(i == len(batch_items) - 1),
-                    chunk=result,
-                    timestamp=int(time.time() * 1_000_000_000),
-                    request_id=request_id,
-                    chunk_index=i
-                )
-            else:
-                break
-    
-    def _handle_large_dataset_stream(self, args: Dict[str, Any], request_id: str, context: ServicerContext) -> Iterator[snakepit_pb2.StreamResponse]:
-        """Example large dataset processing."""
-        total_rows = args.get('total_rows', 1000)
-        chunk_size = args.get('chunk_size', 100)
-        
-        processed = 0
-        chunk_num = 0
-        
-        while processed < total_rows and context.is_active():
-            # Simulate chunk processing
-            current_chunk_size = min(chunk_size, total_rows - processed)
-            time.sleep(0.2)  # Simulate processing time
-            
-            processed += current_chunk_size
-            progress = (processed / total_rows) * 100
-            
-            yield snakepit_pb2.StreamResponse(
-                is_final=(processed >= total_rows),
-                chunk={
-                    "processed_rows": str(processed).encode(),
-                    "total_rows": str(total_rows).encode(),
-                    "progress_percent": f"{progress:.1f}".encode(),
-                    "chunk_number": str(chunk_num).encode(),
-                    "chunk_size": str(current_chunk_size).encode()
-                },
-                timestamp=int(time.time() * 1_000_000_000),
-                request_id=request_id,
-                chunk_index=chunk_num
-            )
-            
-            chunk_num += 1
-    
-    def _handle_log_analysis_stream(self, args: Dict[str, Any], request_id: str, context: ServicerContext) -> Iterator[snakepit_pb2.StreamResponse]:
-        """Example real-time log analysis."""
-        # Simulate log entries
-        log_entries = [
-            "INFO: Application started",
-            "DEBUG: Processing request",
-            "ERROR: Database connection failed",
-            "WARN: High memory usage detected",
-            "INFO: Request completed"
-        ]
-        
-        for i, entry in enumerate(log_entries):
-            if context.is_active():
-                time.sleep(1)  # Simulate real-time delay
-                
-                # Analyze log entry
-                severity = "ERROR" if "ERROR" in entry else "WARN" if "WARN" in entry else "INFO"
-                
-                yield snakepit_pb2.StreamResponse(
-                    is_final=(i == len(log_entries) - 1),
-                    chunk={
-                        "log_entry": entry.encode(),
-                        "severity": severity.encode(),
-                        "timestamp": str(time.time()).encode(),
-                        "entry_number": str(i + 1).encode()
-                    },
-                    timestamp=int(time.time() * 1_000_000_000),
-                    request_id=request_id,
-                    chunk_index=i
-                )
-            else:
-                break
     
     def ExecuteInSession(self, request: snakepit_pb2.SessionRequest, context: ServicerContext) -> snakepit_pb2.ExecuteResponse:
         """Handle session-based execution."""
@@ -359,7 +253,7 @@ class SnakepitBridgeServicer(snakepit_pb2_grpc.SnakepitBridgeServicer):
         return snakepit_pb2.InfoResponse(
             worker_type="python-grpc",
             version="1.0.0",
-            supported_commands=commands + ['ping_stream', 'batch_inference', 'process_large_dataset', 'tail_and_analyze'],
+            supported_commands=commands,
             capabilities={
                 "streaming": "true",
                 "sessions": "true", 

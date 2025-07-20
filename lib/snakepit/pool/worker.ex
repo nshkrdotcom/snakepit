@@ -498,11 +498,19 @@ defmodule Snakepit.Pool.Worker do
     Logger.info("  ✅ Script exists? #{File.exists?(script_path)}")
 
     # Use packet mode for structured communication
+    # Handle nil script_args properly
+    args =
+      if script_args == nil do
+        [script_path]
+      else
+        [script_path | script_args]
+      end
+
     port_opts = [
       :binary,
       :exit_status,
       {:packet, 4},
-      {:args, [script_path | script_args]}
+      {:args, args}
     ]
 
     try do

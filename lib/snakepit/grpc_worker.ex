@@ -1,118 +1,188 @@
-defmodule Snakepit.GRPCWorker do
-  @moduledoc """
-  A GenServer that manages gRPC connections to external processes.
-  
-  This worker can handle both traditional request/response and streaming operations
-  via gRPC instead of stdin/stdout communication.
-  
-  ## Features
-  
-  - Automatic gRPC connection management
-  - Health check monitoring  
-  - Streaming support with callback-based API
-  - Session affinity for stateful operations
-  - Graceful fallback to traditional workers if gRPC unavailable
-  
-  ## Usage
-  
-      # Start a gRPC worker
-      {:ok, worker} = Snakepit.GRPCWorker.start_link(adapter: Snakepit.Adapters.GRPCPython)
-      
-      # Simple execution
-      {:ok, result} = Snakepit.GRPCWorker.execute(worker, "ping", %{})
-      
-      # Streaming execution
-      Snakepit.GRPCWorker.execute_stream(worker, "batch_inference", %{
-        batch_items: ["img1.jpg", "img2.jpg"]
-      }, fn chunk ->
-        IO.puts("Processed: \#{chunk["item"]}")
-      end)
-  """
-  
-  use GenServer
-  require Logger
-  
-  @type worker_state :: %{
-    adapter: module(),
-    port: integer(),
-    channel: term() | nil,
-    health_check_ref: reference() | nil,
-    stats: map()
-  }
-  
-  # Client API
-  
-  @doc """
-  Start a gRPC worker with the given adapter.
-  """
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts)
-  end
-  
-  @doc """
-  Execute a command and return the result.
-  """
-  def execute(worker, command, args, timeout \\ 30_000) do
-    GenServer.call(worker, {:execute, command, args, timeout}, timeout + 1_000)
-  end
-  
-  @doc """
-  Execute a streaming command with a callback function.
-  
-  The callback function is called for each chunk received from the stream.
-  """
-  def execute_stream(worker, command, args, callback_fn, timeout \\ 300_000) do
-    GenServer.call(worker, {:execute_stream, command, args, callback_fn, timeout}, timeout + 1_000)
-  end
-  
-  @doc """
-  Execute a command in a specific session.
-  """
-  def execute_in_session(worker, session_id, command, args, timeout \\ 30_000) do
-    GenServer.call(worker, {:execute_session, session_id, command, args, timeout}, timeout + 1_000)
-  end
-  
-  @doc """
-  Get worker health and statistics.
-  """
-  def get_health(worker) do
-    GenServer.call(worker, :get_health)
-  end
-  
-  @doc """
-  Get worker information and capabilities.
-  """
-  def get_info(worker) do
-    GenServer.call(worker, :get_info)
-  end
-  
-  # Server callbacks
-  
-  @impl true
-  def init(opts) do
-    adapter = Keyword.fetch!(opts, :adapter)
-    
-    # Check if gRPC is available
-    if adapter.grpc_available?() do
-      # Start external process with gRPC server
+# Only compile if gRPC dependencies are available
+if Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf) do
+  defmodule Snakepit.GRPCWorker do
+    @moduledoc """
+      A GenServer that manages gRPC connections to external processes.
+
+      This worker can handle both traditional request/response and streaming operations
+      via gRPC instead of stdin/stdout communication.
+
+      ## Features
+
+      - Automatic gRPC connection management
+    - Health check monitoring  
+    - Streaming support with callback-based API
+    - Session affinity for stateful operations
+    - Graceful fallback to traditional workers if gRPC unavailable
+
+    ## Usage
+
+        # Start a gRPC worker
+        {:ok, worker} = Snakepit.GRPCWorker.start_link(adapter: Snakepit.Adapters.GRPCPython)
+        
+        # Simple execution
+        {:ok, result} = Snakepit.GRPCWorker.execute(worker, "ping", %{})
+        
+        # Streaming execution
+        Snakepit.GRPCWorker.execute_stream(worker, "batch_inference", %{
+          batch_items: ["img1.jpg", "img2.jpg"]
+        }, fn chunk ->
+          IO.puts("Processed: \#{chunk["item"]}")
+        end)
+    """
+
+    use GenServer
+    require Logger
+
+    def child_spec(opts) when is_list(opts) do
+      %{
+        id: Keyword.get(opts, :id, __MODULE__),
+        start: {__MODULE__, :start_link, [opts]},
+        restart: :transient,
+        type: :worker
+      }
+    end
+
+    @type worker_state :: %{
+            adapter: module(),
+            port: integer(),
+            channel: term() | nil,
+            health_check_ref: reference() | nil,
+            stats: map()
+          }
+
+    # Client API
+
+    @doc """
+    Start a gRPC worker with the given adapter.
+    """
+    def start_link(opts) do
+      worker_id = Keyword.get(opts, :id)
+
+      name =
+        if worker_id do
+          {:via, Registry, {Snakepit.Pool.Registry, worker_id, %{worker_module: __MODULE__}}}
+        else
+          nil
+        end
+
+      GenServer.start_link(__MODULE__, opts, name: name)
+    end
+
+    @doc """
+    Execute a command and return the result.
+    """
+    # Header for default values
+    def execute(worker, command, args, timeout \\ 30_000)
+
+    def execute(worker_id, command, args, timeout) when is_binary(worker_id) do
+      case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
+        [{pid, _}] ->
+          GenServer.call(pid, {:execute, command, args, timeout}, timeout + 1_000)
+
+        [] ->
+          {:error, :worker_not_found}
+      end
+    end
+
+    def execute(worker_pid, command, args, timeout) when is_pid(worker_pid) do
+      GenServer.call(worker_pid, {:execute, command, args, timeout}, timeout + 1_000)
+    end
+
+    @doc """
+    Execute a streaming command with a callback function.
+
+    The callback function is called for each chunk received from the stream.
+    """
+    # Header for default values
+    def execute_stream(worker, command, args, callback_fn, timeout \\ 300_000)
+
+    def execute_stream(worker_id, command, args, callback_fn, timeout)
+        when is_binary(worker_id) do
+      case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
+        [{pid, _}] ->
+          GenServer.call(
+            pid,
+            {:execute_stream, command, args, callback_fn, timeout},
+            timeout + 1_000
+          )
+
+        [] ->
+          {:error, :worker_not_found}
+      end
+    end
+
+    def execute_stream(worker_pid, command, args, callback_fn, timeout) when is_pid(worker_pid) do
+      GenServer.call(
+        worker_pid,
+        {:execute_stream, command, args, callback_fn, timeout},
+        timeout + 1_000
+      )
+    end
+
+    @doc """
+    Execute a command in a specific session.
+    """
+    def execute_in_session(worker, session_id, command, args, timeout \\ 30_000) do
+      GenServer.call(
+        worker,
+        {:execute_session, session_id, command, args, timeout},
+        timeout + 1_000
+      )
+    end
+
+    @doc """
+    Get worker health and statistics.
+    """
+    def get_health(worker) do
+      GenServer.call(worker, :get_health)
+    end
+
+    @doc """
+    Get worker information and capabilities.
+    """
+    def get_info(worker) do
+      GenServer.call(worker, :get_info)
+    end
+
+    # Server callbacks
+
+    @impl true
+    def init(opts) do
+      adapter = Keyword.fetch!(opts, :adapter)
+
+      # Start external gRPC server process
       port = adapter.get_port()
-      
-      case start_external_process(adapter, port) do
-        {:ok, external_pid} ->
-          # Wait a bit for the gRPC server to start
-          Process.sleep(1000)
-          
-          # Establish gRPC connection
-          case adapter.get_grpc_connection(port) do
-            {:ok, channel} ->
+
+      case start_grpc_server_and_wait(adapter, port) do
+        {:ok, {server_port, process_pid}} ->
+          # Server is ready, initialize connection
+          case adapter.init_grpc_connection(port) do
+            {:ok, connection} ->
+              # *** CRITICAL: Register with ProcessRegistry for ApplicationCleanup safety net ***
+              worker_id = Keyword.fetch!(opts, :id)
+
+              Snakepit.Pool.ProcessRegistry.register_worker(
+                worker_id,
+                self(),
+                process_pid,
+                "grpc_worker"
+              )
+
+              Logger.info(
+                "gRPC worker #{worker_id} registered process PID #{process_pid} with ProcessRegistry."
+              )
+
               # Schedule health checks
               health_ref = schedule_health_check()
-              
+
               state = %{
+                # Ensure id is in state for unregistration
+                id: worker_id,
                 adapter: adapter,
-                port: port,
-                channel: channel,
-                external_pid: external_pid,
+                connection: connection,
+                server_port: server_port,
+                process_pid: process_pid,
                 health_check_ref: health_ref,
                 stats: %{
                   requests: 0,
@@ -120,189 +190,318 @@ defmodule Snakepit.GRPCWorker do
                   start_time: System.monotonic_time(:millisecond)
                 }
               }
-              
-              Logger.info("gRPC worker started successfully on port #{port}")
+
+              Logger.info("gRPC worker started successfully on port #{connection.port}")
               {:ok, state}
-              
+
             {:error, reason} ->
               Logger.error("Failed to connect to gRPC server: #{reason}")
               {:stop, {:grpc_connection_failed, reason}}
           end
-          
+
         {:error, reason} ->
-          Logger.error("Failed to start external process: #{reason}")
-          {:stop, {:external_process_failed, reason}}
+          Logger.error("Failed to start gRPC server: #{reason}")
+          {:stop, {:grpc_server_failed, reason}}
       end
-    else
-      Logger.warning("gRPC dependencies not available, cannot start gRPC worker")
-      {:stop, :grpc_not_available}
     end
-  end
-  
-  @impl true
-  def handle_call({:execute, command, args, timeout}, _from, state) do
-    case state.adapter.grpc_execute(state.channel, command, args, timeout) do
-      {:ok, result} ->
-        new_state = update_stats(state, :success)
-        {:reply, {:ok, result}, new_state}
-        
-      {:error, reason} ->
-        new_state = update_stats(state, :error)
-        {:reply, {:error, reason}, new_state}
+
+    @impl true
+    def handle_call({:execute, command, args, timeout}, _from, state) do
+      case state.adapter.grpc_execute(state.connection, command, args, timeout) do
+        {:ok, result} ->
+          new_state = update_stats(state, :success)
+          {:reply, {:ok, result}, new_state}
+
+        {:error, reason} ->
+          new_state = update_stats(state, :error)
+          {:reply, {:error, reason}, new_state}
+      end
     end
-  end
-  
-  @impl true
-  def handle_call({:execute_stream, command, args, callback_fn, timeout}, _from, state) do
-    case state.adapter.grpc_execute_stream(state.channel, command, args, callback_fn, timeout) do
-      {:ok, _stream_result} ->
-        new_state = update_stats(state, :success)
-        {:reply, :ok, new_state}
-        
-      {:error, reason} ->
-        new_state = update_stats(state, :error)  
-        {:reply, {:error, reason}, new_state}
+
+    @impl true
+    def handle_call({:execute_stream, command, args, callback_fn, timeout}, _from, state) do
+      case state.adapter.grpc_execute_stream(
+             state.connection,
+             command,
+             args,
+             callback_fn,
+             timeout
+           ) do
+        :ok ->
+          new_state = update_stats(state, :success)
+          {:reply, :ok, new_state}
+
+        {:ok, _stream_result} ->
+          new_state = update_stats(state, :success)
+          {:reply, :ok, new_state}
+
+        {:error, reason} ->
+          new_state = update_stats(state, :error)
+          {:reply, {:error, reason}, new_state}
+      end
     end
-  end
-  
-  @impl true
-  def handle_call({:execute_session, session_id, command, args, timeout}, _from, state) do
-    # For gRPC, session handling is done server-side
-    # Just add session_id to the request args
-    session_args = Map.put(args, :session_id, session_id)
-    
-    case state.adapter.grpc_execute(state.channel, command, session_args, timeout) do
-      {:ok, result} ->
-        new_state = update_stats(state, :success)
-        {:reply, {:ok, result}, new_state}
-        
-      {:error, reason} ->
-        new_state = update_stats(state, :error)
-        {:reply, {:error, reason}, new_state}
+
+    @impl true
+    def handle_call({:execute_session, session_id, command, args, timeout}, _from, state) do
+      # For gRPC, session handling is done server-side
+      # Just add session_id to the request args
+      session_args = Map.put(args, :session_id, session_id)
+
+      case state.adapter.grpc_execute(state.connection, command, session_args, timeout) do
+        {:ok, result} ->
+          new_state = update_stats(state, :success)
+          {:reply, {:ok, result}, new_state}
+
+        {:error, reason} ->
+          new_state = update_stats(state, :error)
+          {:reply, {:error, reason}, new_state}
+      end
     end
-  end
-  
-  @impl true
-  def handle_call(:get_health, _from, state) do
-    # Make gRPC health check call
-    health_result = make_health_check(state)
-    {:reply, health_result, state}
-  end
-  
-  @impl true
-  def handle_call(:get_info, _from, state) do
-    # Make gRPC info call
-    info_result = make_info_call(state)
-    {:reply, info_result, state}
-  end
-  
-  @impl true
-  def handle_info(:health_check, state) do
-    case make_health_check(state) do
-      {:ok, _health} ->
-        # Health check passed, schedule next one
-        health_ref = schedule_health_check()
-        {:noreply, %{state | health_check_ref: health_ref}}
-        
-      {:error, reason} ->
-        Logger.warning("Health check failed: #{reason}")
-        # Could implement reconnection logic here
-        health_ref = schedule_health_check()
-        {:noreply, %{state | health_check_ref: health_ref}}
+
+    @impl true
+    def handle_call(:get_health, _from, state) do
+      # Make gRPC health check call
+      health_result = make_health_check(state)
+      {:reply, health_result, state}
     end
-  end
-  
-  @impl true
-  def handle_info({:DOWN, _ref, :process, pid, reason}, %{external_pid: pid} = state) do
-    Logger.error("External gRPC process died: #{inspect(reason)}")
-    {:stop, {:external_process_died, reason}, state}
-  end
-  
-  @impl true
-  def handle_info(msg, state) do
-    Logger.debug("Unexpected message: #{inspect(msg)}")
-    {:noreply, state}
-  end
-  
-  @impl true
-  def terminate(reason, state) do
-    Logger.info("gRPC worker terminating: #{inspect(reason)}")
-    
-    # Close gRPC connection
-    if state.channel do
-      # Would call GRPC.Channel.disconnect(state.channel) in real implementation
+
+    @impl true
+    def handle_call(:get_info, _from, state) do
+      # Make gRPC info call
+      info_result = make_info_call(state)
+      {:reply, info_result, state}
+    end
+
+    @impl true
+    def handle_info(:health_check, state) do
+      case make_health_check(state) do
+        {:ok, _health} ->
+          # Health check passed, schedule next one
+          health_ref = schedule_health_check()
+          {:noreply, %{state | health_check_ref: health_ref}}
+
+        {:error, reason} ->
+          Logger.warning("Health check failed: #{reason}")
+          # Could implement reconnection logic here
+          health_ref = schedule_health_check()
+          {:noreply, %{state | health_check_ref: health_ref}}
+      end
+    end
+
+    @impl true
+    def handle_info({:DOWN, _ref, :port, port, reason}, %{server_port: port} = state) do
+      Logger.error("External gRPC process died: #{inspect(reason)}")
+      {:stop, {:external_process_died, reason}, state}
+    end
+
+    @impl true
+    def handle_info({port, {:data, data}}, %{server_port: port} = state) do
+      Logger.info("gRPC server output: #{data}")
+      {:noreply, state}
+    end
+
+    @impl true
+    def handle_info({port, {:exit_status, status}}, %{server_port: port} = state) do
+      Logger.error("gRPC server exited with status: #{status}")
+      {:stop, {:grpc_server_exited, status}, state}
+    end
+
+    @impl true
+    def handle_info(msg, state) do
+      Logger.debug("Unexpected message: #{inspect(msg)}")
+      {:noreply, state}
+    end
+
+    # Define graceful shutdown timeout - configurable
+    # 2 seconds
+    @graceful_shutdown_timeout 2000
+
+    @impl true
+    def terminate(reason, state) do
+      Logger.info("gRPC worker #{inspect(self())} terminating with reason: #{inspect(reason)}")
+
+      # Graceful shutdown logic should only apply to a normal :shutdown
+      # For crashes, we want to exit immediately and let the supervisor handle it.
+      if reason == :shutdown and state.process_pid do
+        Logger.debug(
+          "Starting graceful shutdown of external gRPC process PID: #{state.process_pid}..."
+        )
+
+        # Monitor the port to get a :DOWN message when the OS process *actually* dies
+        ref = Port.monitor(state.server_port)
+
+        # 1. Send SIGTERM FIRST. This is the signal for the Python script
+        #    to begin its graceful shutdown via its signal_handler.
+        System.cmd("kill", ["-TERM", to_string(state.process_pid)])
+
+        # 2. WAIT for the process to exit. The Python server's grace period is 1s,
+        #    so we wait for 2s. If the port dies, we get a :DOWN message.
+        receive do
+          {:DOWN, ^ref, :port, _port, _exit_reason} ->
+            Logger.debug("✅ gRPC server PID #{state.process_pid} confirmed graceful exit.")
+        after
+          @graceful_shutdown_timeout ->
+            # 3. ESCALATE to SIGKILL if it doesn't shut down in time.
+            Logger.warning(
+              "⏰ gRPC server PID #{state.process_pid} did not exit gracefully within #{@graceful_shutdown_timeout}ms. Forcing SIGKILL."
+            )
+
+            System.cmd("kill", ["-KILL", to_string(state.process_pid)], stderr_to_stdout: true)
+        end
+
+        # Clean up the monitor message if it's still in the mailbox
+        Process.demonitor(ref, [:flush])
+      end
+
+      # 4. Final resource cleanup (run regardless of shutdown reason)
+      if state.connection do
+        GRPC.Stub.disconnect(state.connection.channel)
+      end
+
+      if state.health_check_ref do
+        Process.cancel_timer(state.health_check_ref)
+      end
+
+      # The Port will be closed automatically when the GenServer terminates.
+      # Calling Port.close() is still good practice if you need to be explicit.
+      if state.server_port, do: Port.close(state.server_port)
+
+      # *** CRITICAL: Unregister from ProcessRegistry as the very last step ***
+      Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
+
       :ok
     end
-    
-    # Cancel health check timer
-    if state.health_check_ref do
-      Process.cancel_timer(state.health_check_ref)
-    end
-    
-    :ok
-  end
-  
-  # Private functions
-  
-  defp start_external_process(adapter, port) do
-    executable = adapter.executable_path()
-    script = adapter.script_path()
-    args = ["--port", to_string(port)]
-    
-    case :os.find_executable(to_charlist(executable)) do
-      false ->
-        {:error, "Executable not found: #{executable}"}
-        
-      _path ->
-        # Start the external process
-        port_opts = [
-          :binary,
-          :exit_status,
-          {:args, [script | args]},
-          {:cd, Path.dirname(script)}
-        ]
-        
-        try do
-          port = Port.open({:spawn_executable, executable}, port_opts)
-          {:ok, port}
-        rescue
-          e -> {:error, "Failed to start process: #{inspect(e)}"}
+
+    # Private functions
+
+    defp start_grpc_server_and_wait(adapter, grpc_port) do
+      executable = adapter.executable_path()
+      script = adapter.script_path()
+
+      # Get adapter args and add port if not already specified
+      adapter_args = adapter.script_args() || []
+
+      args =
+        if Enum.any?(adapter_args, &String.contains?(&1, "--port")) do
+          adapter_args
+        else
+          adapter_args ++ ["--port", to_string(grpc_port)]
         end
+
+      case System.find_executable(executable) do
+        nil ->
+          {:error, "Executable not found: #{executable}"}
+
+        _path ->
+          # Start the external gRPC server as a port
+          port_opts = [
+            :binary,
+            :exit_status,
+            :use_stdio,
+            :stderr_to_stdout,
+            {:args, [script | args]},
+            {:cd, Path.dirname(script)}
+          ]
+
+          try do
+            Logger.info("Starting gRPC server: #{executable} #{script} #{Enum.join(args, " ")}")
+            port = Port.open({:spawn_executable, executable}, port_opts)
+            # Monitor the port
+            Port.monitor(port)
+
+            # Extract external process PID for proper cleanup
+            process_pid =
+              case Port.info(port, :os_pid) do
+                {:os_pid, pid} ->
+                  Logger.debug("gRPC server started with external process PID #{pid}")
+                  pid
+
+                error ->
+                  Logger.error("Failed to get gRPC server process PID: #{inspect(error)}")
+                  nil
+              end
+
+            Logger.info("Started gRPC server process, will listen on TCP port #{grpc_port}")
+
+            # Wait for ready message from server
+            case wait_for_server_ready(port, grpc_port, 5000) do
+              {:ok, _} -> {:ok, {port, process_pid}}
+              error -> error
+            end
+          rescue
+            e ->
+              {:error, "Failed to start gRPC server: #{inspect(e)}"}
+          end
+      end
     end
-  end
-  
-  defp schedule_health_check do
-    # Health check every 30 seconds
-    Process.send_after(self(), :health_check, 30_000)
-  end
-  
-  defp make_health_check(state) do
-    # Placeholder for actual gRPC health check
-    # Would use the generated protobuf client code
-    {:ok, %{healthy: true, worker_id: inspect(self())}}
-  end
-  
-  defp make_info_call(state) do
-    # Placeholder for actual gRPC info call
-    {:ok, %{
-      worker_type: "grpc-python",
-      supported_commands: state.adapter.supported_commands(),
-      stats: state.stats
-    }}
-  end
-  
-  defp update_stats(state, result) do
-    stats = case result do
-      :success ->
-        %{state.stats | requests: state.stats.requests + 1}
-      :error ->
-        %{
-          state.stats | 
-          requests: state.stats.requests + 1,
-          errors: state.stats.errors + 1
-        }
+
+    defp wait_for_server_ready(port, expected_port, timeout) do
+      receive do
+        {^port, {:data, data}} ->
+          output = to_string(data)
+
+          cond do
+            String.contains?(output, "gRPC Bridge started") ->
+              Logger.info("gRPC worker started successfully on port #{expected_port}")
+              Logger.info("gRPC server output: #{String.trim(output)}")
+              {:ok, port}
+
+            true ->
+              # Keep waiting for the ready message
+              wait_for_server_ready(port, expected_port, timeout)
+          end
+
+        {:DOWN, _ref, :port, ^port, reason} ->
+          {:error, "gRPC server crashed during startup: #{inspect(reason)}"}
+      after
+        timeout ->
+          Port.close(port)
+          {:error, "gRPC server failed to start within #{timeout}ms"}
+      end
     end
-    
-    %{state | stats: stats}
+
+    defp schedule_health_check do
+      # Health check every 30 seconds
+      Process.send_after(self(), :health_check, 30_000)
+    end
+
+    defp make_health_check(state) do
+      case Snakepit.GRPC.Client.health(state.connection.channel, inspect(self())) do
+        {:ok, health_response} ->
+          {:ok, health_response}
+
+        {:error, _reason} ->
+          {:error, :health_check_failed}
+      end
+    end
+
+    defp make_info_call(state) do
+      case Snakepit.GRPC.Client.get_info(state.connection.channel) do
+        {:ok, info_response} ->
+          {:ok, info_response}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+
+    defp update_stats(state, result) do
+      stats =
+        case result do
+          :success ->
+            %{state.stats | requests: state.stats.requests + 1}
+
+          :error ->
+            %{
+              state.stats
+              | requests: state.stats.requests + 1,
+                errors: state.stats.errors + 1
+            }
+        end
+
+      %{state | stats: stats}
+    end
   end
 end
+
+# if Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf)

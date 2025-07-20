@@ -52,6 +52,42 @@ defmodule Snakepit.Pool do
   end
 
   @doc """
+  Execute a streaming command with callback.
+  """
+  def execute_stream(command, args, callback, opts \\ []) do
+    pool = opts[:pool] || __MODULE__
+    timeout = opts[:timeout] || 300_000
+
+    with {:ok, worker_id} <- checkout_worker_for_stream(pool, opts),
+         :ok <- execute_on_worker_stream(worker_id, command, args, callback, timeout) do
+      checkin_worker(pool, worker_id)
+      :ok
+    else
+      error ->
+        error
+    end
+  end
+
+  defp checkout_worker_for_stream(pool, opts) do
+    timeout = opts[:checkout_timeout] || 5_000
+    GenServer.call(pool, {:checkout_worker, opts[:session_id]}, timeout)
+  end
+
+  defp checkin_worker(pool, worker_id) do
+    GenServer.cast(pool, {:checkin_worker, worker_id})
+  end
+
+  defp execute_on_worker_stream(worker_id, command, args, callback, timeout) do
+    worker_module = get_worker_module(worker_id)
+
+    if function_exported?(worker_module, :execute_stream, 5) do
+      worker_module.execute_stream(worker_id, command, args, callback, timeout)
+    else
+      {:error, :streaming_not_supported}
+    end
+  end
+
+  @doc """
   Gets pool statistics.
   """
   def get_stats(pool \\ __MODULE__) do
@@ -188,6 +224,16 @@ defmodule Snakepit.Pool do
             {:noreply, %{state | request_queue: new_queue, stats: stats}}
           end
       end
+    end
+  end
+
+  def handle_call({:checkout_worker, session_id}, _from, state) do
+    case checkout_worker(state, session_id) do
+      {:ok, worker_id, new_state} ->
+        {:reply, {:ok, worker_id}, new_state}
+
+      {:error, :no_workers} ->
+        {:reply, {:error, :no_workers_available}, state}
     end
   end
 
@@ -331,6 +377,12 @@ defmodule Snakepit.Pool do
   # Private Functions
 
   defp start_workers_concurrently(count, startup_timeout) do
+    adapter = Application.get_env(:snakepit, :adapter_module)
+    worker_module = determine_worker_module(adapter)
+
+    Logger.info("🚀 Starting concurrent initialization of #{count} workers...")
+    Logger.info("📦 Using worker type: #{inspect(worker_module)}")
+
     1..count
     |> Task.async_stream(
       fn i ->
@@ -359,6 +411,23 @@ defmodule Snakepit.Pool do
         nil
     end)
     |> Enum.filter(&(&1 != nil))
+  end
+
+  defp determine_worker_module(adapter) do
+    # Ensure the adapter module is loaded
+    Code.ensure_loaded(adapter)
+
+    result =
+      if function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+        Logger.info("🔧 Adapter #{inspect(adapter)} uses gRPC, selecting GRPCWorker")
+        Snakepit.GRPCWorker
+      else
+        Logger.info("🔧 Adapter #{inspect(adapter)} uses standard protocol, selecting Worker")
+        Snakepit.Pool.Worker
+      end
+
+    Logger.info("🔧 Worker module selected: #{inspect(result)}")
+    result
   end
 
   defp checkout_worker(state, session_id) do
@@ -434,15 +503,29 @@ defmodule Snakepit.Pool do
 
   defp execute_on_worker(worker_id, command, args, opts) do
     timeout = get_command_timeout(command, args, opts)
+    worker_module = get_worker_module(worker_id)
 
     try do
-      Snakepit.Pool.Worker.execute(worker_id, command, args, timeout)
+      worker_module.execute(worker_id, command, args, timeout)
     catch
       :exit, {:timeout, _} ->
         {:error, :worker_timeout}
 
       :exit, reason ->
         {:error, {:worker_exit, reason}}
+    end
+  end
+
+  defp get_worker_module(worker_id) do
+    # Try to determine the worker module from registry or configuration
+    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
+      [{_pid, %{worker_module: module}}] ->
+        module
+
+      _ ->
+        # Fallback: check adapter configuration
+        adapter = Application.get_env(:snakepit, :adapter_module)
+        determine_worker_module(adapter)
     end
   end
 

@@ -2,11 +2,15 @@
 
 # gRPC Streaming Demo for Snakepit
 # Run with: elixir examples/grpc_streaming_demo.exs
+#
+# This demo uses a TEST adapter (GRPCTestPython) that implements
+# streaming commands for demonstration purposes only.
+# In production, use your own adapter with real streaming implementations.
 
-# Configure Snakepit with gRPC adapter
+# Configure Snakepit with test gRPC adapter
 Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCTestPython)
 Application.put_env(:snakepit, :grpc_config, %{
   base_port: 50051,
   port_range: 10
@@ -208,6 +212,16 @@ end
 # Run the demo
 if GRPCChecker.check_grpc_availability() do
   GRPCStreamingDemo.run()
+  
+  # *** CRITICAL: Explicit graceful shutdown to trigger terminate/2 callbacks ***
+  IO.puts("\n[Demo Script] All streaming tasks complete. Waiting for final cleanup...")
+  # Wait a moment to ensure all background logs are flushed
+
+  IO.puts("[Demo Script] Initiating graceful application shutdown...")
+  # This triggers the supervision tree teardown and calls terminate/2 callbacks
+  Application.stop(:snakepit)
+
+  IO.puts("[Demo Script] Shutdown complete. Exiting.")
 else
   IO.puts("\n🛠️ Setup Required:")
   IO.puts("   1. Install gRPC dependencies: make install-grpc")
