@@ -104,7 +104,8 @@ class ProtocolHandler:
     """
     
     def __init__(self, command_handler: Optional[BaseCommandHandler] = None, 
-                 protocol: Literal["json", "msgpack", "auto"] = "auto"):
+                 protocol: Literal["json", "msgpack", "auto"] = "auto",
+                 quiet: bool = False):
         """
         Initialize the protocol handler.
         
@@ -114,6 +115,7 @@ class ProtocolHandler:
                            in the core module.
             protocol: Wire protocol to use - "json", "msgpack", or "auto" (default).
                      "auto" will negotiate with the Elixir side.
+            quiet: If True, suppress startup messages.
         """
         if command_handler is None:
             raise ValueError("command_handler is required in ProtocolHandler")
@@ -122,6 +124,7 @@ class ProtocolHandler:
         self.shutdown_requested = False
         self.protocol = protocol
         self._negotiated_protocol = None
+        self.quiet = quiet
         
         # Disable Python's broken pipe error handling
         signal.signal(signal.SIGPIPE, signal.SIG_DFL) if hasattr(signal, 'SIGPIPE') else None
@@ -273,22 +276,24 @@ class ProtocolHandler:
         # Perform protocol negotiation if in auto mode
         if self.protocol == "auto":
             if not self._negotiate_protocol():
-                safe_print("Protocol negotiation failed, defaulting to JSON")
+                if not self.quiet:
+                    safe_print("Protocol negotiation failed, defaulting to JSON")
                 self._negotiated_protocol = "json"
         
-        # Only print startup message if stderr is still connected
-        protocol_name = self._get_active_protocol().upper()
-        if not os.isatty(sys.stderr.fileno()):
-            try:
-                # Check if we can write to stderr
-                sys.stderr.write("")
-                sys.stderr.flush()
+        # Only print startup message if not in quiet mode and stderr is still connected
+        if not self.quiet:
+            protocol_name = self._get_active_protocol().upper()
+            if not os.isatty(sys.stderr.fileno()):
+                try:
+                    # Check if we can write to stderr
+                    sys.stderr.write("")
+                    sys.stderr.flush()
+                    safe_print(f"Snakepit Bridge started in pool-worker mode (protocol: {protocol_name})")
+                except:
+                    # stderr is closed, skip the message
+                    pass
+            else:
                 safe_print(f"Snakepit Bridge started in pool-worker mode (protocol: {protocol_name})")
-            except:
-                # stderr is closed, skip the message
-                pass
-        else:
-            safe_print(f"Snakepit Bridge started in pool-worker mode (protocol: {protocol_name})")
         
         while not self.shutdown_requested:
             # Read request
