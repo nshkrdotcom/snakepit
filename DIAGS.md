@@ -1,15 +1,15 @@
-I'll create several Mermaid diagrams to visualize the high-performance architecture of Snakepit, with proper quotes around all subgraph blocks.
-
 ## 1. Overall System Architecture - High Performance Overview
 
 ```mermaid
-graph TB
-    subgraph "Elixir/OTP Layer"
+graph LR
+    ElixirOTPLayer["Elixir OTP Layer"]
+    subgraph ElixirOTPLayer
         Client["Client API"]
         Pool["Pool Manager<br/>⚡ Non-blocking async"]
         TaskSup["Task Supervisor<br/>⚡ Isolated execution"]
         
-        subgraph "Worker Management"
+        WorkerManagement["Worker Management"]
+        subgraph WorkerManagement
             WorkerSup["Worker Supervisor<br/>⚡ Dynamic workers"]
             Starter1["Worker Starter 1<br/>🔄 Auto-restart"]
             Starter2["Worker Starter 2<br/>🔄 Auto-restart"]
@@ -19,19 +19,22 @@ graph TB
             WorkerN["Worker N<br/>GenServer"]
         end
         
-        subgraph "High-Performance Registries"
+        HighPerformanceRegistries["High Performance Registries"]
+        subgraph HighPerformanceRegistries
             Registry["Worker Registry<br/>⚡ O(1) lookups"]
             ProcReg["Process Registry<br/>⚡ PID tracking"]
             StarterReg["Starter Registry<br/>⚡ Supervisor tracking"]
         end
         
-        subgraph "Session Store (ETS)"
+        SessionStoreETS["Session Store ETS"]
+        subgraph SessionStoreETS
             SessionStore["Session Store<br/>⚡ Concurrent R/W<br/>📊 Decentralized counters"]
             GlobalPrograms["Global Programs<br/>⚡ Public table access"]
         end
     end
     
-    subgraph "External Processes"
+    ExternalProcesses["External Processes"]
+    subgraph ExternalProcesses
         Python1["Python Process 1<br/>🐍 Port communication"]
         Python2["Python Process 2<br/>🐍 Port communication"]
         PythonN["Python Process N<br/>🐍 Port communication"]
@@ -65,10 +68,15 @@ graph TB
     Worker2 -->|Track PID| ProcReg
     WorkerN -->|Track PID| ProcReg
     
-    style Pool fill:#f9f,stroke:#333,stroke-width:4px,color:#000
-    style SessionStore fill:#bbf,stroke:#333,stroke-width:4px,color:#000
-    style Registry fill:#bfb,stroke:#333,stroke-width:4px,color:#000
-    style TaskSup fill:#fbf,stroke:#333,stroke-width:4px,color:#000
+    style ElixirOTPLayer fill:#e6e6fa,stroke:#9370db,stroke-width:3px,color:#2e1065
+    style WorkerManagement fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style HighPerformanceRegistries fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style SessionStoreETS fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style ExternalProcesses fill:#f0f9ff,stroke:#0ea5e9,stroke-width:2px,color:#0c4a6e
+    style Pool fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style SessionStore fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style Registry fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style TaskSup fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
 ```
 
 ## 2. Request Flow - Performance Critical Path
@@ -115,8 +123,10 @@ sequenceDiagram
 
 ```mermaid
 graph LR
-    subgraph "Session Store ETS Tables"
-        subgraph "Sessions Table"
+    SessionStoreETSTables["Session Store ETS Tables"]
+    subgraph SessionStoreETSTables
+        SessionsTable["Sessions Table"]
+        subgraph SessionsTable
             ST[":snakepit_sessions<br/>⚡ read_concurrency: true<br/>⚡ write_concurrency: true<br/>⚡ decentralized_counters: true"]
             
             S1["Key: session_1<br/>Value: {last_accessed, ttl, session_data}"]
@@ -124,7 +134,8 @@ graph LR
             SN["Key: session_N<br/>Value: {last_accessed, ttl, session_data}"]
         end
         
-        subgraph "Global Programs Table"
+        GlobalProgramsTable["Global Programs Table"]
+        subgraph GlobalProgramsTable
             GP[":snakepit_sessions_global_programs<br/>⚡ Same optimizations"]
             
             P1["Key: program_1<br/>Value: {data, timestamp}"]
@@ -133,7 +144,8 @@ graph LR
         end
     end
     
-    subgraph "Optimized Operations"
+    OptimizedOperations["Optimized Operations"]
+    subgraph OptimizedOperations
         Read["⚡ Concurrent reads<br/>No locking"]
         Write["⚡ Concurrent writes<br/>Decentralized counters"]
         Cleanup["⚡ select_delete<br/>Atomic batch cleanup"]
@@ -154,11 +166,15 @@ graph LR
     Cleanup --> ST
     Cleanup --> GP
     
-    style ST fill:#bbf,stroke:#333,stroke-width:4px,color:#000
-    style GP fill:#bbf,stroke:#333,stroke-width:4px,color:#000
-    style Read fill:#bfb,stroke:#333,stroke-width:2px,color:#000
-    style Write fill:#bfb,stroke:#333,stroke-width:2px,color:#000
-    style Cleanup fill:#fbb,stroke:#333,stroke-width:2px,color:#000
+    style SessionStoreETSTables fill:#e6e6fa,stroke:#9370db,stroke-width:3px,color:#2e1065
+    style SessionsTable fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style GlobalProgramsTable fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style OptimizedOperations fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style ST fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style GP fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style Read fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style Write fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style Cleanup fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
 ```
 
 ## 4. Worker Lifecycle - Performance & Reliability
@@ -206,7 +222,8 @@ stateDiagram-v2
 
 ```mermaid
 graph TD
-    subgraph "Sequential Startup (Traditional)"
+    SequentialStartupTraditional["Sequential Startup Traditional"]
+    subgraph SequentialStartupTraditional
         T0["Start"] --> W1S["Worker 1<br/>2s"]
         W1S --> W2S["Worker 2<br/>2s"]
         W2S --> W3S["Worker 3<br/>2s"]
@@ -214,7 +231,8 @@ graph TD
         W4S --> DoneS["Ready<br/>Total: 8s"]
     end
     
-    subgraph "Concurrent Startup (Snakepit)"
+    ConcurrentStartupSnakepit["Concurrent Startup Snakepit"]
+    subgraph ConcurrentStartupSnakepit
         T0C["Start"] --> Init["Task.async_stream"]
         Init --> W1C["Worker 1<br/>2s"]
         Init --> W2C["Worker 2<br/>2s"]
@@ -229,17 +247,21 @@ graph TD
         Collect --> DoneC["Ready<br/>Total: ~2s"]
     end
     
-    style Init fill:#f9f,stroke:#333,stroke-width:4px,color:#000
-    style DoneC fill:#bfb,stroke:#333,stroke-width:4px,color:#000
-    style DoneS fill:#fbb,stroke:#333,stroke-width:2px,color:#000
+    style SequentialStartupTraditional fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#92400e
+    style ConcurrentStartupSnakepit fill:#e6e6fa,stroke:#9370db,stroke-width:3px,color:#2e1065
+    style Init fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style DoneC fill:#dcfce7,stroke:#22c55e,stroke-width:2px,color:#14532d
+    style DoneS fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#7f1d1d
 ```
 
 ## 6. Request Queueing & Load Distribution
 
 ```mermaid
-graph TB
-    subgraph "High-Performance Request Handling"
-        subgraph "Request Queue"
+graph LR
+    HighPerformanceRequestHandling["High Performance Request Handling"]
+    subgraph HighPerformanceRequestHandling
+        RequestQueue["Request Queue"]
+        subgraph RequestQueue
             Q[":queue (Erlang)<br/>⚡ FIFO<br/>⚡ O(1) operations"]
             R1["Request 1"]
             R2["Request 2"]
@@ -247,7 +269,8 @@ graph TB
             RN["Request N"]
         end
         
-        subgraph "Worker Pool State"
+        WorkerPoolState["Worker Pool State"]
+        subgraph WorkerPoolState
             Available["MapSet<br/>⚡ O(1) member check<br/>⚡ O(1) add/remove"]
             Busy["Map<br/>⚡ O(1) lookup"]
             
@@ -257,7 +280,8 @@ graph TB
             BW4["Worker 4 🔴"]
         end
         
-        subgraph "Load Distribution"
+        LoadDistribution["Load Distribution"]
+        subgraph LoadDistribution
             Check{"Worker<br/>Available?"}
             Assign["Assign to worker<br/>⚡ O(1)"]
             Queue["Queue request<br/>⚡ O(1)"]
@@ -285,31 +309,39 @@ graph TB
     
     Dequeue -->|Worker freed| Assign
     
-    style Q fill:#bbf,stroke:#333,stroke-width:4px,color:#000
-    style Available fill:#bfb,stroke:#333,stroke-width:4px,color:#000
-    style Check fill:#f9f,stroke:#333,stroke-width:4px,color:#000
+    style HighPerformanceRequestHandling fill:#e6e6fa,stroke:#9370db,stroke-width:3px,color:#2e1065
+    style RequestQueue fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style WorkerPoolState fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style LoadDistribution fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style Q fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style Available fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style Check fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
 ```
 
 ## 7. Process Registry - O(1) Performance
 
 ```mermaid
 graph LR
-    subgraph "Registry Architecture"
-        subgraph "Worker Registry"
+    RegistryArchitecture["Registry Architecture"]
+    subgraph RegistryArchitecture
+        WorkerRegistry["Worker Registry"]
+        subgraph WorkerRegistry
             WR["Elixir Registry<br/>⚡ :unique keys<br/>⚡ O(1) operations"]
             WK1["worker_1 → PID1"]
             WK2["worker_2 → PID2"]
             WKN["worker_N → PIDN"]
         end
         
-        subgraph "Process Registry (ETS)"
+        ProcessRegistryETS["Process Registry ETS"]
+        subgraph ProcessRegistryETS
             PR["Process Registry<br/>⚡ :protected table<br/>⚡ read_concurrency"]
             PK1["worker_1 → {pid, os_pid, fingerprint}"]
             PK2["worker_2 → {pid, os_pid, fingerprint}"]
             PKN["worker_N → {pid, os_pid, fingerprint}"]
         end
         
-        subgraph "Starter Registry"
+        StarterRegistry["Starter Registry"]
+        subgraph StarterRegistry
             SR["Starter Registry<br/>⚡ Supervisor tracking"]
             SK1["worker_1 → Starter PID1"]
             SK2["worker_2 → Starter PID2"]
@@ -317,7 +349,8 @@ graph LR
         end
     end
     
-    subgraph "O(1) Operations"
+    O1Operations["O(1) Operations"]
+    subgraph O1Operations
         Op1["via_tuple lookup<br/>⚡ Direct to worker"]
         Op2["Reverse lookup<br/>⚡ PID to worker_id"]
         Op3["OS PID tracking<br/>⚡ Cleanup guarantee"]
@@ -339,19 +372,12 @@ graph LR
     Op2 --> WR
     Op3 --> PR
     
-    style WR fill:#bfb,stroke:#333,stroke-width:4px,color:#000
-    style PR fill:#bbf,stroke:#333,stroke-width:4px,color:#000
-    style SR fill:#fbf,stroke:#333,stroke-width:4px,color:#000
+    style RegistryArchitecture fill:#e6e6fa,stroke:#9370db,stroke-width:3px,color:#2e1065
+    style WorkerRegistry fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style ProcessRegistryETS fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style StarterRegistry fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style O1Operations fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
+    style WR fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style PR fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+    style SR fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
 ```
-
-These diagrams highlight the key performance features of Snakepit:
-
-1. **Concurrent Operations**: Worker initialization, request handling, and cleanup all leverage Elixir's concurrent capabilities
-2. **O(1) Lookups**: Registry and ETS tables provide constant-time operations for worker management
-3. **Non-blocking Architecture**: The pool never blocks on worker operations thanks to Task.Supervisor
-4. **Optimized Storage**: ETS tables with read/write concurrency and decentralized counters
-5. **Efficient Protocols**: Binary communication with 4-byte framing for fast message parsing
-6. **Auto-scaling**: Queue management with configurable limits and timeouts
-7. **Zero-downtime Recovery**: Automatic worker restart without pool disruption
-
-The architecture achieves high performance through careful use of OTP primitives and avoiding bottlenecks in the critical path.
