@@ -4,7 +4,7 @@ defmodule Snakepit.MixProject do
   def project do
     [
       app: :snakepit,
-      version: "0.2.1",
+      version: "0.3.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       description:
@@ -28,6 +28,7 @@ defmodule Snakepit.MixProject do
   defp deps do
     [
       {:jason, "~> 1.0"},
+      {:msgpax, path: "msgpax"},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]

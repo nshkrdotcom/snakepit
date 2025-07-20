@@ -36,7 +36,8 @@ defmodule Snakepit.Pool.Worker do
     :stats,
     :adapter_module,
     :init_timeout,
-    :health_check_interval
+    :health_check_interval,
+    :protocol_format
   ]
 
   # Client API
@@ -119,7 +120,8 @@ defmodule Snakepit.Pool.Worker do
                 stats: %{requests: 0, errors: 0, total_time: 0},
                 adapter_module: adapter_module,
                 init_timeout: init_timeout,
-                health_check_interval: health_check_interval
+                health_check_interval: health_check_interval,
+                protocol_format: :json
               }
 
               # Worker is already registered via via_tuple in start_link - no manual registration needed
@@ -156,14 +158,45 @@ defmodule Snakepit.Pool.Worker do
       "🔄 Worker #{state.id} starting initialization with process PID #{state.process_pid}"
     )
 
+    # First, negotiate protocol if configured
+    protocol_config = Application.get_env(:snakepit, :wire_protocol, :auto)
+
+    state =
+      if protocol_config == :auto do
+        case negotiate_protocol(state) do
+          {:ok, new_state} ->
+            Logger.info("Worker #{state.id} negotiated protocol: #{new_state.protocol_format}")
+            new_state
+
+          {:error, reason} ->
+            Logger.warning(
+              "Worker #{state.id} protocol negotiation failed: #{reason}, defaulting to JSON"
+            )
+
+            %{state | protocol_format: :json}
+        end
+      else
+        # Use configured protocol
+        format = if protocol_config == :msgpack, do: :msgpack, else: :json
+        %{state | protocol_format: format}
+      end
+
     # Send initialization ping
     request_id = System.unique_integer([:positive])
 
+    # Use the determined protocol format for init ping
+    format = state.protocol_format
+
     request =
-      Protocol.encode_request(request_id, "ping", %{
-        "worker_id" => state.id,
-        "initialization" => true
-      })
+      Protocol.encode_request(
+        request_id,
+        "ping",
+        %{
+          "worker_id" => state.id,
+          "initialization" => true
+        },
+        format: format
+      )
 
     Logger.debug("📤 Worker #{state.id} sending init ping with request_id #{request_id}")
 
@@ -211,7 +244,9 @@ defmodule Snakepit.Pool.Worker do
     )
 
     # Encode and send request
-    request = Protocol.encode_request(request_id, command, args)
+    # Use the determined protocol format
+    format = state.protocol_format
+    request = Protocol.encode_request(request_id, command, args, format: format)
 
     try do
       Port.command(state.port, request)
@@ -256,7 +291,9 @@ defmodule Snakepit.Pool.Worker do
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     Logger.debug("Worker #{state.id} received data from port")
 
-    case Protocol.decode_response(data) do
+    format = state.protocol_format
+
+    case Protocol.decode_response(data, format: format) do
       {:ok, request_id, result} ->
         Logger.debug(
           "Worker #{state.id} decoded response for request #{request_id}: #{inspect(result)}"
@@ -316,7 +353,10 @@ defmodule Snakepit.Pool.Worker do
   def handle_info(:health_check, state) do
     # Send health check ping
     request_id = System.unique_integer([:positive])
-    request = Protocol.encode_request(request_id, "ping", %{"health_check" => true})
+    format = state.protocol_format
+
+    request =
+      Protocol.encode_request(request_id, "ping", %{"health_check" => true}, format: format)
 
     try do
       Port.command(state.port, request)
@@ -419,9 +459,32 @@ defmodule Snakepit.Pool.Worker do
 
   # Private Functions
 
-  # REMOVE the trigger_graceful_shutdown/1 helper function.
+  defp negotiate_protocol(state) do
+    # Send protocol negotiation request
+    negotiation_msg = Protocol.encode_protocol_negotiation()
 
-  # Private Functions
+    try do
+      Port.command(state.port, negotiation_msg)
+
+      # Wait for negotiation response (synchronous)
+      receive do
+        {port, {:data, data}} when port == state.port ->
+          case Protocol.decode_protocol_negotiation(data) do
+            {:ok, protocol_format} ->
+              {:ok, %{state | protocol_format: protocol_format}}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
+      after
+        5_000 ->
+          {:error, :negotiation_timeout}
+      end
+    rescue
+      e ->
+        {:error, {:port_error, e}}
+    end
+  end
 
   defp start_external_port(_fingerprint, adapter_module) do
     executable_path = adapter_module.executable_path()
