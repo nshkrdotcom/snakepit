@@ -320,48 +320,51 @@ end)
 results = Task.await_many(tasks, 30_000)
 ```
 
-## 🌊 gRPC Streaming
+## 🌊 gRPC Communication
 
 Snakepit supports modern gRPC-based communication for advanced streaming capabilities, real-time progress updates, and superior performance.
 
-### gRPC vs Traditional Protocols
+### 🚀 **Upgrading from JSON/MessagePack to gRPC**
 
-| Feature | stdin/stdout | MessagePack | gRPC |
-|---------|-------------|-------------|------|
-| Streaming | ❌ | ❌ | ✅ Native |
-| Multiplexing | ❌ | ❌ | ✅ HTTP/2 |
-| Progress Updates | ❌ | ❌ | ✅ Real-time |
-| Binary Data | Base64 | Native | ✅ Native |
-| Health Checks | Manual | Manual | ✅ Built-in |
-| Error Handling | Custom | Custom | ✅ Rich Status |
+**Already have Snakepit working with JSON?** Great! Here's how to upgrade to gRPC for streaming and better performance:
 
-### Setup gRPC Bridge
+#### Current Setup (JSON/MessagePack):
+```elixir
+# Your existing configuration
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
+# or Snakepit.Adapters.GenericPythonMsgpack
 
-```bash
-# Install gRPC dependencies
-make install-grpc
-
-# Generate protocol buffer code
-make proto-python
-
-# Verify setup
-elixir examples/grpc_streaming_demo.exs
+# Your existing API calls work exactly the same
+{:ok, result} = Snakepit.execute("ping", %{})
+{:ok, result} = Snakepit.execute("compute", %{operation: "add", a: 5, b: 3})
 ```
 
-### Basic gRPC Usage
+#### Upgrade to gRPC (3 Steps):
+```bash
+# Step 1: Install gRPC dependencies
+make install-grpc
 
+# Step 2: Generate protocol buffer code
+make proto-python
+
+# Step 3: Test the upgrade
+elixir examples/grpc_non_streaming_demo.exs
+```
+
+#### New Configuration (gRPC):
 ```elixir
-# Configure with gRPC adapter
+# Replace your adapter configuration with this:
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :grpc_config, %{
   base_port: 50051,
   port_range: 100
 })
 
-# Simple execution (same API)
+# ✅ ALL your existing API calls work EXACTLY the same
 {:ok, result} = Snakepit.execute("ping", %{})
+{:ok, result} = Snakepit.execute("compute", %{operation: "add", a: 5, b: 3})
 
-# Streaming execution (NEW!)
+# 🆕 PLUS you get new streaming capabilities
 Snakepit.execute_stream("batch_inference", %{
   batch_items: ["image1.jpg", "image2.jpg", "image3.jpg"]
 }, fn chunk ->
@@ -369,28 +372,121 @@ Snakepit.execute_stream("batch_inference", %{
 end)
 ```
 
-### Streaming Examples
+### 📋 **gRPC vs Traditional Protocols**
 
-#### ML Batch Inference with Progress
+| Feature | JSON/stdin | MessagePack | gRPC Non-Streaming | gRPC Streaming |
+|---------|------------|-------------|-------------------|----------------|
+| **Backward Compatible** | ✅ | ✅ | ✅ **Same API** | ✅ **Same API + New** |
+| **Streaming** | ❌ | ❌ | ❌ | ✅ **Real-time** |
+| **HTTP/2 Multiplexing** | ❌ | ❌ | ✅ | ✅ |
+| **Progress Updates** | ❌ | ❌ | ❌ | ✅ **Live Updates** |
+| **Health Checks** | Manual | Manual | ✅ Built-in | ✅ Built-in |
+| **Error Handling** | Custom | Custom | ✅ Rich Status | ✅ Rich Status |
 
+### 🎯 **Two gRPC Modes Explained**
+
+#### **Mode 1: gRPC Non-Streaming** 
+**Use this for:** Drop-in replacement of JSON/MessagePack with better performance
 ```elixir
-# Stream ML inference results as they complete
+# IDENTICAL API to your existing JSON/MessagePack code
+{:ok, result} = Snakepit.execute("ping", %{})
+{:ok, result} = Snakepit.execute("compute", %{operation: "multiply", a: 10, b: 5})
+{:ok, result} = Snakepit.execute("info", %{})
+
+# Session support works exactly the same
+{:ok, result} = Snakepit.execute_in_session("user_123", "echo", %{message: "hello"})
+```
+
+**When to use:**
+- ✅ You want better performance without changing your code
+- ✅ Your operations complete quickly (< 30 seconds)
+- ✅ You don't need progress updates
+- ✅ Drop-in replacement for existing JSON/MessagePack
+
+#### **Mode 2: gRPC Streaming** 
+**Use this for:** Long-running operations with real-time progress updates
+```elixir
+# NEW streaming API - get results as they complete
+Snakepit.execute_stream("batch_inference", %{
+  batch_items: ["img1.jpg", "img2.jpg", "img3.jpg"]
+}, fn chunk ->
+  if chunk["is_final"] do
+    IO.puts("✅ All done!")
+  else
+    IO.puts("🧠 Processed: #{chunk["item"]} - #{chunk["confidence"]}")
+  end
+end)
+
+# Session-based streaming also available
+Snakepit.execute_in_session_stream("session_123", "process_large_dataset", %{
+  file_path: "/data/huge_file.csv"
+}, fn chunk ->
+  IO.puts("📊 Progress: #{chunk["progress_percent"]}%")
+end)
+```
+
+**When to use:**
+- ✅ Long-running operations (ML training, data processing)
+- ✅ You want real-time progress updates
+- ✅ Processing large datasets or batches
+- ✅ Better user experience with live feedback
+
+### 🛠️ **Setup Instructions**
+
+#### Install gRPC Dependencies
+```bash
+# Install gRPC dependencies
+make install-grpc
+
+# Generate protocol buffer code
+make proto-python
+
+# Verify with non-streaming demo (same as your existing API)
+elixir examples/grpc_non_streaming_demo.exs
+
+# Try new streaming capabilities
+elixir examples/grpc_streaming_demo.exs
+```
+
+### 📝 **Complete Examples**
+
+#### **Non-Streaming Examples (Standard API)**
+```elixir
+# Configure gRPC (replaces your JSON/MessagePack config)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+Application.put_env(:snakepit, :grpc_config, %{base_port: 50051, port_range: 100})
+
+# All your existing code works unchanged
+{:ok, result} = Snakepit.execute("ping", %{})
+{:ok, result} = Snakepit.execute("compute", %{operation: "add", a: 5, b: 3})
+{:ok, result} = Snakepit.execute("info", %{})
+
+# Sessions work exactly the same
+{:ok, result} = Snakepit.execute_in_session("session_123", "echo", %{message: "hello"})
+
+# Try it: elixir examples/grpc_non_streaming_demo.exs
+```
+
+#### **Streaming Examples (New Capability)**
+
+**ML Batch Inference with Real-time Progress:**
+```elixir
+# Process multiple items, get results as each completes
 Snakepit.execute_stream("batch_inference", %{
   model_path: "/models/resnet50.pkl",
   batch_items: ["img1.jpg", "img2.jpg", "img3.jpg"]
 }, fn chunk ->
   if chunk["is_final"] do
-    IO.puts("✅ Batch complete!")
+    IO.puts("✅ All #{chunk["total_processed"]} items complete!")
   else
     IO.puts("🧠 #{chunk["item"]}: #{chunk["prediction"]} (#{chunk["confidence"]})")
   end
 end)
 ```
 
-#### Large Dataset Processing
-
+**Large Dataset Processing with Progress:**
 ```elixir
-# Process huge datasets with real-time progress
+# Process huge datasets, see progress in real-time
 Snakepit.execute_stream("process_large_dataset", %{
   file_path: "/data/huge_dataset.csv",
   chunk_size: 5000
@@ -404,28 +500,9 @@ Snakepit.execute_stream("process_large_dataset", %{
 end)
 ```
 
-#### Real-time Log Analysis
-
+**Session-based Streaming:**
 ```elixir
-# Stream log analysis results in real-time
-Snakepit.execute_stream("tail_and_analyze", %{
-  log_path: "/var/log/app.log",
-  patterns: ["ERROR", "FATAL", "Exception"]
-}, fn chunk ->
-  if chunk["is_final"] do
-    IO.puts("📊 Log analysis complete")
-  else
-    severity = chunk["severity"]
-    line = chunk["log_line"]
-    IO.puts("🚨 [#{severity}] #{String.slice(line, 0, 100)}...")
-  end
-end)
-```
-
-### Session-based Streaming
-
-```elixir
-# Combine sessions with streaming
+# Streaming with session state
 session_id = "ml_training_#{user_id}"
 
 Snakepit.execute_in_session_stream(session_id, "distributed_training", %{
@@ -442,27 +519,53 @@ Snakepit.execute_in_session_stream(session_id, "distributed_training", %{
     IO.puts("📈 Epoch #{epoch}: loss=#{loss}, acc=#{acc}")
   end
 end)
+
+# Try it: elixir examples/grpc_streaming_demo.exs
 ```
 
-### Performance Benefits
+### 🚀 **Performance & Benefits**
 
-**gRPC Streaming vs Traditional:**
+#### **Why Upgrade to gRPC?**
+
+**gRPC Non-Streaming vs JSON/MessagePack:**
+- ✅ **Better performance**: HTTP/2 multiplexing, protocol buffers
+- ✅ **Built-in health checks**: Automatic worker monitoring
+- ✅ **Rich error handling**: Detailed gRPC status codes
+- ✅ **Zero code changes**: Drop-in replacement
+
+**gRPC Streaming vs Traditional (All Protocols):**
 - ✅ **Progressive results**: Get updates as work completes
 - ✅ **Constant memory**: Process unlimited data without memory growth
 - ✅ **Real-time feedback**: Users see progress immediately
 - ✅ **Cancellable operations**: Stop long-running tasks mid-stream
-- ✅ **HTTP/2 multiplexing**: Multiple concurrent streams per connection
-- ✅ **Built-in compression**: Automatic payload optimization
+- ✅ **Better UX**: No more "is it still working?" uncertainty
 
-**Benchmarks:**
+#### **Performance Comparison:**
 ```
 Traditional (blocking):  Submit → Wait 10 minutes → Get all results
-gRPC (streaming):       Submit → Get result 1 → Get result 2 → ...
+gRPC Non-streaming:     Submit → Get result faster (better protocol)
+gRPC Streaming:         Submit → Get result 1 → Get result 2 → ...
 
-Memory usage:           Grows with result size vs Constant
-User experience:        "Is it working?" vs Real-time updates
-Cancellation:           Kill process vs Graceful stream close
+Memory usage:           Fixed vs Grows with result size vs Constant
+User experience:        "Wait..." vs "Wait..." vs Real-time updates
+Cancellation:           Kill process vs Kill process vs Graceful stream close
 ```
+
+### 📋 **Quick Decision Guide**
+
+**Choose your mode based on your needs:**
+
+| **Your Situation** | **Recommended Mode** | **Why** |
+|-------------------|---------------------|---------|
+| Just getting started | JSON/MessagePack | Simplest setup |
+| Want better performance, same API | **gRPC Non-Streaming** | Drop-in upgrade |
+| Need progress updates | **gRPC Streaming** | Real-time feedback |
+| Long-running ML tasks | **gRPC Streaming** | See progress, cancel if needed |
+| Quick operations (< 30s) | gRPC Non-Streaming | No streaming overhead |
+| Large dataset processing | **gRPC Streaming** | Memory efficient |
+
+**Migration path:**
+1. **Start**: JSON → **Upgrade**: gRPC Non-Streaming → **Add**: Streaming for long tasks
 
 ### gRPC Dependencies
 
@@ -541,6 +644,9 @@ make proto-python
 
 # Test with streaming demo
 elixir examples/grpc_streaming_demo.exs
+
+# Test with non-streaming demo
+elixir examples/grpc_non_streaming_demo.exs
 ```
 
 ```elixir
@@ -549,6 +655,9 @@ Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 
 # Streaming examples
 elixir examples/grpc_streaming_demo.exs
+
+# Non-streaming examples  
+elixir examples/grpc_non_streaming_demo.exs
 ```
 
 ### MessagePack Python Adapter (High Performance)
