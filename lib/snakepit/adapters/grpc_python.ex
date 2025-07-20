@@ -1,6 +1,4 @@
-# Only compile if gRPC dependencies are available
-if Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf) do
-  defmodule Snakepit.Adapters.GRPCPython do
+defmodule Snakepit.Adapters.GRPCPython do
     @moduledoc """
       gRPC-based Python adapter for Snakepit.
 
@@ -113,7 +111,7 @@ if Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf) do
     end
 
     @doc """
-    Check if gRPC dependencies are available.
+    Check if gRPC dependencies are available at runtime.
     """
     def grpc_available? do
       Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf)
@@ -124,12 +122,16 @@ if Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf) do
     Called by GRPCWorker during initialization.
     """
     def init_grpc_connection(port) do
-      case Snakepit.GRPC.Client.connect("127.0.0.1", port) do
-        {:ok, channel} ->
-          {:ok, %{channel: channel, port: port}}
+      unless grpc_available?() do
+        {:error, :grpc_not_available}
+      else
+        case Snakepit.GRPC.Client.connect("127.0.0.1", port) do
+          {:ok, channel} ->
+            {:ok, %{channel: channel, port: port}}
 
-        {:error, reason} ->
-          {:error, reason}
+          {:error, reason} ->
+            {:error, reason}
+        end
       end
     end
 
@@ -137,26 +139,35 @@ if Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf) do
     Execute a command via gRPC.
     """
     def grpc_execute(connection, command, args, timeout \\ 30_000) do
-      Snakepit.GRPC.Client.execute(connection.channel, command, args, timeout)
+      unless grpc_available?() do
+        {:error, :grpc_not_available}
+      else
+        Snakepit.GRPC.Client.execute(connection.channel, command, args, timeout)
+      end
     end
 
     @doc """
     Execute a streaming command via gRPC.
     """
     def grpc_execute_stream(connection, command, args, callback_fn, timeout \\ 300_000) do
-      Snakepit.GRPC.Client.execute_stream(
-        connection.channel,
-        command,
-        args,
-        callback_fn,
-        timeout
-      )
+      unless grpc_available?() do
+        {:error, :grpc_not_available}
+      else
+        Snakepit.GRPC.Client.execute_stream(
+          connection.channel,
+          command,
+          args,
+          callback_fn,
+          timeout
+        )
+      end
     end
 
     @doc """
     Check if this adapter uses gRPC.
+    Returns true only if gRPC dependencies are actually available.
     """
-    def uses_grpc?, do: true
+    def uses_grpc?, do: grpc_available?()
 
     # Compatibility functions for existing adapter interface
 
@@ -173,7 +184,4 @@ if Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf) do
     def command_timeout("process_large_dataset", _args), do: 600_000
     # Default 30 seconds
     def command_timeout(_command, _args), do: 30_000
-  end
 end
-
-# if Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf)

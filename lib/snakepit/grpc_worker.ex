@@ -1,6 +1,4 @@
-# Only compile if gRPC dependencies are available
-if Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf) do
-  defmodule Snakepit.GRPCWorker do
+defmodule Snakepit.GRPCWorker do
     @moduledoc """
       A GenServer that manages gRPC connections to external processes.
 
@@ -501,7 +499,4 @@ if Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf) do
 
       %{state | stats: stats}
     end
-  end
 end
-
-# if Code.ensure_loaded?(GRPC.Channel) and Code.ensure_loaded?(Protobuf)
