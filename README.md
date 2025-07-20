@@ -16,6 +16,8 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 - **Lightning-fast concurrent initialization** - 1000x faster than sequential approaches
 - **Session-based execution** with automatic worker affinity
+- **Multiple communication protocols** - stdin/stdout, MessagePack, and gRPC streaming
+- **Native streaming support** - Real-time progress updates and progressive results (gRPC)
 - **Adapter pattern** for any external language/runtime
 - **Built on OTP primitives** - DynamicSupervisor, Registry, GenServer
 - **Production-ready** with telemetry, health checks, and graceful shutdowns
@@ -27,6 +29,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - [Core Concepts](#-core-concepts)
 - [Configuration](#-configuration)
 - [Usage Examples](#-usage-examples)
+- [gRPC Streaming](#-grpc-streaming)
 - [Built-in Adapters](#-built-in-adapters)
 - [Creating Custom Adapters](#-creating-custom-adapters)
 - [Session Management](#-session-management)
@@ -317,7 +320,234 @@ end)
 results = Task.await_many(tasks, 30_000)
 ```
 
+## 🌊 gRPC Streaming
+
+Snakepit supports modern gRPC-based communication for advanced streaming capabilities, real-time progress updates, and superior performance.
+
+### gRPC vs Traditional Protocols
+
+| Feature | stdin/stdout | MessagePack | gRPC |
+|---------|-------------|-------------|------|
+| Streaming | ❌ | ❌ | ✅ Native |
+| Multiplexing | ❌ | ❌ | ✅ HTTP/2 |
+| Progress Updates | ❌ | ❌ | ✅ Real-time |
+| Binary Data | Base64 | Native | ✅ Native |
+| Health Checks | Manual | Manual | ✅ Built-in |
+| Error Handling | Custom | Custom | ✅ Rich Status |
+
+### Setup gRPC Bridge
+
+```bash
+# Install gRPC dependencies
+make install-grpc
+
+# Generate protocol buffer code
+make proto-python
+
+# Verify setup
+elixir examples/grpc_streaming_demo.exs
+```
+
+### Basic gRPC Usage
+
+```elixir
+# Configure with gRPC adapter
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+Application.put_env(:snakepit, :grpc_config, %{
+  base_port: 50051,
+  port_range: 100
+})
+
+# Simple execution (same API)
+{:ok, result} = Snakepit.execute("ping", %{})
+
+# Streaming execution (NEW!)
+Snakepit.execute_stream("batch_inference", %{
+  batch_items: ["image1.jpg", "image2.jpg", "image3.jpg"]
+}, fn chunk ->
+  IO.puts("Processed: #{chunk["item"]} - #{chunk["confidence"]}")
+end)
+```
+
+### Streaming Examples
+
+#### ML Batch Inference with Progress
+
+```elixir
+# Stream ML inference results as they complete
+Snakepit.execute_stream("batch_inference", %{
+  model_path: "/models/resnet50.pkl",
+  batch_items: ["img1.jpg", "img2.jpg", "img3.jpg"]
+}, fn chunk ->
+  if chunk["is_final"] do
+    IO.puts("✅ Batch complete!")
+  else
+    IO.puts("🧠 #{chunk["item"]}: #{chunk["prediction"]} (#{chunk["confidence"]})")
+  end
+end)
+```
+
+#### Large Dataset Processing
+
+```elixir
+# Process huge datasets with real-time progress
+Snakepit.execute_stream("process_large_dataset", %{
+  file_path: "/data/huge_dataset.csv",
+  chunk_size: 5000
+}, fn chunk ->
+  if chunk["is_final"] do
+    IO.puts("🎉 Processing complete: #{chunk["final_stats"]}")
+  else
+    progress = chunk["progress_percent"]
+    IO.puts("📊 Progress: #{progress}% (#{chunk["processed_rows"]}/#{chunk["total_rows"]})")
+  end
+end)
+```
+
+#### Real-time Log Analysis
+
+```elixir
+# Stream log analysis results in real-time
+Snakepit.execute_stream("tail_and_analyze", %{
+  log_path: "/var/log/app.log",
+  patterns: ["ERROR", "FATAL", "Exception"]
+}, fn chunk ->
+  if chunk["is_final"] do
+    IO.puts("📊 Log analysis complete")
+  else
+    severity = chunk["severity"]
+    line = chunk["log_line"]
+    IO.puts("🚨 [#{severity}] #{String.slice(line, 0, 100)}...")
+  end
+end)
+```
+
+### Session-based Streaming
+
+```elixir
+# Combine sessions with streaming
+session_id = "ml_training_#{user_id}"
+
+Snakepit.execute_in_session_stream(session_id, "distributed_training", %{
+  model_config: training_config,
+  dataset_path: "/data/training_set"
+}, fn chunk ->
+  if chunk["is_final"] do
+    model_path = chunk["final_model_path"]
+    IO.puts("🎯 Training complete! Model saved: #{model_path}")
+  else
+    epoch = chunk["epoch"]
+    loss = chunk["train_loss"]
+    acc = chunk["val_acc"]
+    IO.puts("📈 Epoch #{epoch}: loss=#{loss}, acc=#{acc}")
+  end
+end)
+```
+
+### Performance Benefits
+
+**gRPC Streaming vs Traditional:**
+- ✅ **Progressive results**: Get updates as work completes
+- ✅ **Constant memory**: Process unlimited data without memory growth
+- ✅ **Real-time feedback**: Users see progress immediately
+- ✅ **Cancellable operations**: Stop long-running tasks mid-stream
+- ✅ **HTTP/2 multiplexing**: Multiple concurrent streams per connection
+- ✅ **Built-in compression**: Automatic payload optimization
+
+**Benchmarks:**
+```
+Traditional (blocking):  Submit → Wait 10 minutes → Get all results
+gRPC (streaming):       Submit → Get result 1 → Get result 2 → ...
+
+Memory usage:           Grows with result size vs Constant
+User experience:        "Is it working?" vs Real-time updates
+Cancellation:           Kill process vs Graceful stream close
+```
+
+### gRPC Dependencies
+
+**Elixir:**
+```elixir
+# mix.exs
+def deps do
+  [
+    {:grpc, "~> 0.8"},
+    {:protobuf, "~> 0.12"},
+    # ... other deps
+  ]
+end
+```
+
+**Python:**
+```bash
+# Install with gRPC support
+pip install 'snakepit-bridge[grpc]'
+
+# Or manually
+pip install grpcio protobuf grpcio-tools
+```
+
+### Available Streaming Commands
+
+| Command | Description | Use Case |
+|---------|-------------|----------|
+| `ping_stream` | Heartbeat stream | Testing, monitoring |
+| `batch_inference` | ML model inference | Computer vision, NLP |
+| `process_large_dataset` | Data processing | ETL, analytics |
+| `tail_and_analyze` | Log analysis | Real-time monitoring |
+| `distributed_training` | ML training | Neural networks |
+
+For more streaming examples, see `docs/specs/grpc_streaming_examples.md`.
+
 ## 🔌 Built-in Adapters
+
+### gRPC Python Adapter (Next Generation)
+
+```elixir
+# Configure with gRPC for streaming and advanced features
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+Application.put_env(:snakepit, :grpc_config, %{base_port: 50051, port_range: 100})
+
+# Install dependencies
+# pip install 'snakepit-bridge[grpc]'
+# make proto-python
+
+# New streaming capabilities
+{:ok, _} = Snakepit.execute_stream("batch_inference", %{
+  batch_items: ["img1.jpg", "img2.jpg", "img3.jpg"]
+}, fn chunk ->
+  IO.puts("Processed: #{chunk["item"]} - #{chunk["confidence"]}")
+end)
+```
+
+#### gRPC Features
+- ✅ **Native streaming** - Progressive results and real-time updates
+- ✅ **HTTP/2 multiplexing** - Multiple concurrent requests per connection
+- ✅ **Built-in health checks** - Automatic worker health monitoring
+- ✅ **Rich error handling** - gRPC status codes with detailed context
+- ✅ **Protocol buffers** - Efficient binary serialization
+- ✅ **Cancellable operations** - Stop long-running tasks gracefully
+
+#### Installation & Usage
+
+```bash
+# Install gRPC dependencies
+make install-grpc
+
+# Generate protocol buffer code  
+make proto-python
+
+# Test with streaming demo
+elixir examples/grpc_streaming_demo.exs
+```
+
+```elixir
+# Use auto-negotiation with fallback
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+
+# Streaming examples
+elixir examples/grpc_streaming_demo.exs
+```
 
 ### MessagePack Python Adapter (High Performance)
 

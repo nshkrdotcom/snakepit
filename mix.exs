@@ -29,6 +29,8 @@ defmodule Snakepit.MixProject do
     [
       {:jason, "~> 1.0"},
       {:msgpax, path: "msgpax"},
+      {:grpc, "~> 0.8", optional: true},
+      {:protobuf, "~> 0.12", optional: true},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
