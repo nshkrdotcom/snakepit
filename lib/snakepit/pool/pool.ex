@@ -305,6 +305,14 @@ defmodule Snakepit.Pool do
     end
   end
 
+  @doc false
+  # Handles completion messages from tasks started via Task.Supervisor.async_nolink.
+  # These are used for fire-and-forget operations (like replying to callers or
+  # kicking off worker respawns), so we can safely ignore the completion message.
+  def handle_info({ref, _result}, state) when is_reference(ref) do
+    {:noreply, state}
+  end
+
   def handle_info(msg, state) do
     Logger.debug("Pool received unexpected message: #{inspect(msg)}")
     {:noreply, state}

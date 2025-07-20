@@ -166,7 +166,13 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# Python's lib directory (in virtual environments, not Elixir's lib/)
+venv/lib/
+env/lib/
+ENV/lib/
+.venv/lib/
+.env/lib/
+.ENV/lib/
 lib64/
 parts/
 sdist/
