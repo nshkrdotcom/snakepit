@@ -49,7 +49,12 @@ def main():
     
     if len(sys.argv) > 1 and sys.argv[1] == "--help":
         print("Generic Snakepit Bridge V2")
-        print("Usage: python generic_bridge_v2.py [--mode pool-worker]")
+        print("Usage: python generic_bridge_v2.py [--mode pool-worker] [--protocol json|msgpack|auto] [--quiet]")
+        print("")
+        print("Options:")
+        print("  --mode pool-worker    Run in pool worker mode (required for Snakepit)")
+        print("  --protocol PROTOCOL   Wire protocol to use: json, msgpack, or auto (default: auto)")
+        print("  --quiet               Suppress startup messages")
         print("")
         print("This bridge provides an extensible architecture for creating custom adapters.")
         print("See the module docstring for examples on how to create your own adapter.")
@@ -60,9 +65,22 @@ def main():
             print(f"  {cmd}")
         return
     
+    # Parse protocol from command line arguments
+    protocol = "auto"  # default
+    if "--protocol" in sys.argv:
+        idx = sys.argv.index("--protocol")
+        if idx + 1 < len(sys.argv):
+            protocol = sys.argv[idx + 1]
+            if protocol not in ["json", "msgpack", "auto"]:
+                print(f"Invalid protocol: {protocol}. Using auto.", file=sys.stderr)
+                protocol = "auto"
+    
+    # Check for quiet mode
+    quiet = "--quiet" in sys.argv
+    
     # Create protocol handler with generic command handler
     command_handler = GenericCommandHandler()
-    protocol_handler = ProtocolHandler(command_handler)
+    protocol_handler = ProtocolHandler(command_handler, protocol=protocol, quiet=quiet)
     
     # Set up graceful shutdown handling
     setup_graceful_shutdown(protocol_handler)
