@@ -37,7 +37,7 @@ defmodule GRPCStreamingDemo do
       {:error, reason} ->
         IO.puts("❌ gRPC ping failed: #{inspect(reason)}")
         IO.puts("ℹ️  Make sure to run 'make install-grpc && make proto-python' first")
-        return
+        System.halt(1)
     end
     
     # Demo 2: Streaming ping (heartbeat)
@@ -117,7 +117,7 @@ defmodule GRPCStreamingDemo do
   # Chunk handlers for different streaming operations
   
   defp handle_ping_chunk(chunk) do
-    ping_num = chunk["ping_number"] || "?"
+    _ping_num = chunk["ping_number"] || "?"
     message = chunk["message"] || "ping"
     IO.puts("   💓 #{message}")
   end

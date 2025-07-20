@@ -497,7 +497,9 @@ pip install grpcio protobuf grpcio-tools
 | `tail_and_analyze` | Log analysis | Real-time monitoring |
 | `distributed_training` | ML training | Neural networks |
 
-For more streaming examples, see `docs/specs/grpc_streaming_examples.md`.
+For comprehensive gRPC documentation, see **[README_GRPC.md](README_GRPC.md)**.
+
+For additional streaming examples, see `docs/specs/grpc_streaming_examples.md`.
 
 ## 🔌 Built-in Adapters
 
