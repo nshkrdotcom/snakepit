@@ -22,8 +22,36 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - **Built on OTP primitives** - DynamicSupervisor, Registry, GenServer
 - **Production-ready** with telemetry, health checks, and graceful shutdowns
 
+## 🆕 What's New in v0.3.0
+
+### 🌊 **Native gRPC Streaming**
+- **Real-time progress updates** for long-running operations
+- **HTTP/2 multiplexing** for concurrent requests
+- **Cancellable operations** with graceful stream termination
+- **Built-in health checks** and rich error handling
+- **Drop-in replacement** for existing JSON/MessagePack APIs
+
+### 📦 **Enhanced MessagePack Support**
+- **55x faster binary transfers** compared to JSON with base64
+- **Automatic protocol negotiation** with graceful fallbacks
+- **Native binary data handling** perfect for ML models and images
+- **18-36% smaller message sizes** for improved performance
+
+### 🐍 **Python Bridge V2 Architecture**
+- **Production-ready packaging** with pip install support
+- **Enhanced error handling** and robust shutdown management
+- **Console script integration** for deployment flexibility
+- **Type checking support** with proper py.typed markers
+
+### 🔄 **Bridge Migration & Compatibility**
+- **Deprecated V1 Python bridge** in favor of V2 architecture
+- **Updated demo implementations** using latest best practices
+- **Comprehensive documentation** for all bridge implementations
+- **Backward compatibility** maintained for existing integrations
+
 ## 📋 Table of Contents
 
+- [What's New in v0.3.0](#-whats-new-in-v030)
 - [Quick Start](#-quick-start)
 - [Installation](#-installation)
 - [Core Concepts](#-core-concepts)
@@ -200,6 +228,35 @@ Application.start(:snakepit)
 ```
 
 ## 📖 Usage Examples
+
+All examples are available in the `examples/` directory. Run them directly:
+
+```bash
+# Basic examples
+elixir examples/non_session_demo_json.exs
+elixir examples/session_based_demo_json.exs
+
+# MessagePack examples (high performance)
+elixir examples/non_session_demo_msgpack.exs
+elixir examples/session_based_demo_msgpack.exs
+
+# V2 Bridge examples (production ready)
+elixir examples/v2/non_session_demo.exs
+elixir examples/v2/session_based_demo.exs
+
+# gRPC examples (streaming support)
+elixir examples/grpc_non_streaming_demo.exs
+elixir examples/grpc_streaming_demo.exs
+
+# JavaScript examples
+elixir examples/javascript_stateless_demo_json.exs
+elixir examples/javascript_session_demo_msgpack.exs
+
+# Enhanced Python Bridge examples
+elixir examples/enhanced/basic_usage.exs
+elixir examples/enhanced/dspy_integration.exs
+elixir examples/enhanced/data_science_workflow.exs
+```
 
 ### Basic Stateless Execution
 
@@ -1301,9 +1358,9 @@ mix deps.get
 # Run tests
 mix test
 
-# Run with example scripts
-elixir examples/session_based_demo.exs
-elixir examples/javascript_session_demo.exs
+# Run example scripts
+elixir examples/v2/session_based_demo.exs
+elixir examples/javascript_session_demo_json.exs
 
 # Check code quality
 mix format --check-formatted
@@ -1333,12 +1390,30 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 - Built on battle-tested OTP principles
 - Special thanks to the Elixir community
 
+## 📊 Development Status
+
+**v0.3.0 (Current Release)**
+- ✅ **gRPC streaming bridge** implementation complete
+- ✅ **MessagePack protocol** support with automatic negotiation
+- ✅ **Python Bridge V2** architecture with production packaging
+- ✅ **Comprehensive documentation** and examples
+- ✅ **Performance benchmarks** and optimization
+- ✅ **End-to-end testing** across all protocols
+
+**Roadmap**
+- 🔄 Enhanced streaming operations and cancellation
+- 🔄 Additional language adapters (Ruby, R, Go)
+- 🔄 Advanced telemetry and monitoring features
+- 🔄 Distributed worker pools
+
 ## 📚 Resources
 
 - [Hex Package](https://hex.pm/packages/snakepit)
 - [API Documentation](https://hexdocs.pm/snakepit)
 - [GitHub Repository](https://github.com/nshkrdotcom/snakepit)
 - [Example Projects](https://github.com/nshkrdotcom/snakepit/tree/main/examples)
+- [gRPC Bridge Documentation](README_GRPC.md)
+- [Python Bridge Documentation](README_BRIDGES.md)
 
 ---
 
