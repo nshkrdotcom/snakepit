@@ -52,7 +52,6 @@ defmodule Snakepit.MixProject do
         "priv/python/snakepit_bridge",
         "priv/javascript",
         "assets",
-        "docs",
         ".formatter.exs",
         "mix.exs",
         "README*",
