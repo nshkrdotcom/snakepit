@@ -74,7 +74,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 # In your mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.3.1"}
+    {:snakepit, "~> 0.3.2"}
   ]
 end
 
@@ -104,7 +104,7 @@ Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.3.1"}
+    {:snakepit, "~> 0.3.2"}
   ]
 end
 ```
