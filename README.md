@@ -78,7 +78,7 @@ def deps do
   ]
 end
 
-# Configure with MessagePack for high performance
+# Configure with V2 adapter for auto-negotiation (supports gRPC, MessagePack, JSON)
 Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
 Application.put_env(:snakepit, :wire_protocol, :auto)  # Auto-negotiates best protocol
@@ -163,8 +163,8 @@ Sessions provide:
 # config/config.exs
 config :snakepit,
   pooling_enabled: true,
-  adapter_module: Snakepit.Adapters.GenericPythonV2,
-  wire_protocol: :auto,  # :json, :msgpack, or :auto (recommended)
+  adapter_module: Snakepit.Adapters.GenericPythonV2,  # Supports gRPC, MessagePack, JSON
+  wire_protocol: :auto,  # :json, :msgpack, :grpc, or :auto (recommended)
   pool_config: %{
     pool_size: 8  # Default: System.schedulers_online() * 2
   }
@@ -334,9 +334,9 @@ program_id = response["program_id"]
 ### High-Performance Binary Processing with MessagePack
 
 ```elixir
-# Configure MessagePack for binary-intensive workloads
+# Configure V2 adapter with MessagePack preference for binary-intensive workloads
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
-Application.put_env(:snakepit, :wire_protocol, :auto)
+Application.put_env(:snakepit, :wire_protocol, :msgpack)  # Force MessagePack for performance
 
 # Process binary data natively (no base64 encoding)
 image_data = File.read!("large_image.jpg")  # 5MB image
@@ -668,18 +668,39 @@ For detailed documentation on all Python bridge implementations (V1, V2, Enhance
 
 ## 🔌 Built-in Adapters
 
-### gRPC Python Adapter (Next Generation)
+### Python Adapter V2 (Recommended - Auto-Negotiating)
 
 ```elixir
-# Configure with gRPC for streaming and advanced features
+# V2 adapter auto-negotiates the best protocol (gRPC > MessagePack > JSON)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
+Application.put_env(:snakepit, :wire_protocol, :auto)
+
+# Supports all communication methods:
+{:ok, result} = Snakepit.execute("compute", %{operation: "add", a: 5, b: 3})
+
+# Streaming (when gRPC available)
+Snakepit.execute_stream("batch_inference", %{
+  batch_items: ["img1.jpg", "img2.jpg", "img3.jpg"]
+}, fn chunk ->
+  IO.puts("Processed: #{chunk["item"]} - #{chunk["confidence"]}")
+end)
+```
+
+#### V2 Features
+- ✅ **Auto-negotiation** - Automatically selects best available protocol
+- ✅ **Multi-protocol support** - gRPC, MessagePack, JSON
+- ✅ **Streaming capable** - When gRPC is available
+- ✅ **High performance** - MessagePack for binary data, gRPC for streaming
+- ✅ **Graceful fallbacks** - Works even if dependencies are missing
+
+### gRPC Python Adapter (Streaming Specialist)
+
+```elixir
+# Configure with gRPC for dedicated streaming and advanced features
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :grpc_config, %{base_port: 50051, port_range: 100})
 
-# Install dependencies
-# pip install 'snakepit-bridge[grpc]'
-# make proto-python
-
-# New streaming capabilities
+# Dedicated streaming capabilities
 {:ok, _} = Snakepit.execute_stream("batch_inference", %{
   batch_items: ["img1.jpg", "img2.jpg", "img3.jpg"]
 }, fn chunk ->
@@ -710,24 +731,12 @@ elixir examples/grpc_streaming_demo.exs
 # Test with non-streaming demo
 elixir examples/grpc_non_streaming_demo.exs
 ```
-
-```elixir
-# Use auto-negotiation with fallback
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-
-# Streaming examples
-elixir examples/grpc_streaming_demo.exs
-
-# Non-streaming examples  
-elixir examples/grpc_non_streaming_demo.exs
-```
-
 ### MessagePack Python Adapter (High Performance)
 
 ```elixir
 # Configure with MessagePack for maximum performance
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
-Application.put_env(:snakepit, :wire_protocol, :auto)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonMsgpack)
+Application.put_env(:snakepit, :wire_protocol, :msgpack)  # Force MessagePack
 
 # Install Python dependencies
 # pip install msgpack
@@ -767,9 +776,13 @@ conda install msgpack
 ```
 
 ```elixir
-# Use auto-negotiation (recommended)
-Application.put_env(:snakepit, :wire_protocol, :auto)
+# Option 1: Use dedicated MessagePack adapter
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonMsgpack)
+Application.put_env(:snakepit, :wire_protocol, :msgpack)
+
+# Option 2: Use V2 adapter with MessagePack preference (recommended)
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
+Application.put_env(:snakepit, :wire_protocol, :auto)
 
 # Examples
 elixir examples/non_session_demo_msgpack.exs
