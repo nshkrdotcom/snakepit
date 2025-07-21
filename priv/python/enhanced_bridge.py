@@ -278,6 +278,10 @@ class EnhancedCommandHandler(BaseCommandHandler):
             if not target:
                 return {"status": "error", "error": "Missing 'target' parameter"}
             
+            # Resolve stored references in arguments
+            call_args = self._resolve_stored_references(call_args)
+            call_kwargs = self._resolve_stored_references(call_kwargs)
+            
             # Execute the dynamic call
             result = self._execute_dynamic_call(target, call_args, call_kwargs)
             
@@ -684,6 +688,36 @@ class EnhancedCommandHandler(BaseCommandHandler):
             }
     
     # Utility methods
+    def _resolve_stored_references(self, data):
+        """
+        Recursively resolve stored object references in data structures.
+        
+        Converts strings like "stored.object_id" to the actual stored object.
+        """
+        if isinstance(data, str):
+            # Check if it's a stored reference
+            if data.startswith("stored."):
+                parts = data.split(".", 1)
+                if len(parts) == 2:
+                    object_id = parts[1]
+                    if object_id in self.stored_objects:
+                        return self.stored_objects[object_id]
+                    else:
+                        raise ValueError(f"Stored object '{object_id}' not found")
+            return data
+        elif isinstance(data, dict):
+            # Recursively resolve in dictionaries
+            return {k: self._resolve_stored_references(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            # Recursively resolve in lists
+            return [self._resolve_stored_references(item) for item in data]
+        elif isinstance(data, tuple):
+            # Recursively resolve in tuples
+            return tuple(self._resolve_stored_references(item) for item in data)
+        else:
+            # Return other types as-is
+            return data
+    
     def _convert_signature_format(self, signature):
         """Convert Elixir signature format to DSPy format."""
         if isinstance(signature, str):
