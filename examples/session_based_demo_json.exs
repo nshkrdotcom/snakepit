@@ -35,7 +35,7 @@ Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :pool_config, %{
   pool_size: pool_size
 })
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPython)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
 
 Mix.install([
   {:snakepit, path: "."}

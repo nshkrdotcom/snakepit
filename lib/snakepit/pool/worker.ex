@@ -105,55 +105,59 @@ defmodule Snakepit.Pool.Worker do
         else
           fingerprint = generate_fingerprint(worker_id)
 
-          # Start external process using adapter
-          case start_external_port(fingerprint, adapter_module) do
-            {:ok, port, process_pid} ->
-              state = %__MODULE__{
-                id: worker_id,
-                port: port,
-                process_pid: process_pid,
-                fingerprint: fingerprint,
-                start_time: System.system_time(:second),
-                busy: false,
-                pending_requests: %{},
-                health_status: :initializing,
-                stats: %{requests: 0, errors: 0, total_time: 0},
-                adapter_module: adapter_module,
-                init_timeout: init_timeout,
-                health_check_interval: health_check_interval,
-                protocol_format: :json
-              }
+          state = %__MODULE__{
+            id: worker_id,
+            port: nil,
+            process_pid: nil,
+            fingerprint: fingerprint,
+            start_time: System.system_time(:second),
+            busy: false,
+            pending_requests: %{},
+            health_status: :initializing,
+            stats: %{requests: 0, errors: 0, total_time: 0},
+            adapter_module: adapter_module,
+            init_timeout: init_timeout,
+            health_check_interval: health_check_interval,
+            protocol_format: :json
+          }
 
-              # Worker is already registered via via_tuple in start_link - no manual registration needed
-
-              # Register worker with process tracking only if we have a valid process_pid
-              if process_pid do
-                Snakepit.Pool.ProcessRegistry.register_worker(
-                  worker_id,
-                  self(),
-                  process_pid,
-                  fingerprint
-                )
-
-                # ProcessRegistry provides process tracking for ApplicationCleanup
-                Logger.debug("Registered worker #{worker_id} with process PID #{process_pid}")
-              end
-
-              # Send initialization command asynchronously
-              GenServer.cast(self(), :initialize)
-
-              # Return state immediately
-              {:ok, state}
-
-            {:error, reason} ->
-              {:stop, {:failed_to_start_port, reason}}
-          end
+          # Return immediately and schedule the blocking work for later
+          {:ok, state, {:continue, :start_external_process}}
         end
     end
   end
 
   @impl true
-  def handle_cast(:initialize, state) do
+  def handle_continue(:start_external_process, state) do
+    # Now we do the blocking work here, after init/1 has returned
+    case start_external_port(state.fingerprint, state.adapter_module) do
+      {:ok, port, process_pid} ->
+        # Update state with port and process info
+        updated_state = %{state | port: port, process_pid: process_pid}
+
+        # Register worker with process tracking only if we have a valid process_pid
+        if process_pid do
+          Snakepit.Pool.ProcessRegistry.register_worker(
+            state.id,
+            self(),
+            process_pid,
+            state.fingerprint
+          )
+
+          # ProcessRegistry provides process tracking for ApplicationCleanup
+          Logger.debug("Registered worker #{state.id} with process PID #{process_pid}")
+        end
+
+        # Continue with initialization
+        {:noreply, updated_state, {:continue, :initialize}}
+
+      {:error, reason} ->
+        {:stop, {:failed_to_start_port, reason}, state}
+    end
+  end
+
+  @impl true
+  def handle_continue(:initialize, state) do
     Logger.info(
       "🔄 Worker #{state.id} starting initialization with process PID #{state.process_pid}"
     )
