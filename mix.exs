@@ -43,7 +43,7 @@ defmodule Snakepit.MixProject do
       licenses: ["MIT"],
       maintainers: ["NSHkr <ZeroTrust@NSHkr.com>"],
       links: %{"GitHub" => "https://github.com/nshkrdotcom/snakepit"},
-      files: ~w(lib priv assets .formatter.exs mix.exs README* LICENSE* CHANGELOG* DIAGS*),
+      files: ~w(lib priv assets docs .formatter.exs mix.exs README* LICENSE* CHANGELOG* DIAGS*),
       exclude_patterns: ["priv/plts", "priv/python/__pycache__"]
     ]
   end
