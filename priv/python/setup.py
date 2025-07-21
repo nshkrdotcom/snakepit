@@ -56,15 +56,30 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        # Core Python library - no external dependencies required
+        # Core Python library - no external dependencies required for legacy bridges
     ],
     extras_require={
+        "grpc": [
+            "grpcio>=1.50.0",
+            "protobuf>=4.0.0",
+        ],
+        "msgpack": [
+            "msgpack>=1.0.5",
+        ],
+        "all": [
+            "grpcio>=1.50.0",
+            "protobuf>=4.0.0", 
+            "msgpack>=1.0.5",
+        ],
         "dev": [
             "pytest>=6.0",
             "pytest-cov>=2.0",
             "black>=22.0",
             "flake8>=4.0",
             "mypy>=0.900",
+            "grpcio>=1.50.0",
+            "protobuf>=4.0.0",
+            "grpcio-tools>=1.50.0",  # For protoc compilation
         ],
     },
     entry_points={

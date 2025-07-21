@@ -24,8 +24,26 @@ defmodule Snakepit.Adapters.GenericPythonV2Test do
       args = GenericPythonV2.script_args()
       assert is_list(args)
 
-      # Script args always returns development mode arguments
-      assert args == ["--mode", "pool-worker"]
+      # Script args returns pool-worker mode and may include protocol
+      assert "--mode" in args
+      assert "pool-worker" in args
+
+      # Check protocol configuration based on environment
+      protocol_config = Application.get_env(:snakepit, :wire_protocol, :auto)
+
+      case protocol_config do
+        :json ->
+          assert "--protocol" in args
+          assert "json" in args
+
+        :msgpack ->
+          assert "--protocol" in args
+          assert "msgpack" in args
+
+        :auto ->
+          # Auto mode doesn't pass protocol flag
+          refute "--protocol" in args
+      end
     end
 
     test "supported_commands returns expected commands" do

@@ -206,3 +206,6 @@ repomix*.xml
 # Snakepit extracted project
 
 *.egg-info/
+
+msgpax/
+grpc/
