@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2025-07-20
+
+### Added
+- Support for custom adapter arguments in gRPC adapter via pool configuration
+- Enhanced Python API commands (call, store, retrieve, list_stored, delete_stored) in gRPC adapter
+- Dynamic command validation based on adapter type in gRPC adapter
+
+### Changed
+- GRPCPython adapter now accepts custom adapter arguments through pool_config.adapter_args
+- Improved supported_commands/0 to dynamically include commands based on the adapter in use
+
+### Fixed
+- gRPC adapter now properly supports third-party Python adapters like DSPy integration
+
 ## [0.3.2] - 2025-07-20
 
 ### Fixed
@@ -106,6 +120,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
+[0.3.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.3
 [0.3.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.2
 [0.3.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.1
 [0.3.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.0

@@ -58,40 +58,79 @@ defmodule Snakepit.Adapters.GRPCPython do
 
   @impl true
   def script_args do
-    # Use the streaming test handler for gRPC streaming commands
-    ["--adapter", "snakepit_bridge.adapters.grpc_streaming.GRPCStreamingHandler"]
+    # Check if custom adapter args are provided in pool config
+    pool_config = Application.get_env(:snakepit, :pool_config, %{})
+    adapter_args = Map.get(pool_config, :adapter_args, nil)
+
+    if adapter_args do
+      # Use custom adapter args if provided
+      adapter_args
+    else
+      # Default to streaming test handler
+      ["--adapter", "snakepit_bridge.adapters.grpc_streaming.GRPCStreamingHandler"]
+    end
   end
 
   @impl true
   def supported_commands do
-    # Basic commands + streaming commands
-    [
+    # Check if we're using DSPy adapter
+    pool_config = Application.get_env(:snakepit, :pool_config, %{})
+    adapter_args = Map.get(pool_config, :adapter_args, [])
+
+    base_commands = [
       "ping",
       "echo",
       "compute",
       "info",
-      # Streaming commands
+      # Enhanced Python API
+      "call",
+      "store",
+      "retrieve",
+      "list_stored",
+      "delete_stored"
+    ]
+
+    streaming_commands = [
       "ping_stream",
       "batch_inference",
       "process_large_dataset",
       "tail_and_analyze"
     ]
+
+    dspy_commands = [
+      "configure_lm",
+      "create_program",
+      "create_gemini_program",
+      "execute_program",
+      "execute_gemini_program",
+      "list_programs",
+      "delete_program",
+      "get_stats",
+      "cleanup",
+      "reset_state",
+      "get_program_info",
+      "cleanup_session",
+      "shutdown"
+    ]
+
+    # Include DSPy commands if using DSPy adapter
+    if Enum.any?(adapter_args, &String.contains?(&1, "dspy")) do
+      base_commands ++ streaming_commands ++ dspy_commands
+    else
+      base_commands ++ streaming_commands
+    end
   end
 
   @impl true
-  def validate_command(command, _args) when command in ["ping", "echo", "compute", "info"],
-    do: :ok
+  def validate_command(command, _args) do
+    supported = supported_commands()
 
-  def validate_command(command, _args)
-      when command in [
-             "ping_stream",
-             "batch_inference",
-             "process_large_dataset",
-             "tail_and_analyze"
-           ],
-      do: :ok
-
-  def validate_command(command, _args), do: {:error, "Unsupported command: #{command}"}
+    if command in supported do
+      :ok
+    else
+      {:error, "Unsupported command: #{command}"}
+    end
+  end
 
   # Optional callbacks for gRPC-specific functionality
 
