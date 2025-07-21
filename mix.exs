@@ -4,7 +4,7 @@ defmodule Snakepit.MixProject do
   def project do
     [
       app: :snakepit,
-      version: "0.3.0",
+      version: "0.3.1",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       description:
@@ -59,7 +59,7 @@ defmodule Snakepit.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "DIAGS.md"],
+      extras: ["README.md", "README_GRPC.md", "README_BRIDGES.md", "DIAGS.md"],
       assets: %{"assets" => "assets"},
       logo: "assets/snakepit-logo.svg",
       before_closing_head_tag: &docs_before_closing_head_tag/1,
