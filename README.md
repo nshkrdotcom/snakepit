@@ -51,7 +51,7 @@ end
 
 # Configure with MessagePack for high performance
 Application.put_env(:snakepit, :pooling_enabled, true)
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonMsgpack)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
 Application.put_env(:snakepit, :wire_protocol, :auto)  # Auto-negotiates best protocol
 Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
 
@@ -134,7 +134,7 @@ Sessions provide:
 # config/config.exs
 config :snakepit,
   pooling_enabled: true,
-  adapter_module: Snakepit.Adapters.GenericPythonMsgpack,
+  adapter_module: Snakepit.Adapters.GenericPythonV2,
   wire_protocol: :auto,  # :json, :msgpack, or :auto (recommended)
   pool_config: %{
     pool_size: 8  # Default: System.schedulers_online() * 2
@@ -277,7 +277,7 @@ program_id = response["program_id"]
 
 ```elixir
 # Configure MessagePack for binary-intensive workloads
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonMsgpack)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
 Application.put_env(:snakepit, :wire_protocol, :auto)
 
 # Process binary data natively (no base64 encoding)
@@ -332,7 +332,7 @@ Snakepit supports modern gRPC-based communication for advanced streaming capabil
 ```elixir
 # Your existing configuration
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
-# or Snakepit.Adapters.GenericPythonMsgpack
+# V2 adapter with auto-negotiation (recommended)
 
 # Your existing API calls work exactly the same
 {:ok, result} = Snakepit.execute("ping", %{})
@@ -664,7 +664,7 @@ elixir examples/grpc_non_streaming_demo.exs
 
 ```elixir
 # Configure with MessagePack for maximum performance
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonMsgpack)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
 Application.put_env(:snakepit, :wire_protocol, :auto)
 
 # Install Python dependencies
@@ -707,7 +707,7 @@ conda install msgpack
 ```elixir
 # Use auto-negotiation (recommended)
 Application.put_env(:snakepit, :wire_protocol, :auto)
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonMsgpack)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
 
 # Examples
 elixir examples/non_session_demo_msgpack.exs

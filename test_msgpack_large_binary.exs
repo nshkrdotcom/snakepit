@@ -4,7 +4,7 @@
 
 Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :pool_config, %{pool_size: 1})
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonMsgpack)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
 Application.put_env(:snakepit, :wire_protocol, :auto)
 
 Mix.install([

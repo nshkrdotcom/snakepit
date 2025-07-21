@@ -35,9 +35,8 @@ Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :pool_config, %{
   pool_size: pool_size
 })
-# Use the MessagePack adapter
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonMsgpack)
-# Use auto negotiation (will select MessagePack if available)
+# Use the V2 adapter with auto-negotiation (will select MessagePack if available)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
 Application.put_env(:snakepit, :wire_protocol, :auto)
 
 Mix.install([

@@ -1,6 +1,15 @@
 defmodule Snakepit.Adapters.GenericPython do
   @moduledoc """
-  Generic Python adapter for Snakepit.
+  **DEPRECATED**: Please use `Snakepit.Adapters.GenericPythonV2` instead.
+  
+  This V1 adapter is deprecated and will be removed in a future version.
+  The V2 adapter provides:
+  - Proper protocol negotiation (eliminates warnings)
+  - MessagePack support for better performance
+  - Improved error handling and robustness
+  - Better package structure
+
+  Legacy Generic Python adapter for Snakepit.
 
   This adapter provides a simple, framework-agnostic bridge to Python
   without any external ML dependencies. It's useful for:
@@ -44,6 +53,18 @@ defmodule Snakepit.Adapters.GenericPython do
 
   @impl true
   def executable_path do
+    IO.warn("""
+    DEPRECATION WARNING: Snakepit.Adapters.GenericPython is deprecated.
+    Please use Snakepit.Adapters.GenericPythonV2 instead.
+    
+    The V2 adapter provides:
+    - Proper protocol negotiation (eliminates warnings)
+    - MessagePack support for better performance  
+    - Improved error handling and robustness
+    
+    This adapter will be removed in a future version.
+    """)
+    
     System.find_executable("python3") || System.find_executable("python")
   end
 
