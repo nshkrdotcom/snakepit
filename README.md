@@ -22,7 +22,26 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - **Built on OTP primitives** - DynamicSupervisor, Registry, GenServer
 - **Production-ready** with telemetry, health checks, and graceful shutdowns
 
-## 🆕 What's New in v0.3.0
+## 📋 Table of Contents
+
+- [What's New in v0.3](#whats-new-in-v03)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Core Concepts](#core-concepts)
+- [Configuration](#configuration)
+- [Usage Examples](#usage-examples)
+- [gRPC Communication](#grpc-communication)
+- [Python Bridges](#python-bridges)
+- [Built-in Adapters](#built-in-adapters)
+- [Creating Custom Adapters](#creating-custom-adapters)
+- [Session Management](#session-management)
+- [Monitoring & Telemetry](#monitoring--telemetry)
+- [Architecture Deep Dive](#architecture-deep-dive)
+- [Performance](#performance)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+
+## 🆕 What's New in v0.3
 
 ### 🌊 **Native gRPC Streaming**
 - **Real-time progress updates** for long-running operations
@@ -49,32 +68,13 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - **Comprehensive documentation** for all bridge implementations
 - **Backward compatibility** maintained for existing integrations
 
-## 📋 Table of Contents
-
-- [What's New in v0.3.0](#-whats-new-in-v030)
-- [Quick Start](#-quick-start)
-- [Installation](#-installation)
-- [Core Concepts](#-core-concepts)
-- [Configuration](#-configuration)
-- [Usage Examples](#-usage-examples)
-- [gRPC Streaming](#-grpc-streaming)
-- [Python Bridges](#-python-bridges)
-- [Built-in Adapters](#-built-in-adapters)
-- [Creating Custom Adapters](#-creating-custom-adapters)
-- [Session Management](#-session-management)
-- [Monitoring & Telemetry](#-monitoring--telemetry)
-- [Architecture Deep Dive](#-architecture-deep-dive)
-- [Performance](#-performance)
-- [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
-
 ## 🏃 Quick Start
 
 ```elixir
 # In your mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.3.0"}
+    {:snakepit, "~> 0.3.1"}
   ]
 end
 
@@ -104,7 +104,7 @@ Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.3.0"}
+    {:snakepit, "~> 0.3.1"}
   ]
 end
 ```
@@ -1403,7 +1403,7 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 
 ## 📊 Development Status
 
-**v0.3.0 (Current Release)**
+**v0.3 (Current Release)**
 - ✅ **gRPC streaming bridge** implementation complete
 - ✅ **MessagePack protocol** support with automatic negotiation
 - ✅ **Python Bridge V2** architecture with production packaging
