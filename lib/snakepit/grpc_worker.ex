@@ -441,13 +441,13 @@ defmodule Snakepit.GRPCWorker do
     receive do
       {^port, {:data, data}} ->
         output = to_string(data)
-        
+
         # Look for the ready message anywhere in the output
         if String.contains?(output, "GRPC_SERVER_READY_ON_PORT=") do
           # Extract port from the ready message line
           lines = String.split(output, "\n")
           ready_line = Enum.find(lines, &String.starts_with?(&1, "GRPC_SERVER_READY_ON_PORT="))
-          
+
           if ready_line do
             [_, port_str] = String.split(String.trim(ready_line), "=")
             {:ok, String.to_integer(port_str)}

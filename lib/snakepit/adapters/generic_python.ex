@@ -1,7 +1,7 @@
 defmodule Snakepit.Adapters.GenericPython do
   @moduledoc """
   **DEPRECATED**: Please use `Snakepit.Adapters.GenericPythonV2` instead.
-  
+
   This V1 adapter is deprecated and will be removed in a future version.
   The V2 adapter provides:
   - Proper protocol negotiation (eliminates warnings)
@@ -56,15 +56,15 @@ defmodule Snakepit.Adapters.GenericPython do
     IO.warn("""
     DEPRECATION WARNING: Snakepit.Adapters.GenericPython is deprecated.
     Please use Snakepit.Adapters.GenericPythonV2 instead.
-    
+
     The V2 adapter provides:
     - Proper protocol negotiation (eliminates warnings)
     - MessagePack support for better performance  
     - Improved error handling and robustness
-    
+
     This adapter will be removed in a future version.
     """)
-    
+
     System.find_executable("python3") || System.find_executable("python")
   end
 
