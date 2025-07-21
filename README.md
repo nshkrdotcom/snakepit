@@ -30,6 +30,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - [Configuration](#-configuration)
 - [Usage Examples](#-usage-examples)
 - [gRPC Streaming](#-grpc-streaming)
+- [Python Bridges](#-python-bridges)
 - [Built-in Adapters](#-built-in-adapters)
 - [Creating Custom Adapters](#-creating-custom-adapters)
 - [Session Management](#-session-management)
@@ -603,6 +604,10 @@ pip install grpcio protobuf grpcio-tools
 For comprehensive gRPC documentation, see **[README_GRPC.md](README_GRPC.md)**.
 
 For additional streaming examples, see `docs/specs/grpc_streaming_examples.md`.
+
+## 🐍 Python Bridges
+
+For detailed documentation on all Python bridge implementations (V1, V2, Enhanced, gRPC), see **[README_BRIDGES.md](README_BRIDGES.md)**.
 
 ## 🔌 Built-in Adapters
 
