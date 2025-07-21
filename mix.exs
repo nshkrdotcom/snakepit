@@ -44,7 +44,7 @@ defmodule Snakepit.MixProject do
       maintainers: ["NSHkr <ZeroTrust@NSHkr.com>"],
       links: %{"GitHub" => "https://github.com/nshkrdotcom/snakepit"},
       files: ~w(lib priv assets docs .formatter.exs mix.exs README* LICENSE* CHANGELOG* DIAGS*),
-      exclude_patterns: ["priv/plts", "priv/python/**/__pycache__", "priv/python/**/*.egg-info"]
+      exclude_patterns: ["priv/plts", "**/__pycache__", "**/*.egg-info"]
     ]
   end
 
