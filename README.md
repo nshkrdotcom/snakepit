@@ -713,6 +713,32 @@ end)
 - ✅ **Rich error handling** - gRPC status codes with detailed context
 - ✅ **Protocol buffers** - Efficient binary serialization
 - ✅ **Cancellable operations** - Stop long-running tasks gracefully
+- ✅ **Custom adapter support** - Use third-party Python adapters via pool configuration
+
+#### Custom Adapter Support (v0.3.3+)
+
+The gRPC adapter now supports custom Python adapters through pool configuration:
+
+```elixir
+# Configure with a custom Python adapter (e.g., DSPy integration)
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+Application.put_env(:snakepit, :pool_config, %{
+  pool_size: 4,
+  adapter_args: ["--adapter", "snakepit_bridge.adapters.dspy_grpc.DSPyGRPCHandler"]
+})
+
+# The adapter can provide custom commands beyond the standard set
+{:ok, result} = Snakepit.Python.call("dspy.Predict", %{signature: "question -> answer"})
+{:ok, result} = Snakepit.Python.call("stored.predictor.__call__", %{question: "What is DSPy?"})
+```
+
+##### Available Custom Adapters
+
+- **`snakepit_bridge.adapters.dspy_grpc.DSPyGRPCHandler`** - DSPy integration for declarative language model programming
+  - Supports DSPy modules (Predict, ChainOfThought, ReAct, etc.)
+  - Enhanced Python API with `call`, `store`, `retrieve` commands
+  - Automatic signature parsing and field mapping
+  - Session management for stateful operations
 
 #### Installation & Usage
 
