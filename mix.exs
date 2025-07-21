@@ -59,7 +59,16 @@ defmodule Snakepit.MixProject do
         "CHANGELOG*",
         "DIAGS*"
       ],
-      exclude_patterns: ["**/__pycache__", "**/*.pyc", "**/*.egg-info", "**/*.bak", "priv/plts"]
+      exclude_patterns: [
+        "**/__pycache__", 
+        "**/*.pyc", 
+        "**/*.egg-info", 
+        "**/*.bak", 
+        "priv/plts",
+        "priv/python/snakepit_bridge/__pycache__",
+        "priv/python/snakepit_bridge/grpc/__pycache__", 
+        "priv/python/snakepit_bridge/adapters/__pycache__"
+      ]
     ]
   end
 
