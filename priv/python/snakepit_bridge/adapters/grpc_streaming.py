@@ -12,7 +12,7 @@ from typing import Dict, Any, Iterator
 from ..core import BaseCommandHandler
 
 
-class GRPCStreamingTestHandler(BaseCommandHandler):
+class GRPCStreamingHandler(BaseCommandHandler):
     """
     Test command handler that provides streaming operations for demo purposes.
     """
@@ -51,7 +51,11 @@ class GRPCStreamingTestHandler(BaseCommandHandler):
         - is_final: Boolean indicating if this is the last chunk
         - error: Optional error message
         """
+        import sys
+        print(f"[Python] process_stream_command called with command: {command}, args: {args}", file=sys.stderr, flush=True)
+        
         if command == "ping_stream":
+            print(f"[Python] Routing to _handle_ping_stream", file=sys.stderr, flush=True)
             yield from self._handle_ping_stream(args)
         elif command == "batch_inference":
             yield from self._handle_batch_inference(args)
@@ -61,6 +65,7 @@ class GRPCStreamingTestHandler(BaseCommandHandler):
             yield from self._handle_log_analysis(args)
         else:
             # Unknown streaming command
+            print(f"[Python] Unknown streaming command: {command}", file=sys.stderr, flush=True)
             yield {
                 "data": {"error": f"Unknown streaming command: {command}"},
                 "is_final": True,
@@ -69,10 +74,16 @@ class GRPCStreamingTestHandler(BaseCommandHandler):
     
     def _handle_ping_stream(self, args: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
         """Stream ping responses."""
+        import sys
+        print(f"[Python] _handle_ping_stream called with args: {args}", file=sys.stderr, flush=True)
+        
         count = args.get('count', 5)
+        interval = args.get('interval', 0.5)
+        
+        print(f"[Python] Starting ping stream with count={count}, interval={interval}", file=sys.stderr, flush=True)
         
         for i in range(count):
-            yield {
+            chunk_data = {
                 "data": {
                     "ping_number": str(i + 1),
                     "timestamp": str(time.time()),
@@ -80,6 +91,10 @@ class GRPCStreamingTestHandler(BaseCommandHandler):
                 },
                 "is_final": i == count - 1
             }
+            print(f"[Python] Yielding ping chunk {i + 1}: {chunk_data}", file=sys.stderr, flush=True)
+            yield chunk_data
+        
+        print(f"[Python] Ping stream completed", file=sys.stderr, flush=True)
     
     def _handle_batch_inference(self, args: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
         """Simulate ML batch inference."""

@@ -1,16 +1,42 @@
 #!/usr/bin/env elixir
 
 # gRPC Streaming Demo for Snakepit
-# Run with: elixir examples/grpc_streaming_demo.exs
+# Run with: elixir examples/grpc_streaming_demo.exs [pool_size]
+# Example: elixir examples/grpc_streaming_demo.exs 4
 #
-# This demo uses a TEST adapter (GRPCTestPython) that implements
-# streaming commands for demonstration purposes only.
-# In production, use your own adapter with real streaming implementations.
+# This demo uses the production gRPC adapter (GRPCPython) that implements
+# streaming commands for real gRPC communication.
 
-# Configure Snakepit with test gRPC adapter
+# Parse command line arguments
+pool_size = case System.argv() do
+  [size_str] ->
+    case Integer.parse(size_str) do
+      {size, ""} when size > 0 and size <= 200 ->
+        IO.puts("🔧 Using pool size: #{size}")
+        size
+      {size, ""} when size > 200 ->
+        IO.puts("⚠️ Pool size #{size} exceeds maximum of 200, using 200")
+        200
+      {size, ""} when size <= 0 ->
+        IO.puts("⚠️ Pool size must be positive, using default: 2")
+        2
+      _ ->
+        IO.puts("⚠️ Invalid pool size '#{size_str}', using default: 2")
+        2
+    end
+  [] ->
+    IO.puts("🔧 Using default pool size: 2")
+    2
+  _ ->
+    IO.puts("⚠️ Usage: elixir examples/grpc_streaming_demo.exs [pool_size]")
+    IO.puts("⚠️ Using default pool size: 2")
+    2
+end
+
+# Configure Snakepit with production gRPC adapter
 Application.put_env(:snakepit, :pooling_enabled, true)
-Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCTestPython)
+Application.put_env(:snakepit, :pool_config, %{pool_size: pool_size})
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :grpc_config, %{
   base_port: 50051,
   port_range: 10
@@ -18,16 +44,18 @@ Application.put_env(:snakepit, :grpc_config, %{
 
 Mix.install([
   {:snakepit, path: "."},
-  {:grpc, "~> 0.8"},
-  {:protobuf, "~> 0.12"}
+  {:grpc, "~> 0.10.2"},
+  {:protobuf, "~> 0.14.1"},
+  {:msgpax, "~> 2.4.0"}
 ])
 
 Logger.configure(level: :info)
 
 defmodule GRPCStreamingDemo do
-  def run do
+  def run(pool_size) do
     IO.puts("\n🚀 Snakepit gRPC Streaming Demo")
     IO.puts("=" |> String.duplicate(50))
+    IO.puts("🐍 Pool Size: #{pool_size} Python workers")
     IO.puts("🔗 Protocol: gRPC with native streaming")
     IO.puts("🌊 Features: Progressive results, real-time updates")
     IO.puts("=" |> String.duplicate(50))
@@ -46,6 +74,7 @@ defmodule GRPCStreamingDemo do
     
     # Demo 2: Streaming ping (heartbeat)
     IO.puts("\n2️⃣ Streaming Ping (Heartbeat):")
+    IO.puts("[DEBUG] Starting ping_stream with count: 5, interval: 0.5")
     
     case Snakepit.execute_stream("ping_stream", %{count: 5, interval: 0.5}, &handle_ping_chunk/1) do
       :ok ->
@@ -120,56 +149,82 @@ defmodule GRPCStreamingDemo do
   
   # Chunk handlers for different streaming operations
   
-  defp handle_ping_chunk(chunk) do
-    _ping_num = chunk["ping_number"] || "?"
-    message = chunk["message"] || "ping"
+  defp handle_ping_chunk(%{"error" => ""} = chunk) do
+    data = chunk["data"] || %{}
+    _ping_num = data["ping_number"] || "?"
+    message = data["message"] || "ping"
     IO.puts("   💓 #{message}")
   end
   
-  defp handle_inference_chunk(chunk) do
-    if chunk["is_final"] do
-      IO.puts("   🏁 Batch inference complete")
-    else
-      item = chunk["item"] || "unknown"
-      confidence = chunk["confidence"] || "0.0"
-      prediction = chunk["prediction"] || "unknown"
-      IO.puts("   🧠 Processed #{item}: #{prediction} (#{confidence} confidence)")
-    end
+  defp handle_ping_chunk(%{"error" => error}) when error != "" do
+    IO.puts("   ❌ Stream error: #{error}")
   end
   
-  defp handle_dataset_chunk(chunk) do
-    if chunk["is_final"] do
-      IO.puts("   🏁 Dataset processing complete")
-    else
-      progress = chunk["progress_percent"] || "0"
-      processed = chunk["processed_rows"] || "0"
-      total = chunk["total_rows"] || "0"
-      IO.puts("   📊 Progress: #{progress}% (#{processed}/#{total} rows)")
-    end
+  defp handle_inference_chunk(%{"error" => "", "is_final" => true}) do
+    IO.puts("   🏁 Batch inference complete")
   end
   
-  defp handle_log_chunk(chunk) do
-    if chunk["is_final"] do
-      IO.puts("   🏁 Log analysis complete")
-    else
-      severity = chunk["severity"] || "INFO"
-      entry = chunk["log_entry"] || "log entry"
-      entry_short = String.slice(entry, 0, 50)
-      
-      emoji = case severity do
-        "ERROR" -> "🚨"
-        "WARN" -> "⚠️"
-        _ -> "ℹ️"
-      end
-      
-      IO.puts("   #{emoji} [#{severity}] #{entry_short}...")
-    end
+  defp handle_inference_chunk(%{"error" => ""} = chunk) do
+    data = chunk["data"] || %{}
+    item = data["item"] || "unknown"
+    confidence = data["confidence"] || "0.0"
+    prediction = data["prediction"] || "unknown"
+    IO.puts("   🧠 Processed #{item}: #{prediction} (#{confidence} confidence)")
   end
   
-  defp handle_session_chunk(chunk) do
-    message = chunk["message"] || "session ping"
+  defp handle_inference_chunk(%{"error" => error}) when error != "" do
+    IO.puts("   ❌ Stream error: #{error}")
+  end
+  
+  defp handle_dataset_chunk(%{"error" => "", "is_final" => true}) do
+    IO.puts("   🏁 Dataset processing complete")
+  end
+  
+  defp handle_dataset_chunk(%{"error" => ""} = chunk) do
+    data = chunk["data"] || %{}
+    progress = data["progress_percent"] || "0"
+    processed = data["processed_rows"] || "0"
+    total = data["total_rows"] || "0"
+    IO.puts("   📊 Progress: #{progress}% (#{processed}/#{total} rows)")
+  end
+  
+  defp handle_dataset_chunk(%{"error" => error}) when error != "" do
+    IO.puts("   ❌ Stream error: #{error}")
+  end
+  
+  defp handle_log_chunk(%{"error" => "", "is_final" => true}) do
+    IO.puts("   🏁 Log analysis complete")
+  end
+  
+  defp handle_log_chunk(%{"error" => ""} = chunk) do
+    data = chunk["data"] || %{}
+    severity = data["severity"] || "INFO"
+    entry = data["log_entry"] || "log entry"
+    entry_short = String.slice(entry, 0, 50)
+    
+    emoji = case severity do
+      "ERROR" -> "🚨"
+      "WARN" -> "⚠️"
+      _ -> "ℹ️"
+    end
+    
+    IO.puts("   #{emoji} [#{severity}] #{entry_short}...")
+  end
+  
+  defp handle_log_chunk(%{"error" => error}) when error != "" do
+    IO.puts("   ❌ Stream error: #{error}")
+  end
+  
+  defp handle_session_chunk(%{"error" => ""} = chunk) do
+    data = chunk["data"] || %{}
+    message = data["message"] || "session ping"
     IO.puts("   🔗 Session: #{message}")
   end
+  
+  defp handle_session_chunk(%{"error" => error}) when error != "" do
+    IO.puts("   ❌ Stream error: #{error}")
+  end
+  
   
   defp show_performance_benefits do
     IO.puts("   📈 gRPC vs stdin/stdout comparison:")
@@ -211,7 +266,7 @@ end
 
 # Run the demo
 if GRPCChecker.check_grpc_availability() do
-  GRPCStreamingDemo.run()
+  GRPCStreamingDemo.run(pool_size)
   
   # *** CRITICAL: Explicit graceful shutdown to trigger terminate/2 callbacks ***
   IO.puts("\n[Demo Script] All streaming tasks complete. Waiting for final cleanup...")

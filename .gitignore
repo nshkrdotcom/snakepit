@@ -208,3 +208,4 @@ repomix*.xml
 *.egg-info/
 
 msgpax/
+grpc/

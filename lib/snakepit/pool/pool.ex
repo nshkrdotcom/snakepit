@@ -54,17 +54,33 @@ defmodule Snakepit.Pool do
   @doc """
   Execute a streaming command with callback.
   """
-  def execute_stream(command, args, callback, opts \\ []) do
+  def execute_stream(command, args, callback_fn, opts \\ []) do
     pool = opts[:pool] || __MODULE__
     timeout = opts[:timeout] || 300_000
+    Logger.info("[Pool] execute_stream called for command: #{command}, args: #{inspect(args)}")
 
-    with {:ok, worker_id} <- checkout_worker_for_stream(pool, opts),
-         :ok <- execute_on_worker_stream(worker_id, command, args, callback, timeout) do
-      checkin_worker(pool, worker_id)
-      :ok
-    else
-      error ->
-        error
+    case checkout_worker_for_stream(pool, opts) do
+      {:ok, worker_id} ->
+        Logger.info("[Pool] Checked out worker: #{worker_id}")
+
+        result = execute_on_worker_stream(worker_id, command, args, callback_fn, timeout)
+
+        # Always check the worker back in after streaming completes
+        checkin_worker(pool, worker_id)
+
+        case result do
+          :ok ->
+            Logger.info("[Pool] Stream completed successfully")
+            :ok
+
+          {:error, reason} ->
+            Logger.error("[Pool] Stream failed: #{inspect(reason)}")
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        Logger.error("[Pool] Failed to checkout worker: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
@@ -77,13 +93,18 @@ defmodule Snakepit.Pool do
     GenServer.cast(pool, {:checkin_worker, worker_id})
   end
 
-  defp execute_on_worker_stream(worker_id, command, args, callback, timeout) do
+  defp execute_on_worker_stream(worker_id, command, args, callback_fn, timeout) do
     worker_module = get_worker_module(worker_id)
+    Logger.info("[Pool] execute_on_worker_stream - worker_module: #{inspect(worker_module)}")
 
     if function_exported?(worker_module, :execute_stream, 5) do
-      worker_module.execute_stream(worker_id, command, args, callback, timeout)
+      Logger.info("[Pool] Calling #{worker_module}.execute_stream with timeout: #{timeout}")
+      result = worker_module.execute_stream(worker_id, command, args, callback_fn, timeout)
+      Logger.info("[Pool] execute_stream returned: #{inspect(result)}")
+      result
     else
-      {:error, :streaming_not_supported}
+      Logger.error("[Pool] Worker module #{worker_module} does not export execute_stream/5")
+      {:error, :streaming_not_supported_by_worker}
     end
   end
 
@@ -436,7 +457,7 @@ defmodule Snakepit.Pool do
         {:ok, worker_id, new_state}
 
       :no_preferred_worker ->
-        # Fall back to any available worker  
+        # Fall back to any available worker
         case Enum.take(state.available, 1) do
           [worker_id] ->
             new_available = MapSet.delete(state.available, worker_id)

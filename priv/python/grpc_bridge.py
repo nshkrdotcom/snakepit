@@ -10,6 +10,7 @@ Usage:
     python grpc_bridge.py --port 50051 --adapter my_custom_adapter
 """
 
+import os
 import sys
 import argparse
 import time
@@ -129,11 +130,14 @@ class SnakepitBridgeServicer(snakepit_pb2_grpc.SnakepitBridgeServicer):
     
     def ExecuteStream(self, request: snakepit_pb2.ExecuteRequest, context: ServicerContext) -> Iterator[snakepit_pb2.StreamResponse]:
         """Handle streaming execution."""
+        print(f"[gRPC Bridge] ExecuteStream called with command: {request.command}, request_id: {request.request_id}", file=sys.stderr, flush=True)
         try:
             args = self._convert_args(request.args)
+            print(f"[gRPC Bridge] Converted args: {args}", file=sys.stderr, flush=True)
             
             # Check if command handler supports streaming
             if hasattr(self.command_handler, 'process_stream_command'):
+                print(f"[gRPC Bridge] Handler supports streaming, delegating to process_stream_command", file=sys.stderr, flush=True)
                 # Handler supports streaming - delegate to it
                 chunk_index = 0
                 for result_chunk in self.command_handler.process_stream_command(request.command, args):
@@ -142,7 +146,9 @@ class SnakepitBridgeServicer(snakepit_pb2_grpc.SnakepitBridgeServicer):
                         print(f"gRPC context became inactive. Terminating stream for request {request.request_id}.", file=sys.stderr)
                         break  # Exit the loop gracefully
                     
-                    yield snakepit_pb2.StreamResponse(
+                    print(f"[gRPC Bridge] Received chunk {chunk_index}: {result_chunk}", file=sys.stderr, flush=True)
+                    
+                    response = snakepit_pb2.StreamResponse(
                         is_final=result_chunk.get('is_final', False),
                         chunk=self._convert_result(result_chunk.get('data', {})),
                         error=result_chunk.get('error', ''),
@@ -150,8 +156,13 @@ class SnakepitBridgeServicer(snakepit_pb2_grpc.SnakepitBridgeServicer):
                         request_id=request.request_id,
                         chunk_index=chunk_index
                     )
+                    print(f"[gRPC Bridge] Yielding StreamResponse: is_final={response.is_final}, chunk_index={response.chunk_index}", file=sys.stderr, flush=True)
+                    yield response
                     chunk_index += 1
+                
+                print(f"[gRPC Bridge] Stream loop completed for request {request.request_id}", file=sys.stderr, flush=True)
             else:
+                print(f"[gRPC Bridge] Handler does not support streaming, falling back to Execute", file=sys.stderr, flush=True)
                 # Fallback: execute normally and return single result
                 result = self.Execute(request, context)
                 yield snakepit_pb2.StreamResponse(
@@ -164,8 +175,12 @@ class SnakepitBridgeServicer(snakepit_pb2_grpc.SnakepitBridgeServicer):
                 )
             
             self._track_request(success=True)
+            print(f"[gRPC Bridge] ExecuteStream completed successfully for request {request.request_id}", file=sys.stderr, flush=True)
             
         except Exception as e:
+            print(f"[gRPC Bridge] ExecuteStream error: {e}", file=sys.stderr, flush=True)
+            import traceback
+            traceback.print_exc()
             self._track_request(success=False)
             yield snakepit_pb2.StreamResponse(
                 is_final=True,
@@ -279,8 +294,9 @@ def serve(port: int, adapter_class=None):
     servicer = SnakepitBridgeServicer(command_handler)
     
     # Create server
+    max_workers = os.cpu_count() or 4 
     server = grpc.server(
-        futures.ThreadPoolExecutor(max_workers=4),
+        futures.ThreadPoolExecutor(max_workers=max_workers),
         options=[
             ('grpc.keepalive_time_ms', 10000),
             ('grpc.keepalive_timeout_ms', 5000),
@@ -296,7 +312,10 @@ def serve(port: int, adapter_class=None):
     
     # Listen on port
     listen_addr = f'[::]:{port}'
-    server.add_insecure_port(listen_addr)
+    actual_port = server.add_insecure_port(listen_addr)
+
+    # Report the actual port back to the Elixir supervisor.
+    print(f"GRPC_SERVER_READY_ON_PORT={actual_port}", flush=True)
     
     # Start server
     server.start()
