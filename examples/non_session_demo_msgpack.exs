@@ -35,7 +35,7 @@ Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :pool_config, %{
   pool_size: pool_size
 })
-# Use the V2 adapter with auto-negotiation (will select MessagePack if available)
+# Use the V2 adapter with auto-negotiation (will prefer MessagePack for this demo)
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)
 Application.put_env(:snakepit, :wire_protocol, :auto)
 
