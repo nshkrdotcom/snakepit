@@ -114,7 +114,21 @@ defmodule Snakepit.Adapters.GenericPythonV2 do
   def script_args do
     # Always use development mode arguments since we'll use development scripts
     # when shell shims are detected
-    ["--mode", "pool-worker"]
+    base_args = ["--mode", "pool-worker"]
+
+    # Add protocol configuration if specified
+    protocol_args =
+      case Application.get_env(:snakepit, :wire_protocol, :auto) do
+        :auto -> []
+        :json -> ["--protocol", "json"]
+        :msgpack -> ["--protocol", "msgpack"]
+        _ -> []
+      end
+
+    # Add quiet mode in test environment
+    quiet_args = if Mix.env() == :test, do: ["--quiet"], else: []
+
+    base_args ++ protocol_args ++ quiet_args
   end
 
   defp check_python_package_available do

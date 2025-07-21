@@ -70,5 +70,64 @@ defmodule Snakepit do
     Snakepit.Pool.list_workers(pool)
   end
 
+  @doc """
+  Executes a streaming command with a callback function.
+
+  ## Examples
+
+      Snakepit.execute_stream("batch_inference", %{items: [...]}, fn chunk ->
+        IO.puts("Received: \#{inspect(chunk)}")
+      end)
+
+  ## Options
+
+    * `:pool` - The pool to use (default: `Snakepit.Pool`)
+    * `:timeout` - Request timeout in ms (default: 300000)
+    * `:session_id` - Run in a specific session
+
+  ## Returns
+
+  Returns `:ok` on success or `{:error, reason}` on failure.
+
+  Note: Streaming is only supported with gRPC adapters.
+  """
+  @spec execute_stream(String.t(), map(), function(), keyword()) :: :ok | {:error, term()}
+  def execute_stream(command, args \\ %{}, callback_fn, opts \\ []) do
+    ensure_started!()
+
+    adapter = Application.get_env(:snakepit, :adapter_module)
+
+    unless function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+      {:error, :streaming_not_supported}
+    else
+      Snakepit.Pool.execute_stream(command, args, callback_fn, opts)
+    end
+  end
+
+  @doc """
+  Executes a command in a session with a callback function.
+  """
+  @spec execute_in_session_stream(String.t(), String.t(), map(), function(), keyword()) ::
+          :ok | {:error, term()}
+  def execute_in_session_stream(session_id, command, args \\ %{}, callback_fn, opts \\ []) do
+    ensure_started!()
+
+    adapter = Application.get_env(:snakepit, :adapter_module)
+
+    unless function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+      {:error, :streaming_not_supported}
+    else
+      opts_with_session = Keyword.put(opts, :session_id, session_id)
+      Snakepit.Pool.execute_stream(command, args, callback_fn, opts_with_session)
+    end
+  end
+
+  defp ensure_started! do
+    case Application.ensure_all_started(:snakepit) do
+      {:ok, _} -> :ok
+      {:error, _} -> raise "Snakepit application not started"
+    end
+  end
+
   # Note: For ML/DSP program management functionality, see Snakepit.SessionHelpers
 end
