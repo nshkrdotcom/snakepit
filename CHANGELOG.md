@@ -101,6 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
+[0.3.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.1
 [0.3.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.0
 [0.2.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.2.1
 [0.2.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.2.0

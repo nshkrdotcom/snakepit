@@ -43,7 +43,23 @@ defmodule Snakepit.MixProject do
       licenses: ["MIT"],
       maintainers: ["NSHkr <ZeroTrust@NSHkr.com>"],
       links: %{"GitHub" => "https://github.com/nshkrdotcom/snakepit"},
-      files: ["lib", "priv/proto", "priv/python/*.py", "priv/python/requirements*.txt", "priv/python/setup.py", "priv/python/snakepit_bridge", "priv/javascript", "assets", "docs", ".formatter.exs", "mix.exs", "README*", "LICENSE*", "CHANGELOG*", "DIAGS*"],
+      files: [
+        "lib",
+        "priv/proto",
+        "priv/python/*.py",
+        "priv/python/requirements*.txt",
+        "priv/python/setup.py",
+        "priv/python/snakepit_bridge",
+        "priv/javascript",
+        "assets",
+        "docs",
+        ".formatter.exs",
+        "mix.exs",
+        "README*",
+        "LICENSE*",
+        "CHANGELOG*",
+        "DIAGS*"
+      ],
       exclude_patterns: ["**/__pycache__", "**/*.pyc", "**/*.egg-info", "**/*.bak", "priv/plts"]
     ]
   end
