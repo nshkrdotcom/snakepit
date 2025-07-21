@@ -643,8 +643,3 @@ end
 ```
 
 ---
-
-For more examples and advanced usage, see:
-- [gRPC Streaming Examples](docs/specs/grpc_streaming_examples.md)
-- [gRPC Bridge Redesign](docs/specs/grpc_bridge_redesign.md)
-- [Main README](README.md)
