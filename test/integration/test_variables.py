@@ -263,12 +263,12 @@ class TestConcurrency:
     
     def test_session_isolation(self, server_fixture):
         """Test that sessions are isolated."""
-        from snakepit_bridge.snakepit_bridge_pb2_grpc import SnakepitBridgeStub
-        from snakepit_bridge.snakepit_bridge_pb2 import InitializeSessionRequest, CleanupSessionRequest
+        from snakepit_bridge.grpc.snakepit_bridge_pb2_grpc import BridgeServiceStub
+        from snakepit_bridge.grpc.snakepit_bridge_pb2 import InitializeSessionRequest, CleanupSessionRequest
         import grpc
         
         channel = grpc.insecure_channel(f'localhost:{server_fixture.port}')
-        stub = SnakepitBridgeStub(channel)
+        stub = BridgeServiceStub(channel)
         
         # Initialize two sessions
         for session_id in ['session_1', 'session_2']:

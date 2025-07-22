@@ -5,11 +5,13 @@ package snakepit.bridge;
 import "google/protobuf/any.proto";
 import "google/protobuf/timestamp.proto";
 
-service SnakepitBridge {
+service BridgeService {
   // Health & Session Management
   rpc Ping(PingRequest) returns (PingResponse);
   rpc InitializeSession(InitializeSessionRequest) returns (InitializeSessionResponse);
   rpc CleanupSession(CleanupSessionRequest) returns (CleanupSessionResponse);
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   
   // Variable Operations
   rpc GetVariable(GetVariableRequest) returns (GetVariableResponse);
@@ -308,4 +310,27 @@ message RollbackVariableResponse {
   bool success = 1;
   Variable variable = 2;
   string error_message = 3;
+}
+
+// Session Management Messages
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  string session_id = 1;
+  map<string, string> metadata = 2;
+  google.protobuf.Timestamp created_at = 3;
+  int32 variable_count = 4;
+  int32 tool_count = 5;
+}
+
+message HeartbeatRequest {
+  string session_id = 1;
+  google.protobuf.Timestamp client_time = 2;
+}
+
+message HeartbeatResponse {
+  google.protobuf.Timestamp server_time = 1;
+  bool session_valid = 2;
 }

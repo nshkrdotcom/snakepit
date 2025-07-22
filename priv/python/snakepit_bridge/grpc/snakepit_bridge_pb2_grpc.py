@@ -25,7 +25,7 @@ if _version_not_supported:
     )
 
 
-class SnakepitBridgeStub(object):
+class BridgeServiceStub(object):
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -35,88 +35,108 @@ class SnakepitBridgeStub(object):
             channel: A grpc.Channel.
         """
         self.Ping = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/Ping',
+                '/snakepit.bridge.BridgeService/Ping',
                 request_serializer=snakepit__bridge__pb2.PingRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.PingResponse.FromString,
                 _registered_method=True)
         self.InitializeSession = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/InitializeSession',
+                '/snakepit.bridge.BridgeService/InitializeSession',
                 request_serializer=snakepit__bridge__pb2.InitializeSessionRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.InitializeSessionResponse.FromString,
                 _registered_method=True)
         self.CleanupSession = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/CleanupSession',
+                '/snakepit.bridge.BridgeService/CleanupSession',
                 request_serializer=snakepit__bridge__pb2.CleanupSessionRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.CleanupSessionResponse.FromString,
                 _registered_method=True)
+        self.GetSession = channel.unary_unary(
+                '/snakepit.bridge.BridgeService/GetSession',
+                request_serializer=snakepit__bridge__pb2.GetSessionRequest.SerializeToString,
+                response_deserializer=snakepit__bridge__pb2.GetSessionResponse.FromString,
+                _registered_method=True)
+        self.Heartbeat = channel.unary_unary(
+                '/snakepit.bridge.BridgeService/Heartbeat',
+                request_serializer=snakepit__bridge__pb2.HeartbeatRequest.SerializeToString,
+                response_deserializer=snakepit__bridge__pb2.HeartbeatResponse.FromString,
+                _registered_method=True)
         self.GetVariable = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/GetVariable',
+                '/snakepit.bridge.BridgeService/GetVariable',
                 request_serializer=snakepit__bridge__pb2.GetVariableRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.GetVariableResponse.FromString,
                 _registered_method=True)
         self.SetVariable = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/SetVariable',
+                '/snakepit.bridge.BridgeService/SetVariable',
                 request_serializer=snakepit__bridge__pb2.SetVariableRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.SetVariableResponse.FromString,
                 _registered_method=True)
         self.GetVariables = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/GetVariables',
+                '/snakepit.bridge.BridgeService/GetVariables',
                 request_serializer=snakepit__bridge__pb2.BatchGetVariablesRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.BatchGetVariablesResponse.FromString,
                 _registered_method=True)
         self.SetVariables = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/SetVariables',
+                '/snakepit.bridge.BridgeService/SetVariables',
                 request_serializer=snakepit__bridge__pb2.BatchSetVariablesRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.BatchSetVariablesResponse.FromString,
                 _registered_method=True)
         self.RegisterVariable = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/RegisterVariable',
+                '/snakepit.bridge.BridgeService/RegisterVariable',
                 request_serializer=snakepit__bridge__pb2.RegisterVariableRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.RegisterVariableResponse.FromString,
                 _registered_method=True)
+        self.ListVariables = channel.unary_unary(
+                '/snakepit.bridge.BridgeService/ListVariables',
+                request_serializer=snakepit__bridge__pb2.ListVariablesRequest.SerializeToString,
+                response_deserializer=snakepit__bridge__pb2.ListVariablesResponse.FromString,
+                _registered_method=True)
+        self.DeleteVariable = channel.unary_unary(
+                '/snakepit.bridge.BridgeService/DeleteVariable',
+                request_serializer=snakepit__bridge__pb2.DeleteVariableRequest.SerializeToString,
+                response_deserializer=snakepit__bridge__pb2.DeleteVariableResponse.FromString,
+                _registered_method=True)
         self.ExecuteTool = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/ExecuteTool',
+                '/snakepit.bridge.BridgeService/ExecuteTool',
                 request_serializer=snakepit__bridge__pb2.ExecuteToolRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.ExecuteToolResponse.FromString,
                 _registered_method=True)
         self.ExecuteStreamingTool = channel.unary_stream(
-                '/snakepit.bridge.SnakepitBridge/ExecuteStreamingTool',
+                '/snakepit.bridge.BridgeService/ExecuteStreamingTool',
                 request_serializer=snakepit__bridge__pb2.ExecuteToolRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.ToolChunk.FromString,
                 _registered_method=True)
         self.WatchVariables = channel.unary_stream(
-                '/snakepit.bridge.SnakepitBridge/WatchVariables',
+                '/snakepit.bridge.BridgeService/WatchVariables',
                 request_serializer=snakepit__bridge__pb2.WatchVariablesRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.VariableUpdate.FromString,
                 _registered_method=True)
         self.AddDependency = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/AddDependency',
+                '/snakepit.bridge.BridgeService/AddDependency',
                 request_serializer=snakepit__bridge__pb2.AddDependencyRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.AddDependencyResponse.FromString,
                 _registered_method=True)
         self.StartOptimization = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/StartOptimization',
+                '/snakepit.bridge.BridgeService/StartOptimization',
                 request_serializer=snakepit__bridge__pb2.StartOptimizationRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.StartOptimizationResponse.FromString,
                 _registered_method=True)
         self.StopOptimization = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/StopOptimization',
+                '/snakepit.bridge.BridgeService/StopOptimization',
                 request_serializer=snakepit__bridge__pb2.StopOptimizationRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.StopOptimizationResponse.FromString,
                 _registered_method=True)
         self.GetVariableHistory = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/GetVariableHistory',
+                '/snakepit.bridge.BridgeService/GetVariableHistory',
                 request_serializer=snakepit__bridge__pb2.GetVariableHistoryRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.GetVariableHistoryResponse.FromString,
                 _registered_method=True)
         self.RollbackVariable = channel.unary_unary(
-                '/snakepit.bridge.SnakepitBridge/RollbackVariable',
+                '/snakepit.bridge.BridgeService/RollbackVariable',
                 request_serializer=snakepit__bridge__pb2.RollbackVariableRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.RollbackVariableResponse.FromString,
                 _registered_method=True)
 
 
-class SnakepitBridgeServicer(object):
+class BridgeServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def Ping(self, request, context):
@@ -133,6 +153,18 @@ class SnakepitBridgeServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def CleanupSession(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetSession(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Heartbeat(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -164,6 +196,18 @@ class SnakepitBridgeServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def RegisterVariable(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListVariables(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteVariable(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -221,7 +265,7 @@ class SnakepitBridgeServicer(object):
         raise NotImplementedError('Method not implemented!')
 
 
-def add_SnakepitBridgeServicer_to_server(servicer, server):
+def add_BridgeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'Ping': grpc.unary_unary_rpc_method_handler(
                     servicer.Ping,
@@ -237,6 +281,16 @@ def add_SnakepitBridgeServicer_to_server(servicer, server):
                     servicer.CleanupSession,
                     request_deserializer=snakepit__bridge__pb2.CleanupSessionRequest.FromString,
                     response_serializer=snakepit__bridge__pb2.CleanupSessionResponse.SerializeToString,
+            ),
+            'GetSession': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSession,
+                    request_deserializer=snakepit__bridge__pb2.GetSessionRequest.FromString,
+                    response_serializer=snakepit__bridge__pb2.GetSessionResponse.SerializeToString,
+            ),
+            'Heartbeat': grpc.unary_unary_rpc_method_handler(
+                    servicer.Heartbeat,
+                    request_deserializer=snakepit__bridge__pb2.HeartbeatRequest.FromString,
+                    response_serializer=snakepit__bridge__pb2.HeartbeatResponse.SerializeToString,
             ),
             'GetVariable': grpc.unary_unary_rpc_method_handler(
                     servicer.GetVariable,
@@ -262,6 +316,16 @@ def add_SnakepitBridgeServicer_to_server(servicer, server):
                     servicer.RegisterVariable,
                     request_deserializer=snakepit__bridge__pb2.RegisterVariableRequest.FromString,
                     response_serializer=snakepit__bridge__pb2.RegisterVariableResponse.SerializeToString,
+            ),
+            'ListVariables': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListVariables,
+                    request_deserializer=snakepit__bridge__pb2.ListVariablesRequest.FromString,
+                    response_serializer=snakepit__bridge__pb2.ListVariablesResponse.SerializeToString,
+            ),
+            'DeleteVariable': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteVariable,
+                    request_deserializer=snakepit__bridge__pb2.DeleteVariableRequest.FromString,
+                    response_serializer=snakepit__bridge__pb2.DeleteVariableResponse.SerializeToString,
             ),
             'ExecuteTool': grpc.unary_unary_rpc_method_handler(
                     servicer.ExecuteTool,
@@ -305,13 +369,13 @@ def add_SnakepitBridgeServicer_to_server(servicer, server):
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'snakepit.bridge.SnakepitBridge', rpc_method_handlers)
+            'snakepit.bridge.BridgeService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('snakepit.bridge.SnakepitBridge', rpc_method_handlers)
+    server.add_registered_method_handlers('snakepit.bridge.BridgeService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class SnakepitBridge(object):
+class BridgeService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
@@ -328,7 +392,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/Ping',
+            '/snakepit.bridge.BridgeService/Ping',
             snakepit__bridge__pb2.PingRequest.SerializeToString,
             snakepit__bridge__pb2.PingResponse.FromString,
             options,
@@ -355,7 +419,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/InitializeSession',
+            '/snakepit.bridge.BridgeService/InitializeSession',
             snakepit__bridge__pb2.InitializeSessionRequest.SerializeToString,
             snakepit__bridge__pb2.InitializeSessionResponse.FromString,
             options,
@@ -382,9 +446,63 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/CleanupSession',
+            '/snakepit.bridge.BridgeService/CleanupSession',
             snakepit__bridge__pb2.CleanupSessionRequest.SerializeToString,
             snakepit__bridge__pb2.CleanupSessionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSession(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snakepit.bridge.BridgeService/GetSession',
+            snakepit__bridge__pb2.GetSessionRequest.SerializeToString,
+            snakepit__bridge__pb2.GetSessionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Heartbeat(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snakepit.bridge.BridgeService/Heartbeat',
+            snakepit__bridge__pb2.HeartbeatRequest.SerializeToString,
+            snakepit__bridge__pb2.HeartbeatResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -409,7 +527,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/GetVariable',
+            '/snakepit.bridge.BridgeService/GetVariable',
             snakepit__bridge__pb2.GetVariableRequest.SerializeToString,
             snakepit__bridge__pb2.GetVariableResponse.FromString,
             options,
@@ -436,7 +554,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/SetVariable',
+            '/snakepit.bridge.BridgeService/SetVariable',
             snakepit__bridge__pb2.SetVariableRequest.SerializeToString,
             snakepit__bridge__pb2.SetVariableResponse.FromString,
             options,
@@ -463,7 +581,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/GetVariables',
+            '/snakepit.bridge.BridgeService/GetVariables',
             snakepit__bridge__pb2.BatchGetVariablesRequest.SerializeToString,
             snakepit__bridge__pb2.BatchGetVariablesResponse.FromString,
             options,
@@ -490,7 +608,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/SetVariables',
+            '/snakepit.bridge.BridgeService/SetVariables',
             snakepit__bridge__pb2.BatchSetVariablesRequest.SerializeToString,
             snakepit__bridge__pb2.BatchSetVariablesResponse.FromString,
             options,
@@ -517,9 +635,63 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/RegisterVariable',
+            '/snakepit.bridge.BridgeService/RegisterVariable',
             snakepit__bridge__pb2.RegisterVariableRequest.SerializeToString,
             snakepit__bridge__pb2.RegisterVariableResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListVariables(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snakepit.bridge.BridgeService/ListVariables',
+            snakepit__bridge__pb2.ListVariablesRequest.SerializeToString,
+            snakepit__bridge__pb2.ListVariablesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteVariable(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snakepit.bridge.BridgeService/DeleteVariable',
+            snakepit__bridge__pb2.DeleteVariableRequest.SerializeToString,
+            snakepit__bridge__pb2.DeleteVariableResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -544,7 +716,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/ExecuteTool',
+            '/snakepit.bridge.BridgeService/ExecuteTool',
             snakepit__bridge__pb2.ExecuteToolRequest.SerializeToString,
             snakepit__bridge__pb2.ExecuteToolResponse.FromString,
             options,
@@ -571,7 +743,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_stream(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/ExecuteStreamingTool',
+            '/snakepit.bridge.BridgeService/ExecuteStreamingTool',
             snakepit__bridge__pb2.ExecuteToolRequest.SerializeToString,
             snakepit__bridge__pb2.ToolChunk.FromString,
             options,
@@ -598,7 +770,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_stream(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/WatchVariables',
+            '/snakepit.bridge.BridgeService/WatchVariables',
             snakepit__bridge__pb2.WatchVariablesRequest.SerializeToString,
             snakepit__bridge__pb2.VariableUpdate.FromString,
             options,
@@ -625,7 +797,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/AddDependency',
+            '/snakepit.bridge.BridgeService/AddDependency',
             snakepit__bridge__pb2.AddDependencyRequest.SerializeToString,
             snakepit__bridge__pb2.AddDependencyResponse.FromString,
             options,
@@ -652,7 +824,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/StartOptimization',
+            '/snakepit.bridge.BridgeService/StartOptimization',
             snakepit__bridge__pb2.StartOptimizationRequest.SerializeToString,
             snakepit__bridge__pb2.StartOptimizationResponse.FromString,
             options,
@@ -679,7 +851,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/StopOptimization',
+            '/snakepit.bridge.BridgeService/StopOptimization',
             snakepit__bridge__pb2.StopOptimizationRequest.SerializeToString,
             snakepit__bridge__pb2.StopOptimizationResponse.FromString,
             options,
@@ -706,7 +878,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/GetVariableHistory',
+            '/snakepit.bridge.BridgeService/GetVariableHistory',
             snakepit__bridge__pb2.GetVariableHistoryRequest.SerializeToString,
             snakepit__bridge__pb2.GetVariableHistoryResponse.FromString,
             options,
@@ -733,7 +905,7 @@ class SnakepitBridge(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/snakepit.bridge.SnakepitBridge/RollbackVariable',
+            '/snakepit.bridge.BridgeService/RollbackVariable',
             snakepit__bridge__pb2.RollbackVariableRequest.SerializeToString,
             snakepit__bridge__pb2.RollbackVariableResponse.FromString,
             options,

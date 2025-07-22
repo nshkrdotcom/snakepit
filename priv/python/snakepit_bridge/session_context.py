@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .snakepit_bridge_pb2 import (
+from .grpc.snakepit_bridge_pb2 import (
     Variable, RegisterVariableRequest, RegisterVariableResponse,
     GetVariableRequest, GetVariableResponse, SetVariableRequest, SetVariableResponse,
     BatchGetVariablesRequest, BatchGetVariablesResponse,
@@ -21,7 +21,7 @@ from .snakepit_bridge_pb2 import (
     DeleteVariableRequest, DeleteVariableResponse,
     OptimizationStatus
 )
-from .snakepit_bridge_pb2_grpc import SnakepitBridgeStub
+from .grpc.snakepit_bridge_pb2_grpc import BridgeServiceStub
 from google.protobuf.any_pb2 import Any
 from .types import (
     VariableType, 
@@ -100,7 +100,7 @@ class SessionContext:
     intelligent caching to minimize gRPC calls.
     """
     
-    def __init__(self, stub: SnakepitBridgeStub, session_id: str):
+    def __init__(self, stub: BridgeServiceStub, session_id: str):
         self.stub = stub
         self.session_id = session_id
         self._cache: Dict[str, CachedVariable] = {}
@@ -617,7 +617,7 @@ class SessionContext:
         
         # Send cleanup request to server
         try:
-            from .snakepit_bridge_pb2 import CleanupSessionRequest
+            from .grpc.snakepit_bridge_pb2 import CleanupSessionRequest
             
             request = CleanupSessionRequest(
                 session_id=self.session_id,

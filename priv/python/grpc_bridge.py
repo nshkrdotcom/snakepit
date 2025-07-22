@@ -41,7 +41,7 @@ from snakepit_bridge.adapters.generic import GenericCommandHandler
 from snakepit_bridge.core import BaseCommandHandler
 
 
-class SnakepitBridgeServicer(snakepit_pb2_grpc.SnakepitBridgeServicer):
+class BridgeServiceServicer(snakepit_pb2_grpc.BridgeServiceServicer):
     """gRPC service implementation for Snakepit bridge."""
     
     def __init__(self, command_handler: BaseCommandHandler):
@@ -291,7 +291,7 @@ def serve(port: int, adapter_class=None):
         command_handler = GenericCommandHandler()
     
     # Create service
-    servicer = SnakepitBridgeServicer(command_handler)
+    servicer = BridgeServiceServicer(command_handler)
     
     # Create server
     max_workers = os.cpu_count() or 4 
@@ -308,7 +308,7 @@ def serve(port: int, adapter_class=None):
     )
     
     # Add service to server
-    snakepit_pb2_grpc.add_SnakepitBridgeServicer_to_server(servicer, server)
+    snakepit_pb2_grpc.add_BridgeServiceServicer_to_server(servicer, server)
     
     # Listen on port
     listen_addr = f'[::]:{port}'

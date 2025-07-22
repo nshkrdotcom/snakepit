@@ -32,7 +32,7 @@ defmodule Snakepit.Application do
         [
           # Start the central gRPC server that manages state
           {GRPC.Server.Supervisor,
-           endpoint: Snakepit.GRPC.BridgeServer, port: grpc_port, start_server: true},
+           endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true},
 
           # Task supervisor for async pool operations
           {Task.Supervisor, name: Snakepit.TaskSupervisor},

@@ -51,8 +51,10 @@ defmodule Snakepit.Bridge.Variables.Types.Float do
   end
 
   @impl true
+  @deprecated "Use Snakepit.Bridge.Serialization.encode_any/2 instead"
   def serialize(value) do
-    # Handle special float values
+    # This is deprecated - serialization is now handled by Serialization module
+    # Keeping for backward compatibility
     json_value =
       cond do
         value == :nan -> "NaN"
@@ -70,7 +72,10 @@ defmodule Snakepit.Bridge.Variables.Types.Float do
   end
 
   @impl true
+  @deprecated "Use Snakepit.Bridge.Serialization.decode_any/1 instead"
   def deserialize(json) when is_binary(json) do
+    # This is deprecated - deserialization is now handled by Serialization module
+    # Keeping for backward compatibility
     case Jason.decode(json) do
       {:ok, "NaN"} -> {:ok, :nan}
       {:ok, "Infinity"} -> {:ok, :infinity}

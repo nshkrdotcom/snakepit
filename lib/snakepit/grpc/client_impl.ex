@@ -35,7 +35,7 @@ defmodule Snakepit.GRPC.ClientImpl do
     timeout = opts[:timeout] || @default_timeout
     call_opts = [timeout: timeout]
 
-    case Bridge.SnakepitBridge.Stub.ping(channel, request, call_opts) do
+    case Bridge.BridgeService.Stub.ping(channel, request, call_opts) do
       {:ok, response, _headers} ->
         {:ok,
          %{
@@ -69,7 +69,7 @@ defmodule Snakepit.GRPC.ClientImpl do
     timeout = opts[:timeout] || @default_timeout
     call_opts = [timeout: timeout]
 
-    case Bridge.SnakepitBridge.Stub.initialize_session(channel, request, call_opts) do
+    case Bridge.BridgeService.Stub.initialize_session(channel, request, call_opts) do
       {:ok, response, _headers} ->
         {:ok,
          %{
@@ -93,7 +93,7 @@ defmodule Snakepit.GRPC.ClientImpl do
     timeout = opts[:timeout] || @default_timeout
     call_opts = [timeout: timeout]
 
-    case Bridge.SnakepitBridge.Stub.cleanup_session(channel, request, call_opts) do
+    case Bridge.BridgeService.Stub.cleanup_session(channel, request, call_opts) do
       {:ok, response, _headers} ->
         {:ok,
          %{
@@ -136,7 +136,7 @@ defmodule Snakepit.GRPC.ClientImpl do
     timeout = opts[:timeout] || @default_timeout
     call_opts = [timeout: timeout]
 
-    result = Bridge.SnakepitBridge.Stub.register_variable(channel, request, call_opts)
+    result = Bridge.BridgeService.Stub.register_variable(channel, request, call_opts)
 
     case result do
       {:ok, response, _headers} ->
@@ -203,7 +203,7 @@ defmodule Snakepit.GRPC.ClientImpl do
     timeout = opts[:timeout] || @default_timeout
     call_opts = [timeout: timeout]
 
-    case Bridge.SnakepitBridge.Stub.get_variable(channel, request, call_opts) do
+    case Bridge.BridgeService.Stub.get_variable(channel, request, call_opts) do
       {:ok, response, _headers} ->
         if response.variable do
           {:ok, decode_variable(response.variable)}
@@ -247,7 +247,7 @@ defmodule Snakepit.GRPC.ClientImpl do
         timeout = opts[:timeout] || @default_timeout
         call_opts = [timeout: timeout]
 
-        case Bridge.SnakepitBridge.Stub.set_variable(channel, request, call_opts) do
+        case Bridge.BridgeService.Stub.set_variable(channel, request, call_opts) do
           {:ok, response, _headers} ->
             if response.success do
               :ok
@@ -289,7 +289,7 @@ defmodule Snakepit.GRPC.ClientImpl do
     timeout = opts[:timeout] || 300_000
     call_opts = [timeout: timeout]
 
-    case Bridge.SnakepitBridge.Stub.watch_variables(channel, request, call_opts) do
+    case Bridge.BridgeService.Stub.watch_variables(channel, request, call_opts) do
       stream when is_struct(stream, Enumerable.GRPC.Client.Stream) ->
         {:ok, stream}
 

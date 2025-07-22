@@ -46,15 +46,46 @@ defmodule Snakepit.Bridge.Variables.TypesTest do
     end
 
     test "serialization" do
-      alias Types.Float
+      alias Snakepit.Bridge.Serialization
 
-      assert {:ok, "3.14"} = Float.serialize(3.14)
-      assert {:ok, "\"Infinity\""} = Float.serialize(:infinity)
-      assert {:ok, "\"-Infinity\""} = Float.serialize(:negative_infinity)
-      assert {:ok, "\"NaN\""} = Float.serialize(:nan)
+      # Test encoding
+      assert {:ok, any} = Serialization.encode_any(3.14, :float)
+      assert any.type_url == "type.googleapis.com/snakepit.float"
+      assert Jason.decode!(any.value) == 3.14
 
-      assert {:ok, 3.14} = Float.deserialize("3.14")
-      assert {:ok, :infinity} = Float.deserialize("\"Infinity\"")
+      assert {:ok, any} = Serialization.encode_any(:infinity, :float)
+      assert Jason.decode!(any.value) == "Infinity"
+
+      assert {:ok, any} = Serialization.encode_any(:negative_infinity, :float)
+      assert Jason.decode!(any.value) == "-Infinity"
+
+      assert {:ok, any} = Serialization.encode_any(:nan, :float)
+      assert Jason.decode!(any.value) == "NaN"
+
+      # Test decoding
+      assert {:ok, 3.14} =
+               Serialization.decode_any(%{
+                 type_url: "type.googleapis.com/snakepit.float",
+                 value: "3.14"
+               })
+
+      assert {:ok, :infinity} =
+               Serialization.decode_any(%{
+                 type_url: "type.googleapis.com/snakepit.float",
+                 value: "\"Infinity\""
+               })
+
+      assert {:ok, :negative_infinity} =
+               Serialization.decode_any(%{
+                 type_url: "type.googleapis.com/snakepit.float",
+                 value: "\"-Infinity\""
+               })
+
+      assert {:ok, :nan} =
+               Serialization.decode_any(%{
+                 type_url: "type.googleapis.com/snakepit.float",
+                 value: "\"NaN\""
+               })
     end
   end
 
@@ -80,14 +111,31 @@ defmodule Snakepit.Bridge.Variables.TypesTest do
     end
 
     test "serialization" do
-      alias Types.Integer
+      alias Snakepit.Bridge.Serialization
 
-      assert {:ok, "42"} = Integer.serialize(42)
-      assert {:ok, "-100"} = Integer.serialize(-100)
-      assert {:ok, "0"} = Integer.serialize(0)
+      # Test encoding
+      assert {:ok, any} = Serialization.encode_any(42, :integer)
+      assert any.type_url == "type.googleapis.com/snakepit.integer"
+      assert Jason.decode!(any.value) == 42
 
-      assert {:ok, 42} = Integer.deserialize("42")
-      assert {:ok, -100} = Integer.deserialize("-100")
+      assert {:ok, any} = Serialization.encode_any(-100, :integer)
+      assert Jason.decode!(any.value) == -100
+
+      assert {:ok, any} = Serialization.encode_any(0, :integer)
+      assert Jason.decode!(any.value) == 0
+
+      # Test decoding
+      assert {:ok, 42} =
+               Serialization.decode_any(%{
+                 type_url: "type.googleapis.com/snakepit.integer",
+                 value: "42"
+               })
+
+      assert {:ok, -100} =
+               Serialization.decode_any(%{
+                 type_url: "type.googleapis.com/snakepit.integer",
+                 value: "-100"
+               })
     end
   end
 
@@ -139,13 +187,28 @@ defmodule Snakepit.Bridge.Variables.TypesTest do
     end
 
     test "serialization" do
-      alias Types.Boolean
+      alias Snakepit.Bridge.Serialization
 
-      assert {:ok, "true"} = Boolean.serialize(true)
-      assert {:ok, "false"} = Boolean.serialize(false)
+      # Test encoding
+      assert {:ok, any} = Serialization.encode_any(true, :boolean)
+      assert any.type_url == "type.googleapis.com/snakepit.boolean"
+      assert Jason.decode!(any.value) == true
 
-      assert {:ok, true} = Boolean.deserialize("true")
-      assert {:ok, false} = Boolean.deserialize("false")
+      assert {:ok, any} = Serialization.encode_any(false, :boolean)
+      assert Jason.decode!(any.value) == false
+
+      # Test decoding
+      assert {:ok, true} =
+               Serialization.decode_any(%{
+                 type_url: "type.googleapis.com/snakepit.boolean",
+                 value: "true"
+               })
+
+      assert {:ok, false} =
+               Serialization.decode_any(%{
+                 type_url: "type.googleapis.com/snakepit.boolean",
+                 value: "false"
+               })
     end
   end
 
