@@ -12,7 +12,8 @@ defmodule Snakepit.MixProject do
       package: package(),
       deps: deps(),
       dialyzer: dialyzer(),
-      docs: docs()
+      docs: docs(),
+      aliases: aliases()
     ]
   end
 
@@ -124,4 +125,13 @@ defmodule Snakepit.MixProject do
   end
 
   defp docs_before_closing_body_tag(_), do: ""
+
+  defp aliases do
+    [
+      "grpc.gen": [
+        "cmd mkdir -p lib/snakepit/grpc/generated",
+        "cmd protoc --elixir_out=plugins=grpc:./lib/snakepit/grpc/generated --proto_path=priv/proto priv/proto/snakepit_bridge.proto"
+      ]
+    ]
+  end
 end

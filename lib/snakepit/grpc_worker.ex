@@ -46,7 +46,8 @@ defmodule Snakepit.GRPCWorker do
           port: integer(),
           channel: term() | nil,
           health_check_ref: reference() | nil,
-          stats: map()
+          stats: map(),
+          session_id: String.t()
         }
 
   # Client API
@@ -138,6 +139,20 @@ defmodule Snakepit.GRPCWorker do
   def get_info(worker) do
     GenServer.call(worker, :get_info)
   end
+  
+  @doc """
+  Get the gRPC channel for direct client usage.
+  """
+  def get_channel(worker) do
+    GenServer.call(worker, :get_channel)
+  end
+  
+  @doc """
+  Get the session ID for this worker.
+  """
+  def get_session_id(worker) do
+    GenServer.call(worker, :get_session_id)
+  end
 
   # Server callbacks
 
@@ -146,6 +161,9 @@ defmodule Snakepit.GRPCWorker do
     adapter = Keyword.fetch!(opts, :adapter)
     worker_id = Keyword.fetch!(opts, :id)
     port = adapter.get_port()
+    
+    # Generate unique session ID
+    session_id = "session_#{:erlang.unique_integer([:positive, :monotonic])}_#{:erlang.system_time(:microsecond)}"
 
     # Start the gRPC server process non-blocking
     executable = adapter.executable_path()
@@ -191,6 +209,7 @@ defmodule Snakepit.GRPCWorker do
       port: port,
       server_port: server_port,
       process_pid: process_pid,
+      session_id: session_id,
       # Will be established in handle_continue
       connection: nil,
       health_check_ref: nil,
@@ -307,6 +326,20 @@ defmodule Snakepit.GRPCWorker do
     # Make gRPC info call
     info_result = make_info_call(state)
     {:reply, info_result, state}
+  end
+
+  @impl true
+  def handle_call(:get_channel, _from, state) do
+    if state.connection do
+      {:reply, {:ok, state.connection.channel}, state}
+    else
+      {:reply, {:error, :not_connected}, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:get_session_id, _from, state) do
+    {:reply, {:ok, state.session_id}, state}
   end
 
   @impl true
@@ -443,14 +476,18 @@ defmodule Snakepit.GRPCWorker do
         output = to_string(data)
 
         # Look for the ready message anywhere in the output
-        if String.contains?(output, "GRPC_SERVER_READY_ON_PORT=") do
+        if String.contains?(output, "GRPC_READY:") do
           # Extract port from the ready message line
           lines = String.split(output, "\n")
-          ready_line = Enum.find(lines, &String.starts_with?(&1, "GRPC_SERVER_READY_ON_PORT="))
+          ready_line = Enum.find(lines, &String.contains?(&1, "GRPC_READY:"))
 
           if ready_line do
-            [_, port_str] = String.split(String.trim(ready_line), "=")
-            {:ok, String.to_integer(port_str)}
+            case Regex.run(~r/GRPC_READY:(\d+)/, ready_line) do
+              [_, port_str] ->
+                {:ok, String.to_integer(port_str)}
+              _ ->
+                wait_for_server_ready(port, timeout)
+            end
           else
             wait_for_server_ready(port, timeout)
           end
