@@ -420,7 +420,18 @@ defmodule Snakepit.Bridge.SessionStore do
   @spec export_variables(String.t()) :: {:ok, [map()]} | {:error, term()}
   def export_variables(session_id) do
     with {:ok, variables} <- list_variables(session_id) do
-      exported = Enum.map(variables, &Variable.to_map/1)
+      # Use to_export_map to exclude internal fields
+      exported = Enum.map(variables, &Variable.to_export_map/1)
+
+      # Debug output
+      require Logger
+      Logger.debug("Exporting #{length(exported)} variables from session #{session_id}")
+
+      Enum.each(exported, fn var_map ->
+        Logger.debug("Exported variable: #{inspect(var_map, pretty: true)}")
+        Logger.debug("Exported fields: #{inspect(Map.keys(var_map))}")
+      end)
+
       {:ok, exported}
     end
   end

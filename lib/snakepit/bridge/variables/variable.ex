@@ -146,7 +146,7 @@ defmodule Snakepit.Bridge.Variables.Variable do
   """
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = variable) do
-    %{
+    result = %{
       id: variable.id,
       name: to_string(variable.name),
       type: variable.type,
@@ -159,6 +159,44 @@ defmodule Snakepit.Bridge.Variables.Variable do
       optimization_status: variable.optimization_status,
       access_rules: variable.access_rules
     }
+
+    # Debug output
+    require Logger
+
+    Logger.debug(
+      "Variable.to_map for #{variable.name}: exporting fields #{inspect(Map.keys(result))}"
+    )
+
+    result
+  end
+
+  @doc """
+  Converts variable to a map for export, excluding internal fields.
+  This is useful for serialization to external systems.
+  """
+  @spec to_export_map(t()) :: map()
+  def to_export_map(%__MODULE__{} = variable) do
+    # Only include essential fields for export
+    result = %{
+      id: variable.id,
+      name: to_string(variable.name),
+      type: variable.type,
+      value: variable.value,
+      constraints: variable.constraints,
+      metadata: variable.metadata,
+      version: variable.version,
+      created_at: variable.created_at,
+      last_updated_at: variable.last_updated_at
+    }
+
+    # Debug output
+    require Logger
+
+    Logger.debug(
+      "Variable.to_export_map for #{variable.name}: exporting minimal fields #{inspect(Map.keys(result))}"
+    )
+
+    result
   end
 
   @doc """
