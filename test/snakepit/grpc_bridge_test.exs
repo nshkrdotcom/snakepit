@@ -59,13 +59,13 @@ defmodule Snakepit.GRPCBridgeTest do
     test "can initialize a session", %{channel: channel, session_id: session_id} do
       # Session already initialized in setup, just verify it worked
       # We can try to register a variable as proof
-      assert {:ok, _, _} =
+      assert {:ok, %{success: true}} =
                Client.register_variable(channel, session_id, "init_test", :string, "works")
     end
 
     test "can register and retrieve variables", %{channel: channel, session_id: session_id} do
       # Register a variable
-      assert {:ok, var_id, variable} =
+      assert {:ok, %{success: true}} =
                Client.register_variable(
                  channel,
                  session_id,
@@ -74,19 +74,16 @@ defmodule Snakepit.GRPCBridgeTest do
                  3.14
                )
 
-      assert var_id != nil
-      assert variable[:name] == "test_float"
-      assert variable[:type] == :float
-      assert variable[:value] == 3.14
-
       # Get the variable
       assert {:ok, retrieved} = Client.get_variable(channel, session_id, "test_float")
-      assert retrieved[:value] == 3.14
+      assert retrieved.name == "test_float"
+      assert retrieved.type == :float
+      assert retrieved.value == 3.14
     end
 
     test "can update variables", %{channel: channel, session_id: session_id} do
       # Register a variable
-      {:ok, _, _} =
+      {:ok, %{success: true}} =
         Client.register_variable(
           channel,
           session_id,
@@ -96,16 +93,16 @@ defmodule Snakepit.GRPCBridgeTest do
         )
 
       # Update it
-      assert :ok = Client.set_variable(channel, session_id, "mutable", 100)
+      assert {:ok, %{success: true}} = Client.set_variable(channel, session_id, "mutable", 100)
 
       # Verify update
       {:ok, updated} = Client.get_variable(channel, session_id, "mutable")
-      assert updated[:value] == 100
+      assert updated.value == 100
     end
 
     test "enforces type constraints", %{channel: channel, session_id: session_id} do
       # Register with constraints
-      assert {:ok, _, _} =
+      assert {:ok, %{success: true}} =
                Client.register_variable(
                  channel,
                  session_id,
@@ -116,7 +113,7 @@ defmodule Snakepit.GRPCBridgeTest do
                )
 
       # Valid update
-      assert :ok = Client.set_variable(channel, session_id, "bounded", 0.7)
+      assert {:ok, %{success: true}} = Client.set_variable(channel, session_id, "bounded", 0.7)
 
       # Invalid update
       assert {:error, _} = Client.set_variable(channel, session_id, "bounded", 1.5)

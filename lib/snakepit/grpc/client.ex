@@ -23,36 +23,22 @@ defmodule Snakepit.GRPC.Client do
     end
   end
 
-  def initialize_session(_channel, session_id, config \\ %{}, _opts \\ []) do
-    _request = %{
-      session_id: session_id,
-      metadata: %{
-        "elixir_node" => to_string(node()),
-        "initialized_at" => DateTime.to_iso8601(DateTime.utc_now())
-      },
-      config:
-        Map.merge(
-          %{
-            enable_caching: true,
-            cache_ttl_seconds: 60,
-            enable_telemetry: false
-          },
-          config
-        )
-    }
-
-    # Placeholder for actual gRPC call
-    {:ok, %{success: true, available_tools: %{}, initial_variables: %{}}}
+  def initialize_session(channel, session_id, config \\ %{}, opts \\ []) do
+    if not Map.get(channel, :mock, false) do
+      Snakepit.GRPC.ClientImpl.initialize_session(channel, session_id, config, opts)
+    else
+      # Mock implementation
+      {:ok, %{success: true, available_tools: %{}, initial_variables: %{}}}
+    end
   end
 
-  def cleanup_session(_channel, session_id, force \\ false, _opts \\ []) do
-    _request = %{
-      session_id: session_id,
-      force: force
-    }
-
-    # Placeholder for actual gRPC call
-    {:ok, %{success: true, resources_cleaned: 2}}
+  def cleanup_session(channel, session_id, force \\ false, opts \\ []) do
+    if not Map.get(channel, :mock, false) do
+      Snakepit.GRPC.ClientImpl.cleanup_session(channel, session_id, force, opts)
+    else
+      # Mock implementation  
+      {:ok, %{success: true, resources_cleaned: 2}}
+    end
   end
 
   def register_variable(
@@ -111,28 +97,22 @@ defmodule Snakepit.GRPC.Client do
     result
   end
 
-  def get_variable(_channel, session_id, identifier, opts \\ []) do
-    _request = %{
-      session_id: session_id,
-      variable_identifier: to_string(identifier),
-      bypass_cache: opts[:bypass_cache] || false
-    }
-
-    # Placeholder for actual gRPC call
-    {:ok, %{variable: %{id: identifier, name: identifier, type: "float", value: 0.7}}}
+  def get_variable(channel, session_id, identifier, opts \\ []) do
+    if not Map.get(channel, :mock, false) do
+      Snakepit.GRPC.ClientImpl.get_variable(channel, session_id, identifier, opts)
+    else
+      # Mock implementation
+      {:ok, %{variable: %{id: identifier, name: identifier, type: "float", value: 0.7}}}
+    end
   end
 
-  def set_variable(_channel, session_id, identifier, value, opts \\ []) do
-    _request = %{
-      session_id: session_id,
-      variable_identifier: to_string(identifier),
-      value: encode_any(value),
-      metadata: opts[:metadata] || %{},
-      expected_version: opts[:expected_version] || 0
-    }
-
-    # Placeholder for actual gRPC call
-    {:ok, %{success: true, error_message: "", new_version: 1}}
+  def set_variable(channel, session_id, identifier, value, opts \\ []) do
+    if not Map.get(channel, :mock, false) do
+      Snakepit.GRPC.ClientImpl.set_variable(channel, session_id, identifier, value, opts)
+    else
+      # Mock implementation
+      {:ok, %{success: true, error_message: "", new_version: 1}}
+    end
   end
 
   def execute_tool(_channel, session_id, tool_name, parameters, opts \\ []) do
@@ -213,5 +193,59 @@ defmodule Snakepit.GRPC.Client do
        version: "1.0.0",
        capabilities: ["tools", "variables", "streaming"]
      }}
+  end
+
+  def list_variables(channel, session_id, pattern \\ "*", opts \\ []) do
+    if not Map.get(channel, :mock, false) do
+      Snakepit.GRPC.ClientImpl.list_variables(channel, session_id, pattern, opts)
+    else
+      # Mock implementation
+      {:ok, %{variables: []}}
+    end
+  end
+
+  def delete_variable(channel, session_id, identifier, opts \\ []) do
+    if not Map.get(channel, :mock, false) do
+      Snakepit.GRPC.ClientImpl.delete_variable(channel, session_id, identifier, opts)
+    else
+      # Mock implementation
+      {:ok, %{success: true}}
+    end
+  end
+
+  def get_session(channel, session_id, opts \\ []) do
+    if not Map.get(channel, :mock, false) do
+      Snakepit.GRPC.ClientImpl.get_session(channel, session_id, opts)
+    else
+      # Mock implementation
+      {:ok, %{session: %{id: session_id, active: true}}}
+    end
+  end
+
+  def heartbeat(channel, session_id, opts \\ []) do
+    if not Map.get(channel, :mock, false) do
+      Snakepit.GRPC.ClientImpl.heartbeat(channel, session_id, opts)
+    else
+      # Mock implementation
+      {:ok, %{success: true}}
+    end
+  end
+
+  def set_variables(channel, session_id, updates, opts \\ []) do
+    if not Map.get(channel, :mock, false) do
+      Snakepit.GRPC.ClientImpl.set_variables(channel, session_id, updates, opts)
+    else
+      # Mock implementation
+      results =
+        Enum.map(updates, fn update ->
+          %{
+            identifier: update.identifier,
+            success: true,
+            error: nil
+          }
+        end)
+
+      {:ok, %{results: results}}
+    end
   end
 end

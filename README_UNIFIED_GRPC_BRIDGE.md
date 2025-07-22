@@ -101,20 +101,38 @@ The unified gRPC bridge provides a high-performance, protocol-based communicatio
 
 ## Testing
 
-All components have comprehensive test coverage:
+Comprehensive test coverage across all components:
+
+### Test Files
 - Protocol tests: `test/snakepit/grpc/`
 - SessionStore tests: `test/snakepit/bridge/session_store_test.exs`
 - Type system tests: `test/snakepit/bridge/variables/types_test.exs`
-- Integration tests: `test/dspex/bridge/state/`
+- Property-based tests: `test/snakepit/bridge/property_test.exs`
+- Integration tests: `test/snakepit/bridge/integration_test.exs`
+- Test runner: `test/run_bridge_tests.exs`
 
 ### Running Tests
 ```bash
-# In snakepit directory
-cd snakepit && mix test
+# Run all tests
+mix test
 
-# In dspex directory  
-cd .. && mix test
+# Run unified test suite
+mix run test/run_bridge_tests.exs --all
+
+# Run specific test types
+mix test --include property
+mix test --include integration
+mix test --include performance
+
+# Run with test runner options
+mix run test/run_bridge_tests.exs --property --integration --verbose
 ```
+
+### Test Types
+1. **Unit Tests**: Individual component testing with isolation
+2. **Property-Based Tests**: Invariant verification with generated data using StreamData
+3. **Integration Tests**: Full stack Python-Elixir communication testing
+4. **Performance Tests**: Benchmark operations against targets
 
 ## Performance Characteristics
 
@@ -126,9 +144,9 @@ cd .. && mix test
 ## Future Work
 
 Low priority items for future consideration:
-- Unified integration test runner
-- Property-based tests
-- Benchmark suite
+- Benchmark suite for performance regression testing
+- Stage 3: Streaming and real-time updates
+- Stage 4: Advanced features (optimization, dependencies)
 
 ## References
 

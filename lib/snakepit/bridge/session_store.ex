@@ -698,7 +698,7 @@ defmodule Snakepit.Bridge.SessionStore do
     with {:ok, session} <- get_session_internal(state, session_id),
          {:ok, type_module} <- Types.get_type_module(type),
          {:ok, validated_value} <- type_module.validate(initial_value),
-         constraints = Keyword.get(opts, :constraints, %{}),
+         constraints = get_option(opts, :constraints, %{}),
          :ok <- type_module.validate_constraints(validated_value, constraints) do
       var_id = generate_variable_id(name)
       now = System.monotonic_time(:second)
@@ -863,7 +863,7 @@ defmodule Snakepit.Bridge.SessionStore do
   @impl true
   def handle_call({:update_variables, session_id, updates, opts}, _from, state) do
     atomic = Keyword.get(opts, :atomic, false)
-    metadata = Keyword.get(opts, :metadata, %{})
+    metadata = get_option(opts, :metadata, %{})
 
     with {:ok, session} <- get_session_internal(state, session_id) do
       if atomic do
@@ -1026,6 +1026,16 @@ defmodule Snakepit.Bridge.SessionStore do
 
   # Private helpers for variable operations
 
+  defp get_option(opts, key, default) when is_map(opts) do
+    Map.get(opts, key, default)
+  end
+
+  defp get_option(opts, key, default) when is_list(opts) do
+    Keyword.get(opts, key, default)
+  end
+
+  defp get_option(_, _, default), do: default
+
   defp get_session_internal(state, session_id) do
     case :ets.lookup(state.table, session_id) do
       [{^session_id, {_last_accessed, _ttl, session}}] -> {:ok, session}
@@ -1056,14 +1066,14 @@ defmodule Snakepit.Bridge.SessionStore do
 
     # Add description if provided
     base_metadata =
-      if desc = Keyword.get(opts, :description) do
+      if desc = get_option(opts, :description, nil) do
         Map.put(base_metadata, "description", desc)
       else
         base_metadata
       end
 
     # Merge any additional metadata
-    Map.merge(base_metadata, Keyword.get(opts, :metadata, %{}))
+    Map.merge(base_metadata, get_option(opts, :metadata, %{}))
   end
 
   defp handle_atomic_updates(session, updates, metadata, state, session_id) do

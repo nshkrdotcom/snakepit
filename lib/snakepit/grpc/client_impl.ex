@@ -109,87 +109,59 @@ defmodule Snakepit.GRPC.ClientImpl do
   def register_variable(channel, session_id, name, type, initial_value, opts \\ []) do
     require Logger
     # Encode value
-    {:ok, any_value} = Serialization.encode_any(initial_value, type)
+    case Serialization.encode_any(initial_value, type) do
+      {:ok, any_value} ->
+        # Convert to protobuf Any
+        proto_any = %Google.Protobuf.Any{
+          type_url: any_value.type_url,
+          value: any_value.value
+        }
 
-    # Convert to protobuf Any
-    proto_any = %Google.Protobuf.Any{
-      type_url: any_value.type_url,
-      value: any_value.value
-    }
+        # Encode constraints if provided
+        constraints_json =
+          case opts[:constraints] do
+            nil -> ""
+            constraints -> Jason.encode!(constraints)
+          end
 
-    # Encode constraints if provided
-    constraints_json =
-      case opts[:constraints] do
-        nil -> ""
-        constraints -> Jason.encode!(constraints)
-      end
+        request = %Bridge.RegisterVariableRequest{
+          session_id: session_id,
+          name: to_string(name),
+          type: to_string(type),
+          initial_value: proto_any,
+          constraints_json: constraints_json,
+          metadata: opts[:metadata] || %{}
+        }
 
-    request = %Bridge.RegisterVariableRequest{
-      session_id: session_id,
-      name: to_string(name),
-      type: to_string(type),
-      initial_value: proto_any,
-      constraints_json: constraints_json,
-      metadata: opts[:metadata] || %{}
-    }
+        timeout = opts[:timeout] || @default_timeout
+        call_opts = [timeout: timeout]
 
-    timeout = opts[:timeout] || @default_timeout
-    call_opts = [timeout: timeout]
+        result = Bridge.BridgeService.Stub.register_variable(channel, request, call_opts)
 
-    result = Bridge.BridgeService.Stub.register_variable(channel, request, call_opts)
+        case result do
+          {:ok, response, _headers} ->
+            Logger.debug("Got response: #{inspect(response)}")
 
-    case result do
-      {:ok, response, _headers} ->
-        Logger.debug("Got response: #{inspect(response)}")
+            if response.success do
+              {:ok, %{success: true}}
+            else
+              {:error, response.error_message || "Failed to register variable"}
+            end
 
-        if response.success do
-          # For now, return simple structure that tests expect
-          formatted_result =
-            {:ok, response.variable_id,
-             %{
-               id: response.variable_id,
-               name: to_string(name),
-               type: type,
-               value: initial_value,
-               version: 1,
-               source: nil,
-               created_at: nil,
-               updated_at: nil,
-               metadata: %{},
-               constraints: opts[:constraints] || %{}
-             }}
+          {:ok, response} ->
+            # The stub is returning just {:ok, response} without headers
+            if response.success do
+              {:ok, %{success: true}}
+            else
+              {:error, response.error_message || "Failed to register variable"}
+            end
 
-          formatted_result
-        else
-          {:error, response.error_message || "Failed to register variable"}
-        end
-
-      {:ok, response} ->
-        # The stub is returning just {:ok, response} without headers
-        if response.success do
-          # For now, return simple structure that tests expect
-          formatted_result =
-            {:ok, response.variable_id,
-             %{
-               id: response.variable_id,
-               name: to_string(name),
-               type: type,
-               value: initial_value,
-               version: 1,
-               source: nil,
-               created_at: nil,
-               updated_at: nil,
-               metadata: %{},
-               constraints: opts[:constraints] || %{}
-             }}
-
-          formatted_result
-        else
-          {:error, response.error_message || "Failed to register variable"}
+          error ->
+            handle_error(error)
         end
 
       error ->
-        handle_error(error)
+        error
     end
   end
 
@@ -229,42 +201,46 @@ defmodule Snakepit.GRPC.ClientImpl do
     case get_variable(channel, session_id, name) do
       {:ok, current_var} ->
         # Encode value with the variable's type (type is already an atom)
-        {:ok, any_value} = Serialization.encode_any(value, current_var.type)
+        case Serialization.encode_any(value, current_var.type) do
+          {:ok, any_value} ->
+            proto_any = %Google.Protobuf.Any{
+              type_url: any_value.type_url,
+              value: any_value.value
+            }
 
-        proto_any = %Google.Protobuf.Any{
-          type_url: any_value.type_url,
-          value: any_value.value
-        }
+            request = %Bridge.SetVariableRequest{
+              session_id: session_id,
+              variable_identifier: to_string(name),
+              value: proto_any,
+              metadata: opts[:metadata] || %{},
+              expected_version: opts[:expected_version] || 0
+            }
 
-        request = %Bridge.SetVariableRequest{
-          session_id: session_id,
-          variable_identifier: to_string(name),
-          value: proto_any,
-          metadata: opts[:metadata] || %{},
-          expected_version: opts[:expected_version] || 0
-        }
+            timeout = opts[:timeout] || @default_timeout
+            call_opts = [timeout: timeout]
 
-        timeout = opts[:timeout] || @default_timeout
-        call_opts = [timeout: timeout]
+            case Bridge.BridgeService.Stub.set_variable(channel, request, call_opts) do
+              {:ok, response, _headers} ->
+                if response.success do
+                  {:ok, %{success: true}}
+                else
+                  {:error, response.error || "Failed to set variable"}
+                end
 
-        case Bridge.BridgeService.Stub.set_variable(channel, request, call_opts) do
-          {:ok, response, _headers} ->
-            if response.success do
-              :ok
-            else
-              {:error, response.error || "Failed to set variable"}
-            end
+              {:ok, response} ->
+                # Handle 2-tuple response
+                if response.success do
+                  {:ok, %{success: true}}
+                else
+                  {:error, response.error || "Failed to set variable"}
+                end
 
-          {:ok, response} ->
-            # Handle 2-tuple response
-            if response.success do
-              :ok
-            else
-              {:error, response.error || "Failed to set variable"}
+              error ->
+                handle_error(error)
             end
 
           error ->
-            handle_error(error)
+            error
         end
 
       error ->
@@ -272,10 +248,166 @@ defmodule Snakepit.GRPC.ClientImpl do
     end
   end
 
-  def list_variables(_channel, _session_id, _opts \\ []) do
-    # Since there's no ListVariables RPC, we'll use GetVariables with empty list
-    # to get all variables (this would need server-side support)
-    {:error, :not_implemented}
+  def list_variables(channel, session_id, pattern \\ "*", opts \\ []) do
+    request = %Bridge.ListVariablesRequest{
+      session_id: session_id,
+      pattern: pattern
+    }
+
+    timeout = opts[:timeout] || @default_timeout
+    call_opts = [timeout: timeout]
+
+    case Bridge.BridgeService.Stub.list_variables(channel, request, call_opts) do
+      {:ok, response, _headers} ->
+        variables = Enum.map(response.variables, &decode_variable/1)
+        {:ok, %{variables: variables}}
+
+      {:ok, response} ->
+        # Handle 2-tuple response
+        variables = Enum.map(response.variables, &decode_variable/1)
+        {:ok, %{variables: variables}}
+
+      error ->
+        handle_error(error)
+    end
+  end
+
+  def delete_variable(channel, session_id, identifier, opts \\ []) do
+    request = %Bridge.DeleteVariableRequest{
+      session_id: session_id,
+      variable_identifier: to_string(identifier)
+    }
+
+    timeout = opts[:timeout] || @default_timeout
+    call_opts = [timeout: timeout]
+
+    case Bridge.BridgeService.Stub.delete_variable(channel, request, call_opts) do
+      {:ok, response, _headers} ->
+        if response.success do
+          {:ok, %{success: true}}
+        else
+          {:error, response.error_message || "Failed to delete variable"}
+        end
+
+      {:ok, response} ->
+        # Handle 2-tuple response
+        if response.success do
+          {:ok, %{success: true}}
+        else
+          {:error, response.error_message || "Failed to delete variable"}
+        end
+
+      error ->
+        handle_error(error)
+    end
+  end
+
+  def get_session(channel, session_id, opts \\ []) do
+    request = %Bridge.GetSessionRequest{
+      session_id: session_id
+    }
+
+    timeout = opts[:timeout] || @default_timeout
+    call_opts = [timeout: timeout]
+
+    case Bridge.BridgeService.Stub.get_session(channel, request, call_opts) do
+      {:ok, response, _headers} ->
+        if response.session_id do
+          {:ok, %{session: decode_session_response(response)}}
+        else
+          {:error, :not_found}
+        end
+
+      {:ok, response} ->
+        # Handle 2-tuple response
+        if response.session_id do
+          {:ok, %{session: decode_session_response(response)}}
+        else
+          {:error, :not_found}
+        end
+
+      error ->
+        handle_error(error)
+    end
+  end
+
+  def heartbeat(channel, session_id, opts \\ []) do
+    request = %Bridge.HeartbeatRequest{
+      session_id: session_id
+    }
+
+    timeout = opts[:timeout] || @default_timeout
+    call_opts = [timeout: timeout]
+
+    case Bridge.BridgeService.Stub.heartbeat(channel, request, call_opts) do
+      {:ok, response, _headers} ->
+        {:ok, %{success: response.session_valid}}
+
+      {:ok, response} ->
+        # Handle 2-tuple response
+        {:ok, %{success: response.session_valid}}
+
+      error ->
+        handle_error(error)
+    end
+  end
+
+  def set_variables(channel, session_id, updates, opts \\ []) do
+    # Convert updates to map format expected by proto
+    updates_map =
+      Enum.into(updates, %{}, fn update ->
+        # Get current type for encoding
+        {:ok, current_var} = get_variable(channel, session_id, update.identifier.name)
+        {:ok, any_value} = Serialization.encode_any(update.value, current_var.type)
+
+        {update.identifier.name,
+         %Google.Protobuf.Any{
+           type_url: any_value.type_url,
+           value: any_value.value
+         }}
+      end)
+
+    request = %Bridge.BatchSetVariablesRequest{
+      session_id: session_id,
+      updates: updates_map,
+      metadata: opts[:metadata] || %{},
+      atomic: opts[:atomic] || false
+    }
+
+    timeout = opts[:timeout] || @default_timeout
+    call_opts = [timeout: timeout]
+
+    case Bridge.BridgeService.Stub.set_variables(channel, request, call_opts) do
+      {:ok, response, _headers} ->
+        handle_batch_response(response, updates)
+
+      {:ok, response} ->
+        # Handle 2-tuple response
+        handle_batch_response(response, updates)
+
+      error ->
+        handle_error(error)
+    end
+  end
+
+  defp handle_batch_response(response, updates) do
+    if response.success do
+      # Convert the response to expected format
+      results =
+        Enum.map(updates, fn update ->
+          error = Map.get(response.errors || %{}, update.identifier.name)
+
+          %{
+            identifier: update.identifier,
+            success: is_nil(error),
+            error: error
+          }
+        end)
+
+      {:ok, %{results: results}}
+    else
+      {:error, "Batch update failed"}
+    end
   end
 
   def watch_variables(channel, session_id, names, opts \\ []) do
@@ -335,6 +467,18 @@ defmodule Snakepit.GRPC.ClientImpl do
       {:ok, constraints} -> constraints
       _ -> %{}
     end
+  end
+
+  defp decode_session_response(response) do
+    %{
+      id: response.session_id,
+      # Assume active if we got a response
+      active: true,
+      created_at: response.created_at,
+      # Not provided in response
+      last_activity: nil,
+      metadata: Map.new(response.metadata || %{})
+    }
   end
 
   defp handle_error({:error, %GRPC.RPCError{} = error}) do
