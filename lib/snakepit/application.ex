@@ -22,7 +22,12 @@ defmodule Snakepit.Application do
     # Get gRPC config for the Elixir server
     grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
 
-    children =
+    # Always start SessionStore as it's needed for tests and bridge functionality
+    base_children = [
+      Snakepit.Bridge.SessionStore
+    ]
+
+    pool_children =
       if pooling_enabled do
         pool_config = Application.get_env(:snakepit, :pool_config, %{})
         pool_size = Map.get(pool_config, :pool_size, System.schedulers_online() * 2)
@@ -36,9 +41,6 @@ defmodule Snakepit.Application do
 
           # Task supervisor for async pool operations
           {Task.Supervisor, name: Snakepit.TaskSupervisor},
-
-          # Session store for session management
-          Snakepit.Bridge.SessionStore,
 
           # Registry for worker process registration
           Snakepit.Pool.Registry,
@@ -62,6 +64,8 @@ defmodule Snakepit.Application do
         Logger.info("🔧 Starting Snakepit with pooling disabled")
         []
       end
+
+    children = base_children ++ pool_children
 
     opts = [strategy: :one_for_one, name: Snakepit.Supervisor]
     Supervisor.start_link(children, opts)
