@@ -113,6 +113,15 @@ class SessionContext:
         
         logger.info(f"Created SessionContext for session {session_id}")
     
+    def __enter__(self):
+        """Support using SessionContext as a context manager."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Automatically cleanup when exiting context."""
+        self.cleanup()
+        return False
+    
     # Variable Registration
     
     def register_variable(
@@ -591,13 +600,40 @@ class SessionContext:
         except:
             return {}
     
-    def cleanup(self):
-        """Clean up resources associated with this session context."""
-        # Clear cache
-        self.clear_cache()
+    def cleanup(self, force: bool = False):
+        """
+        Clean up resources associated with this session context.
         
-        # Clear proxies
+        This method:
+        1. Clears local caches and proxies
+        2. Sends a CleanupSession RPC to the server to release server-side resources
+        
+        Args:
+            force: If True, forces cleanup even if there are active references
+        """
+        # Clear local resources first
+        self.clear_cache()
         self._proxies.clear()
+        
+        # Send cleanup request to server
+        try:
+            from .snakepit_bridge_pb2 import CleanupSessionRequest
+            
+            request = CleanupSessionRequest(
+                session_id=self.session_id,
+                force=force
+            )
+            
+            response = self.stub.CleanupSession(request)
+            
+            if response.success:
+                logger.info(f"Successfully cleaned up session {self.session_id} "
+                          f"(cleaned {response.resources_cleaned} resources)")
+            else:
+                logger.warning(f"Failed to cleanup session {self.session_id} on server")
+                
+        except Exception as e:
+            logger.error(f"Error during session cleanup: {e}")
         
         logger.info(f"Cleaned up session context for {self.session_id}")
     

@@ -78,10 +78,9 @@ defmodule Snakepit.GRPC.BridgeServerTest do
         metadata: %{}
       }
 
-      response = BridgeServer.initialize_session(request, nil)
-
-      assert response.success == false
-      assert response.error_message =~ "already exists"
+      assert_raise GRPC.RPCError, ~r/already exists/, fn ->
+        BridgeServer.initialize_session(request, nil)
+      end
     end
   end
 
@@ -121,10 +120,9 @@ defmodule Snakepit.GRPC.BridgeServerTest do
         constraints_json: Jason.encode!(%{min: 0.0, max: 1.0})
       }
 
-      response = BridgeServer.register_variable(request, nil)
-
-      assert response.success == false
-      assert response.error_message =~ "above maximum"
+      assert_raise GRPC.RPCError, ~r/above maximum/, fn ->
+        BridgeServer.register_variable(request, nil)
+      end
     end
 
     test "handles invalid JSON constraints", %{session_id: session_id} do
@@ -138,10 +136,9 @@ defmodule Snakepit.GRPC.BridgeServerTest do
         constraints_json: "invalid json"
       }
 
-      response = BridgeServer.register_variable(request, nil)
-
-      assert response.success == false
-      assert response.error_message =~ "Invalid constraints"
+      assert_raise GRPC.RPCError, ~r/Invalid constraints/, fn ->
+        BridgeServer.register_variable(request, nil)
+      end
     end
   end
 
@@ -237,10 +234,9 @@ defmodule Snakepit.GRPC.BridgeServerTest do
         value: value_any
       }
 
-      response = BridgeServer.set_variable(request, nil)
-
-      assert response.success == false
-      assert response.error_message =~ "must be an integer"
+      assert_raise GRPC.RPCError, ~r/must be an integer/, fn ->
+        BridgeServer.set_variable(request, nil)
+      end
     end
   end
 

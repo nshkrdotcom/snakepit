@@ -60,16 +60,14 @@ defmodule Snakepit.GRPC.BridgeServer do
         }
 
       {:error, :already_exists} ->
-        %InitializeSessionResponse{
-          success: false,
-          error_message: "Session already exists"
-        }
+        raise GRPC.RPCError,
+          status: :already_exists,
+          message: "Session already exists: #{request.session_id}"
 
       {:error, reason} ->
-        %InitializeSessionResponse{
-          success: false,
-          error_message: format_error(reason)
-        }
+        raise GRPC.RPCError,
+          status: :internal,
+          message: format_error(reason)
     end
   end
 
@@ -107,11 +105,20 @@ defmodule Snakepit.GRPC.BridgeServer do
         variable_id: var_id
       }
     else
+      {:error, {:validation_failed, _} = reason} ->
+        raise GRPC.RPCError,
+          status: :invalid_argument,
+          message: format_error(reason)
+
+      {:error, :session_not_found} ->
+        raise GRPC.RPCError,
+          status: :not_found,
+          message: "Session not found: #{request.session_id}"
+
       {:error, reason} ->
-        %RegisterVariableResponse{
-          success: false,
-          error_message: format_error(reason)
-        }
+        raise GRPC.RPCError,
+          status: :internal,
+          message: format_error(reason)
     end
   end
 
@@ -151,51 +158,47 @@ defmodule Snakepit.GRPC.BridgeServer do
     Logger.debug("SetVariable: session=#{request.session_id}, id=#{request.variable_identifier}")
 
     # First get the variable to know its type
-    case SessionStore.get_variable(request.session_id, request.variable_identifier) do
-      {:ok, variable} ->
-        case decode_typed_value(request.value, variable.type) do
-          {:ok, decoded_value} ->
-            case SessionStore.update_variable(
-                   request.session_id,
-                   request.variable_identifier,
-                   decoded_value,
-                   request.metadata
-                 ) do
-              :ok ->
-                # Get updated variable for version
-                case SessionStore.get_variable(request.session_id, request.variable_identifier) do
-                  {:ok, updated} ->
-                    %SetVariableResponse{
-                      success: true,
-                      new_version: updated.version
-                    }
-
-                  _ ->
-                    %SetVariableResponse{
-                      success: true,
-                      new_version: variable.version + 1
-                    }
-                end
-
-              {:error, reason} ->
-                %SetVariableResponse{
-                  success: false,
-                  error_message: format_error(reason)
-                }
-            end
-
-          {:error, reason} ->
-            %SetVariableResponse{
-              success: false,
-              error_message: format_error(reason)
-            }
+    with {:ok, variable} <-
+           SessionStore.get_variable(request.session_id, request.variable_identifier),
+         {:ok, decoded_value} <- decode_typed_value(request.value, variable.type),
+         :ok <-
+           SessionStore.update_variable(
+             request.session_id,
+             request.variable_identifier,
+             decoded_value,
+             request.metadata
+           ) do
+      # Get updated variable for version
+      new_version =
+        case SessionStore.get_variable(request.session_id, request.variable_identifier) do
+          {:ok, updated} -> updated.version
+          _ -> variable.version + 1
         end
 
+      %SetVariableResponse{
+        success: true,
+        new_version: new_version
+      }
+    else
+      {:error, :not_found} ->
+        raise GRPC.RPCError,
+          status: :not_found,
+          message: "Variable not found: #{request.variable_identifier}"
+
+      {:error, :session_not_found} ->
+        raise GRPC.RPCError,
+          status: :not_found,
+          message: "Session not found: #{request.session_id}"
+
+      {:error, {:validation_failed, _} = reason} ->
+        raise GRPC.RPCError,
+          status: :invalid_argument,
+          message: format_error(reason)
+
       {:error, reason} ->
-        %SetVariableResponse{
-          success: false,
-          error_message: format_error(reason)
-        }
+        raise GRPC.RPCError,
+          status: :internal,
+          message: format_error(reason)
     end
   end
 
@@ -352,22 +355,19 @@ defmodule Snakepit.GRPC.BridgeServer do
         }
 
       {:error, :not_found} ->
-        %DeleteVariableResponse{
-          success: false,
-          error_message: "Variable not found: #{request.variable_identifier}"
-        }
+        raise GRPC.RPCError,
+          status: :not_found,
+          message: "Variable not found: #{request.variable_identifier}"
 
       {:error, :session_not_found} ->
-        %DeleteVariableResponse{
-          success: false,
-          error_message: "Session not found: #{request.session_id}"
-        }
+        raise GRPC.RPCError,
+          status: :not_found,
+          message: "Session not found: #{request.session_id}"
 
       {:error, reason} ->
-        %DeleteVariableResponse{
-          success: false,
-          error_message: format_error(reason)
-        }
+        raise GRPC.RPCError,
+          status: :internal,
+          message: format_error(reason)
     end
   end
 
@@ -417,8 +417,19 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  defp encode_variable(variable, source \\ :ELIXIR) do
+  defp encode_variable(variable, default_source \\ :ELIXIR) do
     with {:ok, value_any} <- encode_any_value(variable.value, variable.type) do
+      # Check metadata for source, falling back to default
+      source =
+        case variable.metadata["source"] do
+          "python" -> :PYTHON
+          "elixir" -> :ELIXIR
+          "PYTHON" -> :PYTHON
+          "ELIXIR" -> :ELIXIR
+          nil -> default_source
+          _ -> default_source
+        end
+
       proto_var = %ProtoVariable{
         id: variable.id,
         name: to_string(variable.name),

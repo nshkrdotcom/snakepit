@@ -19,6 +19,9 @@ defmodule Snakepit.Application do
     # Check if pooling is enabled (default: false to prevent auto-start issues)
     pooling_enabled = Application.get_env(:snakepit, :pooling_enabled, false)
 
+    # Get gRPC config for the Elixir server
+    grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
+
     children =
       if pooling_enabled do
         pool_config = Application.get_env(:snakepit, :pool_config, %{})
@@ -27,6 +30,10 @@ defmodule Snakepit.Application do
         Logger.info("🚀 Starting Snakepit with pooling enabled (size: #{pool_size})")
 
         [
+          # Start the central gRPC server that manages state
+          {GRPC.Server.Supervisor,
+           endpoint: Snakepit.GRPC.BridgeServer, port: grpc_port, start_server: true},
+
           # Task supervisor for async pool operations
           {Task.Supervisor, name: Snakepit.TaskSupervisor},
 
