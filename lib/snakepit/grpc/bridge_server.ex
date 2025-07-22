@@ -14,19 +14,14 @@ defmodule Snakepit.GRPC.BridgeServer do
   alias Snakepit.Bridge.{
     PingRequest,
     PingResponse,
-    InitializeSessionRequest,
     InitializeSessionResponse,
     CleanupSessionRequest,
     CleanupSessionResponse,
-    RegisterVariableRequest,
     RegisterVariableResponse,
     GetVariableRequest,
     GetVariableResponse,
-    SetVariableRequest,
     SetVariableResponse,
-    BatchGetVariablesRequest,
     BatchGetVariablesResponse,
-    BatchSetVariablesRequest,
     BatchSetVariablesResponse,
     OptimizationStatus
   }
@@ -39,7 +34,6 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   # Health & Session Management
 
-  @impl GRPC.Server
   def ping(%PingRequest{message: message}, _stream) do
     Logger.debug("Ping received: #{message}")
 
@@ -49,7 +43,6 @@ defmodule Snakepit.GRPC.BridgeServer do
     }
   end
 
-  @impl GRPC.Server
   def initialize_session(request, _stream) do
     Logger.info("Initializing session: #{request.session_id}")
 
@@ -77,28 +70,21 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  @impl GRPC.Server
-  def cleanup_session(%CleanupSessionRequest{session_id: session_id, force: force}, _stream) do
+  def cleanup_session(%CleanupSessionRequest{session_id: session_id, force: _force}, _stream) do
     Logger.info("Cleaning up session: #{session_id}")
 
-    case SessionStore.delete_session(session_id, force: force) do
-      :ok ->
-        %CleanupSessionResponse{
-          success: true,
-          resources_cleaned: 1
-        }
+    # TODO: Implement force flag when supported by SessionStore
+    # SessionStore.delete_session always returns :ok
+    SessionStore.delete_session(session_id)
 
-      {:error, _reason} ->
-        %CleanupSessionResponse{
-          success: false,
-          resources_cleaned: 0
-        }
-    end
+    %CleanupSessionResponse{
+      success: true,
+      resources_cleaned: 1
+    }
   end
 
   # Variable Operations
 
-  @impl GRPC.Server
   def register_variable(request, _stream) do
     Logger.debug("RegisterVariable: session=#{request.session_id}, name=#{request.name}")
 
@@ -126,7 +112,6 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  @impl GRPC.Server
   def get_variable(
         %GetVariableRequest{session_id: session_id, variable_identifier: identifier},
         _stream
@@ -159,7 +144,6 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  @impl GRPC.Server
   def set_variable(request, _stream) do
     Logger.debug("SetVariable: session=#{request.session_id}, id=#{request.variable_identifier}")
 
@@ -212,7 +196,6 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  @impl GRPC.Server
   def get_variables(request, _stream) do
     Logger.debug(
       "GetVariables: session=#{request.session_id}, count=#{length(request.variable_identifiers)}"
@@ -245,7 +228,6 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  @impl GRPC.Server
   def set_variables(request, _stream) do
     Logger.debug(
       "SetVariables: session=#{request.session_id}, count=#{map_size(request.updates)}"
@@ -389,13 +371,17 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   defp encode_any_value(value, type) do
     # Create a properly typed Any message
-    encoded = Jason.encode!(value)
+    case Jason.encode(value) do
+      {:ok, encoded} ->
+        {:ok,
+         %Any{
+           type_url: "type.googleapis.com/snakepit.#{type}",
+           value: encoded
+         }}
 
-    {:ok,
-     %Any{
-       type_url: "type.googleapis.com/snakepit.#{type}",
-       value: encoded
-     }}
+      {:error, reason} ->
+        {:error, "Failed to encode value: #{inspect(reason)}"}
+    end
   end
 
   defp encode_optimization_status(variable) do

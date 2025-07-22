@@ -21,7 +21,7 @@ defmodule Snakepit.GRPC.BridgeServerTest do
     BatchSetVariablesResponse
   }
 
-  alias Google.Protobuf.Any
+  alias Google.Protobuf.{Any, Timestamp}
 
   setup do
     # Start SessionStore
@@ -51,7 +51,7 @@ defmodule Snakepit.GRPC.BridgeServerTest do
 
       assert %PingResponse{} = response
       assert response.message == "pong: hello"
-      assert response.server_time != nil
+      assert %Timestamp{} = response.server_time
     end
   end
 

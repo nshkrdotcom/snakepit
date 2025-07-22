@@ -74,14 +74,9 @@ defmodule Snakepit.Bridge.Variables.Types.Integer do
   def deserialize(_), do: {:error, "invalid integer format"}
 
   defp is_nan(value) when is_float(value), do: value != value
-  defp is_nan(_), do: false
-
-  defp is_inf(value) when is_atom(value), do: value in [:infinity, :negative_infinity]
 
   defp is_inf(value) when is_float(value) do
     # Check if float is infinite by testing if it equals itself plus 1
     value == value + 1.0 and value != 0.0
   end
-
-  defp is_inf(_), do: false
 end
