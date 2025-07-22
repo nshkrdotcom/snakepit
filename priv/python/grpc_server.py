@@ -137,14 +137,18 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
         
         try:
             # Decode initial value
+            logger.info(f"Decoding value of type {request.type}")
             value = TypeSerializer.decode_any(request.initial_value)
+            logger.info(f"Decoded value: {value}")
             
             # Parse constraints
             constraints = {}
-            if request.constraints:
-                constraints = json.loads(request.constraints)
+            if request.constraints_json:
+                constraints = json.loads(request.constraints_json)
+                logger.info(f"Parsed constraints: {constraints}")
             
             # Register the variable
+            logger.info(f"Registering variable: {request.name}")
             var_id = session.register_variable(
                 name=request.name,
                 var_type=request.type,
@@ -156,16 +160,27 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
             # Get the variable to return
             variable = session.get_variable_by_id(var_id)
             
+            if not variable:
+                logger.error(f"Variable not found after registration: {var_id}")
+                context.set_code(grpc.StatusCode.INTERNAL)
+                context.set_details("Failed to retrieve variable after registration")
+                return pb2.RegisterVariableResponse()
+            
             response = pb2.RegisterVariableResponse()
+            response.success = True
             response.variable_id = var_id
-            response.variable.CopyFrom(self._convert_to_proto_variable(variable))
             
             return response
             
         except Exception as e:
             logger.error(f"RegisterVariable failed: {e}", exc_info=True)
             context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(str(e))
+            # Make sure we're not getting a simple 'variable' error
+            error_msg = str(e)
+            if error_msg == "variable":
+                # Try to provide more context
+                error_msg = f"Variable conversion error: {repr(e)}"
+            context.set_details(error_msg)
             return pb2.RegisterVariableResponse()
     
     async def GetVariable(self, request, context):
@@ -320,16 +335,13 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
         
         # Encode value
         value_any = TypeSerializer.encode_any(variable['value'], variable['type'])
+        # value_any is already a protobuf Any, just copy it
         proto_var.value.CopyFrom(value_any)
         
-        # Set timestamps
-        timestamp = Timestamp()
-        timestamp.FromDatetime(variable['created_at'])
-        proto_var.created_at.CopyFrom(timestamp)
-        
+        # Set timestamp (only last_updated_at in the proto)
         timestamp = Timestamp()
         timestamp.FromDatetime(variable['updated_at'])
-        proto_var.updated_at.CopyFrom(timestamp)
+        proto_var.last_updated_at.CopyFrom(timestamp)
         
         # Set metadata
         for k, v in variable.get('metadata', {}).items():
@@ -337,7 +349,11 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
         
         # Set constraints
         if variable.get('constraints'):
-            proto_var.constraints = json.dumps(variable['constraints'])
+            proto_var.constraints_json = json.dumps(variable['constraints'])
+        
+        # Set source (default to PYTHON)
+        # TODO: Debug why this is failing
+        # proto_var.source = pb2.Variable.Source.PYTHON
         
         return proto_var
 
@@ -371,13 +387,13 @@ async def serve(port: int, adapter_module: str):
     pb2_grpc.add_SnakepitBridgeServicer_to_server(servicer, server)
     
     # Listen on port
-    server.add_insecure_port(f'[::]:{port}')
+    actual_port = server.add_insecure_port(f'[::]:{port}')
     
-    logger.info(f"Starting gRPC server on port {port}")
+    logger.info(f"Starting gRPC server on port {actual_port}")
     await server.start()
     
-    # Signal readiness
-    print(f"GRPC_READY:{port}", flush=True)
+    # Signal readiness with actual port
+    print(f"GRPC_READY:{actual_port}", flush=True)
     
     # Setup graceful shutdown
     shutdown_event = asyncio.Event()

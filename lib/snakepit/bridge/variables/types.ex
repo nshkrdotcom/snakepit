@@ -2,10 +2,10 @@ defmodule Snakepit.Bridge.Variables.Types do
   @moduledoc """
   Type system for bridge variables with serialization support.
   """
-  
-  @type var_type :: :float | :integer | :string | :boolean | 
-                    :choice | :module | :embedding | :tensor
-  
+
+  @type var_type ::
+          :float | :integer | :string | :boolean | :choice | :module | :embedding | :tensor
+
   @doc """
   Get the type module for a given type atom.
   """
@@ -18,14 +18,18 @@ defmodule Snakepit.Bridge.Variables.Types do
   def get_type_module(:embedding), do: {:ok, __MODULE__.Embedding}
   def get_type_module(:tensor), do: {:ok, __MODULE__.Tensor}
   def get_type_module(_), do: {:error, :unknown_type}
-  
+
   @doc """
   Common behaviour for all types.
   """
   defmodule Behaviour do
-    @callback validate(value :: any()) :: {:ok, normalized :: any()} | {:error, reason :: String.t()}
-    @callback validate_constraints(value :: any(), constraints :: map()) :: :ok | {:error, reason :: String.t()}
-    @callback serialize(value :: any()) :: {:ok, json :: String.t()} | {:error, reason :: String.t()}
-    @callback deserialize(json :: String.t()) :: {:ok, value :: any()} | {:error, reason :: String.t()}
+    @callback validate(value :: any()) ::
+                {:ok, normalized :: any()} | {:error, reason :: String.t()}
+    @callback validate_constraints(value :: any(), constraints :: map()) ::
+                :ok | {:error, reason :: String.t()}
+    @callback serialize(value :: any()) ::
+                {:ok, json :: String.t()} | {:error, reason :: String.t()}
+    @callback deserialize(json :: String.t()) ::
+                {:ok, value :: any()} | {:error, reason :: String.t()}
   end
 end

@@ -139,14 +139,14 @@ defmodule Snakepit.GRPCWorker do
   def get_info(worker) do
     GenServer.call(worker, :get_info)
   end
-  
+
   @doc """
   Get the gRPC channel for direct client usage.
   """
   def get_channel(worker) do
     GenServer.call(worker, :get_channel)
   end
-  
+
   @doc """
   Get the session ID for this worker.
   """
@@ -161,9 +161,10 @@ defmodule Snakepit.GRPCWorker do
     adapter = Keyword.fetch!(opts, :adapter)
     worker_id = Keyword.fetch!(opts, :id)
     port = adapter.get_port()
-    
+
     # Generate unique session ID
-    session_id = "session_#{:erlang.unique_integer([:positive, :monotonic])}_#{:erlang.system_time(:microsecond)}"
+    session_id =
+      "session_#{:erlang.unique_integer([:positive, :monotonic])}_#{:erlang.system_time(:microsecond)}"
 
     # Start the gRPC server process non-blocking
     executable = adapter.executable_path()
@@ -485,6 +486,7 @@ defmodule Snakepit.GRPCWorker do
             case Regex.run(~r/GRPC_READY:(\d+)/, ready_line) do
               [_, port_str] ->
                 {:ok, String.to_integer(port_str)}
+
               _ ->
                 wait_for_server_ready(port, timeout)
             end
