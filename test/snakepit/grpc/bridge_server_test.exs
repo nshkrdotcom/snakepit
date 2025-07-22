@@ -333,8 +333,18 @@ defmodule Snakepit.GRPC.BridgeServerTest do
   # Helper functions
 
   defp encode_test_value(value) do
+    # Infer type from value
+    type =
+      cond do
+        is_boolean(value) -> "boolean"
+        is_integer(value) -> "integer"
+        is_float(value) -> "float"
+        is_binary(value) -> "string"
+        true -> "string"
+      end
+
     %Any{
-      type_url: "type.googleapis.com/test",
+      type_url: "type.googleapis.com/snakepit.#{type}",
       value: Jason.encode!(value)
     }
   end

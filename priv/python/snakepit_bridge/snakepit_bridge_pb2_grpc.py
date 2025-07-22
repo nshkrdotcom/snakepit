@@ -74,6 +74,16 @@ class SnakepitBridgeStub(object):
                 request_serializer=snakepit__bridge__pb2.RegisterVariableRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.RegisterVariableResponse.FromString,
                 _registered_method=True)
+        self.ListVariables = channel.unary_unary(
+                '/snakepit.bridge.SnakepitBridge/ListVariables',
+                request_serializer=snakepit__bridge__pb2.ListVariablesRequest.SerializeToString,
+                response_deserializer=snakepit__bridge__pb2.ListVariablesResponse.FromString,
+                _registered_method=True)
+        self.DeleteVariable = channel.unary_unary(
+                '/snakepit.bridge.SnakepitBridge/DeleteVariable',
+                request_serializer=snakepit__bridge__pb2.DeleteVariableRequest.SerializeToString,
+                response_deserializer=snakepit__bridge__pb2.DeleteVariableResponse.FromString,
+                _registered_method=True)
         self.ExecuteTool = channel.unary_unary(
                 '/snakepit.bridge.SnakepitBridge/ExecuteTool',
                 request_serializer=snakepit__bridge__pb2.ExecuteToolRequest.SerializeToString,
@@ -164,6 +174,18 @@ class SnakepitBridgeServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def RegisterVariable(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListVariables(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteVariable(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -262,6 +284,16 @@ def add_SnakepitBridgeServicer_to_server(servicer, server):
                     servicer.RegisterVariable,
                     request_deserializer=snakepit__bridge__pb2.RegisterVariableRequest.FromString,
                     response_serializer=snakepit__bridge__pb2.RegisterVariableResponse.SerializeToString,
+            ),
+            'ListVariables': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListVariables,
+                    request_deserializer=snakepit__bridge__pb2.ListVariablesRequest.FromString,
+                    response_serializer=snakepit__bridge__pb2.ListVariablesResponse.SerializeToString,
+            ),
+            'DeleteVariable': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteVariable,
+                    request_deserializer=snakepit__bridge__pb2.DeleteVariableRequest.FromString,
+                    response_serializer=snakepit__bridge__pb2.DeleteVariableResponse.SerializeToString,
             ),
             'ExecuteTool': grpc.unary_unary_rpc_method_handler(
                     servicer.ExecuteTool,
@@ -520,6 +552,60 @@ class SnakepitBridge(object):
             '/snakepit.bridge.SnakepitBridge/RegisterVariable',
             snakepit__bridge__pb2.RegisterVariableRequest.SerializeToString,
             snakepit__bridge__pb2.RegisterVariableResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListVariables(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snakepit.bridge.SnakepitBridge/ListVariables',
+            snakepit__bridge__pb2.ListVariablesRequest.SerializeToString,
+            snakepit__bridge__pb2.ListVariablesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteVariable(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snakepit.bridge.SnakepitBridge/DeleteVariable',
+            snakepit__bridge__pb2.DeleteVariableRequest.SerializeToString,
+            snakepit__bridge__pb2.DeleteVariableResponse.FromString,
             options,
             channel_credentials,
             insecure,

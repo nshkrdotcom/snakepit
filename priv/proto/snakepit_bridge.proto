@@ -17,6 +17,8 @@ service SnakepitBridge {
   rpc GetVariables(BatchGetVariablesRequest) returns (BatchGetVariablesResponse);
   rpc SetVariables(BatchSetVariablesRequest) returns (BatchSetVariablesResponse);
   rpc RegisterVariable(RegisterVariableRequest) returns (RegisterVariableResponse);
+  rpc ListVariables(ListVariablesRequest) returns (ListVariablesResponse);
+  rpc DeleteVariable(DeleteVariableRequest) returns (DeleteVariableResponse);
   
   // Tool Execution
   rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
@@ -162,6 +164,25 @@ message BatchSetVariablesResponse {
   bool success = 1;
   map<string, string> errors = 2;
   map<string, int32> new_versions = 3;
+}
+
+message ListVariablesRequest {
+  string session_id = 1;
+  string pattern = 2; // Optional wildcard pattern for filtering
+}
+
+message ListVariablesResponse {
+  repeated Variable variables = 1;
+}
+
+message DeleteVariableRequest {
+  string session_id = 1;
+  string variable_identifier = 2; // Can be ID or name
+}
+
+message DeleteVariableResponse {
+  bool success = 1;
+  string error_message = 2;
 }
 
 // Tool Messages
