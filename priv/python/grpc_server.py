@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Unified gRPC bridge server for DSPex.
+Stateless gRPC bridge server for DSPex.
+
+This server acts as a proxy for state operations (forwarding to Elixir)
+and as an execution environment for Python tools.
 """
 
 import argparse
@@ -11,17 +14,15 @@ import signal
 import sys
 from concurrent import futures
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Optional
 
 # Add the package to Python path
 sys.path.insert(0, '.')
 
 from snakepit_bridge import snakepit_bridge_pb2 as pb2
 from snakepit_bridge import snakepit_bridge_pb2_grpc as pb2_grpc
-from snakepit_bridge.server_session import ServerSession
-from snakepit_bridge.serialization import TypeSerializer
+from snakepit_bridge.session_context import SessionContext
 from google.protobuf.timestamp_pb2 import Timestamp
-from google.protobuf import any_pb2
 import json
 
 logging.basicConfig(
@@ -32,20 +33,37 @@ logger = logging.getLogger(__name__)
 
 
 class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
-    """Implementation of the unified gRPC bridge service."""
+    """
+    Stateless implementation of the gRPC bridge service.
     
-    def __init__(self, adapter_class):
+    For state operations, this server acts as a proxy to the Elixir BridgeServer.
+    For tool execution, it creates ephemeral contexts that callback to Elixir for state.
+    """
+    
+    def __init__(self, adapter_class, elixir_address: str):
         self.adapter_class = adapter_class
-        self.sessions: Dict[str, ServerSession] = {}
-        self.adapters: Dict[str, object] = {}
+        self.elixir_address = elixir_address
         self.server: Optional[grpc.aio.Server] = None
+        
+        # Create a client channel to the Elixir server
+        self.elixir_channel = grpc.aio.insecure_channel(elixir_address)
+        self.elixir_stub = pb2_grpc.SnakepitBridgeStub(self.elixir_channel)
+        
+        logger.info(f"Python server initialized with Elixir backend at {elixir_address}")
+    
+    async def close(self):
+        """Clean up resources."""
+        if self.elixir_channel:
+            await self.elixir_channel.close()
+    
+    # Health & Session Management
     
     async def Ping(self, request, context):
-        """Health check endpoint."""
+        """Health check endpoint - handled locally."""
         logger.debug(f"Ping received: {request.message}")
         
         response = pb2.PingResponse()
-        response.message = f"Pong: {request.message}"
+        response.message = f"Pong from Python: {request.message}"
         
         # Set current timestamp
         timestamp = Timestamp()
@@ -55,308 +73,105 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
         return response
     
     async def InitializeSession(self, request, context):
-        """Initialize a new session."""
-        logger.info(f"Initializing session: {request.session_id}")
+        """
+        Initialize a session - proxy to Elixir.
+        
+        The Python server maintains no session state.
+        All session data is managed by Elixir.
+        """
+        logger.info(f"Proxying InitializeSession for: {request.session_id}")
+        return await self.elixir_stub.InitializeSession(request)
+    
+    async def CleanupSession(self, request, context):
+        """Clean up a session - proxy to Elixir."""
+        logger.info(f"Proxying CleanupSession for: {request.session_id}")
+        return await self.elixir_stub.CleanupSession(request)
+    
+    # Variable Operations - All Proxied to Elixir
+    
+    async def RegisterVariable(self, request, context):
+        """Register a variable - proxy to Elixir."""
+        logger.debug(f"Proxying RegisterVariable: {request.name}")
+        return await self.elixir_stub.RegisterVariable(request)
+    
+    async def GetVariable(self, request, context):
+        """Get a variable - proxy to Elixir."""
+        logger.debug(f"Proxying GetVariable: {request.variable_identifier}")
+        return await self.elixir_stub.GetVariable(request)
+    
+    async def SetVariable(self, request, context):
+        """Set a variable - proxy to Elixir."""
+        logger.debug(f"Proxying SetVariable: {request.variable_identifier}")
+        return await self.elixir_stub.SetVariable(request)
+    
+    async def GetVariables(self, request, context):
+        """Get multiple variables - proxy to Elixir."""
+        logger.debug(f"Proxying GetVariables for {len(request.variable_identifiers)} variables")
+        return await self.elixir_stub.GetVariables(request)
+    
+    async def SetVariables(self, request, context):
+        """Set multiple variables - proxy to Elixir."""
+        logger.debug(f"Proxying SetVariables for {len(request.updates)} variables")
+        return await self.elixir_stub.SetVariables(request)
+    
+    async def ListVariables(self, request, context):
+        """List variables - proxy to Elixir."""
+        logger.debug(f"Proxying ListVariables with pattern: {request.pattern}")
+        return await self.elixir_stub.ListVariables(request)
+    
+    async def DeleteVariable(self, request, context):
+        """Delete a variable - proxy to Elixir."""
+        logger.debug(f"Proxying DeleteVariable: {request.variable_identifier}")
+        return await self.elixir_stub.DeleteVariable(request)
+    
+    # Tool Execution - Stateless with Ephemeral Context
+    
+    async def ExecuteTool(self, request, context):
+        """
+        Execute a tool with an ephemeral session context.
+        
+        This is where Python-specific functionality is implemented.
+        The context provides access to variables via callbacks to Elixir.
+        """
+        logger.info(f"ExecuteTool: {request.tool_name} for session {request.session_id}")
         
         try:
-            # Create server session
-            session = ServerSession(request.session_id)
-            self.sessions[request.session_id] = session
+            # Create ephemeral context for this request
+            session_context = SessionContext(self.elixir_stub, request.session_id)
             
-            # Create adapter instance
+            # Create adapter instance for this request
             adapter = self.adapter_class()
-            # For now, adapter doesn't need session context since we're server-side
-            # adapter.set_session_context(session)
-            self.adapters[request.session_id] = adapter
+            adapter.set_session_context(session_context)
             
-            # Initialize adapter (may register tools/variables)
+            # Initialize adapter if needed
             if hasattr(adapter, 'initialize'):
                 await adapter.initialize()
             
-            response = pb2.InitializeSessionResponse()
-            response.success = True
-            
-            # Populate available tools
-            for tool_name, tool_spec in session.get_tools().items():
-                proto_spec = pb2.ToolSpec()
-                proto_spec.name = tool_name
-                proto_spec.description = tool_spec.get('description', '')
-                proto_spec.supports_streaming = tool_spec.get('supports_streaming', False)
-                response.available_tools[tool_name].CopyFrom(proto_spec)
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize session: {e}", exc_info=True)
-            response = pb2.InitializeSessionResponse()
-            response.success = False
-            response.error_message = str(e)
-            return response
-    
-    async def CleanupSession(self, request, context):
-        """Clean up a session."""
-        logger.info(f"Cleaning up session: {request.session_id}")
-        
-        response = pb2.CleanupSessionResponse()
-        resources_cleaned = 0
-        
-        if request.session_id in self.sessions:
-            session = self.sessions[request.session_id]
-            
-            # Clean up adapter
-            if request.session_id in self.adapters:
-                adapter = self.adapters[request.session_id]
-                if hasattr(adapter, 'cleanup'):
-                    # Check if cleanup is async
-                    import inspect
-                    if inspect.iscoroutinefunction(adapter.cleanup):
-                        await adapter.cleanup()
-                    else:
-                        adapter.cleanup()
-                del self.adapters[request.session_id]
-                resources_cleaned += 1
-            
-            # Clean up session (ServerSession.cleanup is not async)
-            session.cleanup()
-            del self.sessions[request.session_id]
-            resources_cleaned += 1
-            
-            response.success = True
-        else:
-            response.success = False
-            
-        response.resources_cleaned = resources_cleaned
-        return response
-    
-    async def RegisterVariable(self, request, context):
-        """Register a new variable."""
-        session = self._get_session(request.session_id, context)
-        if not session:
-            return pb2.RegisterVariableResponse()
-        
-        try:
-            # Decode initial value
-            logger.info(f"Decoding value of type {request.type}")
-            value = TypeSerializer.decode_any(request.initial_value)
-            logger.info(f"Decoded value: {value}")
-            
-            # Parse constraints
-            constraints = {}
-            if request.constraints_json:
-                constraints = json.loads(request.constraints_json)
-                logger.info(f"Parsed constraints: {constraints}")
-            
-            # Register the variable
-            logger.info(f"Registering variable: {request.name}")
-            var_id = session.register_variable(
-                name=request.name,
-                var_type=request.type,
-                initial_value=value,
-                constraints=constraints,
-                metadata=dict(request.metadata)
-            )
-            
-            # Get the variable to return
-            variable = session.get_variable_by_id(var_id)
-            
-            if not variable:
-                logger.error(f"Variable not found after registration: {var_id}")
-                context.set_code(grpc.StatusCode.INTERNAL)
-                context.set_details("Failed to retrieve variable after registration")
-                return pb2.RegisterVariableResponse()
-            
-            response = pb2.RegisterVariableResponse()
-            response.success = True
-            response.variable_id = var_id
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"RegisterVariable failed: {e}", exc_info=True)
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            # Make sure we're not getting a simple 'variable' error
-            error_msg = str(e)
-            if error_msg == "variable":
-                # Try to provide more context
-                error_msg = f"Variable conversion error: {repr(e)}"
-            context.set_details(error_msg)
-            return pb2.RegisterVariableResponse()
-    
-    async def GetVariable(self, request, context):
-        """Get a variable value."""
-        session = self._get_session(request.session_id, context)
-        if not session:
-            return pb2.GetVariableResponse()
-        
-        try:
-            # Get by name or ID based on variable_identifier
-            identifier = request.variable_identifier
-            if not identifier:
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("variable_identifier must be provided")
-                return pb2.GetVariableResponse()
-            
-            # Check if it's an ID (starts with "var_") or a name
-            if identifier.startswith("var_"):
-                variable = session.get_variable_by_id(identifier)
-            else:
-                variable = session.get_variable_by_name(identifier)
-            
-            if not variable:
-                context.set_code(grpc.StatusCode.NOT_FOUND)
-                context.set_details("Variable not found")
-                return pb2.GetVariableResponse()
-            
-            response = pb2.GetVariableResponse()
-            response.variable.CopyFrom(self._convert_to_proto_variable(variable))
-            return response
-            
-        except Exception as e:
-            logger.error(f"GetVariable failed: {e}", exc_info=True)
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(str(e))
-            return pb2.GetVariableResponse()
-    
-    async def SetVariable(self, request, context):
-        """Set a variable value."""
-        session = self._get_session(request.session_id, context)
-        if not session:
-            return pb2.SetVariableResponse()
-        
-        try:
-            # Decode new value
-            value = TypeSerializer.decode_any(request.value)
-            
-            # Update variable using variable_identifier
-            identifier = request.variable_identifier
-            if not identifier:
-                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("variable_identifier must be provided")
-                return pb2.SetVariableResponse()
-            
-            # Update variable by identifier (can be name or ID)
-            success = session.set_variable(
-                identifier=identifier,
-                new_value=value,
-                metadata=dict(request.metadata)
-            )
-            
-            response = pb2.SetVariableResponse()
-            response.success = success
-            
-            if not success:
-                response.error = "Failed to set variable"
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"SetVariable failed: {e}", exc_info=True)
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details(str(e))
-            return pb2.SetVariableResponse()
-    
-    async def GetVariables(self, request, context):
-        """Get multiple variables at once."""
-        session = self._get_session(request.session_id, context)
-        if not session:
-            return pb2.BatchGetVariablesResponse()
-        
-        response = pb2.BatchGetVariablesResponse()
-        
-        for name in request.names:
-            try:
-                variable = session.get_variable_by_name(name)
-                if variable:
-                    response.variables[name].CopyFrom(self._convert_to_proto_variable(variable))
-                else:
-                    # Add error for missing variable
-                    response.errors[name] = f"Variable '{name}' not found"
-            except Exception as e:
-                response.errors[name] = str(e)
-        
-        return response
-    
-    async def SetVariables(self, request, context):
-        """Set multiple variables at once."""
-        session = self._get_session(request.session_id, context)
-        if not session:
-            return pb2.BatchSetVariablesResponse()
-        
-        response = pb2.BatchSetVariablesResponse()
-        
-        for update in request.updates:
-            try:
-                # Decode value
-                value = TypeSerializer.decode_any(update.value)
-                
-                # Update variable
-                success = session.set_variable(
-                    identifier=update.name,
-                    new_value=value,
-                    metadata=dict(update.metadata)
+            # Execute the tool
+            if hasattr(adapter, 'execute_tool'):
+                result = await adapter.execute_tool(
+                    tool_name=request.tool_name,
+                    arguments=dict(request.arguments),
+                    context=session_context
                 )
                 
-                response.results[update.name] = success
-                if not success:
-                    response.errors[update.name] = "Failed to set variable"
-                    
-            except Exception as e:
-                response.results[update.name] = False
-                response.errors[update.name] = str(e)
-        
-        return response
-    
-    async def ListVariables(self, request, context):
-        """List all variables in a session."""
-        session = self._get_session(request.session_id, context)
-        if not session:
-            return pb2.ListVariablesResponse()
-        
-        try:
-            # Get variables with optional pattern filtering
-            variables = session.list_variables(request.pattern if request.pattern else None)
-            
-            response = pb2.ListVariablesResponse()
-            for var in variables:
-                proto_var = self._convert_to_proto_variable(var)
-                response.variables.append(proto_var)
-            
-            return response
-            
+                # Build response
+                response = pb2.ExecuteToolResponse()
+                response.success = True
+                response.result_json = json.dumps(result)
+                return response
+            else:
+                # Tool execution not implemented yet
+                context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+                context.set_details(f'Tool execution not implemented in adapter')
+                return pb2.ExecuteToolResponse()
+                
         except Exception as e:
-            logger.error(f"ListVariables failed: {e}", exc_info=True)
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(str(e))
-            return pb2.ListVariablesResponse()
-    
-    async def DeleteVariable(self, request, context):
-        """Delete a variable from a session."""
-        session = self._get_session(request.session_id, context)
-        if not session:
-            return pb2.DeleteVariableResponse()
-        
-        try:
-            success = session.delete_variable(request.variable_identifier)
-            
-            response = pb2.DeleteVariableResponse()
-            response.success = success
-            if not success:
-                response.error_message = f"Variable not found: {request.variable_identifier}"
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"DeleteVariable failed: {e}", exc_info=True)
-            response = pb2.DeleteVariableResponse()
+            logger.error(f"ExecuteTool failed: {e}", exc_info=True)
+            response = pb2.ExecuteToolResponse()
             response.success = False
             response.error_message = str(e)
             return response
-    
-    async def ExecuteTool(self, request, context):
-        """Execute a tool - placeholder for Stage 2."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('ExecuteTool not implemented until Stage 2')
-        return pb2.ExecuteToolResponse()
     
     async def ExecuteStreamingTool(self, request, context):
         """Execute a streaming tool - placeholder for Stage 3."""
@@ -374,82 +189,40 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
         return
         yield  # Make this a generator but never actually yield anything
     
+    # Advanced Features - Stage 4 Placeholders
+    
     async def AddDependency(self, request, context):
-        """Add dependency - placeholder for Stage 4."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('AddDependency not implemented until Stage 4')
-        return pb2.AddDependencyResponse()
+        """Add dependency - proxy to Elixir when implemented."""
+        logger.debug("Proxying AddDependency")
+        return await self.elixir_stub.AddDependency(request)
     
     async def StartOptimization(self, request, context):
-        """Start optimization - placeholder for Stage 4."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('StartOptimization not implemented until Stage 4')
-        return pb2.StartOptimizationResponse()
+        """Start optimization - proxy to Elixir when implemented."""
+        logger.debug("Proxying StartOptimization")
+        return await self.elixir_stub.StartOptimization(request)
     
     async def StopOptimization(self, request, context):
-        """Stop optimization - placeholder for Stage 4."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('StopOptimization not implemented until Stage 4')
-        return pb2.StopOptimizationResponse()
+        """Stop optimization - proxy to Elixir when implemented."""
+        logger.debug("Proxying StopOptimization")
+        return await self.elixir_stub.StopOptimization(request)
     
     async def GetVariableHistory(self, request, context):
-        """Get variable history - placeholder for Stage 4."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('GetVariableHistory not implemented until Stage 4')
-        return pb2.GetVariableHistoryResponse()
+        """Get variable history - proxy to Elixir when implemented."""
+        logger.debug("Proxying GetVariableHistory")
+        return await self.elixir_stub.GetVariableHistory(request)
     
     async def RollbackVariable(self, request, context):
-        """Rollback variable - placeholder for Stage 4."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('RollbackVariable not implemented until Stage 4')
-        return pb2.RollbackVariableResponse()
+        """Rollback variable - proxy to Elixir when implemented."""
+        logger.debug("Proxying RollbackVariable")
+        return await self.elixir_stub.RollbackVariable(request)
     
     def set_server(self, server):
         """Set the server reference for graceful shutdown."""
         self.server = server
-    
-    def _get_session(self, session_id: str, context) -> Optional[ServerSession]:
-        """Get session with error handling."""
-        if session_id not in self.sessions:
-            context.set_code(grpc.StatusCode.NOT_FOUND)
-            context.set_details(f"Session {session_id} not found")
-            return None
-        return self.sessions[session_id]
-    
-    def _convert_to_proto_variable(self, variable) -> pb2.Variable:
-        """Convert internal variable representation to protobuf."""
-        proto_var = pb2.Variable()
-        proto_var.id = variable.id
-        proto_var.name = variable.name
-        proto_var.type = variable.type
-        proto_var.version = variable.version
-        
-        # Encode value
-        value_any = TypeSerializer.encode_any(variable.value, variable.type)
-        # value_any is already a protobuf Any, just copy it
-        proto_var.value.CopyFrom(value_any)
-        
-        # Set timestamp (only last_updated_at in the proto)
-        timestamp = Timestamp()
-        timestamp.FromDatetime(variable.last_updated_at)
-        proto_var.last_updated_at.CopyFrom(timestamp)
-        
-        # Set metadata
-        for k, v in variable.metadata.items():
-            proto_var.metadata[k] = str(v)
-        
-        # Set constraints
-        if variable.constraints:
-            proto_var.constraints_json = json.dumps(variable.constraints)
-        
-        # Set source (default to PYTHON)
-        proto_var.source = pb2.Variable.PYTHON
-        
-        return proto_var
 
 
-async def serve(port: int, adapter_module: str):
-    """Start the gRPC server."""
+async def serve(port: int, adapter_module: str, elixir_address: str):
+    """Start the stateless gRPC server."""
     # Import the adapter
     module_parts = adapter_module.split('.')
     module_name = '.'.join(module_parts[:-1])
@@ -471,7 +244,7 @@ async def serve(port: int, adapter_module: str):
         ]
     )
     
-    servicer = SnakepitBridgeServicer(adapter_class)
+    servicer = SnakepitBridgeServicer(adapter_class, elixir_address)
     servicer.set_server(server)
     
     pb2_grpc.add_SnakepitBridgeServicer_to_server(servicer, server)
@@ -479,66 +252,57 @@ async def serve(port: int, adapter_module: str):
     # Listen on port
     actual_port = server.add_insecure_port(f'[::]:{port}')
     
-    logger.info(f"Starting gRPC server on port {actual_port}")
+    if actual_port == 0 and port != 0:
+        logger.error(f"Failed to bind to port {port}")
+        sys.exit(1)
+    
     await server.start()
     
-    # Signal readiness with actual port
+    # Signal that the server is ready
     print(f"GRPC_READY:{actual_port}", flush=True)
+    logger.info(f"gRPC server started on port {actual_port}")
+    logger.info(f"Connected to Elixir backend at {elixir_address}")
     
-    # Setup graceful shutdown with asyncio signal handlers
-    shutdown_event = asyncio.Event()
-    
+    # Setup graceful shutdown
     async def _graceful_shutdown():
-        logger.info("Graceful shutdown initiated...")
-        # Immediate shutdown for tests - cancels all active RPCs immediately
-        await server.stop(0)
-        shutdown_event.set()
+        logger.info("Shutting down gRPC server...")
+        await servicer.close()
+        await server.stop(grace_period=5)
+        logger.info("Server shutdown complete")
     
-    # Get the current event loop and attach signal handlers
-    loop = asyncio.get_running_loop()
+    # Handle signals
+    loop = asyncio.get_event_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        # Use asyncio's signal handler instead of standard signal module
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(_graceful_shutdown()))
+        loop.add_signal_handler(
+            sig,
+            lambda: asyncio.create_task(_graceful_shutdown())
+        )
     
     try:
-        # Wait for shutdown signal
-        await shutdown_event.wait()
-        logger.info("gRPC server shut down complete.")
+        await server.wait_for_termination()
     except asyncio.CancelledError:
         pass
-    
-    logger.info("Server stopped")
+    finally:
+        await servicer.close()
 
 
 async def shutdown(server):
     """Gracefully shutdown the server."""
-    logger.info("Stopping server gracefully...")
-    await server.stop(grace=5)
+    await server.stop(grace_period=5)
 
 
 def main():
     parser = argparse.ArgumentParser(description='DSPex gRPC Bridge Server')
-    parser.add_argument('--port', type=int, default=50051, 
-                       help='Port to listen on')
-    parser.add_argument('--adapter', type=str, 
-                       default='enhanced_bridge.EnhancedBridge',
-                       help='Adapter class to use')
-    parser.add_argument('--log-level', type=str, default='INFO',
-                       choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-                       help='Logging level')
+    parser.add_argument('--port', type=int, default=0,
+                        help='Port to listen on (0 for dynamic allocation)')
+    parser.add_argument('--adapter', type=str, required=True,
+                        help='Python module path to adapter class')
+    parser.add_argument('--elixir-address', type=str, required=True,
+                        help='Address of the Elixir gRPC server (e.g., localhost:50051)')
     
     args = parser.parse_args()
     
-    # Update logging level
-    logging.getLogger().setLevel(getattr(logging, args.log_level))
-    
-    try:
-        asyncio.run(serve(args.port, args.adapter))
-    except KeyboardInterrupt:
-        logger.info("Server interrupted by user")
-    except Exception as e:
-        logger.error(f"Server failed: {e}", exc_info=True)
-        sys.exit(1)
+    asyncio.run(serve(args.port, args.adapter, args.elixir_address))
 
 
 if __name__ == '__main__':

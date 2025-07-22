@@ -166,16 +166,32 @@ defmodule Snakepit.GRPCWorker do
     session_id =
       "session_#{:erlang.unique_integer([:positive, :monotonic])}_#{:erlang.system_time(:microsecond)}"
 
+    # Get the address of the central Elixir gRPC server
+    elixir_grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
+    elixir_address = "localhost:#{elixir_grpc_port}"
+
     # Start the gRPC server process non-blocking
     executable = adapter.executable_path()
     script = adapter.script_path()
     adapter_args = adapter.script_args() || []
 
+    # Build args ensuring both port and elixir-address are included
+    args = adapter_args
+
+    # Add port if not already present
     args =
-      if Enum.any?(adapter_args, &String.contains?(&1, "--port")) do
-        adapter_args
+      if not Enum.any?(args, &String.contains?(&1, "--port")) do
+        args ++ ["--port", to_string(port)]
       else
-        adapter_args ++ ["--port", to_string(port)]
+        args
+      end
+
+    # Add elixir-address if not already present
+    args =
+      if not Enum.any?(args, &String.contains?(&1, "--elixir-address")) do
+        args ++ ["--elixir-address", elixir_address]
+      else
+        args
       end
 
     Logger.info("Starting gRPC server: #{executable} #{script} #{Enum.join(args, " ")}")
