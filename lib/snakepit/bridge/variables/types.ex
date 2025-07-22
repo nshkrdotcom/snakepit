@@ -19,10 +19,10 @@ defmodule Snakepit.Bridge.Variables.Types do
   def get_type_module(:tensor), do: {:ok, __MODULE__.Tensor}
   def get_type_module(_), do: {:error, :unknown_type}
 
-  @doc """
-  Common behaviour for all types.
-  """
   defmodule Behaviour do
+    @moduledoc """
+    Common behaviour for all types.
+    """
     @callback validate(value :: any()) ::
                 {:ok, normalized :: any()} | {:error, reason :: String.t()}
     @callback validate_constraints(value :: any(), constraints :: map()) ::

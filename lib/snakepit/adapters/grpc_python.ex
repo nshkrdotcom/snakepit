@@ -164,7 +164,7 @@ defmodule Snakepit.Adapters.GRPCPython do
     unless grpc_available?() do
       {:error, :grpc_not_available}
     else
-      case Snakepit.GRPC.Client.connect("127.0.0.1", port) do
+      case Snakepit.GRPC.Client.connect(port) do
         {:ok, channel} ->
           {:ok, %{channel: channel, port: port}}
 
@@ -188,7 +188,7 @@ defmodule Snakepit.Adapters.GRPCPython do
   @doc """
   Execute a streaming command via gRPC with callback.
   """
-  def grpc_execute_stream(connection, command, args, callback_fn, timeout \\ 300_000) do
+  def grpc_execute_stream(connection, command, args, _callback_fn, timeout \\ 300_000) do
     Logger.info(
       "[GRPCPython] grpc_execute_stream - command: #{command}, args: #{inspect(args)}, timeout: #{timeout}"
     )
@@ -201,29 +201,19 @@ defmodule Snakepit.Adapters.GRPCPython do
       Logger.info("[GRPCPython] Using existing connection for streaming")
 
       result =
-        Snakepit.GRPC.Client.execute_stream(
+        Snakepit.GRPC.Client.execute_tool(
           connection.channel,
+          "default_session",
           command,
           args,
-          callback_fn,
-          timeout
+          stream: true,
+          timeout: timeout
         )
 
-      Logger.info("[GRPCPython] GRPC.Client.execute_stream returned: #{inspect(result)}")
+      Logger.info("[GRPCPython] GRPC.Client.execute_tool returned: #{inspect(result)}")
 
-      # Check if we got an error due to connection state
-      case result do
-        {:error, %GRPC.RPCError{message: msg}} ->
-          if String.contains?(msg, "Broken pipe") do
-            Logger.warning("[GRPCPython] Broken pipe detected, connection might be corrupted")
-            {:error, :connection_corrupted}
-          else
-            result
-          end
-
-        other ->
-          other
-      end
+      # Return the result directly since execute_tool always returns {:ok, _}
+      result
     end
   end
 

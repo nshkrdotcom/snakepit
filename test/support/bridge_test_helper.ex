@@ -24,7 +24,6 @@ defmodule BridgeTestHelper do
 
       pid ->
         Process.exit(pid, :kill)
-        Process.sleep(100)
     end
   end
 
