@@ -136,7 +136,8 @@ defmodule Snakepit.Bridge.SerializationTest do
 
   describe "error handling" do
     test "invalid type" do
-      assert {:error, :unknown_type} = Serialization.encode_any("value", :invalid_type)
+      assert {:error, {:unknown_type, :invalid_type}} =
+               Serialization.encode_any("value", :invalid_type)
     end
 
     test "type mismatch" do

@@ -1,4 +1,13 @@
 defmodule Snakepit.Bridge.Variables.Types.Float do
+  @moduledoc """
+  Float type implementation for variables.
+
+  Supports:
+  - Automatic integer to float conversion
+  - Min/max constraints
+  - Special values (infinity, NaN) for Python compatibility
+  """
+
   @behaviour Snakepit.Bridge.Variables.Types.Behaviour
 
   @impl true
@@ -7,27 +16,37 @@ defmodule Snakepit.Bridge.Variables.Types.Float do
   def validate(:infinity), do: {:ok, :infinity}
   def validate(:negative_infinity), do: {:ok, :negative_infinity}
   def validate(:nan), do: {:ok, :nan}
+  def validate("Infinity"), do: {:ok, :infinity}
+  def validate("-Infinity"), do: {:ok, :negative_infinity}
+  def validate("NaN"), do: {:ok, :nan}
   def validate(_), do: {:error, "must be a number"}
 
   @impl true
   def validate_constraints(value, constraints) do
-    # Special values bypass constraints
-    if value in [:nan, :infinity, :negative_infinity] do
-      :ok
-    else
-      min = Map.get(constraints, :min)
-      max = Map.get(constraints, :max)
+    cond do
+      # Special values bypass normal constraints
+      value in [:infinity, :negative_infinity, :nan] ->
+        :ok
 
-      cond do
-        min != nil and value < min ->
-          {:error, "must be >= #{min}"}
+      # Check min constraint
+      min = Map.get(constraints, :min) ->
+        if value >= min do
+          validate_constraints(value, Map.delete(constraints, :min))
+        else
+          {:error, "value #{value} is below minimum #{min}"}
+        end
 
-        max != nil and value > max ->
-          {:error, "must be <= #{max}"}
+      # Check max constraint  
+      max = Map.get(constraints, :max) ->
+        if value <= max do
+          validate_constraints(value, Map.delete(constraints, :max))
+        else
+          {:error, "value #{value} is above maximum #{max}"}
+        end
 
-        true ->
-          :ok
-      end
+      # No more constraints
+      true ->
+        :ok
     end
   end
 
@@ -36,17 +55,22 @@ defmodule Snakepit.Bridge.Variables.Types.Float do
     # Handle special float values
     json_value =
       cond do
-        is_nan(value) -> "NaN"
+        value == :nan -> "NaN"
         value == :infinity -> "Infinity"
         value == :negative_infinity -> "-Infinity"
-        true -> value
+        is_float(value) -> value
+        true -> nil
       end
 
-    {:ok, Jason.encode!(json_value)}
+    if json_value do
+      {:ok, Jason.encode!(json_value)}
+    else
+      {:error, "cannot serialize non-float"}
+    end
   end
 
   @impl true
-  def deserialize(json) do
+  def deserialize(json) when is_binary(json) do
     case Jason.decode(json) do
       {:ok, "NaN"} -> {:ok, :nan}
       {:ok, "Infinity"} -> {:ok, :infinity}
@@ -56,8 +80,5 @@ defmodule Snakepit.Bridge.Variables.Types.Float do
     end
   end
 
-  defp is_nan(value) do
-    # Elixir doesn't have NaN, but we support it for Python interop
-    value == :nan
-  end
+  def deserialize(_), do: {:error, "invalid float format"}
 end
