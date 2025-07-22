@@ -6,28 +6,16 @@ defmodule Snakepit.GRPC.Client do
 
   require Logger
 
-  @default_timeout 30_000
-  @default_deadline 60_000
-
-  # Check if we have the real implementation available
-  @has_real_impl Code.ensure_loaded?(Snakepit.GRPC.ClientImpl)
-
   def connect(port) when is_integer(port) do
     connect("localhost:#{port}")
   end
 
   def connect(address) when is_binary(address) do
-    if @has_real_impl do
-      Snakepit.GRPC.ClientImpl.connect(address)
-    else
-      # Fallback to mock implementation
-      Logger.warning("Using mock gRPC client - protobuf not compiled")
-      {:ok, %{address: address, mock: true}}
-    end
+    Snakepit.GRPC.ClientImpl.connect(address)
   end
 
   def ping(channel, message, opts \\ []) do
-    if @has_real_impl and not Map.get(channel, :mock, false) do
+    if not Map.get(channel, :mock, false) do
       Snakepit.GRPC.ClientImpl.ping(channel, message, opts)
     else
       # Mock implementation
@@ -35,8 +23,8 @@ defmodule Snakepit.GRPC.Client do
     end
   end
 
-  def initialize_session(channel, session_id, config \\ %{}, opts \\ []) do
-    request = %{
+  def initialize_session(_channel, session_id, config \\ %{}, _opts \\ []) do
+    _request = %{
       session_id: session_id,
       metadata: %{
         "elixir_node" => to_string(node()),
@@ -57,8 +45,8 @@ defmodule Snakepit.GRPC.Client do
     {:ok, %{success: true, available_tools: %{}, initial_variables: %{}}}
   end
 
-  def cleanup_session(channel, session_id, force \\ false, opts \\ []) do
-    request = %{
+  def cleanup_session(_channel, session_id, force \\ false, _opts \\ []) do
+    _request = %{
       session_id: session_id,
       force: force
     }
@@ -86,7 +74,7 @@ defmodule Snakepit.GRPC.Client do
     start_time = System.monotonic_time()
 
     result =
-      if @has_real_impl and not Map.get(channel, :mock, false) do
+      if not Map.get(channel, :mock, false) do
         # Merge constraints into opts
         full_opts = Keyword.put(opts, :constraints, constraints)
 
@@ -100,7 +88,7 @@ defmodule Snakepit.GRPC.Client do
         )
       else
         # Mock implementation
-        request = %{
+        _request = %{
           session_id: session_id,
           name: to_string(name),
           type: to_string(type),
@@ -123,8 +111,8 @@ defmodule Snakepit.GRPC.Client do
     result
   end
 
-  def get_variable(channel, session_id, identifier, opts \\ []) do
-    request = %{
+  def get_variable(_channel, session_id, identifier, opts \\ []) do
+    _request = %{
       session_id: session_id,
       variable_identifier: to_string(identifier),
       bypass_cache: opts[:bypass_cache] || false
@@ -134,8 +122,8 @@ defmodule Snakepit.GRPC.Client do
     {:ok, %{variable: %{id: identifier, name: identifier, type: "float", value: 0.7}}}
   end
 
-  def set_variable(channel, session_id, identifier, value, opts \\ []) do
-    request = %{
+  def set_variable(_channel, session_id, identifier, value, opts \\ []) do
+    _request = %{
       session_id: session_id,
       variable_identifier: to_string(identifier),
       value: encode_any(value),
@@ -147,13 +135,13 @@ defmodule Snakepit.GRPC.Client do
     {:ok, %{success: true, error_message: "", new_version: 1}}
   end
 
-  def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
+  def execute_tool(_channel, session_id, tool_name, parameters, opts \\ []) do
     proto_params =
       Enum.into(parameters, %{}, fn {k, v} ->
         {to_string(k), encode_any(v)}
       end)
 
-    request = %{
+    _request = %{
       session_id: session_id,
       tool_name: tool_name,
       parameters: proto_params,
@@ -166,25 +154,6 @@ defmodule Snakepit.GRPC.Client do
   end
 
   # Helper functions
-  defp build_call_opts(opts) do
-    timeout = opts[:timeout] || @default_timeout
-    deadline = opts[:deadline] || @default_deadline
-
-    [
-      timeout: timeout,
-      deadline: deadline
-    ]
-  end
-
-  defp handle_response({:ok, response, _headers}), do: {:ok, response}
-  defp handle_response({:ok, response}), do: {:ok, response}
-
-  defp handle_response({:error, %GRPC.RPCError{} = error}) do
-    Logger.error("gRPC error: #{inspect(error)}")
-    {:error, error}
-  end
-
-  defp handle_response(error), do: error
 
   defp encode_any(value) when is_binary(value) do
     %{
@@ -237,7 +206,7 @@ defmodule Snakepit.GRPC.Client do
     ping(channel, "health_check_#{client_id}")
   end
 
-  def get_info(channel) do
+  def get_info(_channel) do
     # Return mock info for now
     {:ok,
      %{

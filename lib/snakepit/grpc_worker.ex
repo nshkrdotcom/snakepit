@@ -384,8 +384,8 @@ defmodule Snakepit.GRPCWorker do
   end
 
   # Define graceful shutdown timeout - configurable
-  # 2 seconds
-  @graceful_shutdown_timeout 2000
+  # 500ms should be more than enough with proper signal handling
+  @graceful_shutdown_timeout 500
 
   @impl true
   def terminate(reason, state) do
@@ -435,7 +435,17 @@ defmodule Snakepit.GRPCWorker do
 
     # The Port will be closed automatically when the GenServer terminates.
     # Calling Port.close() is still good practice if you need to be explicit.
-    if state.server_port, do: Port.close(state.server_port)
+    # Gracefully handle port closing, as it may already be closed.
+    if state.server_port do
+      try do
+        Port.close(state.server_port)
+      rescue
+        # An ArgumentError is raised if the port is already closed.
+        # This is an expected race condition, so we can safely ignore it.
+        ArgumentError ->
+          :ok
+      end
+    end
 
     # *** CRITICAL: Unregister from ProcessRegistry as the very last step ***
     Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
@@ -521,9 +531,6 @@ defmodule Snakepit.GRPCWorker do
     case Snakepit.GRPC.Client.get_info(state.connection.channel) do
       {:ok, info_response} ->
         {:ok, info_response}
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 

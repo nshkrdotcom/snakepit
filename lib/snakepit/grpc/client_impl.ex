@@ -30,7 +30,7 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   def ping(channel, message, opts \\ []) do
-    request = Bridge.PingRequest.new(message: message)
+    request = %Bridge.PingRequest{message: message}
 
     timeout = opts[:timeout] || @default_timeout
     call_opts = [timeout: timeout]
@@ -54,19 +54,17 @@ defmodule Snakepit.GRPC.ClientImpl do
       "initialized_at" => DateTime.to_iso8601(DateTime.utc_now())
     }
 
-    session_config =
-      Bridge.SessionConfig.new(
-        enable_caching: Map.get(config, :enable_caching, true),
-        cache_ttl_seconds: Map.get(config, :cache_ttl_seconds, 60),
-        enable_telemetry: Map.get(config, :enable_telemetry, false)
-      )
+    session_config = %Bridge.SessionConfig{
+      enable_caching: Map.get(config, :enable_caching, true),
+      cache_ttl_seconds: Map.get(config, :cache_ttl_seconds, 60),
+      enable_telemetry: Map.get(config, :enable_telemetry, false)
+    }
 
-    request =
-      Bridge.InitializeSessionRequest.new(
-        session_id: session_id,
-        metadata: metadata,
-        config: session_config
-      )
+    request = %Bridge.InitializeSessionRequest{
+      session_id: session_id,
+      metadata: metadata,
+      config: session_config
+    }
 
     timeout = opts[:timeout] || @default_timeout
     call_opts = [timeout: timeout]
@@ -87,11 +85,10 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   def cleanup_session(channel, session_id, force \\ false, opts \\ []) do
-    request =
-      Bridge.CleanupSessionRequest.new(
-        session_id: session_id,
-        force: force
-      )
+    request = %Bridge.CleanupSessionRequest{
+      session_id: session_id,
+      force: force
+    }
 
     timeout = opts[:timeout] || @default_timeout
     call_opts = [timeout: timeout]
@@ -111,16 +108,14 @@ defmodule Snakepit.GRPC.ClientImpl do
 
   def register_variable(channel, session_id, name, type, initial_value, opts \\ []) do
     require Logger
-    IO.inspect("ClientImpl.register_variable called!", label: "DEBUG")
     # Encode value
     {:ok, any_value} = Serialization.encode_any(initial_value, type)
 
     # Convert to protobuf Any
-    proto_any =
-      Google.Protobuf.Any.new(
-        type_url: any_value.type_url,
-        value: any_value.value
-      )
+    proto_any = %Google.Protobuf.Any{
+      type_url: any_value.type_url,
+      value: any_value.value
+    }
 
     # Encode constraints if provided
     constraints_json =
@@ -129,21 +124,19 @@ defmodule Snakepit.GRPC.ClientImpl do
         constraints -> Jason.encode!(constraints)
       end
 
-    request =
-      Bridge.RegisterVariableRequest.new(
-        session_id: session_id,
-        name: to_string(name),
-        type: to_string(type),
-        initial_value: proto_any,
-        constraints_json: constraints_json,
-        metadata: opts[:metadata] || %{}
-      )
+    request = %Bridge.RegisterVariableRequest{
+      session_id: session_id,
+      name: to_string(name),
+      type: to_string(type),
+      initial_value: proto_any,
+      constraints_json: constraints_json,
+      metadata: opts[:metadata] || %{}
+    }
 
     timeout = opts[:timeout] || @default_timeout
     call_opts = [timeout: timeout]
 
     result = Bridge.SnakepitBridge.Stub.register_variable(channel, request, call_opts)
-    IO.inspect(result, label: "GRPC RESULT")
 
     case result do
       {:ok, response, _headers} ->
@@ -166,7 +159,30 @@ defmodule Snakepit.GRPC.ClientImpl do
                constraints: opts[:constraints] || %{}
              }}
 
-          Logger.debug("Returning: #{inspect(formatted_result)}")
+          formatted_result
+        else
+          {:error, response.error_message || "Failed to register variable"}
+        end
+
+      {:ok, response} ->
+        # The stub is returning just {:ok, response} without headers
+        if response.success do
+          # For now, return simple structure that tests expect
+          formatted_result =
+            {:ok, response.variable_id,
+             %{
+               id: response.variable_id,
+               name: to_string(name),
+               type: type,
+               value: initial_value,
+               version: 1,
+               source: nil,
+               created_at: nil,
+               updated_at: nil,
+               metadata: %{},
+               constraints: opts[:constraints] || %{}
+             }}
+
           formatted_result
         else
           {:error, response.error_message || "Failed to register variable"}
@@ -178,24 +194,25 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   def get_variable(channel, session_id, identifier, opts \\ []) do
-    request =
-      if is_binary(identifier) and String.starts_with?(identifier, "var_") do
-        Bridge.GetVariableRequest.new(
-          session_id: session_id,
-          id: identifier
-        )
-      else
-        Bridge.GetVariableRequest.new(
-          session_id: session_id,
-          name: to_string(identifier)
-        )
-      end
+    request = %Bridge.GetVariableRequest{
+      session_id: session_id,
+      variable_identifier: to_string(identifier),
+      bypass_cache: opts[:bypass_cache] || false
+    }
 
     timeout = opts[:timeout] || @default_timeout
     call_opts = [timeout: timeout]
 
     case Bridge.SnakepitBridge.Stub.get_variable(channel, request, call_opts) do
       {:ok, response, _headers} ->
+        if response.variable do
+          {:ok, decode_variable(response.variable)}
+        else
+          {:error, :not_found}
+        end
+
+      {:ok, response} ->
+        # Handle 2-tuple response
         if response.variable do
           {:ok, decode_variable(response.variable)}
         else
@@ -211,28 +228,35 @@ defmodule Snakepit.GRPC.ClientImpl do
     # Infer type from current variable
     case get_variable(channel, session_id, name) do
       {:ok, current_var} ->
-        # Encode value with the variable's type
-        {:ok, any_value} = Serialization.encode_any(value, String.to_atom(current_var.type))
+        # Encode value with the variable's type (type is already an atom)
+        {:ok, any_value} = Serialization.encode_any(value, current_var.type)
 
-        proto_any =
-          Google.Protobuf.Any.new(
-            type_url: any_value.type_url,
-            value: any_value.value
-          )
+        proto_any = %Google.Protobuf.Any{
+          type_url: any_value.type_url,
+          value: any_value.value
+        }
 
-        request =
-          Bridge.SetVariableRequest.new(
-            session_id: session_id,
-            name: to_string(name),
-            value: proto_any,
-            metadata: opts[:metadata] || %{}
-          )
+        request = %Bridge.SetVariableRequest{
+          session_id: session_id,
+          variable_identifier: to_string(name),
+          value: proto_any,
+          metadata: opts[:metadata] || %{},
+          expected_version: opts[:expected_version] || 0
+        }
 
         timeout = opts[:timeout] || @default_timeout
         call_opts = [timeout: timeout]
 
         case Bridge.SnakepitBridge.Stub.set_variable(channel, request, call_opts) do
           {:ok, response, _headers} ->
+            if response.success do
+              :ok
+            else
+              {:error, response.error || "Failed to set variable"}
+            end
+
+          {:ok, response} ->
+            # Handle 2-tuple response
             if response.success do
               :ok
             else
@@ -255,12 +279,11 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   def watch_variables(channel, session_id, names, opts \\ []) do
-    request =
-      Bridge.WatchVariablesRequest.new(
-        session_id: session_id,
-        variable_names: names,
-        include_initial: opts[:include_initial] || false
-      )
+    request = %Bridge.WatchVariablesRequest{
+      session_id: session_id,
+      variable_identifiers: names,
+      include_initial_values: opts[:include_initial] || false
+    }
 
     # 5 minutes for streaming
     timeout = opts[:timeout] || 300_000

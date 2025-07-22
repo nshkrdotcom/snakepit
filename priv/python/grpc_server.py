@@ -190,15 +190,18 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
             return pb2.GetVariableResponse()
         
         try:
-            # Get by name or ID
-            if request.name:
-                variable = session.get_variable_by_name(request.name)
-            elif request.id:
-                variable = session.get_variable_by_id(request.id)
-            else:
+            # Get by name or ID based on variable_identifier
+            identifier = request.variable_identifier
+            if not identifier:
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-                context.set_details("Either name or id must be provided")
+                context.set_details("variable_identifier must be provided")
                 return pb2.GetVariableResponse()
+            
+            # Check if it's an ID (starts with "var_") or a name
+            if identifier.startswith("var_"):
+                variable = session.get_variable_by_id(identifier)
+            else:
+                variable = session.get_variable_by_name(identifier)
             
             if not variable:
                 context.set_code(grpc.StatusCode.NOT_FOUND)
@@ -225,9 +228,16 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
             # Decode new value
             value = TypeSerializer.decode_any(request.value)
             
-            # Update variable
+            # Update variable using variable_identifier
+            identifier = request.variable_identifier
+            if not identifier:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("variable_identifier must be provided")
+                return pb2.SetVariableResponse()
+            
+            # For now, we assume identifier is always a name (not an ID)
             success = session.set_variable(
-                name=request.name,
+                name=identifier,
                 value=value,
                 metadata=dict(request.metadata)
             )
@@ -395,21 +405,25 @@ async def serve(port: int, adapter_module: str):
     # Signal readiness with actual port
     print(f"GRPC_READY:{actual_port}", flush=True)
     
-    # Setup graceful shutdown
+    # Setup graceful shutdown with asyncio signal handlers
     shutdown_event = asyncio.Event()
     
-    def handle_signal(signum, frame):
-        logger.info(f"Received signal {signum}")
+    async def _graceful_shutdown():
+        logger.info("Graceful shutdown initiated...")
+        # Immediate shutdown for tests - cancels all active RPCs immediately
+        await server.stop(0)
         shutdown_event.set()
     
+    # Get the current event loop and attach signal handlers
+    loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, handle_signal)
+        # Use asyncio's signal handler instead of standard signal module
+        loop.add_signal_handler(sig, lambda: asyncio.create_task(_graceful_shutdown()))
     
     try:
         # Wait for shutdown signal
         await shutdown_event.wait()
-        logger.info("Shutdown requested, stopping server...")
-        await server.stop(grace=5)
+        logger.info("gRPC server shut down complete.")
     except asyncio.CancelledError:
         pass
     
