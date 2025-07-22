@@ -12,6 +12,7 @@ import grpc
 import logging
 import signal
 import sys
+import time
 from concurrent import futures
 from datetime import datetime
 from typing import Optional
@@ -231,8 +232,10 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         self.server = server
 
 
-async def serve(port: int, adapter_module: str, elixir_address: str):
-    """Start the stateless gRPC server."""
+async def serve_with_shutdown(port: int, adapter_module: str, elixir_address: str, shutdown_event: asyncio.Event):
+    """Start the stateless gRPC server with proper shutdown handling."""
+    # print(f"GRPC_SERVER_LOG: Starting serve function with fixed shutdown (v4)", flush=True)
+    
     # Import the adapter
     module_parts = adapter_module.split('.')
     module_name = '.'.join(module_parts[:-1])
@@ -270,30 +273,45 @@ async def serve(port: int, adapter_module: str, elixir_address: str):
     
     # Signal that the server is ready
     print(f"GRPC_READY:{actual_port}", flush=True)
+    # print(f"GRPC_SERVER_LOG: Server started with new shutdown logic v2", flush=True)
     logger.info(f"gRPC server started on port {actual_port}")
     logger.info(f"Connected to Elixir backend at {elixir_address}")
     
-    # Setup graceful shutdown
-    async def _graceful_shutdown():
-        logger.info("Shutting down gRPC server...")
-        await servicer.close()
-        await server.stop(grace_period=5)
-        logger.info("Server shutdown complete")
+    # The shutdown_event is passed in from main()
+    # print(f"GRPC_SERVER_LOG: Using shutdown event from main, handlers already registered", flush=True)
     
-    # Handle signals
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(
-            sig,
-            lambda: asyncio.create_task(_graceful_shutdown())
-        )
+    # Wait for either termination or shutdown signal
+    # print("GRPC_SERVER_LOG: Starting main event loop wait", flush=True)
+    server_task = asyncio.create_task(server.wait_for_termination())
+    shutdown_task = asyncio.create_task(shutdown_event.wait())
     
     try:
-        await server.wait_for_termination()
-    except asyncio.CancelledError:
-        pass
-    finally:
-        await servicer.close()
+        done, pending = await asyncio.wait(
+            [server_task, shutdown_task],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        
+        # print(f"GRPC_SERVER_LOG: Event loop returned, shutdown_event.is_set()={shutdown_event.is_set()}", flush=True)
+        
+        # Cancel pending tasks
+        for task in pending:
+            task.cancel()
+        
+        # If shutdown was triggered, stop the server gracefully
+        if shutdown_event.is_set():
+            # print("GRPC_SERVER_LOG: Shutdown event triggered, stopping server...", flush=True)
+            await servicer.close()
+            await server.stop(grace_period=0.5)  # Quick stop for tests
+            # print("GRPC_SERVER_LOG: Server stopped successfully", flush=True)
+    except Exception as e:
+        # print(f"GRPC_SERVER_LOG: Exception in main loop: {e}", flush=True)
+        raise
+
+
+async def serve(port: int, adapter_module: str, elixir_address: str):
+    """Legacy entry point - creates its own shutdown event."""
+    shutdown_event = asyncio.Event()
+    await serve_with_shutdown(port, adapter_module, elixir_address, shutdown_event)
 
 
 async def shutdown(server):
@@ -302,6 +320,7 @@ async def shutdown(server):
 
 
 def main():
+    # print(f"GRPC_SERVER_LOG: main() called at {datetime.now()}", flush=True)
     parser = argparse.ArgumentParser(description='DSPex gRPC Bridge Server')
     parser.add_argument('--port', type=int, default=0,
                         help='Port to listen on (0 for dynamic allocation)')
@@ -312,7 +331,27 @@ def main():
     
     args = parser.parse_args()
     
-    asyncio.run(serve(args.port, args.adapter, args.elixir_address))
+    # Set up signal handlers at the module level before running asyncio
+    shutdown_event = None
+    
+    def handle_signal(signum, frame):
+        # print(f"GRPC_SERVER_LOG: Received signal {signum} in main process", flush=True)
+        if shutdown_event and not shutdown_event.is_set():
+            # Schedule the shutdown in the running loop
+            asyncio.get_running_loop().call_soon_threadsafe(shutdown_event.set)
+    
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+    
+    # Create and run the server with the shutdown event
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    shutdown_event = asyncio.Event()
+    
+    try:
+        loop.run_until_complete(serve_with_shutdown(args.port, args.adapter, args.elixir_address, shutdown_event))
+    finally:
+        loop.close()
 
 
 if __name__ == '__main__':
