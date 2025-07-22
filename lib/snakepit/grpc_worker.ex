@@ -384,6 +384,8 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_info({port, {:data, data}}, %{server_port: port} = state) do
+    # Debug output commented out now that shutdown is fixed
+    # IO.puts("gRPC server output: #{data}")
     Logger.info("gRPC server output: #{data}")
     {:noreply, state}
   end
@@ -401,8 +403,8 @@ defmodule Snakepit.GRPCWorker do
   end
 
   # Define graceful shutdown timeout - configurable
-  # 500ms should be more than enough with proper signal handling
-  @graceful_shutdown_timeout 500
+  # 2000ms to accommodate Python server's async shutdown
+  @graceful_shutdown_timeout 2000
 
   @impl true
   def terminate(reason, state) do

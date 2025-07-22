@@ -96,7 +96,7 @@ defmodule Snakepit.GRPC.BridgeServer do
         variables = Map.get(session, :variables, %{})
         tools = Map.get(session, :tools, %{})
         metadata = Map.get(session, :metadata, %{})
-        
+
         variable_count = map_size(variables)
         tool_count = map_size(tools)
 
