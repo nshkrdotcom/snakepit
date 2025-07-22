@@ -1,6 +1,9 @@
 defmodule Snakepit.Bridge.Variables.Types do
   @moduledoc """
   Type system for bridge variables with serialization support.
+
+  Provides a behaviour for implementing variable types and
+  a registry for looking up type implementations.
   """
 
   @type var_type ::
@@ -17,7 +20,46 @@ defmodule Snakepit.Bridge.Variables.Types do
   def get_type_module(:module), do: {:ok, __MODULE__.Module}
   def get_type_module(:embedding), do: {:ok, __MODULE__.Embedding}
   def get_type_module(:tensor), do: {:ok, __MODULE__.Tensor}
-  def get_type_module(_), do: {:error, :unknown_type}
+
+  def get_type_module(type) when is_binary(type) do
+    try do
+      get_type_module(String.to_existing_atom(type))
+    rescue
+      ArgumentError -> {:error, {:unknown_type, type}}
+    end
+  end
+
+  def get_type_module(type), do: {:error, {:unknown_type, type}}
+
+  @doc """
+  Lists all supported variable types.
+  """
+  def list_types do
+    [:float, :integer, :string, :boolean, :choice, :module, :embedding, :tensor]
+  end
+
+  @doc """
+  Validates a value against a type.
+  """
+  @spec validate_value(any(), atom(), map()) :: {:ok, any()} | {:error, String.t()}
+  def validate_value(value, type, constraints \\ %{}) do
+    with {:ok, module} <- get_type_module(type),
+         {:ok, validated} <- module.validate(value),
+         :ok <- module.validate_constraints(validated, constraints) do
+      {:ok, validated}
+    end
+  end
+
+  @doc """
+  Checks if a value would be valid for a type without modifying it.
+  """
+  @spec valid?(any(), atom(), map()) :: boolean()
+  def valid?(value, type, constraints \\ %{}) do
+    case validate_value(value, type, constraints) do
+      {:ok, _} -> true
+      {:error, _} -> false
+    end
+  end
 
   defmodule Behaviour do
     @moduledoc """

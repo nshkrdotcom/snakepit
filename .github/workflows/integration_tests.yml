@@ -1,0 +1,65 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Elixir
+      uses: erlef/setup-beam@v1
+      with:
+        elixir-version: '1.14'
+        otp-version: '25'
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          deps
+          _build
+          ~/.cache/pip
+        key: ${{ runner.os }}-mix-pip-${{ hashFiles('**/mix.lock', '**/requirements.txt') }}
+    
+    - name: Install Elixir dependencies
+      run: |
+        mix deps.get
+        mix compile
+    
+    - name: Install Python dependencies
+      run: |
+        cd priv/python
+        pip install pytest pytest-asyncio grpcio grpcio-tools
+    
+    - name: Run unit tests
+      run: mix test
+    
+    - name: Run integration tests
+      run: ./test/run_integration_tests.sh
+      env:
+        CI: true
+    
+    - name: Run benchmarks
+      run: ./test/run_integration_tests.sh --with-benchmarks
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: benchmark-results
+        path: |
+          benchmark_results.json
+          variable_benchmarks.png
