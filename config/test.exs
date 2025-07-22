@@ -30,4 +30,5 @@ config :logger, level: :warning
 # Configure ExUnit
 config :ex_unit,
   capture_log: true,
-  exclude: [:performance]  # Exclude performance tests by default
+  # Exclude performance tests by default
+  exclude: [:performance]
