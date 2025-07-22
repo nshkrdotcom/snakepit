@@ -13,7 +13,7 @@ defmodule Snakepit.Bridge.Serialization do
          {:ok, normalized} <- type_module.validate(value),
          {:ok, json} <- type_module.serialize(normalized) do
       any = %{
-        type_url: "dspex.variables/#{type}",
+        type_url: "type.googleapis.com/snakepit.#{type}",
         value: json
       }
 
@@ -47,22 +47,33 @@ defmodule Snakepit.Bridge.Serialization do
   @doc """
   Parse constraints JSON string into a map.
   """
-  def parse_constraints(nil), do: %{}
-  def parse_constraints(""), do: %{}
+  def parse_constraints(nil), do: {:ok, %{}}
+  def parse_constraints(""), do: {:ok, %{}}
 
   def parse_constraints(json_string) when is_binary(json_string) do
     case Jason.decode(json_string) do
-      {:ok, constraints} -> constraints
-      {:error, _} -> %{}
+      {:ok, constraints} -> {:ok, constraints}
+      {:error, reason} -> {:error, "Invalid JSON: #{inspect(reason)}"}
     end
   end
 
-  def parse_constraints(constraints) when is_map(constraints), do: constraints
+  def parse_constraints(constraints) when is_map(constraints), do: {:ok, constraints}
 
   defp extract_type_from_url(type_url) do
-    case String.split(type_url, "/") do
-      [_prefix, type] -> type
-      _ -> nil
+    # Handle both "dspex.variables/type" and "type.googleapis.com/snakepit.type" formats
+    cond do
+      String.contains?(type_url, "snakepit.") ->
+        type_url
+        |> String.split("snakepit.")
+        |> List.last()
+
+      String.contains?(type_url, "/") ->
+        type_url
+        |> String.split("/")
+        |> List.last()
+
+      true ->
+        nil
     end
   end
 

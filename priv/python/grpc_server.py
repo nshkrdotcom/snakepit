@@ -18,7 +18,7 @@ sys.path.insert(0, '.')
 
 from snakepit_bridge import snakepit_bridge_pb2 as pb2
 from snakepit_bridge import snakepit_bridge_pb2_grpc as pb2_grpc
-from snakepit_bridge.session_context import SessionContext
+from snakepit_bridge.server_session import ServerSession
 from snakepit_bridge.serialization import TypeSerializer
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf import any_pb2
@@ -36,7 +36,7 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
     
     def __init__(self, adapter_class):
         self.adapter_class = adapter_class
-        self.sessions: Dict[str, SessionContext] = {}
+        self.sessions: Dict[str, ServerSession] = {}
         self.adapters: Dict[str, object] = {}
         self.server: Optional[grpc.aio.Server] = None
     
@@ -59,20 +59,14 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
         logger.info(f"Initializing session: {request.session_id}")
         
         try:
-            # Create session context with config
-            config = {
-                'enable_caching': request.config.enable_caching,
-                'cache_ttl': request.config.cache_ttl_seconds,
-                'enable_telemetry': request.config.enable_telemetry,
-                'metadata': dict(request.metadata)
-            }
-            
-            session = SessionContext(request.session_id, config)
+            # Create server session
+            session = ServerSession(request.session_id)
             self.sessions[request.session_id] = session
             
             # Create adapter instance
             adapter = self.adapter_class()
-            adapter.set_session_context(session)
+            # For now, adapter doesn't need session context since we're server-side
+            # adapter.set_session_context(session)
             self.adapters[request.session_id] = adapter
             
             # Initialize adapter (may register tools/variables)
@@ -113,12 +107,17 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
             if request.session_id in self.adapters:
                 adapter = self.adapters[request.session_id]
                 if hasattr(adapter, 'cleanup'):
-                    await adapter.cleanup()
+                    # Check if cleanup is async
+                    import inspect
+                    if inspect.iscoroutinefunction(adapter.cleanup):
+                        await adapter.cleanup()
+                    else:
+                        adapter.cleanup()
                 del self.adapters[request.session_id]
                 resources_cleaned += 1
             
-            # Clean up session
-            await session.cleanup()
+            # Clean up session (ServerSession.cleanup is not async)
+            session.cleanup()
             del self.sessions[request.session_id]
             resources_cleaned += 1
             
@@ -235,10 +234,10 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
                 context.set_details("variable_identifier must be provided")
                 return pb2.SetVariableResponse()
             
-            # For now, we assume identifier is always a name (not an ID)
+            # Update variable by identifier (can be name or ID)
             success = session.set_variable(
-                name=identifier,
-                value=value,
+                identifier=identifier,
+                new_value=value,
                 metadata=dict(request.metadata)
             )
             
@@ -292,8 +291,8 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
                 
                 # Update variable
                 success = session.set_variable(
-                    name=update.name,
-                    value=value,
+                    identifier=update.name,
+                    new_value=value,
                     metadata=dict(update.metadata)
                 )
                 
@@ -307,27 +306,109 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
         
         return response
     
+    async def ListVariables(self, request, context):
+        """List all variables in a session."""
+        session = self._get_session(request.session_id, context)
+        if not session:
+            return pb2.ListVariablesResponse()
+        
+        try:
+            # Get variables with optional pattern filtering
+            variables = session.list_variables(request.pattern if request.pattern else None)
+            
+            response = pb2.ListVariablesResponse()
+            for var in variables:
+                proto_var = self._convert_to_proto_variable(var)
+                response.variables.append(proto_var)
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"ListVariables failed: {e}", exc_info=True)
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(e))
+            return pb2.ListVariablesResponse()
+    
+    async def DeleteVariable(self, request, context):
+        """Delete a variable from a session."""
+        session = self._get_session(request.session_id, context)
+        if not session:
+            return pb2.DeleteVariableResponse()
+        
+        try:
+            success = session.delete_variable(request.variable_identifier)
+            
+            response = pb2.DeleteVariableResponse()
+            response.success = success
+            if not success:
+                response.error_message = f"Variable not found: {request.variable_identifier}"
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"DeleteVariable failed: {e}", exc_info=True)
+            response = pb2.DeleteVariableResponse()
+            response.success = False
+            response.error_message = str(e)
+            return response
+    
     async def ExecuteTool(self, request, context):
         """Execute a tool - placeholder for Stage 2."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('ExecuteTool not implemented until Stage 2')
         return pb2.ExecuteToolResponse()
     
+    async def ExecuteStreamingTool(self, request, context):
+        """Execute a streaming tool - placeholder for Stage 3."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('ExecuteStreamingTool not implemented until Stage 3')
+        # For streaming RPCs, we need to yield, not return
+        return
+        yield  # Make this a generator but never actually yield anything
+    
     async def WatchVariables(self, request, context):
         """Watch variables for changes - placeholder for Stage 3."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('WatchVariables not implemented until Stage 3')
-        # Return empty generator to satisfy type requirements
-        async def empty_generator():
-            return
-            yield  # Make it a generator
-        return empty_generator()
+        # For streaming RPCs, we need to yield, not return
+        return
+        yield  # Make this a generator but never actually yield anything
+    
+    async def AddDependency(self, request, context):
+        """Add dependency - placeholder for Stage 4."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('AddDependency not implemented until Stage 4')
+        return pb2.AddDependencyResponse()
+    
+    async def StartOptimization(self, request, context):
+        """Start optimization - placeholder for Stage 4."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('StartOptimization not implemented until Stage 4')
+        return pb2.StartOptimizationResponse()
+    
+    async def StopOptimization(self, request, context):
+        """Stop optimization - placeholder for Stage 4."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('StopOptimization not implemented until Stage 4')
+        return pb2.StopOptimizationResponse()
+    
+    async def GetVariableHistory(self, request, context):
+        """Get variable history - placeholder for Stage 4."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('GetVariableHistory not implemented until Stage 4')
+        return pb2.GetVariableHistoryResponse()
+    
+    async def RollbackVariable(self, request, context):
+        """Rollback variable - placeholder for Stage 4."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('RollbackVariable not implemented until Stage 4')
+        return pb2.RollbackVariableResponse()
     
     def set_server(self, server):
         """Set the server reference for graceful shutdown."""
         self.server = server
     
-    def _get_session(self, session_id: str, context) -> Optional[SessionContext]:
+    def _get_session(self, session_id: str, context) -> Optional[ServerSession]:
         """Get session with error handling."""
         if session_id not in self.sessions:
             context.set_code(grpc.StatusCode.NOT_FOUND)
@@ -335,35 +416,34 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
             return None
         return self.sessions[session_id]
     
-    def _convert_to_proto_variable(self, variable: dict) -> pb2.Variable:
+    def _convert_to_proto_variable(self, variable) -> pb2.Variable:
         """Convert internal variable representation to protobuf."""
         proto_var = pb2.Variable()
-        proto_var.id = variable['id']
-        proto_var.name = variable['name']
-        proto_var.type = variable['type']
-        proto_var.version = variable['version']
+        proto_var.id = variable.id
+        proto_var.name = variable.name
+        proto_var.type = variable.type
+        proto_var.version = variable.version
         
         # Encode value
-        value_any = TypeSerializer.encode_any(variable['value'], variable['type'])
+        value_any = TypeSerializer.encode_any(variable.value, variable.type)
         # value_any is already a protobuf Any, just copy it
         proto_var.value.CopyFrom(value_any)
         
         # Set timestamp (only last_updated_at in the proto)
         timestamp = Timestamp()
-        timestamp.FromDatetime(variable['updated_at'])
+        timestamp.FromDatetime(variable.last_updated_at)
         proto_var.last_updated_at.CopyFrom(timestamp)
         
         # Set metadata
-        for k, v in variable.get('metadata', {}).items():
+        for k, v in variable.metadata.items():
             proto_var.metadata[k] = str(v)
         
         # Set constraints
-        if variable.get('constraints'):
-            proto_var.constraints_json = json.dumps(variable['constraints'])
+        if variable.constraints:
+            proto_var.constraints_json = json.dumps(variable.constraints)
         
         # Set source (default to PYTHON)
-        # TODO: Debug why this is failing
-        # proto_var.source = pb2.Variable.Source.PYTHON
+        proto_var.source = pb2.Variable.PYTHON
         
         return proto_var
 

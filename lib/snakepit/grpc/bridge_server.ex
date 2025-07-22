@@ -10,6 +10,7 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   alias Snakepit.Bridge.SessionStore
   alias Snakepit.Bridge.Variables.{Variable, Types}
+  alias Snakepit.Bridge.Serialization
 
   alias Snakepit.Bridge.{
     PingRequest,
@@ -23,6 +24,8 @@ defmodule Snakepit.GRPC.BridgeServer do
     SetVariableResponse,
     BatchGetVariablesResponse,
     BatchSetVariablesResponse,
+    ListVariablesResponse,
+    DeleteVariableResponse,
     OptimizationStatus
   }
 
@@ -295,6 +298,79 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
+  def list_variables(request, _stream) do
+    Logger.debug("ListVariables: session=#{request.session_id}")
+
+    case SessionStore.get_session(request.session_id) do
+      {:ok, session} ->
+        # Apply pattern filter if provided
+        variables =
+          if request.pattern && request.pattern != "" do
+            pattern = String.replace(request.pattern, "*", ".*")
+            regex = Regex.compile!(pattern)
+
+            session.variables
+            |> Map.values()
+            |> Enum.filter(fn var ->
+              Regex.match?(regex, to_string(var.name))
+            end)
+          else
+            Map.values(session.variables)
+          end
+
+        # Encode all variables
+        encoded_vars =
+          Enum.reduce(variables, [], fn variable, acc ->
+            case encode_variable(variable) do
+              {:ok, proto_var} -> [proto_var | acc]
+              # Skip encoding errors
+              {:error, _} -> acc
+            end
+          end)
+          |> Enum.reverse()
+
+        %ListVariablesResponse{
+          variables: encoded_vars
+        }
+
+      {:error, :not_found} ->
+        raise GRPC.RPCError,
+          status: :not_found,
+          message: "Session not found: #{request.session_id}"
+    end
+  end
+
+  def delete_variable(request, _stream) do
+    Logger.debug(
+      "DeleteVariable: session=#{request.session_id}, id=#{request.variable_identifier}"
+    )
+
+    case SessionStore.delete_variable(request.session_id, request.variable_identifier) do
+      :ok ->
+        %DeleteVariableResponse{
+          success: true
+        }
+
+      {:error, :not_found} ->
+        %DeleteVariableResponse{
+          success: false,
+          error_message: "Variable not found: #{request.variable_identifier}"
+        }
+
+      {:error, :session_not_found} ->
+        %DeleteVariableResponse{
+          success: false,
+          error_message: "Session not found: #{request.session_id}"
+        }
+
+      {:error, reason} ->
+        %DeleteVariableResponse{
+          success: false,
+          error_message: format_error(reason)
+        }
+    end
+  end
+
   # TODO: Implement remaining handlers
   def execute_tool(_request, _stream) do
     raise GRPC.RPCError, status: :unimplemented, message: "Tool execution not yet implemented"
@@ -314,26 +390,20 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   # Encoding/Decoding Helpers
 
-  defp decode_any_value(%Any{type_url: _type_url, value: encoded}) do
-    case Jason.decode(encoded) do
-      {:ok, decoded} -> {:ok, decoded}
-      {:error, _} -> {:error, "Failed to decode value"}
-    end
+  defp decode_any_value(%Any{} = any_value) do
+    Serialization.decode_any(any_value)
   end
 
   defp decode_typed_value(%Any{} = any_value, expected_type) do
-    with {:ok, decoded} <- decode_any_value(any_value),
+    with {:ok, decoded} <- Serialization.decode_any(any_value),
          {:ok, validated} <- Types.validate_value(decoded, expected_type) do
       {:ok, validated}
     end
   end
 
-  defp decode_constraints(nil), do: {:ok, %{}}
-  defp decode_constraints(""), do: {:ok, %{}}
-
-  defp decode_constraints(json) when is_binary(json) do
-    case Jason.decode(json) do
-      {:ok, constraints} when is_map(constraints) ->
+  defp decode_constraints(json) do
+    case Serialization.parse_constraints(json) do
+      {:ok, constraints} ->
         # Convert string keys to atoms
         atomized =
           Enum.reduce(constraints, %{}, fn {k, v}, acc ->
@@ -342,15 +412,12 @@ defmodule Snakepit.GRPC.BridgeServer do
 
         {:ok, atomized}
 
-      {:ok, _} ->
-        {:error, "Constraints must be a JSON object"}
-
-      {:error, _} ->
-        {:error, "Invalid constraints JSON"}
+      {:error, reason} ->
+        {:error, {:invalid_constraints, reason}}
     end
   end
 
-  defp encode_variable(variable) do
+  defp encode_variable(variable, source \\ :ELIXIR) do
     with {:ok, value_any} <- encode_any_value(variable.value, variable.type) do
       proto_var = %ProtoVariable{
         id: variable.id,
@@ -359,7 +426,7 @@ defmodule Snakepit.GRPC.BridgeServer do
         value: value_any,
         constraints_json: Jason.encode!(variable.constraints),
         metadata: variable.metadata,
-        source: :ELIXIR,
+        source: source,
         last_updated_at: %Timestamp{seconds: variable.last_updated_at, nanos: 0},
         version: variable.version,
         optimization_status: encode_optimization_status(variable)
@@ -370,13 +437,12 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   defp encode_any_value(value, type) do
-    # Create a properly typed Any message
-    case Jason.encode(value) do
-      {:ok, encoded} ->
+    case Serialization.encode_any(value, type) do
+      {:ok, %{type_url: type_url, value: encoded_value}} ->
         {:ok,
          %Any{
-           type_url: "type.googleapis.com/snakepit.#{type}",
-           value: encoded
+           type_url: type_url,
+           value: encoded_value
          }}
 
       {:error, reason} ->
@@ -433,6 +499,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   defp format_error(reason) when is_atom(reason), do: to_string(reason)
   defp format_error({:error, reason}), do: format_error(reason)
   defp format_error({:unknown_type, type}), do: "Unknown type: #{inspect(type)}"
+  defp format_error({:invalid_constraints, reason}), do: "Invalid constraints: #{reason}"
 
   defp format_error({:validation_failed, details}) when is_map(details) do
     "Validation failed: #{inspect(details)}"

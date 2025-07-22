@@ -365,6 +365,41 @@ defmodule Snakepit.Bridge.BatchSetVariablesResponse do
   )
 end
 
+defmodule Snakepit.Bridge.ListVariablesRequest do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:session_id, 1, type: :string, json_name: "sessionId")
+  field(:pattern, 2, type: :string)
+end
+
+defmodule Snakepit.Bridge.ListVariablesResponse do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:variables, 1, repeated: true, type: Snakepit.Bridge.Variable)
+end
+
+defmodule Snakepit.Bridge.DeleteVariableRequest do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:session_id, 1, type: :string, json_name: "sessionId")
+  field(:variable_identifier, 2, type: :string, json_name: "variableIdentifier")
+end
+
+defmodule Snakepit.Bridge.DeleteVariableResponse do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:success, 1, type: :bool)
+  field(:error_message, 2, type: :string, json_name: "errorMessage")
+end
+
 defmodule Snakepit.Bridge.ToolSpec.MetadataEntry do
   @moduledoc false
 
@@ -705,6 +740,14 @@ defmodule Snakepit.Bridge.SnakepitBridge.Service do
     :RegisterVariable,
     Snakepit.Bridge.RegisterVariableRequest,
     Snakepit.Bridge.RegisterVariableResponse
+  )
+
+  rpc(:ListVariables, Snakepit.Bridge.ListVariablesRequest, Snakepit.Bridge.ListVariablesResponse)
+
+  rpc(
+    :DeleteVariable,
+    Snakepit.Bridge.DeleteVariableRequest,
+    Snakepit.Bridge.DeleteVariableResponse
   )
 
   rpc(:ExecuteTool, Snakepit.Bridge.ExecuteToolRequest, Snakepit.Bridge.ExecuteToolResponse)

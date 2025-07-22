@@ -1,206 +1,662 @@
 """
-SessionContext manages the Python-side session state.
+Enhanced SessionContext with comprehensive variable support and intelligent caching.
 """
 
-import asyncio
-import time
-import threading
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Any, Dict, List, Optional, Union, TypeVar, Generic
+from contextlib import contextmanager
 from datetime import datetime, timedelta
+from threading import Lock
+import weakref
 import logging
-import uuid
+import json
+from dataclasses import dataclass, field
+from enum import Enum
+
+from .snakepit_bridge_pb2 import (
+    Variable, RegisterVariableRequest, RegisterVariableResponse,
+    GetVariableRequest, GetVariableResponse, SetVariableRequest, SetVariableResponse,
+    BatchGetVariablesRequest, BatchGetVariablesResponse,
+    BatchSetVariablesRequest, BatchSetVariablesResponse,
+    ListVariablesRequest, ListVariablesResponse,
+    DeleteVariableRequest, DeleteVariableResponse,
+    OptimizationStatus
+)
+from .snakepit_bridge_pb2_grpc import SnakepitBridgeStub
+from google.protobuf.any_pb2 import Any
+from .types import (
+    VariableType, 
+    TypeValidator,
+    serialize_value,
+    deserialize_value,
+    validate_constraints
+)
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar('T')
+
+@dataclass
+class CachedVariable:
+    """Cached variable with TTL tracking."""
+    variable: Variable
+    cached_at: datetime
+    ttl: timedelta = field(default_factory=lambda: timedelta(seconds=5))
+    
+    @property
+    def expired(self) -> bool:
+        return datetime.now() > self.cached_at + self.ttl
+    
+    def refresh(self, variable: Variable):
+        self.variable = variable
+        self.cached_at = datetime.now()
+
+
+class VariableNotFoundError(KeyError):
+    """Raised when a variable is not found."""
+    pass
+
+
+class VariableProxy(Generic[T]):
+    """
+    Proxy object for lazy variable access.
+    
+    Provides attribute-style access to variable values with
+    automatic synchronization.
+    """
+    
+    def __init__(self, context: 'SessionContext', name: str):
+        self._context = weakref.ref(context)
+        self._name = name
+        self._lock = Lock()
+    
+    @property
+    def value(self) -> T:
+        """Get the current value."""
+        ctx = self._context()
+        if ctx is None:
+            raise RuntimeError("SessionContext has been destroyed")
+        return ctx.get_variable(self._name)
+    
+    @value.setter
+    def value(self, new_value: T):
+        """Update the value."""
+        ctx = self._context()
+        if ctx is None:
+            raise RuntimeError("SessionContext has been destroyed")
+        ctx.update_variable(self._name, new_value)
+    
+    def __repr__(self):
+        try:
+            return f"<Variable {self._name}={self.value}>"
+        except:
+            return f"<Variable {self._name} (not loaded)>"
 
 
 class SessionContext:
     """
-    Manages session state and provides unified access to variables and tools.
+    Enhanced session context with comprehensive variable support.
     
-    This is a minimal implementation for Stage 0. It will be significantly
-    expanded in subsequent stages.
+    Provides intuitive Python API for variable management with
+    intelligent caching to minimize gRPC calls.
     """
     
-    def __init__(self, session_id: str, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, stub: SnakepitBridgeStub, session_id: str):
+        self.stub = stub
         self.session_id = session_id
-        self.config = config or {}
+        self._cache: Dict[str, CachedVariable] = {}
+        self._cache_lock = Lock()
+        self._default_ttl = timedelta(seconds=5)
+        self._proxies: Dict[str, VariableProxy] = {}
         
-        # Configuration
-        self._cache_enabled = self.config.get('enable_caching', True)
-        self._cache_ttl = self.config.get('cache_ttl', 60)  # seconds
-        self._telemetry_enabled = self.config.get('enable_telemetry', False)
+        # Tool registry remains from Stage 0
+        self._tools = {}
         
-        # Session metadata
-        self.metadata: Dict[str, str] = self.config.get('metadata', {})
-        self.created_at = datetime.utcnow()
+        logger.info(f"Created SessionContext for session {session_id}")
+    
+    # Variable Registration
+    
+    def register_variable(
+        self,
+        name: str,
+        var_type: Union[str, VariableType],
+        initial_value: Any,
+        constraints: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, str]] = None,
+        ttl: Optional[timedelta] = None
+    ) -> str:
+        """
+        Register a new variable in the session.
         
-        # State storage
-        self._tools: Dict[str, Any] = {}
-        self._variable_cache: Dict[str, Tuple[Any, float]] = {}
-        self._local_objects: Dict[str, Any] = {}  # For DSPy modules, etc.
+        Args:
+            name: Variable name (must be unique in session)
+            var_type: Type of the variable
+            initial_value: Initial value
+            constraints: Type-specific constraints
+            metadata: Additional metadata
+            ttl: Cache TTL for this variable
+            
+        Returns:
+            Variable ID
+            
+        Raises:
+            ValueError: If type validation fails
+            RuntimeError: If registration fails
+        """
+        # Convert type
+        if isinstance(var_type, str):
+            var_type = VariableType[var_type.upper()]
         
-        # Variable storage
-        self._variables: Dict[str, Dict[str, Any]] = {}  # id -> variable
-        self._variables_by_name: Dict[str, str] = {}  # name -> id
-        self._lock = threading.Lock()  # Thread safety
+        # Validate value against type
+        validator = TypeValidator.get_validator(var_type)
+        validated_value = validator.validate(initial_value)
         
-        # Statistics
-        self._stats = {
-            'cache_hits': 0,
-            'cache_misses': 0,
-            'tool_executions': 0,
-            'variable_reads': 0,
-            'variable_writes': 0
-        }
-        
-        logger.info(f"SessionContext created: {session_id}")
-    
-    def get_session_id(self) -> str:
-        """Get the session ID."""
-        return self.session_id
-    
-    def set_metadata(self, key: str, value: str):
-        """Set session metadata."""
-        self.metadata[key] = value
-    
-    def get_metadata(self, key: str) -> Optional[str]:
-        """Get session metadata."""
-        return self.metadata.get(key)
-    
-    def get_tools(self) -> Dict[str, Any]:
-        """Get available tools."""
-        return self._tools.copy()
-    
-    def store_local_object(self, key: str, obj: Any):
-        """Store a local object (e.g., DSPy module instance)."""
-        self._local_objects[key] = obj
-        logger.debug(f"Stored local object: {key}")
-    
-    def get_local_object(self, key: str) -> Any:
-        """Retrieve a local object."""
-        return self._local_objects.get(key)
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Get session statistics."""
-        return {
-            **self._stats,
-            'session_id': self.session_id,
-            'created_at': self.created_at.isoformat(),
-            'uptime_seconds': (datetime.utcnow() - self.created_at).total_seconds(),
-            'cache_enabled': self._cache_enabled,
-            'telemetry_enabled': self._telemetry_enabled
-        }
-    
-    async def cleanup(self):
-        """Clean up session resources."""
-        logger.info(f"Cleaning up session: {self.session_id}")
-        
-        # Clear caches
-        self._variable_cache.clear()
-        self._local_objects.clear()
-        self._tools.clear()
-        
-        # Log final stats
-        if self._telemetry_enabled:
-            logger.info(f"Session stats: {self.get_stats()}")
-    
-    # Variable management methods
-    
-    def register_variable(self, name: str, var_type: str, initial_value: Any,
-                         constraints: Optional[Dict] = None,
-                         metadata: Optional[Dict[str, str]] = None) -> str:
-        """Register a new variable."""
-        from .serialization import TypeSerializer
-        
-        # Validate value against type and constraints
+        # Validate constraints if provided
         if constraints:
-            TypeSerializer.validate_constraints(initial_value, var_type, constraints)
+            validate_constraints(validated_value, var_type, constraints)
         
-        var_id = f"var_{uuid.uuid4().hex[:8]}"
+        # Serialize for gRPC
+        value_any = serialize_value(validated_value, var_type)
         
-        variable = {
-            'id': var_id,
-            'name': name,
-            'type': var_type,
-            'value': initial_value,
-            'constraints': constraints or {},
-            'metadata': metadata or {},
-            'version': 1,
-            'created_at': datetime.utcnow(),
-            'updated_at': datetime.utcnow()
-        }
+        # Convert constraints to JSON
+        import json
+        constraints_json = json.dumps(constraints) if constraints else ""
         
-        with self._lock:
-            if name in self._variables_by_name:
-                raise ValueError(f"Variable '{name}' already exists")
-            
-            self._variables[var_id] = variable
-            self._variables_by_name[name] = var_id
-            
-            self._stats['variable_writes'] += 1
+        request = RegisterVariableRequest(
+            session_id=self.session_id,
+            name=name,
+            type=var_type.value,
+            initial_value=value_any,
+            constraints_json=constraints_json,
+            metadata=metadata or {}
+        )
         
-        logger.info(f"Registered variable: {name} (ID: {var_id}, Type: {var_type})")
+        response = self.stub.RegisterVariable(request)
+        
+        if not response.success:
+            raise RuntimeError(f"Failed to register variable: {response.error_message}")
+        
+        var_id = response.variable_id
+        logger.info(f"Registered variable {name} ({var_id}) of type {var_type}")
+        
+        # Invalidate cache for this name
+        self._invalidate_cache(name)
+        
         return var_id
     
-    def get_variable_by_id(self, var_id: str) -> Optional[Dict]:
-        """Get variable by ID."""
-        with self._lock:
-            self._stats['variable_reads'] += 1
-            return self._variables.get(var_id)
+    # Variable Access
     
-    def get_variable_by_name(self, name: str) -> Optional[Dict]:
-        """Get variable by name."""
-        with self._lock:
-            var_id = self._variables_by_name.get(name)
-            if var_id:
-                self._stats['variable_reads'] += 1
-                return self._variables.get(var_id)
-            return None
-    
-    def set_variable(self, name: str, value: Any, 
-                    metadata: Optional[Dict[str, str]] = None) -> bool:
-        """Set variable value."""
-        from .serialization import TypeSerializer
+    def get_variable(self, identifier: str) -> Any:
+        """
+        Get a variable's value by name or ID.
         
-        with self._lock:
-            var_id = self._variables_by_name.get(name)
-            if not var_id:
-                return False
+        Uses cache when possible to minimize gRPC calls.
+        
+        Args:
+            identifier: Variable name or ID
             
-            variable = self._variables.get(var_id)
-            if not variable:
-                return False
+        Returns:
+            The variable's current value
             
-            # Validate against type and constraints
-            if variable.get('constraints'):
-                TypeSerializer.validate_constraints(value, variable['type'], variable['constraints'])
-            
-            old_value = variable['value']
-            variable['value'] = value
-            variable['version'] += 1
-            variable['updated_at'] = datetime.utcnow()
-            
-            if metadata:
-                variable['metadata'].update(metadata)
-            
-            self._stats['variable_writes'] += 1
-            
-            # TODO: Notify watchers in Stage 3
-            
-        logger.info(f"Updated variable: {name} (version: {variable['version']})")
-        return True
+        Raises:
+            VariableNotFoundError: If variable doesn't exist
+        """
+        # Check cache first
+        with self._cache_lock:
+            cached = self._cache.get(identifier)
+            if cached and not cached.expired:
+                logger.debug(f"Cache hit for variable {identifier}")
+                return deserialize_value(
+                    cached.variable.value, 
+                    VariableType(cached.variable.type)
+                )
+        
+        # Cache miss - fetch from server
+        logger.debug(f"Cache miss for variable {identifier}")
+        
+        request = GetVariableRequest(
+            session_id=self.session_id,
+            variable_identifier=identifier
+        )
+        
+        try:
+            response = self.stub.GetVariable(request)
+        except Exception as e:
+            if "not found" in str(e).lower():
+                raise VariableNotFoundError(f"Variable not found: {identifier}")
+            raise
+        
+        variable = response.variable
+        
+        # Update cache (by both ID and name)
+        with self._cache_lock:
+            cached_var = CachedVariable(
+                variable=variable,
+                cached_at=datetime.now(),
+                ttl=self._default_ttl
+            )
+            self._cache[variable.id] = cached_var
+            self._cache[variable.name] = cached_var
+        
+        # Deserialize and return value
+        return deserialize_value(
+            variable.value,
+            VariableType(variable.type)
+        )
     
-    def list_variables(self) -> List[Dict]:
-        """List all variables in the session."""
-        with self._lock:
-            return list(self._variables.values())
+    def update_variable(
+        self,
+        identifier: str,
+        new_value: Any,
+        metadata: Optional[Dict[str, str]] = None
+    ) -> None:
+        """
+        Update a variable's value.
+        
+        Performs write-through caching for consistency.
+        
+        Args:
+            identifier: Variable name or ID
+            new_value: New value (will be validated)
+            metadata: Additional metadata for the update
+            
+        Raises:
+            ValueError: If value doesn't match type/constraints
+            VariableNotFoundError: If variable doesn't exist
+        """
+        # First get the variable to know its type
+        # This also populates the cache
+        self.get_variable(identifier)
+        
+        # Get from cache to access type info
+        with self._cache_lock:
+            cached = self._cache.get(identifier)
+            if not cached:
+                raise RuntimeError("Variable should be in cache")
+            
+            var_type = VariableType(cached.variable.type)
+        
+        # Validate new value
+        validator = TypeValidator.get_validator(var_type)
+        validated_value = validator.validate(new_value)
+        
+        # Serialize for gRPC
+        value_any = serialize_value(validated_value, var_type)
+        
+        request = SetVariableRequest(
+            session_id=self.session_id,
+            variable_identifier=identifier,
+            value=value_any,
+            metadata=metadata or {}
+        )
+        
+        response = self.stub.SetVariable(request)
+        
+        if not response.success:
+            raise RuntimeError(f"Failed to update variable: {response.error_message}")
+        
+        # Invalidate cache for write-through consistency
+        self._invalidate_cache(identifier)
+        
+        logger.info(f"Updated variable {identifier}")
     
-    # Placeholder methods for future stages
+    def list_variables(self, pattern: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        List all variables or those matching a pattern.
+        
+        Args:
+            pattern: Optional wildcard pattern (e.g., "temp_*")
+            
+        Returns:
+            List of variable info dictionaries
+        """
+        request = ListVariablesRequest(
+            session_id=self.session_id,
+            pattern=pattern or ""
+        )
+        
+        response = self.stub.ListVariables(request)
+        
+        variables = []
+        for var in response.variables:
+            var_type = VariableType(var.type)
+            variables.append({
+                'id': var.id,
+                'name': var.name,
+                'type': var_type.value,
+                'value': deserialize_value(var.value, var_type),
+                'version': var.version,
+                'constraints': json.loads(var.constraints_json) if var.constraints_json else {},
+                'metadata': dict(var.metadata),
+                'optimizing': var.optimization_status.optimizing if var.optimization_status else False
+            })
+            
+            # Update cache opportunistically
+            with self._cache_lock:
+                cached_var = CachedVariable(
+                    variable=var,
+                    cached_at=datetime.now(),
+                    ttl=self._default_ttl
+                )
+                self._cache[var.id] = cached_var
+                self._cache[var.name] = cached_var
+        
+        return variables
     
-    async def execute_tool(self, name: str, parameters: Dict[str, Any]) -> Any:
-        """Execute a tool - to be implemented in Stage 2."""
-        raise NotImplementedError("Tools not implemented until Stage 2")
+    def delete_variable(self, identifier: str) -> None:
+        """
+        Delete a variable from the session.
+        
+        Args:
+            identifier: Variable name or ID
+            
+        Raises:
+            RuntimeError: If deletion fails
+        """
+        request = DeleteVariableRequest(
+            session_id=self.session_id,
+            variable_identifier=identifier
+        )
+        
+        response = self.stub.DeleteVariable(request)
+        
+        if not response.success:
+            raise RuntimeError(f"Failed to delete variable: {response.error_message}")
+        
+        # Remove from cache
+        self._invalidate_cache(identifier)
+        
+        # Remove proxy if exists
+        self._proxies.pop(identifier, None)
+        
+        logger.info(f"Deleted variable {identifier}")
     
-    async def watch_variables(self, names: List[str]):
-        """Watch variables for changes - to be implemented in Stage 3."""
-        raise NotImplementedError("Variable watching not implemented until Stage 3")
+    # Batch Operations
+    
+    def get_variables(self, identifiers: List[str]) -> Dict[str, Any]:
+        """
+        Get multiple variables efficiently.
+        
+        Uses cache and batches uncached requests.
+        
+        Args:
+            identifiers: List of variable names or IDs
+            
+        Returns:
+            Dict mapping identifier to value
+        """
+        result = {}
+        uncached = []
+        
+        # Check cache first
+        with self._cache_lock:
+            for identifier in identifiers:
+                cached = self._cache.get(identifier)
+                if cached and not cached.expired:
+                    var_type = VariableType(cached.variable.type)
+                    result[identifier] = deserialize_value(
+                        cached.variable.value,
+                        var_type
+                    )
+                else:
+                    uncached.append(identifier)
+        
+        # Batch fetch uncached
+        if uncached:
+            request = BatchGetVariablesRequest(
+                session_id=self.session_id,
+                variable_identifiers=uncached
+            )
+            
+            response = self.stub.GetVariables(request)
+            
+            # Process found variables
+            for var_id, var in response.variables.items():
+                var_type = VariableType(var.type)
+                value = deserialize_value(var.value, var_type)
+                
+                # Update result
+                result[var_id] = value
+                result[var.name] = value
+                
+                # Update cache
+                with self._cache_lock:
+                    cached_var = CachedVariable(
+                        variable=var,
+                        cached_at=datetime.now(),
+                        ttl=self._default_ttl
+                    )
+                    self._cache[var.id] = cached_var
+                    self._cache[var.name] = cached_var
+            
+            # Handle missing
+            for missing in response.missing_variables:
+                if missing in identifiers:
+                    raise VariableNotFoundError(f"Variable not found: {missing}")
+        
+        return result
+    
+    def update_variables(
+        self,
+        updates: Dict[str, Any],
+        atomic: bool = False,
+        metadata: Optional[Dict[str, str]] = None
+    ) -> Dict[str, Union[bool, str]]:
+        """
+        Update multiple variables efficiently.
+        
+        Args:
+            updates: Dict mapping identifier to new value
+            atomic: If True, all updates must succeed
+            metadata: Metadata for all updates
+            
+        Returns:
+            Dict mapping identifier to success/error
+        """
+        # First, get all variables to know their types
+        var_info = self.get_variables(list(updates.keys()))
+        
+        # Prepare updates with proper serialization
+        serialized_updates = {}
+        for identifier, new_value in updates.items():
+            # Get variable type from cache
+            with self._cache_lock:
+                cached = self._cache.get(identifier)
+                if not cached:
+                    continue
+                var_type = VariableType(cached.variable.type)
+            
+            # Validate and serialize
+            validator = TypeValidator.get_validator(var_type)
+            validated = validator.validate(new_value)
+            serialized_updates[identifier] = serialize_value(validated, var_type)
+        
+        request = BatchSetVariablesRequest(
+            session_id=self.session_id,
+            updates=serialized_updates,
+            atomic=atomic,
+            metadata=metadata or {}
+        )
+        
+        response = self.stub.SetVariables(request)
+        
+        if not response.success:
+            # Return errors
+            return {k: v for k, v in response.errors.items()}
+        
+        # Process results
+        results = {}
+        for identifier in updates:
+            if identifier in response.errors:
+                results[identifier] = response.errors[identifier]
+            else:
+                results[identifier] = True
+                # Invalidate cache
+                self._invalidate_cache(identifier)
+        
+        return results
+    
+    # Pythonic Access Patterns
+    
+    def __getitem__(self, name: str) -> Any:
+        """Allow dict-style access: value = ctx['temperature']"""
+        return self.get_variable(name)
+    
+    def __setitem__(self, name: str, value: Any):
+        """Allow dict-style updates: ctx['temperature'] = 0.8"""
+        try:
+            self.update_variable(name, value)
+        except VariableNotFoundError:
+            # Auto-register if doesn't exist
+            var_type = TypeValidator.infer_type(value)
+            self.register_variable(name, var_type, value)
+    
+    def __contains__(self, name: str) -> bool:
+        """Check if variable exists: 'temperature' in ctx"""
+        try:
+            self.get_variable(name)
+            return True
+        except VariableNotFoundError:
+            return False
+    
+    @property
+    def v(self) -> 'VariableNamespace':
+        """
+        Attribute-style access to variables.
+        
+        Example:
+            ctx.v.temperature = 0.8
+            print(ctx.v.temperature)
+        """
+        return VariableNamespace(self)
+    
+    def variable(self, name: str) -> VariableProxy:
+        """
+        Get a variable proxy for repeated access.
+        
+        The proxy provides efficient access to a single variable.
+        """
+        if name not in self._proxies:
+            self._proxies[name] = VariableProxy(self, name)
+        return self._proxies[name]
+    
+    @contextmanager
+    def batch_updates(self):
+        """
+        Context manager for batched updates.
+        
+        Example:
+            with ctx.batch_updates() as batch:
+                batch['var1'] = 10
+                batch['var2'] = 20
+                batch['var3'] = 30
+        """
+        batch = BatchUpdater(self)
+        yield batch
+        batch.commit()
+    
+    # Cache Management
+    
+    def set_cache_ttl(self, ttl: timedelta):
+        """Set default cache TTL for variables."""
+        self._default_ttl = ttl
+    
+    def clear_cache(self):
+        """Clear all cached variables."""
+        with self._cache_lock:
+            self._cache.clear()
+        logger.info("Cleared variable cache")
+    
+    def _invalidate_cache(self, identifier: str):
+        """Invalidate cache entry for a variable."""
+        with self._cache_lock:
+            # Try to remove by identifier
+            self._cache.pop(identifier, None)
+            
+            # Also check if it's cached by the other key
+            to_remove = []
+            for key, cached in self._cache.items():
+                if cached.variable.id == identifier or cached.variable.name == identifier:
+                    to_remove.append(key)
+            
+            for key in to_remove:
+                self._cache.pop(key, None)
+    
+    def _deserialize_constraints(self, constraints_json: str) -> Dict[str, Any]:
+        """Deserialize constraint values."""
+        if not constraints_json:
+            return {}
+        import json
+        try:
+            return json.loads(constraints_json)
+        except:
+            return {}
+    
+    def cleanup(self):
+        """Clean up resources associated with this session context."""
+        # Clear cache
+        self.clear_cache()
+        
+        # Clear proxies
+        self._proxies.clear()
+        
+        logger.info(f"Cleaned up session context for {self.session_id}")
+    
+    # Existing tool methods remain...
+    
+    def register_tool(self, tool_class):
+        """Register a tool (from Stage 0)."""
+        # Implementation remains from Stage 0
+        pass
+    
+    def call_tool(self, tool_name: str, **kwargs):
+        """Call a tool (from Stage 0)."""
+        # Implementation remains from Stage 0
+        pass
+
+
+class VariableNamespace:
+    """
+    Namespace for attribute-style variable access.
+    
+    Provides ctx.v.variable_name syntax.
+    """
+    
+    def __init__(self, context: SessionContext):
+        self._context = weakref.ref(context)
+    
+    def __getattr__(self, name: str) -> Any:
+        ctx = self._context()
+        if ctx is None:
+            raise RuntimeError("SessionContext has been destroyed")
+        return ctx.get_variable(name)
+    
+    def __setattr__(self, name: str, value: Any):
+        if name.startswith('_'):
+            super().__setattr__(name, value)
+        else:
+            ctx = self._context()
+            if ctx is None:
+                raise RuntimeError("SessionContext has been destroyed")
+            try:
+                ctx.update_variable(name, value)
+            except VariableNotFoundError:
+                # Auto-register
+                var_type = TypeValidator.infer_type(value)
+                ctx.register_variable(name, var_type, value)
+
+
+class BatchUpdater:
+    """Collect updates for batch submission."""
+    
+    def __init__(self, context: SessionContext):
+        self.context = context
+        self.updates = {}
+    
+    def __setitem__(self, name: str, value: Any):
+        self.updates[name] = value
+    
+    def commit(self, atomic: bool = False):
+        """Commit all updates."""
+        if self.updates:
+            return self.context.update_variables(self.updates, atomic=atomic)
+        return {}
