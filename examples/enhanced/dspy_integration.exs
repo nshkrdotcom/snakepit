@@ -30,7 +30,7 @@ api_key = System.get_env("GEMINI_API_KEY")
 if api_key do
   # Configure with Gemini
   case Snakepit.Python.configure_dspy(:gemini, %{
-    model: "gemini-2.5-flash-lite-preview-06-17",
+    model: "gemini-2.5-flash-lite",
     api_key: api_key
   }, session_id: session_id) do
     {:ok, _result} ->
