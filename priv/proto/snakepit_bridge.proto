@@ -1,0 +1,290 @@
+syntax = "proto3";
+
+package snakepit.bridge;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+service SnakepitBridge {
+  // Health & Session Management
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc InitializeSession(InitializeSessionRequest) returns (InitializeSessionResponse);
+  rpc CleanupSession(CleanupSessionRequest) returns (CleanupSessionResponse);
+  
+  // Variable Operations
+  rpc GetVariable(GetVariableRequest) returns (GetVariableResponse);
+  rpc SetVariable(SetVariableRequest) returns (SetVariableResponse);
+  rpc GetVariables(BatchGetVariablesRequest) returns (BatchGetVariablesResponse);
+  rpc SetVariables(BatchSetVariablesRequest) returns (BatchSetVariablesResponse);
+  rpc RegisterVariable(RegisterVariableRequest) returns (RegisterVariableResponse);
+  
+  // Tool Execution
+  rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
+  rpc ExecuteStreamingTool(ExecuteToolRequest) returns (stream ToolChunk);
+  
+  // Streaming & Reactive
+  rpc WatchVariables(WatchVariablesRequest) returns (stream VariableUpdate);
+  
+  // Advanced Features (Stage 4)
+  rpc AddDependency(AddDependencyRequest) returns (AddDependencyResponse);
+  rpc StartOptimization(StartOptimizationRequest) returns (StartOptimizationResponse);
+  rpc StopOptimization(StopOptimizationRequest) returns (StopOptimizationResponse);
+  rpc GetVariableHistory(GetVariableHistoryRequest) returns (GetVariableHistoryResponse);
+  rpc RollbackVariable(RollbackVariableRequest) returns (RollbackVariableResponse);
+}
+
+// Core Messages
+message PingRequest {
+  string message = 1;
+}
+
+message PingResponse {
+  string message = 1;
+  google.protobuf.Timestamp server_time = 2;
+}
+
+message InitializeSessionRequest {
+  string session_id = 1;
+  map<string, string> metadata = 2;
+  SessionConfig config = 3;
+}
+
+message SessionConfig {
+  bool enable_caching = 1;
+  int32 cache_ttl_seconds = 2;
+  bool enable_telemetry = 3;
+}
+
+message InitializeSessionResponse {
+  bool success = 1;
+  string error_message = 2;
+  map<string, ToolSpec> available_tools = 3;
+  map<string, Variable> initial_variables = 4;
+}
+
+message CleanupSessionRequest {
+  string session_id = 1;
+  bool force = 2;
+}
+
+message CleanupSessionResponse {
+  bool success = 1;
+  int32 resources_cleaned = 2;
+}
+
+// Variable Messages
+message Variable {
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  google.protobuf.Any value = 4;
+  string constraints_json = 5;
+  map<string, string> metadata = 6;
+  enum Source {
+    ELIXIR = 0;
+    PYTHON = 1;
+  }
+  Source source = 7;
+  google.protobuf.Timestamp last_updated_at = 8;
+  int32 version = 9;
+  
+  // Advanced fields (Stage 4)
+  string access_control_json = 10;
+  OptimizationStatus optimization_status = 11;
+}
+
+message OptimizationStatus {
+  bool optimizing = 1;
+  string optimizer_id = 2;
+  google.protobuf.Timestamp started_at = 3;
+}
+
+message RegisterVariableRequest {
+  string session_id = 1;
+  string name = 2;
+  string type = 3;
+  google.protobuf.Any initial_value = 4;
+  string constraints_json = 5;
+  map<string, string> metadata = 6;
+}
+
+message RegisterVariableResponse {
+  bool success = 1;
+  string variable_id = 2;
+  string error_message = 3;
+}
+
+message GetVariableRequest {
+  string session_id = 1;
+  string variable_identifier = 2; // Can be ID or name
+  bool bypass_cache = 3;
+}
+
+message GetVariableResponse {
+  Variable variable = 1;
+  bool from_cache = 2;
+}
+
+message SetVariableRequest {
+  string session_id = 1;
+  string variable_identifier = 2;
+  google.protobuf.Any value = 3;
+  map<string, string> metadata = 4;
+  int32 expected_version = 5; // For optimistic locking
+}
+
+message SetVariableResponse {
+  bool success = 1;
+  string error_message = 2;
+  int32 new_version = 3;
+}
+
+message BatchGetVariablesRequest {
+  string session_id = 1;
+  repeated string variable_identifiers = 2;
+  bool include_metadata = 3;
+  bool bypass_cache = 4;
+}
+
+message BatchGetVariablesResponse {
+  map<string, Variable> variables = 1;
+  repeated string missing_variables = 2;
+}
+
+message BatchSetVariablesRequest {
+  string session_id = 1;
+  map<string, google.protobuf.Any> updates = 2;
+  map<string, string> metadata = 3;
+  bool atomic = 4;
+}
+
+message BatchSetVariablesResponse {
+  bool success = 1;
+  map<string, string> errors = 2;
+  map<string, int32> new_versions = 3;
+}
+
+// Tool Messages
+message ToolSpec {
+  string name = 1;
+  string description = 2;
+  repeated ParameterSpec parameters = 3;
+  map<string, string> metadata = 4;
+  bool supports_streaming = 5;
+  repeated string required_variables = 6;
+}
+
+message ParameterSpec {
+  string name = 1;
+  string type = 2;
+  string description = 3;
+  bool required = 4;
+  google.protobuf.Any default_value = 5;
+  string validation_json = 6;
+}
+
+message ExecuteToolRequest {
+  string session_id = 1;
+  string tool_name = 2;
+  map<string, google.protobuf.Any> parameters = 3;
+  map<string, string> metadata = 4;
+  bool stream = 5;
+}
+
+message ExecuteToolResponse {
+  bool success = 1;
+  google.protobuf.Any result = 2;
+  string error_message = 3;
+  map<string, string> metadata = 4;
+  int64 execution_time_ms = 5;
+}
+
+message ToolChunk {
+  string chunk_id = 1;
+  bytes data = 2;
+  bool is_final = 3;
+  map<string, string> metadata = 4;
+}
+
+// Streaming Messages
+message WatchVariablesRequest {
+  string session_id = 1;
+  repeated string variable_identifiers = 2;
+  bool include_initial_values = 3;
+}
+
+message VariableUpdate {
+  string variable_id = 1;
+  Variable variable = 2;
+  string update_source = 3;
+  map<string, string> update_metadata = 4;
+  google.protobuf.Timestamp timestamp = 5;
+  string update_type = 6; // "value_change", "constraint_change", etc.
+}
+
+// Advanced Messages (Stage 4)
+message AddDependencyRequest {
+  string session_id = 1;
+  string from_variable = 2;
+  string to_variable = 3;
+  string dependency_type = 4;
+}
+
+message AddDependencyResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+message StartOptimizationRequest {
+  string session_id = 1;
+  string variable_identifier = 2;
+  string optimizer_id = 3;
+  map<string, string> optimizer_config = 4;
+}
+
+message StartOptimizationResponse {
+  bool success = 1;
+  string error_message = 2;
+  string optimization_id = 3;
+}
+
+message StopOptimizationRequest {
+  string session_id = 1;
+  string variable_identifier = 2;
+  bool force = 3;
+}
+
+message StopOptimizationResponse {
+  bool success = 1;
+  google.protobuf.Any final_value = 2;
+}
+
+message GetVariableHistoryRequest {
+  string session_id = 1;
+  string variable_identifier = 2;
+  int32 limit = 3;
+}
+
+message GetVariableHistoryResponse {
+  repeated VariableHistoryEntry entries = 1;
+}
+
+message VariableHistoryEntry {
+  int32 version = 1;
+  google.protobuf.Any value = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  string changed_by = 4;
+  map<string, string> metadata = 5;
+}
+
+message RollbackVariableRequest {
+  string session_id = 1;
+  string variable_identifier = 2;
+  int32 target_version = 3;
+}
+
+message RollbackVariableResponse {
+  bool success = 1;
+  Variable variable = 2;
+  string error_message = 3;
+}

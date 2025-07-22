@@ -15,9 +15,19 @@ config :snakepit,
   worker_health_check_interval: 5_000,
 
   # Configure the adapter module
-  adapter_module: Snakepit.Adapters.GenericPythonV2
+  adapter_module: Snakepit.Adapters.GenericPythonV2,
+
+  # Configure test environment for gRPC bridge
+  python_path: System.get_env("PYTHON_PATH", "python3"),
+  grpc_timeout: 5_000,
+  test_mode: true
 
 # Configure Logger for tests
 # Set to :warning to hide debug and info logs during tests
 # You can set to :debug if you need to see all logs while debugging
 config :logger, level: :warning
+
+# Configure ExUnit
+config :ex_unit,
+  capture_log: true,
+  exclude: [:performance]  # Exclude performance tests by default

@@ -216,8 +216,49 @@ class EnhancedCommandHandler(BaseCommandHandler):
         self.start_time = time.time()
         self.request_count = 0
         
+        # Initialize streaming handler
+        self._init_streaming_handler()
+        
         # Auto-discover and load framework plugins
         self._discover_frameworks()
+    
+    def _init_streaming_handler(self):
+        """Initialize the DSPy streaming handler."""
+        try:
+            from snakepit_bridge.adapters.dspy_streaming import DSPyStreamingHandler
+            self.streaming_handler = DSPyStreamingHandler()
+            # Give streaming handler access to protocol handler for stored objects
+            self.streaming_handler.protocol_handler = self
+        except ImportError:
+            self.streaming_handler = None
+    
+    def supports_streaming(self) -> bool:
+        """Check if streaming is supported."""
+        return self.streaming_handler is not None
+    
+    def process_stream_command(self, command: str, args: Dict[str, Any]):
+        """Process streaming commands."""
+        if self.streaming_handler:
+            # Resolve stored references in args before streaming
+            resolved_args = self._resolve_stored_references(args)
+            yield from self.streaming_handler.process_stream_command(command, resolved_args)
+        else:
+            yield {"error": "Streaming not supported - DSPyStreamingHandler not available"}
+    
+    def get_supported_commands(self) -> List[str]:
+        """Get list of supported commands including streaming ones."""
+        # Get base commands from parent class
+        commands = []
+        
+        # Add registered commands
+        if hasattr(self, 'commands'):
+            commands.extend(list(self.commands.keys()))
+        
+        # Add streaming commands if available
+        if self.streaming_handler:
+            commands.extend(self.streaming_handler.get_streaming_commands())
+        
+        return commands
     
     def _register_commands(self):
         """Register both legacy and dynamic commands."""
@@ -442,6 +483,33 @@ class EnhancedCommandHandler(BaseCommandHandler):
                 "error": str(e),
                 "string_repr": str(obj)[:500]
             }
+    
+    # Override handle_ping to include streaming information
+    def handle_ping(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Enhanced ping with streaming capabilities."""
+        self.request_count += 1
+        
+        response = {
+            "status": "ok",
+            "message": "pong",
+            "version": "2.0.0-enhanced",
+            "uptime": time.time() - self.start_time,
+            "request_count": self.request_count,
+            "stored_objects": list(self.stored_objects.keys()),
+            "loaded_frameworks": list(self.framework_plugins.keys()),
+            "capabilities": {
+                "dynamic_invocation": True,
+                "object_persistence": True,
+                "framework_plugins": True,
+                "streaming": self.supports_streaming()
+            }
+        }
+        
+        # Add streaming commands if available
+        if self.streaming_handler:
+            response["streaming_commands"] = self.streaming_handler.get_streaming_commands()
+        
+        return response
     
     # Legacy command handlers (for backward compatibility)
     def handle_configure_lm(self, args: Dict[str, Any]) -> Dict[str, Any]:

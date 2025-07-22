@@ -53,7 +53,7 @@ defmodule Snakepit.Adapters.GRPCPython do
   def script_path do
     # Get the application directory
     app_dir = Application.app_dir(:snakepit)
-    Path.join([app_dir, "priv", "python", "grpc_bridge.py"])
+    Path.join([app_dir, "priv", "python", "grpc_server.py"])
   end
 
   @impl true
@@ -66,8 +66,8 @@ defmodule Snakepit.Adapters.GRPCPython do
       # Use custom adapter args if provided
       adapter_args
     else
-      # Default to streaming test handler
-      ["--adapter", "snakepit_bridge.adapters.grpc_streaming.GRPCStreamingHandler"]
+      # Default to enhanced bridge adapter
+      ["--adapter", "snakepit_bridge.adapters.enhanced.EnhancedBridge"]
     end
   end
 

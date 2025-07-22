@@ -1,0 +1,10 @@
+# Core dependencies for Snakepit Bridge
+grpcio>=1.60.0
+grpcio-tools>=1.60.0
+protobuf>=4.25.0
+
+# Optional: MessagePack for alternative protocol
+msgpack>=1.0.5
+
+# Optional: DSPy integration
+# dspy-ai>=2.0.0
