@@ -1378,6 +1378,11 @@ Logger.configure(level: :debug)
 :sys.get_state(Snakepit.Pool)
 ```
 
+## 📚 Additional Documentation
+
+- [Testing Guide](README_TESTING.md) - How to run and write tests  
+- [Unified gRPC Bridge](README_UNIFIED_GRPC_BRIDGE.md) - Stage 0, 1, and 2 implementation details
+
 ## 🤝 Contributing
 
 We welcome contributions! Please see our [Contributing Guide](https://github.com/nshkrdotcom/snakepit/blob/main/CONTRIBUTING.md) for details.

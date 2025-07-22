@@ -5,8 +5,8 @@ Provides variable management capabilities to DSPy modules.
 
 from typing import Any, Dict, Optional, Callable
 import grpc
-from . import snakepit_bridge_pb2
-from . import snakepit_bridge_pb2_grpc
+from .grpc import snakepit_bridge_pb2
+from .grpc import snakepit_bridge_pb2_grpc
 from .serialization import TypeSerializer
 
 
@@ -22,7 +22,7 @@ class VariableAwareMixin:
         """Initialize the mixin with gRPC channel and session."""
         self._channel = channel
         self._session_id = session_id
-        self._stub = snakepit_bridge_pb2_grpc.SnakepitBridgeStub(channel)
+        self._stub = snakepit_bridge_pb2_grpc.BridgeServiceStub(channel)
         self._watchers = {}
         
     def get_variable(self, name: str) -> Any:

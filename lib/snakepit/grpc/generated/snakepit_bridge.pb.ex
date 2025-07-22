@@ -701,10 +701,63 @@ defmodule Snakepit.Bridge.RollbackVariableResponse do
   field(:error_message, 3, type: :string, json_name: "errorMessage")
 end
 
-defmodule Snakepit.Bridge.SnakepitBridge.Service do
+defmodule Snakepit.Bridge.GetSessionRequest do
   @moduledoc false
 
-  use GRPC.Service, name: "snakepit.bridge.SnakepitBridge", protoc_gen_elixir_version: "0.14.1"
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:session_id, 1, type: :string, json_name: "sessionId")
+end
+
+defmodule Snakepit.Bridge.GetSessionResponse.MetadataEntry do
+  @moduledoc false
+
+  use Protobuf, map: true, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:key, 1, type: :string)
+  field(:value, 2, type: :string)
+end
+
+defmodule Snakepit.Bridge.GetSessionResponse do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:session_id, 1, type: :string, json_name: "sessionId")
+
+  field(:metadata, 2,
+    repeated: true,
+    type: Snakepit.Bridge.GetSessionResponse.MetadataEntry,
+    map: true
+  )
+
+  field(:created_at, 3, type: Google.Protobuf.Timestamp, json_name: "createdAt")
+  field(:variable_count, 4, type: :int32, json_name: "variableCount")
+  field(:tool_count, 5, type: :int32, json_name: "toolCount")
+end
+
+defmodule Snakepit.Bridge.HeartbeatRequest do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:session_id, 1, type: :string, json_name: "sessionId")
+  field(:client_time, 2, type: Google.Protobuf.Timestamp, json_name: "clientTime")
+end
+
+defmodule Snakepit.Bridge.HeartbeatResponse do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:server_time, 1, type: Google.Protobuf.Timestamp, json_name: "serverTime")
+  field(:session_valid, 2, type: :bool, json_name: "sessionValid")
+end
+
+defmodule Snakepit.Bridge.BridgeService.Service do
+  @moduledoc false
+
+  use GRPC.Service, name: "snakepit.bridge.BridgeService", protoc_gen_elixir_version: "0.14.1"
 
   rpc(:Ping, Snakepit.Bridge.PingRequest, Snakepit.Bridge.PingResponse)
 
@@ -719,6 +772,10 @@ defmodule Snakepit.Bridge.SnakepitBridge.Service do
     Snakepit.Bridge.CleanupSessionRequest,
     Snakepit.Bridge.CleanupSessionResponse
   )
+
+  rpc(:GetSession, Snakepit.Bridge.GetSessionRequest, Snakepit.Bridge.GetSessionResponse)
+
+  rpc(:Heartbeat, Snakepit.Bridge.HeartbeatRequest, Snakepit.Bridge.HeartbeatResponse)
 
   rpc(:GetVariable, Snakepit.Bridge.GetVariableRequest, Snakepit.Bridge.GetVariableResponse)
 
@@ -791,8 +848,8 @@ defmodule Snakepit.Bridge.SnakepitBridge.Service do
   )
 end
 
-defmodule Snakepit.Bridge.SnakepitBridge.Stub do
+defmodule Snakepit.Bridge.BridgeService.Stub do
   @moduledoc false
 
-  use GRPC.Stub, service: Snakepit.Bridge.SnakepitBridge.Service
+  use GRPC.Stub, service: Snakepit.Bridge.BridgeService.Service
 end

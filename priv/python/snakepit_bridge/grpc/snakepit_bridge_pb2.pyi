@@ -300,6 +300,36 @@ class BatchSetVariablesResponse(_message.Message):
     new_versions: _containers.ScalarMap[str, int]
     def __init__(self, success: bool = ..., errors: _Optional[_Mapping[str, str]] = ..., new_versions: _Optional[_Mapping[str, int]] = ...) -> None: ...
 
+class ListVariablesRequest(_message.Message):
+    __slots__ = ("session_id", "pattern")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    PATTERN_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    pattern: str
+    def __init__(self, session_id: _Optional[str] = ..., pattern: _Optional[str] = ...) -> None: ...
+
+class ListVariablesResponse(_message.Message):
+    __slots__ = ("variables",)
+    VARIABLES_FIELD_NUMBER: _ClassVar[int]
+    variables: _containers.RepeatedCompositeFieldContainer[Variable]
+    def __init__(self, variables: _Optional[_Iterable[_Union[Variable, _Mapping]]] = ...) -> None: ...
+
+class DeleteVariableRequest(_message.Message):
+    __slots__ = ("session_id", "variable_identifier")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    VARIABLE_IDENTIFIER_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    variable_identifier: str
+    def __init__(self, session_id: _Optional[str] = ..., variable_identifier: _Optional[str] = ...) -> None: ...
+
+class DeleteVariableResponse(_message.Message):
+    __slots__ = ("success", "error_message")
+    SUCCESS_FIELD_NUMBER: _ClassVar[int]
+    ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    success: bool
+    error_message: str
+    def __init__(self, success: bool = ..., error_message: _Optional[str] = ...) -> None: ...
+
 class ToolSpec(_message.Message):
     __slots__ = ("name", "description", "parameters", "metadata", "supports_streaming", "required_variables")
     class MetadataEntry(_message.Message):
@@ -563,3 +593,46 @@ class RollbackVariableResponse(_message.Message):
     variable: Variable
     error_message: str
     def __init__(self, success: bool = ..., variable: _Optional[_Union[Variable, _Mapping]] = ..., error_message: _Optional[str] = ...) -> None: ...
+
+class GetSessionRequest(_message.Message):
+    __slots__ = ("session_id",)
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    def __init__(self, session_id: _Optional[str] = ...) -> None: ...
+
+class GetSessionResponse(_message.Message):
+    __slots__ = ("session_id", "metadata", "created_at", "variable_count", "tool_count")
+    class MetadataEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    VARIABLE_COUNT_FIELD_NUMBER: _ClassVar[int]
+    TOOL_COUNT_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    metadata: _containers.ScalarMap[str, str]
+    created_at: _timestamp_pb2.Timestamp
+    variable_count: int
+    tool_count: int
+    def __init__(self, session_id: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., created_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., variable_count: _Optional[int] = ..., tool_count: _Optional[int] = ...) -> None: ...
+
+class HeartbeatRequest(_message.Message):
+    __slots__ = ("session_id", "client_time")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    CLIENT_TIME_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    client_time: _timestamp_pb2.Timestamp
+    def __init__(self, session_id: _Optional[str] = ..., client_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
+
+class HeartbeatResponse(_message.Message):
+    __slots__ = ("server_time", "session_valid")
+    SERVER_TIME_FIELD_NUMBER: _ClassVar[int]
+    SESSION_VALID_FIELD_NUMBER: _ClassVar[int]
+    server_time: _timestamp_pb2.Timestamp
+    session_valid: bool
+    def __init__(self, server_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., session_valid: bool = ...) -> None: ...

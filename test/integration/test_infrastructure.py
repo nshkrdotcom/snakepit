@@ -19,7 +19,7 @@ import signal
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../priv/python'))
 
 from snakepit_bridge import SessionContext
-from snakepit_bridge.snakepit_bridge_pb2_grpc import SnakepitBridgeStub
+from snakepit_bridge.grpc.snakepit_bridge_pb2_grpc import BridgeServiceStub
 
 
 class TestServer:
@@ -126,12 +126,12 @@ def test_server() -> Generator[TestServer, None, None]:
 def test_session(server: TestServer) -> Generator[SessionContext, None, None]:
     """Create a test session context."""
     channel = grpc.insecure_channel(f'localhost:{server.port}')
-    stub = SnakepitBridgeStub(channel)
+    stub = BridgeServiceStub(channel)
     
     session_id = f"test_session_{int(time.time() * 1000)}"
     
     # Initialize session via gRPC
-    from snakepit_bridge.snakepit_bridge_pb2 import InitializeSessionRequest
+    from snakepit_bridge.grpc.snakepit_bridge_pb2 import InitializeSessionRequest
     init_request = InitializeSessionRequest(session_id=session_id)
     init_response = stub.InitializeSession(init_request)
     
@@ -144,7 +144,7 @@ def test_session(server: TestServer) -> Generator[SessionContext, None, None]:
         yield ctx
     finally:
         # Cleanup session
-        from snakepit_bridge.snakepit_bridge_pb2 import CleanupSessionRequest
+        from snakepit_bridge.grpc.snakepit_bridge_pb2 import CleanupSessionRequest
         cleanup_request = CleanupSessionRequest(session_id=session_id, force=True)
         stub.CleanupSession(cleanup_request)
         channel.close()

@@ -19,8 +19,8 @@ from typing import Optional
 # Add the package to Python path
 sys.path.insert(0, '.')
 
-from snakepit_bridge import snakepit_bridge_pb2 as pb2
-from snakepit_bridge import snakepit_bridge_pb2_grpc as pb2_grpc
+from snakepit_bridge.grpc import snakepit_bridge_pb2 as pb2
+from snakepit_bridge.grpc import snakepit_bridge_pb2_grpc as pb2_grpc
 from snakepit_bridge.session_context import SessionContext
 from google.protobuf.timestamp_pb2 import Timestamp
 import json
@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
+class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     """
     Stateless implementation of the gRPC bridge service.
     
@@ -47,7 +47,7 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
         
         # Create a client channel to the Elixir server
         self.elixir_channel = grpc.aio.insecure_channel(elixir_address)
-        self.elixir_stub = pb2_grpc.SnakepitBridgeStub(self.elixir_channel)
+        self.elixir_stub = pb2_grpc.BridgeServiceStub(self.elixir_channel)
         
         logger.info(f"Python server initialized with Elixir backend at {elixir_address}")
     
@@ -86,6 +86,16 @@ class SnakepitBridgeServicer(pb2_grpc.SnakepitBridgeServicer):
         """Clean up a session - proxy to Elixir."""
         logger.info(f"Proxying CleanupSession for: {request.session_id}")
         return await self.elixir_stub.CleanupSession(request)
+    
+    async def GetSession(self, request, context):
+        """Get session details - proxy to Elixir."""
+        logger.debug(f"Proxying GetSession for: {request.session_id}")
+        return await self.elixir_stub.GetSession(request)
+    
+    async def Heartbeat(self, request, context):
+        """Send heartbeat - proxy to Elixir."""
+        logger.debug(f"Proxying Heartbeat for: {request.session_id}")
+        return await self.elixir_stub.Heartbeat(request)
     
     # Variable Operations - All Proxied to Elixir
     
@@ -244,10 +254,10 @@ async def serve(port: int, adapter_module: str, elixir_address: str):
         ]
     )
     
-    servicer = SnakepitBridgeServicer(adapter_class, elixir_address)
+    servicer = BridgeServiceServicer(adapter_class, elixir_address)
     servicer.set_server(server)
     
-    pb2_grpc.add_SnakepitBridgeServicer_to_server(servicer, server)
+    pb2_grpc.add_BridgeServiceServicer_to_server(servicer, server)
     
     # Listen on port
     actual_port = server.add_insecure_port(f'[::]:{port}')

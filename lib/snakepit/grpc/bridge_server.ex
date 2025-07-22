@@ -6,7 +6,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   through the unified bridge protocol.
   """
 
-  use GRPC.Server, service: Snakepit.Bridge.SnakepitBridge.Service
+  use GRPC.Server, service: Snakepit.Bridge.BridgeService.Service
 
   alias Snakepit.Bridge.SessionStore
   alias Snakepit.Bridge.Variables.{Variable, Types}
@@ -18,6 +18,10 @@ defmodule Snakepit.GRPC.BridgeServer do
     InitializeSessionResponse,
     CleanupSessionRequest,
     CleanupSessionResponse,
+    GetSessionRequest,
+    GetSessionResponse,
+    HeartbeatRequest,
+    HeartbeatResponse,
     RegisterVariableResponse,
     GetVariableRequest,
     GetVariableResponse,
@@ -81,6 +85,53 @@ defmodule Snakepit.GRPC.BridgeServer do
     %CleanupSessionResponse{
       success: true,
       resources_cleaned: 1
+    }
+  end
+
+  def get_session(%GetSessionRequest{session_id: session_id}, _stream) do
+    Logger.debug("GetSession: #{session_id}")
+
+    case SessionStore.get_session(session_id) do
+      {:ok, session} ->
+        variables = Map.get(session, :variables, %{})
+        tools = Map.get(session, :tools, %{})
+        metadata = Map.get(session, :metadata, %{})
+        
+        variable_count = map_size(variables)
+        tool_count = map_size(tools)
+
+        %GetSessionResponse{
+          session_id: session_id,
+          metadata: metadata,
+          created_at: %Timestamp{seconds: session.created_at, nanos: 0},
+          variable_count: variable_count,
+          tool_count: tool_count
+        }
+
+      {:error, :not_found} ->
+        raise GRPC.RPCError,
+          status: :not_found,
+          message: "Session not found: #{session_id}"
+    end
+  end
+
+  def heartbeat(%HeartbeatRequest{session_id: session_id, client_time: _client_time}, _stream) do
+    Logger.debug("Heartbeat: #{session_id}")
+
+    # Check if session exists and update last_accessed
+    session_valid =
+      case SessionStore.get_session(session_id) do
+        {:ok, _session} ->
+          # Getting the session automatically updates last_accessed
+          true
+
+        {:error, :not_found} ->
+          false
+      end
+
+    %HeartbeatResponse{
+      server_time: %Timestamp{seconds: System.system_time(:second), nanos: 0},
+      session_valid: session_valid
     }
   end
 

@@ -6,7 +6,7 @@ Example usage of the enhanced SessionContext with variable support.
 import grpc
 import time
 from snakepit_bridge import SessionContext, VariableType
-from snakepit_bridge.snakepit_bridge_pb2_grpc import SnakepitBridgeStub
+from snakepit_bridge.grpc.snakepit_bridge_pb2_grpc import BridgeServiceStub
 
 
 def basic_usage(ctx: SessionContext):
@@ -163,7 +163,7 @@ def main():
     """Run all examples."""
     # Connect to gRPC server
     channel = grpc.insecure_channel('localhost:50051')
-    stub = SnakepitBridgeStub(channel)
+    stub = BridgeServiceStub(channel)
     
     # Create session context
     session_id = f"example_session_{int(time.time())}"
