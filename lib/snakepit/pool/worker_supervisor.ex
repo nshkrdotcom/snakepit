@@ -61,13 +61,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   end
 
   defp determine_worker_module(adapter) do
-    Code.ensure_loaded(adapter)
-
-    if function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
-      Snakepit.GRPCWorker
-    else
-      Snakepit.Pool.Worker
-    end
+    Snakepit.Utils.determine_worker_module(adapter)
   end
 
   @doc """

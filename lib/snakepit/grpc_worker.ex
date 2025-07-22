@@ -167,8 +167,9 @@ defmodule Snakepit.GRPCWorker do
       "session_#{:erlang.unique_integer([:positive, :monotonic])}_#{:erlang.system_time(:microsecond)}"
 
     # Get the address of the central Elixir gRPC server
+    elixir_grpc_host = Application.get_env(:snakepit, :grpc_host, "localhost")
     elixir_grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
-    elixir_address = "localhost:#{elixir_grpc_port}"
+    elixir_address = "#{elixir_grpc_host}:#{elixir_grpc_port}"
 
     # Start the gRPC server process non-blocking
     executable = adapter.executable_path()

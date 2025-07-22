@@ -36,4 +36,30 @@ defmodule Snakepit.Utils do
   end
 
   def stringify_keys(value), do: value
+
+  @doc """
+  Determines which worker module to use based on the adapter's capabilities.
+
+  Returns `Snakepit.GRPCWorker` if the adapter supports gRPC,
+  otherwise returns `Snakepit.Pool.Worker`.
+
+  ## Examples
+
+      iex> Snakepit.Utils.determine_worker_module(Snakepit.Adapters.GRPCBridge)
+      Snakepit.GRPCWorker
+      
+      iex> Snakepit.Utils.determine_worker_module(Snakepit.Adapters.Python)
+      Snakepit.Pool.Worker
+  """
+  @spec determine_worker_module(module()) :: module()
+  def determine_worker_module(adapter) do
+    # Ensure the adapter module is loaded
+    Code.ensure_loaded(adapter)
+
+    if function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+      Snakepit.GRPCWorker
+    else
+      Snakepit.Pool.Worker
+    end
+  end
 end

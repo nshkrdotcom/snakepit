@@ -435,17 +435,13 @@ defmodule Snakepit.Pool do
   end
 
   defp determine_worker_module(adapter) do
-    # Ensure the adapter module is loaded
-    Code.ensure_loaded(adapter)
+    result = Snakepit.Utils.determine_worker_module(adapter)
 
-    result =
-      if function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
-        Logger.info("🔧 Adapter #{inspect(adapter)} uses gRPC, selecting GRPCWorker")
-        Snakepit.GRPCWorker
-      else
-        Logger.info("🔧 Adapter #{inspect(adapter)} uses standard protocol, selecting Worker")
-        Snakepit.Pool.Worker
-      end
+    if result == Snakepit.GRPCWorker do
+      Logger.info("🔧 Adapter #{inspect(adapter)} uses gRPC, selecting GRPCWorker")
+    else
+      Logger.info("🔧 Adapter #{inspect(adapter)} uses standard protocol, selecting Worker")
+    end
 
     Logger.info("🔧 Worker module selected: #{inspect(result)}")
     result
