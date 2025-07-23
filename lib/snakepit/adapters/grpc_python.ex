@@ -142,7 +142,8 @@ defmodule Snakepit.Adapters.GRPCPython do
   """
   def get_port do
     config = Application.get_env(:snakepit, :grpc_config, %{})
-    base_port = Map.get(config, :base_port, 50051)
+    # Start at 50052 to avoid Elixir server
+    base_port = Map.get(config, :base_port, 50052)
     port_range = Map.get(config, :port_range, 100)
 
     # Simple port allocation - in production might use a registry

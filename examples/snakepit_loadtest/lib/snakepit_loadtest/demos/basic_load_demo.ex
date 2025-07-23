@@ -4,6 +4,7 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
   """
 
   alias SnakepitLoadtest
+  require Logger
 
   def run(worker_count \\ 10) do
     IO.puts("\n🚀 Basic Load Test Demo")
@@ -11,19 +12,29 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
     IO.puts("Workers: #{worker_count}")
     IO.puts("Workload: Simple compute tasks\n")
 
-    # Configure pool size based on worker count
-    pool_size = min(worker_count, 50)  # Cap pool size at 50
-    Application.put_env(:snakepit, :pool_config, %{
-      pool_size: pool_size,
-      max_overflow: 10
-    })
-
+    # Get the current pool size
+    pool_config = Application.get_env(:snakepit, :pool_config, %{})
+    current_pool_size = Map.get(pool_config, :pool_size, System.schedulers_online() * 2)
+    
+    # Use configured pool size instead of trying to reconfigure
+    actual_pool_size = min(current_pool_size, worker_count)
+    
+    if worker_count > current_pool_size do
+      IO.puts("⚠️  Note: Requested #{worker_count} workers but pool is configured for #{current_pool_size}")
+      IO.puts("   Using #{actual_pool_size} workers for this test")
+      IO.puts("   To use more workers, configure pool_size in config.exs\n")
+    end
+    
     # Ensure Snakepit is started
-    {:ok, _} = Application.ensure_all_started(:snakepit)
+    case Application.ensure_all_started(:snakepit) do
+      {:ok, _} -> :ok
+      {:error, {:already_started, :snakepit}} -> :ok
+      error -> raise "Failed to start Snakepit: #{inspect(error)}"
+    end
     
     # Warm up the pool
     IO.puts("Warming up pool...")
-    warm_up_pool(pool_size)
+    warm_up_pool(actual_pool_size)
 
     # Run the load test
     IO.puts("\nStarting load test...")
@@ -31,10 +42,6 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
 
     # Display results
     display_results(results, worker_count)
-    
-    # Properly shut down Snakepit
-    IO.puts("\nShutting down gracefully...")
-    Application.stop(:snakepit)
   end
 
   defp warm_up_pool(pool_size) do
@@ -42,7 +49,7 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
     |> Task.async_stream(
       fn _ -> Snakepit.execute("ping", %{message: "warmup"}) end,
       max_concurrency: pool_size,
-      timeout: 5000
+      timeout: 30000  # Increased timeout to 30 seconds for gRPC startup
     )
     |> Stream.run()
   end

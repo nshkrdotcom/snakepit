@@ -9,7 +9,10 @@ config :snakepit,
   grpc_timeout: 60_000,  # 60 seconds for load testing
   python_timeout: 55_000,  # Slightly less than gRPC timeout
   # Use the ShowcaseAdapter which has the required tools
-  python_adapter: "snakepit_bridge.adapters.showcase.ShowcaseAdapter"
+  python_adapter: "snakepit_bridge.adapters.showcase.showcase_adapter.ShowcaseAdapter",
+  pool_config: %{
+    adapter_args: ["--adapter", "snakepit_bridge.adapters.showcase.showcase_adapter.ShowcaseAdapter"]
+  }
 
 # Configure logger for load testing
 config :logger,

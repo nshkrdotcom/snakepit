@@ -195,11 +195,15 @@ defmodule Snakepit.GRPCWorker do
         args
       end
 
+    # Add beam-run-id for safer process cleanup
+    beam_run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
+    args = args ++ ["--snakepit-run-id", beam_run_id]
+
     Logger.info("Starting gRPC server: #{executable} #{script} #{Enum.join(args, " ")}")
 
     # Use setsid to create a new process group for easier cleanup
     setsid_path = System.find_executable("setsid") || "/usr/bin/setsid"
-    
+
     port_opts = [
       :binary,
       :exit_status,
@@ -248,7 +252,7 @@ defmodule Snakepit.GRPCWorker do
   @impl true
   def handle_continue(:connect_and_wait, state) do
     # Now we do the blocking work here, after init/1 has returned
-    case wait_for_server_ready(state.server_port, 5000) do
+    case wait_for_server_ready(state.server_port, 30000) do
       {:ok, actual_port} ->
         case state.adapter.init_grpc_connection(actual_port) do
           {:ok, connection} ->
@@ -276,7 +280,7 @@ defmodule Snakepit.GRPCWorker do
         end
 
       {:error, reason} ->
-        Logger.error("Failed to start gRPC server: #{reason}")
+        Logger.error("Failed to start gRPC server: #{inspect(reason)}")
         {:stop, {:grpc_server_failed, reason}, state}
     end
   end
@@ -387,9 +391,13 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_info({port, {:data, data}}, %{server_port: port} = state) do
-    # Debug output commented out now that shutdown is fixed
-    # IO.puts("gRPC server output: #{data}")
-    Logger.info("gRPC server output: #{data}")
+    # Always log server output for debugging
+    output = String.trim(to_string(data))
+
+    if output != "" do
+      Logger.info("gRPC server output: #{output}")
+    end
+
     {:noreply, state}
   end
 
@@ -508,6 +516,11 @@ defmodule Snakepit.GRPCWorker do
       {^port, {:data, data}} ->
         output = to_string(data)
 
+        # Log any output for debugging
+        if String.trim(output) != "" do
+          Logger.debug("Python server output during startup: #{String.trim(output)}")
+        end
+
         # Look for the ready message anywhere in the output
         if String.contains?(output, "GRPC_READY:") do
           # Extract port from the ready message line
@@ -529,8 +542,18 @@ defmodule Snakepit.GRPCWorker do
           # Keep waiting for the ready message
           wait_for_server_ready(port, timeout)
         end
+
+      {^port, {:exit_status, status}} ->
+        Logger.error("Python gRPC server process exited with status #{status} during startup")
+        {:error, {:exit_status, status}}
+
+      {:DOWN, _ref, :port, ^port, reason} ->
+        Logger.error("Python gRPC server port died during startup: #{inspect(reason)}")
+        {:error, {:port_died, reason}}
     after
-      timeout -> {:error, :timeout}
+      timeout ->
+        Logger.error("Timeout waiting for Python gRPC server to start after #{timeout}ms")
+        {:error, :timeout}
     end
   end
 

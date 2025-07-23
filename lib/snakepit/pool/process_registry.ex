@@ -112,6 +112,13 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @doc """
+  Get the current BEAM run ID.
+  """
+  def get_beam_run_id() do
+    GenServer.call(__MODULE__, :get_beam_run_id)
+  end
+
+  @doc """
   Gets registry statistics.
   """
   def get_stats() do
@@ -153,8 +160,12 @@ defmodule Snakepit.Pool.ProcessRegistry do
     beam_run_id = "#{timestamp}_#{random_component}"
 
     # Create a proper file path for DETS
+    # Include node name to prevent conflicts between multiple BEAM instances
     priv_dir = :code.priv_dir(:snakepit) |> to_string()
-    dets_file = Path.join([priv_dir, "data", "process_registry.dets"])
+
+    # Sanitize node name for filesystem usage
+    node_name = node() |> to_string() |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
+    dets_file = Path.join([priv_dir, "data", "process_registry_#{node_name}.dets"])
 
     # Ensure directory exists for DETS file
     dets_dir = Path.dirname(dets_file)
@@ -228,8 +239,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # Atomic write to both ETS and DETS
     :ets.insert(state.table, {worker_id, worker_info})
     :dets.insert(state.dets_table, {worker_id, worker_info})
-    # Force sync to ensure data is written to disk
-    :dets.sync(state.dets_table)
+    # Rely on auto_save (1000ms) instead of blocking sync for better performance
 
     Logger.info(
       "✅ Registered worker #{worker_id} with external process PID #{process_pid} " <>
@@ -289,6 +299,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
       |> Enum.filter(&(&1 != nil))
 
     {:reply, pids, state}
+  end
+
+  @impl true
+  def handle_call(:get_beam_run_id, _from, state) do
+    {:reply, state.beam_run_id, state}
   end
 
   @impl true
@@ -391,31 +406,64 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
           # Be very careful with process cleanup
           pid_str = to_string(info.process_pid)
-          
+          pgid = Map.get(info, :pgid, info.process_pid)
+          pgid_str = to_string(pgid)
+
           # First verify this is actually a Python grpc_server process
           case System.cmd("ps", ["-p", pid_str, "-o", "cmd="], stderr_to_stdout: true) do
             {output, 0} ->
               if String.contains?(output, "grpc_server.py") do
-                Logger.info("Confirmed PID #{pid_str} is a grpc_server process, sending SIGTERM")
-                System.cmd("kill", ["-TERM", pid_str], stderr_to_stdout: true)
-                
+                Logger.info(
+                  "Confirmed PID #{pid_str} (PGID #{pgid_str}) is a grpc_server process"
+                )
+
+                # Try to kill the entire process group first
+                Logger.info("Sending SIGTERM to process group #{pgid_str}")
+
+                case System.cmd("kill", ["-TERM", "-#{pgid_str}"], stderr_to_stdout: true) do
+                  {_output, 0} ->
+                    Logger.info("Successfully sent SIGTERM to process group #{pgid_str}")
+
+                  {error, _} ->
+                    Logger.debug(
+                      "Failed to kill process group #{pgid_str}: #{error}, trying individual process"
+                    )
+
+                    System.cmd("kill", ["-TERM", pid_str], stderr_to_stdout: true)
+                end
+
                 # Check if still alive and force kill if needed
                 if process_alive?(info.process_pid) do
-                  Logger.warning("Process #{pid_str} still alive after SIGTERM, sending SIGKILL")
-                  System.cmd("kill", ["-KILL", pid_str], stderr_to_stdout: true)
-                  
+                  Logger.warning(
+                    "Process #{pid_str} still alive after SIGTERM, sending SIGKILL to process group"
+                  )
+
+                  case System.cmd("kill", ["-KILL", "-#{pgid_str}"], stderr_to_stdout: true) do
+                    {_output, 0} ->
+                      Logger.info("Successfully sent SIGKILL to process group #{pgid_str}")
+
+                    {error, _} ->
+                      Logger.debug(
+                        "Failed to SIGKILL process group #{pgid_str}: #{error}, trying individual process"
+                      )
+
+                      System.cmd("kill", ["-KILL", pid_str], stderr_to_stdout: true)
+                  end
+
                   if process_alive?(info.process_pid) do
                     Logger.error("Process #{pid_str} appears to be unkillable!")
                   else
-                    Logger.info("Process #{pid_str} successfully terminated with SIGKILL")
+                    Logger.info("Process #{pid_str} successfully terminated")
                   end
                 else
                   Logger.info("Process #{pid_str} successfully terminated with SIGTERM")
                 end
               else
-                Logger.warning("PID #{pid_str} is not a grpc_server process, skipping: #{String.trim(output)}")
+                Logger.warning(
+                  "PID #{pid_str} is not a grpc_server process, skipping: #{String.trim(output)}"
+                )
               end
-              
+
             {_output, _} ->
               Logger.debug("Process #{pid_str} not found, already dead")
           end
