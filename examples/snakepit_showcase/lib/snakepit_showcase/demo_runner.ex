@@ -10,7 +10,8 @@ defmodule SnakepitShowcase.DemoRunner do
     ConcurrentDemo,
     VariablesDemo,
     BinaryDemo,
-    MLWorkflowDemo
+    MLWorkflowDemo,
+    ExecutionModesDemo
   }
 
   @demos [
@@ -20,7 +21,8 @@ defmodule SnakepitShowcase.DemoRunner do
     {ConcurrentDemo, "Concurrent Processing"},
     {VariablesDemo, "Variable Management"},
     {BinaryDemo, "Binary Serialization"},
-    {MLWorkflowDemo, "ML Workflows"}
+    {MLWorkflowDemo, "ML Workflows"},
+    {ExecutionModesDemo, "Execution Modes Guide"}
   ]
 
   def run_all do
