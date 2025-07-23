@@ -76,7 +76,7 @@ defmodule SnakepitShowcase.Demos.BasicDemo do
   end
 
   defp demo_custom_adapter do
-    IO.puts("\n4️⃣ Custom Adapter Usage")
+    IO.puts("\n4️⃣ Adapter Info")
     
     # The adapter is configured in the pool config
     {:ok, result} = Snakepit.execute("adapter_info", %{})

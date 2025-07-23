@@ -25,6 +25,8 @@ class VariableType(Enum):
     MODULE = "module"
     EMBEDDING = "embedding"
     TENSOR = "tensor"
+    MAP = "map"      # Add this
+    LIST = "list"    # Add this
     
     def to_proto(self) -> str:
         """Convert to protobuf string representation."""
@@ -69,12 +71,20 @@ class TypeValidator:
         """Infer type from a Python value."""
         if isinstance(value, bool):
             return VariableType.BOOLEAN
-        elif isinstance(value, int):
+        if isinstance(value, int):
             return VariableType.INTEGER
-        elif isinstance(value, float):
+        if isinstance(value, float):
             return VariableType.FLOAT
-        else:
+        if isinstance(value, str):
             return VariableType.STRING
+        # CORRECT: Add checks for dict and list *before* the string fallback
+        if isinstance(value, dict):
+            return VariableType.MAP
+        if isinstance(value, list):
+            return VariableType.LIST
+            
+        # Default to string for any other unknown types
+        return VariableType.STRING
 
 
 class FloatValidator(TypeValidator):

@@ -23,10 +23,13 @@ sys.path.insert(0, '.')
 from snakepit_bridge.grpc import snakepit_bridge_pb2 as pb2
 from snakepit_bridge.grpc import snakepit_bridge_pb2_grpc as pb2_grpc
 from snakepit_bridge.session_context import SessionContext
+from snakepit_bridge.serialization import TypeSerializer
 from google.protobuf.timestamp_pb2 import Timestamp
+from google.protobuf import any_pb2
 import json
 import functools
 import traceback
+import pickle
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -216,13 +219,9 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     
     @grpc_error_handler
     async def ExecuteTool(self, request, context):
-        """
-        Execute a tool with an ephemeral session context.
-        
-        This is where Python-specific functionality is implemented.
-        The context provides access to variables via callbacks to Elixir.
-        """
+        """Executes a non-streaming tool."""
         logger.info(f"ExecuteTool: {request.tool_name} for session {request.session_id}")
+        start_time = time.time()
         
         try:
             # Create ephemeral context for this request
@@ -236,24 +235,55 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             if hasattr(adapter, 'initialize'):
                 await adapter.initialize()
             
+            # Decode parameters from protobuf Any using TypeSerializer
+            arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
+            # Also handle binary parameters if present
+            for key, binary_val in request.binary_parameters.items():
+                arguments[key] = pickle.loads(binary_val)
+            
             # Execute the tool
-            if hasattr(adapter, 'execute_tool'):
-                result = await adapter.execute_tool(
+            if not hasattr(adapter, 'execute_tool'):
+                raise grpc.RpcError(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support 'execute_tool'")
+            
+            # CORRECT: Await the async method
+            import inspect
+            if inspect.iscoroutinefunction(adapter.execute_tool):
+                result_data = await adapter.execute_tool(
                     tool_name=request.tool_name,
-                    arguments=dict(request.arguments),
+                    arguments=arguments,
                     context=session_context
                 )
-                
-                # Build response
-                response = pb2.ExecuteToolResponse()
-                response.success = True
-                response.result_json = json.dumps(result)
-                return response
             else:
-                # Tool execution not implemented yet
-                context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-                context.set_details(f'Tool execution not implemented in adapter')
-                return pb2.ExecuteToolResponse()
+                result_data = adapter.execute_tool(
+                    tool_name=request.tool_name,
+                    arguments=arguments,
+                    context=session_context
+                )
+            
+            # Check if a generator was mistakenly returned (should have been called via streaming endpoint)
+            if inspect.isgenerator(result_data) or inspect.isasyncgen(result_data):
+                logger.warning(f"Tool '{request.tool_name}' returned a generator but was called via non-streaming ExecuteTool. Returning empty result.")
+                result_data = {"error": "Streaming tool called on non-streaming endpoint."}
+            
+            # CORRECT: Use the robust TypeValidator and TypeSerializer for ALL types.
+            # This removes the need for custom `snakepit.map` logic.
+            response = pb2.ExecuteToolResponse(success=True)
+            from snakepit_bridge.types import TypeValidator
+            
+            # Infer the type of the result
+            result_type = TypeValidator.infer_type(result_data)
+            
+            # Use the centralized serializer to encode the result correctly
+            any_msg, binary_data = TypeSerializer.encode_any(result_data, result_type.value)
+            
+            # The result from encode_any is already a protobuf Any message, so we just assign it
+            response.result.CopyFrom(any_msg)
+            if binary_data:
+                response.binary_result = binary_data
+                
+            response.execution_time_ms = int((time.time() - start_time) * 1000)
+            
+            return response
                 
         except Exception as e:
             logger.error(f"ExecuteTool failed: {e}", exc_info=True)
@@ -263,13 +293,95 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             return response
     
     @grpc_error_handler
-    async def ExecuteStreamingTool(self, request, context):
-        """Execute a streaming tool - placeholder for Stage 3."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('ExecuteStreamingTool not implemented until Stage 3')
-        # For streaming RPCs, we need to yield, not return
-        return
-        yield  # Make this a generator but never actually yield anything
+    def ExecuteStreamingTool(self, request, context):
+        """Executes a streaming tool."""
+        logger.info(f"ExecuteStreamingTool: {request.tool_name} for session {request.session_id}")
+        
+        try:
+            # Create ephemeral context for this request
+            session_context = SessionContext(self.elixir_stub, request.session_id)
+            
+            # Create adapter instance for this request
+            adapter = self.adapter_class()
+            adapter.set_session_context(session_context)
+            
+            # Initialize adapter if needed
+            if hasattr(adapter, 'initialize') and inspect.iscoroutinefunction(adapter.initialize):
+                # Can't await in a sync function, so skip async initialization
+                logger.warning("Skipping async adapter initialization in streaming context")
+            elif hasattr(adapter, 'initialize'):
+                adapter.initialize()
+            
+            # Decode parameters from protobuf Any using TypeSerializer
+            arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
+            # Also handle binary parameters if present
+            for key, binary_val in request.binary_parameters.items():
+                arguments[key] = pickle.loads(binary_val)
+            
+            # Execute the tool
+            if not hasattr(adapter, 'execute_tool'):
+                context.abort(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support tool execution")
+                return
+            
+            # Can't await in sync function - just call it directly
+            import inspect
+            
+            if inspect.iscoroutinefunction(adapter.execute_tool):
+                # Can't handle async execute_tool in sync ExecuteStreamingTool
+                context.abort(grpc.StatusCode.UNIMPLEMENTED, "Async adapters not supported for streaming")
+                return
+            else:
+                stream_iterator = adapter.execute_tool(
+                    tool_name=request.tool_name,
+                    arguments=arguments,
+                    context=session_context
+                )
+            
+            # Handle both sync and async generators
+            chunk_id_counter = 0
+            
+            # Import StreamChunk for proper handling
+            from snakepit_bridge.adapters.showcase.tool import StreamChunk
+            
+            logger.info(f"Stream iterator type: {type(stream_iterator)}")
+            logger.info(f"Has __aiter__: {hasattr(stream_iterator, '__aiter__')}")
+            logger.info(f"Has __iter__: {hasattr(stream_iterator, '__iter__')}")
+            
+            # Since ExecuteStreamingTool is now sync, we can only handle sync iterators
+            if hasattr(stream_iterator, '__aiter__'):
+                # Can't handle async generators in a sync function
+                logger.error("Tool returned async generator but ExecuteStreamingTool is sync")
+                context.abort(grpc.StatusCode.INTERNAL, "Async generators not supported")
+                return
+            elif hasattr(stream_iterator, '__iter__'):
+                for chunk_data in stream_iterator:
+                    # This is the same processing logic
+                    if isinstance(chunk_data, StreamChunk):
+                        data_payload = chunk_data.data
+                    else:
+                        data_payload = chunk_data
+                    data_bytes = json.dumps(data_payload).encode('utf-8')
+                    chunk_id_counter += 1
+                    yield pb2.ToolChunk(
+                        chunk_id=f"{request.tool_name}-{chunk_id_counter}",
+                        data=data_bytes,
+                        is_final=False
+                    )
+            else:
+                # This handles non-generator returns
+                data_bytes = json.dumps(stream_iterator).encode('utf-8')
+                yield pb2.ToolChunk(
+                    chunk_id=f"{request.tool_name}-1",
+                    data=data_bytes,
+                    is_final=True
+                )
+            
+            # Yield the final empty chunk after the loop
+            yield pb2.ToolChunk(is_final=True)
+                
+        except Exception as e:
+            logger.error(f"ExecuteStreamingTool failed: {e}", exc_info=True)
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
     
     async def WatchVariables(self, request, context):
         """Watch variables for changes - placeholder for Stage 3."""

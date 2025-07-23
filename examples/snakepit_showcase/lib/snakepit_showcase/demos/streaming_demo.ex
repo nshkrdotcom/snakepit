@@ -27,10 +27,7 @@ defmodule SnakepitShowcase.Demos.StreamingDemo do
     
     IO.puts("   Processing 10 steps with progress updates...")
     
-    {:ok, stream} = Snakepit.execute_stream("stream_progress", %{steps: 10})
-    
-    stream
-    |> Enum.each(fn chunk ->
+    :ok = Snakepit.execute_stream("stream_progress", %{steps: 10}, fn chunk ->
       IO.puts("   Step #{chunk["step"]}/#{chunk["total"]}: #{chunk["progress"]}% - #{chunk["message"]}")
     end)
     
@@ -42,12 +39,11 @@ defmodule SnakepitShowcase.Demos.StreamingDemo do
     
     IO.puts("   Streaming Fibonacci sequence...")
     
-    {:ok, stream} = Snakepit.execute_stream("stream_fibonacci", %{count: 20})
-    
-    stream
-    |> Enum.take(10)
-    |> Enum.each(fn chunk ->
-      IO.puts("   Fibonacci ##{chunk["index"]}: #{chunk["value"]}")
+    :ok = Snakepit.execute_stream("stream_fibonacci", %{count: 20}, fn chunk ->
+      # Only print the first 10 for brevity
+      if chunk["index"] <= 10 do
+        IO.puts("   Fibonacci ##{chunk["index"]}: #{chunk["value"]}")
+      end
     end)
     
     IO.puts("   ... (showing first 10 of 20)")
@@ -58,19 +54,19 @@ defmodule SnakepitShowcase.Demos.StreamingDemo do
     
     IO.puts("   Generating and streaming large dataset...")
     
-    {:ok, stream} = Snakepit.execute_stream("generate_dataset", %{
+    chunk_count_ref = :atomics.new(1, [])
+    
+    :ok = Snakepit.execute_stream("generate_dataset", %{
       rows: 1000,
       chunk_size: 100
-    })
+    }, fn chunk ->
+      count = :atomics.get(chunk_count_ref, 1)
+      IO.puts("   Received chunk #{count}: #{chunk["rows_in_chunk"]} rows (total so far: #{chunk["total_rows"]})")
+      :atomics.add(chunk_count_ref, 1, 1)
+    end)
     
-    chunk_count = 
-      stream
-      |> Enum.reduce(0, fn chunk, acc ->
-        IO.puts("   Received chunk #{acc + 1}: #{chunk["rows_in_chunk"]} rows (total so far: #{chunk["total_rows"]})")
-        acc + 1
-      end)
-    
-    IO.puts("   ✅ Received #{chunk_count} chunks")
+    final_count = :atomics.get(chunk_count_ref, 1) - 1
+    IO.puts("   ✅ Received #{final_count} chunks")
   end
 
   defp demo_stream_cancellation do
@@ -79,11 +75,7 @@ defmodule SnakepitShowcase.Demos.StreamingDemo do
     IO.puts("   Starting long-running stream...")
     
     task = Task.async(fn ->
-      {:ok, stream} = Snakepit.execute_stream("infinite_stream", %{delay_ms: 500})
-      
-      stream
-      |> Stream.take(5)
-      |> Enum.each(fn chunk ->
+      :ok = Snakepit.execute_stream("infinite_stream", %{delay_ms: 500}, fn chunk ->
         IO.puts("   Received: #{chunk["message"]} at #{chunk["timestamp"]}")
       end)
     end)
@@ -94,6 +86,6 @@ defmodule SnakepitShowcase.Demos.StreamingDemo do
     # Cancel the task
     Task.shutdown(task, :brutal_kill)
     
-    IO.puts("   ✅ Stream cancelled after 5 messages")
+    IO.puts("   ✅ Stream cancelled after receiving messages")
   end
 end

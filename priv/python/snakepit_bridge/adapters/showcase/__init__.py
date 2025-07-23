@@ -1,0 +1,1 @@
+# Showcase adapter module

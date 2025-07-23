@@ -41,8 +41,7 @@ defmodule SnakepitShowcase.MixProject do
 
   defp aliases do
     [
-      setup: ["deps.get", "python.setup"],
-      "python.setup": ["cmd mkdir -p priv/python && cd priv/python && echo 'numpy\\ndspy\\nscikit-learn' > requirements.txt && pip install -r requirements.txt"],
+      setup: ["deps.get"],
       demo: ["run --no-halt"],
       "demo.all": ["run --no-halt -e SnakepitShowcase.DemoRunner.run_all()"],
       "demo.interactive": ["run --no-halt -e SnakepitShowcase.DemoRunner.interactive()"]

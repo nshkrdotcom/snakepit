@@ -5,19 +5,18 @@ import psutil
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-# Add parent directory to path to import snakepit_bridge
-import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../priv/python'))
-
-from snakepit_bridge import Tool, SessionContext, StreamChunk
+from snakepit_bridge import SessionContext
+from .tool import Tool, StreamChunk
 
 class ShowcaseAdapter:
     """Main adapter demonstrating all Snakepit features."""
     
+    # State now persists across requests within the same worker process
+    session_start_times = {}
+    command_counts = {}
+    counters = {}
+    
     def __init__(self):
-        self.session_start_times = {}
-        self.command_counts = {}
-        self.counters = {}
         self.tools = {
             # Basic operations
             "ping": Tool(self.ping),
@@ -174,9 +173,9 @@ class ShowcaseAdapter:
     # Session operations
     def init_session(self, ctx: SessionContext, **kwargs) -> Dict[str, Any]:
         session_id = ctx.session_id
-        self.session_start_times[session_id] = time.time()
-        self.command_counts[session_id] = 0
-        self.counters[session_id] = 0
+        ShowcaseAdapter.session_start_times[session_id] = time.time()
+        ShowcaseAdapter.command_counts[session_id] = 0
+        ShowcaseAdapter.counters[session_id] = 0
         
         return {
             "timestamp": datetime.now().isoformat(),
@@ -186,14 +185,14 @@ class ShowcaseAdapter:
     
     def cleanup_session(self, ctx: SessionContext) -> Dict[str, Any]:
         session_id = ctx.session_id
-        start_time = self.session_start_times.get(session_id, time.time())
+        start_time = ShowcaseAdapter.session_start_times.get(session_id, time.time())
         duration_ms = (time.time() - start_time) * 1000
-        command_count = self.command_counts.get(session_id, 0)
+        command_count = ShowcaseAdapter.command_counts.get(session_id, 0)
         
         # Cleanup
-        self.session_start_times.pop(session_id, None)
-        self.command_counts.pop(session_id, None)
-        self.counters.pop(session_id, None)
+        ShowcaseAdapter.session_start_times.pop(session_id, None)
+        ShowcaseAdapter.command_counts.pop(session_id, None)
+        ShowcaseAdapter.counters.pop(session_id, None)
         
         return {
             "duration_ms": round(duration_ms, 2),
@@ -201,21 +200,21 @@ class ShowcaseAdapter:
         }
     
     def set_counter(self, ctx: SessionContext, value: int) -> Dict[str, Any]:
-        self.counters[ctx.session_id] = value
-        self.command_counts[ctx.session_id] = self.command_counts.get(ctx.session_id, 0) + 1
+        ShowcaseAdapter.counters[ctx.session_id] = value
+        ShowcaseAdapter.command_counts[ctx.session_id] = ShowcaseAdapter.command_counts.get(ctx.session_id, 0) + 1
         return {"value": value}
     
     def get_counter(self, ctx: SessionContext) -> Dict[str, Any]:
-        self.command_counts[ctx.session_id] = self.command_counts.get(ctx.session_id, 0) + 1
-        return {"value": self.counters.get(ctx.session_id, 0)}
+        ShowcaseAdapter.command_counts[ctx.session_id] = ShowcaseAdapter.command_counts.get(ctx.session_id, 0) + 1
+        return {"value": ShowcaseAdapter.counters.get(ctx.session_id, 0)}
     
     def increment_counter(self, ctx: SessionContext) -> Dict[str, Any]:
-        self.counters[ctx.session_id] = self.counters.get(ctx.session_id, 0) + 1
-        self.command_counts[ctx.session_id] = self.command_counts.get(ctx.session_id, 0) + 1
-        return {"value": self.counters[ctx.session_id]}
+        ShowcaseAdapter.counters[ctx.session_id] = ShowcaseAdapter.counters.get(ctx.session_id, 0) + 1
+        ShowcaseAdapter.command_counts[ctx.session_id] = ShowcaseAdapter.command_counts.get(ctx.session_id, 0) + 1
+        return {"value": ShowcaseAdapter.counters[ctx.session_id]}
     
     def get_worker_info(self, ctx: SessionContext, call_number: int) -> Dict[str, Any]:
-        self.command_counts[ctx.session_id] = self.command_counts.get(ctx.session_id, 0) + 1
+        ShowcaseAdapter.command_counts[ctx.session_id] = ShowcaseAdapter.command_counts.get(ctx.session_id, 0) + 1
         return {
             "worker_pid": str(os.getpid()),
             "call_number": call_number,
@@ -318,7 +317,7 @@ class ShowcaseAdapter:
         memory_mb = process.memory_info().rss / 1024 / 1024
         
         return {
-            "active_workers": len(self.session_start_times),
+            "active_workers": len(ShowcaseAdapter.session_start_times),
             "memory_mb": round(memory_mb, 2),
             "pid": os.getpid()
         }
@@ -551,3 +550,15 @@ class ShowcaseAdapter:
             })
         
         return result
+    
+    def set_session_context(self, session_context):
+        """Set the session context for this adapter instance."""
+        self.session_context = session_context
+    
+    def execute_tool(self, tool_name: str, arguments: Dict[str, Any], context) -> Any:
+        """Execute a tool by name with given arguments."""
+        if tool_name in self.tools:
+            tool = self.tools[tool_name]
+            return tool.func(context, **arguments)
+        else:
+            raise ValueError(f"Unknown tool: {tool_name}")
