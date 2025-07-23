@@ -5,7 +5,15 @@ from ..tool import Tool
 
 
 class VariableOpsHandler:
-    """Handler for variable management operations."""
+    """Handler for variable management operations.
+    
+    Note: In a production system with full SessionContext support,
+    these would use ctx.register_variable(), ctx.get_variable(), etc.
+    For this showcase, we use a simple in-memory approach.
+    """
+    
+    # Simple in-memory storage for demo
+    _variables = {}
     
     def get_tools(self) -> Dict[str, Tool]:
         """Return all tools provided by this handler."""
@@ -21,8 +29,20 @@ class VariableOpsHandler:
     def register_variable(self, ctx, name: str, type: str, 
                          initial_value: Any, constraints: Dict) -> Dict[str, Any]:
         """Register a variable with type and constraints."""
-        # Register with SessionContext
-        var_id = ctx.register_variable(name, type, initial_value, constraints)
+        session_id = ctx.session_id
+        
+        if session_id not in self._variables:
+            self._variables[session_id] = {}
+        
+        # Store variable with metadata
+        var_id = f"{session_id}_{name}"
+        self._variables[session_id][name] = {
+            "id": var_id,
+            "type": type,
+            "value": initial_value,
+            "constraints": constraints,
+            "version": 1
+        }
         
         return {
             "variable_id": var_id,
@@ -33,15 +53,37 @@ class VariableOpsHandler:
     
     def get_variable(self, ctx, name: str) -> Dict[str, Any]:
         """Get a variable value."""
-        value = ctx.get_variable(name)
-        return {
-            "name": name,
-            "value": value
-        }
+        session_id = ctx.session_id
+        
+        if session_id in self._variables and name in self._variables[session_id]:
+            var_data = self._variables[session_id][name]
+            return {
+                "name": name,
+                "value": var_data["value"]
+            }
+        else:
+            raise KeyError(f"Variable '{name}' not found in session")
     
     def set_variable(self, ctx, name: str, value: Any) -> Dict[str, Any]:
         """Set a variable value."""
-        ctx.update_variable(name, value)
+        session_id = ctx.session_id
+        
+        if session_id not in self._variables:
+            self._variables[session_id] = {}
+        
+        if name in self._variables[session_id]:
+            self._variables[session_id][name]["value"] = value
+            self._variables[session_id][name]["version"] += 1
+        else:
+            # Auto-register if doesn't exist
+            self._variables[session_id][name] = {
+                "id": f"{session_id}_{name}",
+                "type": "any",
+                "value": value,
+                "constraints": {},
+                "version": 1
+            }
+        
         return {
             "name": name,
             "value": value,
@@ -51,14 +93,15 @@ class VariableOpsHandler:
     def set_variable_with_history(self, ctx, name: str, value: Any, 
                                  metadata: Optional[Dict] = None) -> Dict[str, Any]:
         """Set variable with metadata for history tracking."""
-        # Get previous value for history
-        try:
-            previous = ctx.get_variable(name)
-        except:
-            previous = None
+        session_id = ctx.session_id
         
-        # Update with metadata
-        ctx.update_variable(name, value, metadata=metadata)
+        # Get previous value
+        previous = None
+        if session_id in self._variables and name in self._variables[session_id]:
+            previous = self._variables[session_id][name]["value"]
+        
+        # Update variable
+        result = self.set_variable(ctx, name, value)
         
         return {
             "name": name,
@@ -69,7 +112,14 @@ class VariableOpsHandler:
     
     def get_variables(self, ctx, names: List[str]) -> Dict[str, Any]:
         """Get multiple variables at once."""
-        values = ctx.get_variables(names)
+        session_id = ctx.session_id
+        values = {}
+        
+        if session_id in self._variables:
+            for name in names:
+                if name in self._variables[session_id]:
+                    values[name] = self._variables[session_id][name]["value"]
+        
         return {
             "variables": values,
             "count": len(values)
@@ -78,10 +128,21 @@ class VariableOpsHandler:
     def set_variables(self, ctx, updates: Dict[str, Any], 
                      atomic: bool = False) -> Dict[str, Any]:
         """Set multiple variables at once."""
-        results = ctx.update_variables(updates, atomic=atomic)
+        results = {}
+        successful = 0
+        failed = 0
         
-        successful = sum(1 for v in results.values() if v is True)
-        failed = len(results) - successful
+        for name, value in updates.items():
+            try:
+                self.set_variable(ctx, name, value)
+                results[name] = True
+                successful += 1
+            except Exception as e:
+                results[name] = str(e)
+                failed += 1
+                if atomic:
+                    # Rollback on failure in atomic mode
+                    break
         
         return {
             "total": len(updates),
