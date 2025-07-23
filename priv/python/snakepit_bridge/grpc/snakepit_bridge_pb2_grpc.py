@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import snakepit_bridge_pb2 as snakepit__bridge__pb2
+import snakepit_bridge_pb2 as snakepit__bridge__pb2
 
 GRPC_GENERATED_VERSION = '1.73.1'
 GRPC_VERSION = grpc.__version__

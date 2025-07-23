@@ -1,5 +1,6 @@
 defmodule Snakepit.GRPCWorkerTest do
   use Snakepit.TestCase
+  import ExUnit.CaptureLog
 
   alias Snakepit.TestAdapters.MockGRPCAdapter
 
@@ -69,15 +70,23 @@ defmodule Snakepit.GRPCWorkerTest do
     end
 
     test "worker survives adapter errors", %{worker: worker} do
-      # Send invalid command
-      {:error, _reason} = GenServer.call(worker, {:execute, "invalid_command", %{}, 5_000})
+      # Capture logs during error handling to trap warnings/errors
+      log =
+        capture_log(fn ->
+          # Send invalid command
+          {:error, _reason} = GenServer.call(worker, {:execute, "invalid_command", %{}, 5_000})
 
-      # Worker should still be alive
-      assert Process.alive?(worker)
+          # Worker should still be alive
+          assert Process.alive?(worker)
 
-      # Should still handle valid commands
-      {:ok, result} = GenServer.call(worker, {:execute, "ping", %{}, 5_000})
-      assert result["status"] == "pong"
+          # Should still handle valid commands
+          {:ok, result} = GenServer.call(worker, {:execute, "ping", %{}, 5_000})
+          assert result["status"] == "pong"
+        end)
+
+      # Assert no critical gRPC server errors during error handling
+      refute log =~ "Failed to start gRPC server"
+      refute log =~ "GenServer .* terminating"
     end
   end
 
@@ -129,19 +138,35 @@ defmodule Snakepit.GRPCWorkerTest do
       # Monitor worker
       ref = Process.monitor(worker)
 
-      # Stop worker
-      :ok = GenServer.stop(worker, :normal)
+      # Capture logs during shutdown to trap any warnings/errors
+      log =
+        capture_log(fn ->
+          # Stop worker
+          :ok = GenServer.stop(worker, :normal)
 
-      # Should receive DOWN message
-      assert_receive {:DOWN, ^ref, :process, ^worker, :normal}
+          # Should receive DOWN message
+          assert_receive {:DOWN, ^ref, :process, ^worker, :normal}
+        end)
+
+      # Assert no error logs during normal shutdown
+      refute log =~ "Failed to start gRPC server"
+      refute log =~ "Attempted to unregister unknown worker"
+      refute log =~ "GenServer .* terminating"
     end
 
     test "worker cleans up resources on shutdown", %{worker: worker, worker_id: worker_id} do
-      # Stop worker
-      GenServer.stop(worker)
+      # Capture logs during resource cleanup to trap warnings/errors
+      log =
+        capture_log(fn ->
+          # Stop worker
+          GenServer.stop(worker)
 
-      # Worker should be unregistered
-      assert Registry.lookup(Snakepit.Pool.Registry, worker_id) == []
+          # Worker should be unregistered
+          assert Registry.lookup(Snakepit.Pool.Registry, worker_id) == []
+        end)
+
+      # Assert no warnings about unregistering unknown workers
+      refute log =~ "Attempted to unregister unknown worker"
     end
   end
 end

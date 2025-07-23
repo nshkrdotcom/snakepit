@@ -6,10 +6,10 @@ PYTHON_OUT_DIR = priv/python/snakepit_bridge/grpc
 ELIXIR_OUT_DIR = lib/snakepit/grpc
 
 # Protocol buffer source
-PROTO_FILE = $(PROTO_DIR)/snakepit.proto
+PROTO_FILE = $(PROTO_DIR)/snakepit_bridge.proto
 
 # Python gRPC files
-PYTHON_GRPC_FILES = $(PYTHON_OUT_DIR)/snakepit_pb2.py $(PYTHON_OUT_DIR)/snakepit_pb2_grpc.py
+PYTHON_GRPC_FILES = $(PYTHON_OUT_DIR)/snakepit_bridge_pb2.py $(PYTHON_OUT_DIR)/snakepit_bridge_pb2_grpc.py
 
 .PHONY: all clean proto-python proto-elixir install-dev test help
 
