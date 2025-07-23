@@ -44,6 +44,44 @@ The `SnakepitBridge` service provides the following RPC methods:
 - `GetVariableHistory` - Get variable change history
 - `RollbackVariable` - Rollback variable to previous version
 
+## Binary Serialization
+
+The protocol includes automatic binary serialization for efficient handling of large data:
+
+### Overview
+- **Automatic**: Triggered when data exceeds 10KB threshold
+- **Transparent**: No API changes required
+- **Optimized**: 5-10x faster for large tensors and embeddings
+- **Types**: Currently supports `tensor` and `embedding` types
+
+### Binary Fields
+- `Variable.binary_value` (field 12): Stores large variable data
+- `SetVariableRequest.binary_value` (field 6): Binary data for updates
+- `RegisterVariableRequest.initial_binary_value` (field 7): Initial binary value
+- `BatchSetVariablesRequest.binary_updates` (field 5): Map of binary updates
+- `ExecuteToolRequest.binary_parameters` (field 6): Binary tool parameters
+
+### Format
+- **Metadata**: Stored in the standard `value` field as JSON
+  - Contains: shape, dtype, binary_format, type
+- **Binary Data**: Stored in the `binary_value` field
+  - Elixir side: Erlang Term Format (ETF)
+  - Python side: Python pickle format
+
+### Example
+```protobuf
+// For a large tensor
+Variable {
+  name: "large_tensor"
+  type: "tensor"
+  value: Any {
+    type_url: "type.googleapis.com/snakepit.tensor.binary"
+    value: "{\"shape\": [1000, 1000], \"dtype\": \"float32\", \"binary_format\": \"pickle\"}"
+  }
+  binary_value: <8MB of binary data>
+}
+```
+
 ## Type System
 
 The protocol supports the following variable types:

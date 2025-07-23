@@ -443,11 +443,11 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   # Encoding/Decoding Helpers
 
-  defp decode_any_value(%Any{} = any_value, binary_data \\ nil) do
+  defp decode_any_value(%Any{} = any_value, binary_data) do
     Serialization.decode_any(any_value, binary_data)
   end
 
-  defp decode_typed_value(%Any{} = any_value, expected_type, binary_data \\ nil) do
+  defp decode_typed_value(%Any{} = any_value, expected_type, binary_data) do
     with {:ok, decoded} <- Serialization.decode_any(any_value, binary_data),
          {:ok, validated} <- Types.validate_value(decoded, expected_type) do
       {:ok, validated}
@@ -534,7 +534,7 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  defp decode_updates_map(session_id, updates, binary_updates \\ %{}) do
+  defp decode_updates_map(session_id, updates, binary_updates) do
     # First get variable types for decoding
     identifiers = Map.keys(updates)
 
