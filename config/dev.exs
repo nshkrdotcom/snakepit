@@ -6,5 +6,5 @@ config :logger, level: :debug
 
 # Configure Snakepit for development
 config :snakepit,
-  # Use the generic Python adapter
-  adapter_module: Snakepit.Adapters.GenericPythonV2
+  # Use the gRPC Python adapter
+  adapter_module: Snakepit.Adapters.GRPCPython

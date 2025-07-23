@@ -29,10 +29,10 @@ defmodule Snakepit.MixProject do
   defp deps do
     [
       {:jason, "~> 1.0"},
-      {:msgpax, "~> 2.4.0"},
       {:grpc, "~> 0.10.2"},
       {:protobuf, "~> 0.14.1"},
       {:stream_data, "~> 1.0", only: [:test]},
+      {:supertester, github: "nshkrdotcom/supertester", only: :test},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
