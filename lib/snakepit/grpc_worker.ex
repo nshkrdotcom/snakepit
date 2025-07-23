@@ -197,16 +197,19 @@ defmodule Snakepit.GRPCWorker do
 
     Logger.info("Starting gRPC server: #{executable} #{script} #{Enum.join(args, " ")}")
 
+    # Use setsid to create a new process group for easier cleanup
+    setsid_path = System.find_executable("setsid") || "/usr/bin/setsid"
+    
     port_opts = [
       :binary,
       :exit_status,
       :use_stdio,
       :stderr_to_stdout,
-      {:args, [script | args]},
+      {:args, [executable, script | args]},
       {:cd, Path.dirname(script)}
     ]
 
-    server_port = Port.open({:spawn_executable, executable}, port_opts)
+    server_port = Port.open({:spawn_executable, setsid_path}, port_opts)
     Port.monitor(server_port)
 
     # Extract external process PID for cleanup registry
