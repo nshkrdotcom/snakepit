@@ -110,8 +110,12 @@ class VariableOpsHandler:
             "metadata": metadata
         }
     
-    def get_variables(self, ctx, names: List[str]) -> Dict[str, Any]:
+    def get_variables(self, ctx, names: List[str] = None, **kwargs) -> Dict[str, Any]:
         """Get multiple variables at once."""
+        # Handle names being passed as keyword argument
+        if names is None and 'names' in kwargs:
+            names = kwargs['names']
+            
         session_id = ctx.session_id
         values = {}
         
@@ -125,9 +129,18 @@ class VariableOpsHandler:
             "count": len(values)
         }
     
-    def set_variables(self, ctx, updates: Dict[str, Any], 
-                     atomic: bool = False) -> Dict[str, Any]:
+    def set_variables(self, ctx, updates: Dict[str, Any] = None,
+                     atomic: bool = False, **kwargs) -> Dict[str, Any]:
         """Set multiple variables at once."""
+        # Handle updates being passed as keyword argument
+        if updates is None and 'updates' in kwargs:
+            updates = kwargs['updates']
+            
+        # Handle JSON-encoded updates
+        if isinstance(updates, str):
+            import json
+            updates = json.loads(updates)
+        
         results = {}
         successful = 0
         failed = 0
@@ -146,6 +159,8 @@ class VariableOpsHandler:
         
         return {
             "total": len(updates),
+            "updated_count": successful,
+            "failed_count": failed,
             "successful": successful,
             "failed": failed,
             "results": results
