@@ -206,40 +206,42 @@ defmodule Snakepit.Adapters.GRPCPython do
       # Use the streaming endpoint
       Logger.info("[GRPCPython] Using streaming endpoint")
 
-      result = Snakepit.GRPC.Client.execute_streaming_tool(
-        connection.channel,
-        "default_session", 
-        command,
-        args,
-        timeout: timeout
-      )
-      
+      result =
+        Snakepit.GRPC.Client.execute_streaming_tool(
+          connection.channel,
+          "default_session",
+          command,
+          args,
+          timeout: timeout
+        )
+
       Logger.info("[GRPCPython] execute_streaming_tool returned: #{inspect(result)}")
-      
+
       case result do
         {:ok, stream} ->
           # BLOCK until the stream is fully processed.
           # This prevents the race condition in the demos.
-          task = Task.async(fn ->
-            Enum.each(stream, fn
-              {:ok, %Snakepit.Bridge.ToolChunk{data: data_bytes}} when is_binary(data_bytes) ->
-                # Decode the JSON payload from the chunk
-                decoded_chunk = Jason.decode!(data_bytes)
-                callback_fn.(decoded_chunk)
-              
-              {:error, reason} ->
-                callback_fn.({:error, reason})
-                # You might want to halt the stream on error
-                # For now, we continue processing
+          task =
+            Task.async(fn ->
+              Enum.each(stream, fn
+                {:ok, %Snakepit.Bridge.ToolChunk{data: data_bytes}} when is_binary(data_bytes) ->
+                  # Decode the JSON payload from the chunk
+                  decoded_chunk = Jason.decode!(data_bytes)
+                  callback_fn.(decoded_chunk)
+
+                {:error, reason} ->
+                  callback_fn.({:error, reason})
+                  # You might want to halt the stream on error
+                  # For now, we continue processing
+              end)
             end)
-          end)
-          
+
           # Wait for the task to finish, effectively making this a blocking call.
           Task.await(task, timeout)
-          
+
           # Now that the stream is complete, return :ok.
           :ok
-          
+
         {:error, reason} ->
           Logger.error("[GRPCPython] Failed to initiate stream: #{inspect(reason)}")
           {:error, reason}

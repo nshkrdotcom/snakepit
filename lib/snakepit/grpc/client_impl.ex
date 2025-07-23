@@ -544,11 +544,13 @@ defmodule Snakepit.GRPC.ClientImpl do
   # Helper to infer type and encode to Google.Protobuf.Any
   defp infer_and_encode_any(value) do
     type = Snakepit.Bridge.Variables.Types.infer_type(value)
-    
+
     # For complex types that would be encoded as :string, we need to handle them specially
-    if type == :string and (is_map(value) or (is_list(value) and not Enum.all?(value, &is_number/1))) do
+    if type == :string and
+         (is_map(value) or (is_list(value) and not Enum.all?(value, &is_number/1))) do
       # Encode complex structures as JSON strings
       json_value = Jason.encode!(value)
+
       with {:ok, any_struct, _binary_data} <- Serialization.encode_any(json_value, :string) do
         {:ok, %Google.Protobuf.Any{type_url: any_struct.type_url, value: any_struct.value}}
       end

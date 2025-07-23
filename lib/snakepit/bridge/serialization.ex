@@ -280,7 +280,9 @@ defmodule Snakepit.Bridge.Serialization do
   defp parse_type("module"), do: {:ok, :module}
   defp parse_type("embedding"), do: {:ok, :embedding}
   defp parse_type("tensor"), do: {:ok, :tensor}
-  defp parse_type("map"), do: {:ok, :map}     # Add this
-  defp parse_type("list"), do: {:ok, :list}   # Add this
+  # Add this
+  defp parse_type("map"), do: {:ok, :map}
+  # Add this
+  defp parse_type("list"), do: {:ok, :list}
   defp parse_type(_), do: {:error, :unknown_type}
 end

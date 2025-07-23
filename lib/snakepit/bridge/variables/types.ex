@@ -69,14 +69,17 @@ defmodule Snakepit.Bridge.Variables.Types do
   def infer_type(value) when is_integer(value), do: :integer
   def infer_type(value) when is_float(value), do: :float
   def infer_type(value) when is_binary(value), do: :string
+
   def infer_type(value) when is_list(value) do
     # Check if it's a numeric list that could be an embedding
     if Enum.all?(value, &is_number/1), do: :embedding, else: :string
   end
+
   def infer_type(value) when is_map(value) do
     # Check if it looks like a tensor
     if Map.has_key?(value, "shape") and Map.has_key?(value, "data"), do: :tensor, else: :string
   end
+
   def infer_type(_value), do: :string
 
   defmodule Behaviour do
