@@ -460,6 +460,7 @@ defmodule Snakepit.GRPC.ClientImpl do
 
   def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     # Convert Elixir terms to protobuf Any messages
+    Logger.info("[ClientImpl] execute_streaming_tool called: #{tool_name}")
     with {:ok, proto_params} <- encode_parameters(parameters) do
       request = %Bridge.ExecuteToolRequest{
         session_id: session_id,
@@ -472,7 +473,10 @@ defmodule Snakepit.GRPC.ClientImpl do
       call_opts = [timeout: timeout]
 
       # This call returns {:ok, Stream} or {:error, reason}
-      Bridge.BridgeService.Stub.execute_streaming_tool(channel, request, call_opts)
+      Logger.info("[ClientImpl] Calling Bridge.BridgeService.Stub.execute_streaming_tool")
+      result = Bridge.BridgeService.Stub.execute_streaming_tool(channel, request, call_opts)
+      Logger.info("[ClientImpl] Stub returned: #{inspect(result)}")
+      result
     end
   end
 

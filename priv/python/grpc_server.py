@@ -296,12 +296,20 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     def ExecuteStreamingTool(self, request, context):
         """Executes a streaming tool."""
         logger.info(f"ExecuteStreamingTool: {request.tool_name} for session {request.session_id}")
+        logger.info(f"ExecuteStreamingTool request.stream: {request.stream}")
+        
+        # Debug logging to file
+        with open("/tmp/grpc_streaming_debug.log", "a") as f:
+            f.write(f"ExecuteStreamingTool called: {request.tool_name} at {time.time()}\n")
+            f.flush()
         
         try:
             # Create ephemeral context for this request
+            logger.info(f"Creating SessionContext for {request.session_id}")
             session_context = SessionContext(self.elixir_stub, request.session_id)
             
             # Create adapter instance for this request
+            logger.info(f"Creating adapter instance: {self.adapter_class}")
             adapter = self.adapter_class()
             adapter.set_session_context(session_context)
             
@@ -354,7 +362,17 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                 context.abort(grpc.StatusCode.INTERNAL, "Async generators not supported")
                 return
             elif hasattr(stream_iterator, '__iter__'):
+                logger.info(f"Processing sync iterator for {request.tool_name}")
+                # Debug to file
+                with open("/tmp/grpc_streaming_debug.log", "a") as f:
+                    f.write(f"Starting iteration at {time.time()}\n")
+                    f.flush()
+                    
                 for chunk_data in stream_iterator:
+                    logger.info(f"Got chunk data: {chunk_data}")
+                    with open("/tmp/grpc_streaming_debug.log", "a") as f:
+                        f.write(f"Got chunk: {chunk_data} at {time.time()}\n")
+                        f.flush()
                     # This is the same processing logic
                     if isinstance(chunk_data, StreamChunk):
                         data_payload = chunk_data.data
@@ -362,13 +380,19 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                         data_payload = chunk_data
                     data_bytes = json.dumps(data_payload).encode('utf-8')
                     chunk_id_counter += 1
-                    yield pb2.ToolChunk(
+                    chunk = pb2.ToolChunk(
                         chunk_id=f"{request.tool_name}-{chunk_id_counter}",
                         data=data_bytes,
                         is_final=False
                     )
+                    logger.info(f"Yielding chunk {chunk_id_counter}: {chunk.chunk_id}")
+                    with open("/tmp/grpc_streaming_debug.log", "a") as f:
+                        f.write(f"Yielding chunk_id={chunk.chunk_id} at {time.time()}\n")
+                        f.flush()
+                    yield chunk
             else:
                 # This handles non-generator returns
+                logger.info(f"Non-generator return from {request.tool_name}")
                 data_bytes = json.dumps(stream_iterator).encode('utf-8')
                 yield pb2.ToolChunk(
                     chunk_id=f"{request.tool_name}-1",
@@ -377,6 +401,10 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                 )
             
             # Yield the final empty chunk after the loop
+            logger.info(f"Yielding final chunk for {request.tool_name}")
+            with open("/tmp/grpc_streaming_debug.log", "a") as f:
+                f.write(f"Yielding final chunk at {time.time()}\n")
+                f.flush()
             yield pb2.ToolChunk(is_final=True)
                 
         except Exception as e:
