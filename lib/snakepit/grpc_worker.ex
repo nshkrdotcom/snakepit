@@ -199,7 +199,7 @@ defmodule Snakepit.GRPCWorker do
 
     # Use setsid to create a new process group for easier cleanup
     setsid_path = System.find_executable("setsid") || "/usr/bin/setsid"
-
+    
     port_opts = [
       :binary,
       :exit_status,
