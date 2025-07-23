@@ -28,7 +28,8 @@ defmodule Snakepit.Pool do
     :initialized,
     :startup_timeout,
     :queue_timeout,
-    :max_queue_size
+    :max_queue_size,
+    :worker_module
     # Note: process_pids removed - ProcessRegistry is the single source of truth
   ]
 
@@ -137,6 +138,8 @@ defmodule Snakepit.Pool do
     queue_timeout = Application.get_env(:snakepit, :pool_queue_timeout, @default_queue_timeout)
     max_queue_size = Application.get_env(:snakepit, :pool_max_queue_size, @default_max_queue_size)
 
+    worker_module = opts[:worker_module] || Snakepit.GRPCWorker
+
     state = %__MODULE__{
       size: size,
       workers: [],
@@ -153,7 +156,8 @@ defmodule Snakepit.Pool do
       initialized: false,
       startup_timeout: startup_timeout,
       queue_timeout: queue_timeout,
-      max_queue_size: max_queue_size
+      max_queue_size: max_queue_size,
+      worker_module: worker_module
     }
 
     # Start concurrent worker initialization
@@ -166,7 +170,7 @@ defmodule Snakepit.Pool do
     start_time = System.monotonic_time(:millisecond)
 
     # Start all workers concurrently
-    workers = start_workers_concurrently(state.size, state.startup_timeout)
+    workers = start_workers_concurrently(state.size, state.startup_timeout, state.worker_module)
 
     elapsed = System.monotonic_time(:millisecond) - start_time
     Logger.info("✅ Initialized #{length(workers)}/#{state.size} workers in #{elapsed}ms")
@@ -397,9 +401,7 @@ defmodule Snakepit.Pool do
 
   # Private Functions
 
-  defp start_workers_concurrently(count, startup_timeout) do
-    worker_module = Snakepit.GRPCWorker
-
+  defp start_workers_concurrently(count, startup_timeout, worker_module) do
     Logger.info("🚀 Starting concurrent initialization of #{count} workers...")
     Logger.info("📦 Using worker type: #{inspect(worker_module)}")
 
@@ -408,7 +410,7 @@ defmodule Snakepit.Pool do
       fn i ->
         worker_id = "pool_worker_#{i}_#{:erlang.unique_integer([:positive])}"
 
-        case Snakepit.Pool.WorkerSupervisor.start_worker(worker_id) do
+        case Snakepit.Pool.WorkerSupervisor.start_worker(worker_id, worker_module) do
           {:ok, _pid} ->
             Logger.info("✅ Worker #{i}/#{count} ready: #{worker_id}")
             worker_id

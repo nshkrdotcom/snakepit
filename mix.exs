@@ -7,6 +7,7 @@ defmodule Snakepit.MixProject do
       version: "0.3.3",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       description:
         "High-performance pooler and session manager for external language integrations",
       package: package(),
@@ -32,7 +33,7 @@ defmodule Snakepit.MixProject do
       {:grpc, "~> 0.10.2"},
       {:protobuf, "~> 0.14.1"},
       {:stream_data, "~> 1.0", only: [:test]},
-      {:supertester, github: "nshkrdotcom/supertester", only: :test},
+      {:supertester, "~> 0.1.0", only: :test},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
@@ -135,4 +136,7 @@ defmodule Snakepit.MixProject do
       ]
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 end

@@ -11,14 +11,18 @@ defmodule SessionStoreTest do
     # Create session
     {:ok, session} = Snakepit.Bridge.SessionStore.create_session(session_id)
     assert session.id == session_id
-    assert session.data == %{}
+    assert session.metadata == %{}
 
     # Get session
     assert {:ok, ^session} = Snakepit.Bridge.SessionStore.get_session(session_id)
 
-    # Update session data
-    {:ok, updated} = Snakepit.Bridge.SessionStore.update_session(session_id, %{foo: "bar"})
-    assert updated.data == %{foo: "bar"}
+    # Update session using update function
+    {:ok, updated} =
+      Snakepit.Bridge.SessionStore.update_session(session_id, fn session ->
+        %{session | metadata: %{foo: "bar"}}
+      end)
+
+    assert updated.metadata == %{foo: "bar"}
 
     # Delete session
     :ok = Snakepit.Bridge.SessionStore.delete_session(session_id)
@@ -65,7 +69,10 @@ defmodule SessionStoreTest do
     assert name.type == :string
 
     # Update variable
-    {:ok, updated} = Snakepit.Bridge.SessionStore.update_variable(session_id, "counter", 42)
+    :ok = Snakepit.Bridge.SessionStore.update_variable(session_id, "counter", 42)
+
+    # Get variable to verify update
+    {:ok, updated} = Snakepit.Bridge.SessionStore.get_variable(session_id, "counter")
     assert updated.value == 42
 
     # List variables
@@ -98,8 +105,9 @@ defmodule SessionStoreTest do
       )
 
     # Valid update
-    assert {:ok, updated} = Snakepit.Bridge.SessionStore.update_variable(session_id, "age", 30)
-    assert updated.value == 30
+    assert :ok = Snakepit.Bridge.SessionStore.update_variable(session_id, "age", 30)
+    {:ok, age_var} = Snakepit.Bridge.SessionStore.get_variable(session_id, "age")
+    assert age_var.value == 30
 
     # Invalid update (out of range)
     assert {:error, _} = Snakepit.Bridge.SessionStore.update_variable(session_id, "age", 200)
@@ -115,17 +123,20 @@ defmodule SessionStoreTest do
   test "Session expiration" do
     session_id = "expire_#{System.unique_integer([:positive])}"
 
-    # Create session with short TTL
-    {:ok, session} = Snakepit.Bridge.SessionStore.create_session(session_id, ttl: 100)
+    # Create session with very short TTL (0 seconds = immediate expiration)
+    {:ok, session} = Snakepit.Bridge.SessionStore.create_session(session_id, ttl: 0)
     assert session.id == session_id
 
-    # Session should exist
+    # Session should exist initially
     assert {:ok, _} = Snakepit.Bridge.SessionStore.get_session(session_id)
 
-    # Wait for expiration
-    Process.sleep(150)
+    # Wait at least 1 second to ensure time has passed (monotonic time is in seconds)
+    Process.sleep(1100)
 
-    # Session should be gone
+    # Manually trigger cleanup
+    Snakepit.Bridge.SessionStore.cleanup_expired_sessions()
+
+    # Session should now be expired
     assert {:error, :not_found} = Snakepit.Bridge.SessionStore.get_session(session_id)
   end
 end
