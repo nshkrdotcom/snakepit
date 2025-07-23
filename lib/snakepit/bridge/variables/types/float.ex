@@ -51,37 +51,22 @@ defmodule Snakepit.Bridge.Variables.Types.Float do
   end
 
   @impl true
-  @deprecated "Use Snakepit.Bridge.Serialization.encode_any/2 instead"
   def serialize(value) do
-    # This is deprecated - serialization is now handled by Serialization module
-    # Keeping for backward compatibility
-    json_value =
-      cond do
-        value == :nan -> "NaN"
-        value == :infinity -> "Infinity"
-        value == :negative_infinity -> "-Infinity"
-        is_float(value) -> value
-        true -> nil
-      end
-
-    if json_value do
-      {:ok, Jason.encode!(json_value)}
-    else
-      {:error, "cannot serialize non-float"}
-    end
+    # Delegate to centralized Serialization module
+    Snakepit.Bridge.Serialization.encode_any(value, :float)
   end
 
   @impl true
-  @deprecated "Use Snakepit.Bridge.Serialization.decode_any/1 instead"
   def deserialize(json) when is_binary(json) do
-    # This is deprecated - deserialization is now handled by Serialization module
-    # Keeping for backward compatibility
-    case Jason.decode(json) do
-      {:ok, "NaN"} -> {:ok, :nan}
-      {:ok, "Infinity"} -> {:ok, :infinity}
-      {:ok, "-Infinity"} -> {:ok, :negative_infinity}
-      {:ok, value} when is_number(value) -> {:ok, value * 1.0}
-      _ -> {:error, "invalid float format"}
+    with {:ok, value} <- Jason.decode(json),
+         {:ok, validated} <- validate(value) do
+      {:ok, validated}
+    else
+      {:error, %Jason.DecodeError{} = e} ->
+        {:error, "JSON decoding failed: #{Exception.message(e)}"}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
