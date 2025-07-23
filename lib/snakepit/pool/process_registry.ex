@@ -35,9 +35,20 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @doc """
   Unregisters a worker from tracking.
+  Returns :ok regardless of whether the worker was registered.
   """
   def unregister_worker(worker_id) do
     GenServer.cast(__MODULE__, {:unregister, worker_id})
+  end
+
+  @doc """
+  Checks if a worker is currently registered.
+  """
+  def worker_registered?(worker_id) do
+    case :ets.lookup(@table_name, worker_id) do
+      [{^worker_id, _}] -> true
+      [] -> false
+    end
   end
 
   @doc """
@@ -160,7 +171,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
         Logger.info("🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}")
 
       [] ->
-        Logger.warning("Attempted to unregister unknown worker #{worker_id}")
+        # Defensive check: Only log at debug level for unknown workers
+        # This is expected during certain race conditions and shouldn't be a warning
+        Logger.debug(
+          "Attempted to unregister unknown worker #{worker_id} - ignoring (worker may have failed to register)"
+        )
     end
 
     {:noreply, state}

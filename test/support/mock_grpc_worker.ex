@@ -48,6 +48,15 @@ defmodule Snakepit.Test.MockGRPCWorker do
     # Simulate successful connection
     case adapter.init_grpc_connection(port) do
       {:ok, connection} ->
+        # Register with ProcessRegistry for consistency with GRPCWorker
+        # Use nil for process_pid since mock doesn't spawn external process
+        Snakepit.Pool.ProcessRegistry.register_worker(
+          worker_id,
+          self(),
+          nil,
+          "mock_grpc_worker"
+        )
+
         {:ok, %{state | connection: connection}}
 
       {:error, reason} ->
@@ -91,6 +100,10 @@ defmodule Snakepit.Test.MockGRPCWorker do
   def terminate(_reason, state) do
     # Unregister from pool registry
     Registry.unregister(Snakepit.Pool.Registry, state.id)
+
+    # Unregister from ProcessRegistry for consistency with GRPCWorker
+    Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
+
     :ok
   end
 end
