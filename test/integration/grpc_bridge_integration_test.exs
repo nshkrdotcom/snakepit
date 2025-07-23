@@ -23,10 +23,6 @@ defmodule Snakepit.GRPCBridgeIntegrationTest do
       # Start pool supervisor
       {:ok, pool_sup} = DynamicSupervisor.start_link(strategy: :one_for_one)
 
-      # Configure the application to use mock adapter
-      original_adapter = Application.get_env(:snakepit, :adapter_module)
-      Application.put_env(:snakepit, :adapter_module, Snakepit.TestAdapters.MockGRPCAdapter)
-
       # Start pool under test supervisor
       {:ok, pool} =
         DynamicSupervisor.start_child(pool_sup, {
@@ -42,13 +38,6 @@ defmodule Snakepit.GRPCBridgeIntegrationTest do
           end
         catch
           :exit, _ -> :ok
-        end
-
-        # Restore original adapter
-        if original_adapter do
-          Application.put_env(:snakepit, :adapter_module, original_adapter)
-        else
-          Application.delete_env(:snakepit, :adapter_module)
         end
       end)
 

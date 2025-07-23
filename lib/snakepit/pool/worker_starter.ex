@@ -43,6 +43,12 @@ defmodule Snakepit.Pool.Worker.Starter do
     Supervisor.start_link(__MODULE__, {worker_id, worker_module}, name: via_name(worker_id))
   end
 
+  def start_link({worker_id, worker_module, adapter_module}) when is_binary(worker_id) do
+    Supervisor.start_link(__MODULE__, {worker_id, worker_module, adapter_module},
+      name: via_name(worker_id)
+    )
+  end
+
   @doc """
   Returns a via tuple for this starter supervisor.
   """
@@ -52,6 +58,10 @@ defmodule Snakepit.Pool.Worker.Starter do
 
   @impl true
   def init({worker_id, worker_module}) do
+    init({worker_id, worker_module, nil})
+  end
+
+  def init({worker_id, worker_module, adapter_module}) do
     # Check if the Pool is already terminating
     case Process.whereis(Snakepit.Pool) do
       nil ->
@@ -64,7 +74,7 @@ defmodule Snakepit.Pool.Worker.Starter do
           "Starting worker starter for #{worker_id} with module #{inspect(worker_module)}"
         )
 
-        adapter = Application.get_env(:snakepit, :adapter_module)
+        adapter = adapter_module || Application.get_env(:snakepit, :adapter_module)
 
         children = [
           %{
