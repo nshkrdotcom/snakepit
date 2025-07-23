@@ -389,67 +389,35 @@ defmodule Snakepit.Pool.ProcessRegistry do
               "BEAM run #{info.beam_run_id}. Terminating..."
           )
 
-          # Try graceful shutdown first with the process group
+          # Be very careful with process cleanup
           pid_str = to_string(info.process_pid)
-
-          # First try SIGTERM to the process group (negative PID)
-          case System.cmd("kill", ["-TERM", "-#{pid_str}"], stderr_to_stdout: true) do
-            {_output, 0} ->
-              Logger.info("Sent SIGTERM to process group #{pid_str}")
-
-            {output, _} ->
-              Logger.warning("Failed to kill process group, trying individual process: #{output}")
-              # Fallback to killing just the process
-              System.cmd("kill", ["-TERM", pid_str], stderr_to_stdout: true)
-          end
-
-          # Immediately force kill - no waiting
-          if process_alive?(info.process_pid) do
-            Logger.warning(
-              "Process #{info.process_pid} still alive after SIGTERM, force killing..."
-            )
-
-            # Try SIGKILL to process group first
-            case System.cmd("kill", ["-KILL", "-#{pid_str}"], stderr_to_stdout: true) do
-              {_output, 0} ->
-                Logger.info("Sent SIGKILL to process group #{pid_str}")
-
-              {output, _} ->
-                Logger.warning(
-                  "Failed to force kill process group, trying individual process: #{output}"
-                )
-
-                # Fallback to killing just the process
-                System.cmd("kill", ["-KILL", pid_str], stderr_to_stdout: true)
-            end
-
-            # Also try pkill as a last resort
-            if process_alive?(info.process_pid) do
-              Logger.error(
-                "Process #{info.process_pid} STILL alive after SIGKILL, trying more aggressive methods..."
-              )
-
-              # Try to kill by session ID
-              case System.cmd("pkill", ["-KILL", "-s", pid_str], stderr_to_stdout: true) do
-                {_output, 0} -> Logger.info("Killed processes in session #{pid_str}")
-                {output, _} -> Logger.warning("Failed to kill by session: #{output}")
+          
+          # First verify this is actually a Python grpc_server process
+          case System.cmd("ps", ["-p", pid_str, "-o", "cmd="], stderr_to_stdout: true) do
+            {output, 0} ->
+              if String.contains?(output, "grpc_server.py") do
+                Logger.info("Confirmed PID #{pid_str} is a grpc_server process, sending SIGTERM")
+                System.cmd("kill", ["-TERM", pid_str], stderr_to_stdout: true)
+                
+                # Check if still alive and force kill if needed
+                if process_alive?(info.process_pid) do
+                  Logger.warning("Process #{pid_str} still alive after SIGTERM, sending SIGKILL")
+                  System.cmd("kill", ["-KILL", pid_str], stderr_to_stdout: true)
+                  
+                  if process_alive?(info.process_pid) do
+                    Logger.error("Process #{pid_str} appears to be unkillable!")
+                  else
+                    Logger.info("Process #{pid_str} successfully terminated with SIGKILL")
+                  end
+                else
+                  Logger.info("Process #{pid_str} successfully terminated with SIGTERM")
+                end
+              else
+                Logger.warning("PID #{pid_str} is not a grpc_server process, skipping: #{String.trim(output)}")
               end
-
-              # Try to kill all python processes started by this worker
-              case System.cmd("pkill", ["-KILL", "-f", "grpc_server.py.*--port"],
-                     stderr_to_stdout: true
-                   ) do
-                {_output, 0} -> Logger.info("Killed matching Python processes")
-                {output, _} -> Logger.warning("Failed to kill Python processes: #{output}")
-              end
-
-              # Final check - if STILL alive, it might be a zombie
-              if process_alive?(info.process_pid) do
-                Logger.error("Process #{info.process_pid} appears to be a zombie or unkillable!")
-              end
-            end
-          else
-            Logger.info("Process #{info.process_pid} successfully terminated")
+              
+            {_output, _} ->
+              Logger.debug("Process #{pid_str} not found, already dead")
           end
 
           acc + 1
@@ -491,7 +459,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
         Logger.debug("Process #{pid} is alive (kill -0 succeeded)")
         true
 
-      {_output, _} ->
+      {output, exit_code} ->
+        Logger.debug("kill -0 for PID #{pid} failed with exit code #{exit_code}: #{output}")
         # Double-check with ps to avoid false negatives
         case System.cmd("ps", ["-p", to_string(pid), "-o", "pid,stat,cmd"],
                stderr_to_stdout: true

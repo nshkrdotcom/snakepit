@@ -62,6 +62,18 @@ defmodule Snakepit.Pool.ApplicationCleanup do
         "✅ ApplicationCleanup confirms all external processes were shut down correctly."
       )
     end
+    
+    # Final fallback: kill any Python grpc_server processes that might have been missed
+    # This handles cases where setsid PIDs don't match actual process PIDs
+    case System.cmd("pkill", ["-9", "-f", "grpc_server.py.*--port.*--elixir-address"], stderr_to_stdout: true) do
+      {_output, 0} ->
+        Logger.info("🧹 Final cleanup: killed any remaining grpc_server.py processes")
+      {_output, 1} ->
+        # Exit code 1 means no processes found, which is fine
+        :ok
+      {output, code} ->
+        Logger.warning("pkill returned unexpected code #{code}: #{output}")
+    end
 
     :ok
   end
@@ -79,9 +91,22 @@ defmodule Snakepit.Pool.ApplicationCleanup do
   # Send a signal to a single process
   defp send_signal_to_process(pid, signal) when is_integer(pid) do
     try do
-      case System.cmd("kill", ["-#{signal}", "#{pid}"], stderr_to_stdout: true) do
-        {_output, 0} -> :ok
-        {_error, _} -> :error
+      # First check if process exists
+      case System.cmd("kill", ["-0", "#{pid}"], stderr_to_stdout: true) do
+        {_output, 0} ->
+          # Process exists, now kill it
+          case System.cmd("kill", ["-#{signal}", "#{pid}"], stderr_to_stdout: true) do
+            {_output, 0} -> 
+              Logger.debug("Successfully sent #{signal} to PID #{pid}")
+              :ok
+            {error, _} -> 
+              Logger.debug("Failed to send #{signal} to PID #{pid}: #{error}")
+              :error
+          end
+        {_output, _} ->
+          # Process doesn't exist
+          Logger.debug("Process #{pid} doesn't exist, skipping")
+          :error
       end
     rescue
       _ -> :error

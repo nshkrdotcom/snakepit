@@ -31,6 +31,10 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
 
     # Display results
     display_results(results, worker_count)
+    
+    # Properly shut down Snakepit
+    IO.puts("\nShutting down gracefully...")
+    Application.stop(:snakepit)
   end
 
   defp warm_up_pool(pool_size) do
