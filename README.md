@@ -43,6 +43,13 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 🆕 What's New in v0.3
 
+### 🛡️ **Enhanced Process Management & Reliability**
+- **Persistent process tracking** with DETS storage survives BEAM crashes
+- **Automatic orphan cleanup** - no more zombie Python processes
+- **Zero-configuration reliability** - works out of the box
+- **Production-ready** - handles VM crashes, OOM kills, and power failures
+- See [Process Management Documentation](README_PROCESS_MANAGEMENT.md) for details
+
 ### 🌊 **Native gRPC Streaming**
 - **Real-time progress updates** for long-running operations
 - **HTTP/2 multiplexing** for concurrent requests
@@ -1395,8 +1402,8 @@ stats = Snakepit.get_stats()
 ├───────────────────────────────────────────────────────┤
 │                                                       │
 │  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐ │
-│  │    Pool     │  │ SessionStore │  │  Registries   │ │
-│  │  Manager    │  │   (ETS)      │  │  (Worker/Proc)│ │
+│  │    Pool     │  │ SessionStore │  │ProcessRegistry│ │
+│  │  Manager    │  │   (ETS)      │  │ (ETS + DETS) │ │
 │  └──────┬──────┘  └──────────────┘  └───────────────┘ │
 │         │                                             │
 │  ┌──────▼────────────────────────────────────────────┐│
@@ -1430,6 +1437,7 @@ stats = Snakepit.get_stats()
 3. **Centralized State**: All session data in ETS, workers are stateless
 4. **Registry-Based**: O(1) worker lookups and reverse PID lookups
 5. **gRPC Communication**: HTTP/2 protocol with streaming support
+6. **Persistent Process Tracking**: ProcessRegistry uses DETS for crash-resistant tracking
 
 ### Process Lifecycle
 
@@ -1450,6 +1458,7 @@ stats = Snakepit.get_stats()
    - Worker crashes → Worker.Starter restarts it automatically
    - External process dies → Worker detects and crashes → restart
    - Pool crashes → Supervisor restarts entire pool
+   - BEAM crashes → ProcessRegistry cleans orphans on next startup
 
 4. **Shutdown**:
    - Pool manager sends shutdown to all workers
@@ -1594,6 +1603,22 @@ The following fields support binary data:
 ## 🔧 Troubleshooting
 
 ### Common Issues
+
+#### Orphaned Python Processes
+
+```elixir
+# Check for orphaned processes
+ps aux | grep grpc_server.py
+
+# Verify ProcessRegistry is cleaning up
+Snakepit.Pool.ProcessRegistry.get_stats()
+
+# Check DETS file location
+ls -la priv/data/process_registry.dets
+
+# See detailed documentation
+# README_PROCESS_MANAGEMENT.md
+```
 
 #### Workers Not Starting
 

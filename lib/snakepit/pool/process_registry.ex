@@ -128,12 +128,29 @@ defmodule Snakepit.Pool.ProcessRegistry do
     }
   end
 
+  @doc """
+  Manually trigger orphan cleanup. Useful for testing and debugging.
+  """
+  def manual_orphan_cleanup() do
+    GenServer.call(__MODULE__, :manual_orphan_cleanup)
+  end
+
+  @doc """
+  Debug function to show all DETS entries with their BEAM run IDs.
+  """
+  def debug_show_all_entries() do
+    GenServer.call(__MODULE__, :debug_show_all_entries)
+  end
+
   # Server Callbacks
 
   @impl true
   def init(_opts) do
-    # Generate unique ID for this BEAM run
-    beam_run_id = :erlang.unique_integer([:positive, :monotonic])
+    # Generate unique ID for this BEAM run using timestamp + random component
+    # This ensures uniqueness even across BEAM restarts
+    timestamp = System.system_time(:microsecond)
+    random_component = :rand.uniform(999_999)
+    beam_run_id = "#{timestamp}_#{random_component}"
 
     # Create a proper file path for DETS
     priv_dir = :code.priv_dir(:snakepit) |> to_string()
@@ -143,14 +160,34 @@ defmodule Snakepit.Pool.ProcessRegistry do
     dets_dir = Path.dirname(dets_file)
     File.mkdir_p!(dets_dir)
 
-    # Open DETS for persistence
-    {:ok, dets_table} =
+    # Open DETS for persistence with repair option
+    dets_result =
       :dets.open_file(@dets_table, [
         {:file, to_charlist(dets_file)},
         {:type, :set},
         # Auto-save every 1000ms
-        {:auto_save, 1000}
+        {:auto_save, 1000},
+        # Automatically repair corrupted files
+        {:repair, true}
       ])
+
+    dets_table =
+      case dets_result do
+        {:ok, table} ->
+          table
+
+        {:error, reason} ->
+          Logger.error("Failed to open DETS file: #{inspect(reason)}. Deleting and recreating...")
+          File.rm(dets_file)
+          {:ok, table} =
+            :dets.open_file(@dets_table, [
+              {:file, to_charlist(dets_file)},
+              {:type, :set},
+              {:auto_save, 1000}
+            ])
+
+          table
+      end
 
     # Create ETS table for worker tracking - protected so only GenServer can write
     table =
@@ -190,6 +227,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # Atomic write to both ETS and DETS
     :ets.insert(state.table, {worker_id, worker_info})
     :dets.insert(state.dets_table, {worker_id, worker_info})
+    # Force sync to ensure data is written to disk
+    :dets.sync(state.dets_table)
 
     Logger.info(
       "✅ Registered worker #{worker_id} with external process PID #{process_pid} " <>
@@ -258,6 +297,28 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @impl true
+  def handle_call(:manual_orphan_cleanup, _from, state) do
+    Logger.info("Manual orphan cleanup triggered")
+    cleanup_orphaned_processes(state.dets_table, state.beam_run_id)
+    {:reply, :ok, state}
+  end
+
+  @impl true
+  def handle_call(:debug_show_all_entries, _from, state) do
+    all_entries = :dets.match_object(state.dets_table, :_)
+    entries_info = Enum.map(all_entries, fn {worker_id, info} ->
+      %{
+        worker_id: worker_id,
+        process_pid: info.process_pid,
+        beam_run_id: info.beam_run_id,
+        is_current_run: info.beam_run_id == state.beam_run_id,
+        process_alive: process_alive?(info.process_pid)
+      }
+    end)
+    {:reply, {entries_info, state.beam_run_id}, state}
+  end
+
+  @impl true
   def handle_info(:cleanup_dead_workers, state) do
     dead_count = do_cleanup_dead_workers(state.table)
 
@@ -279,9 +340,14 @@ defmodule Snakepit.Pool.ProcessRegistry do
   @impl true
   def terminate(reason, state) do
     Logger.info("Snakepit Pool Process Registry terminating: #{inspect(reason)}")
+    
+    # Log current state before closing
+    all_entries = :dets.match_object(state.dets_table, :_)
+    Logger.info("ProcessRegistry terminating with #{length(all_entries)} entries in DETS")
 
-    # Ensure DETS is properly closed
+    # Ensure DETS is properly synced and closed
     if state.dets_table do
+      :dets.sync(state.dets_table)
       :dets.close(state.dets_table)
     end
 
@@ -298,6 +364,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
   defp cleanup_orphaned_processes(dets_table, current_beam_run_id) do
     Logger.warning("Starting orphan cleanup for BEAM run #{current_beam_run_id}")
 
+    # First, log all entries in DETS for debugging
+    all_entries = :dets.match_object(dets_table, :_)
+    Logger.info("Total entries in DETS: #{length(all_entries)}")
+
     # Get all processes from previous runs
     orphans =
       :dets.select(dets_table, [
@@ -305,28 +375,81 @@ defmodule Snakepit.Pool.ProcessRegistry do
          [{{:"$1", :"$2"}}]}
       ])
 
-    Enum.each(orphans, fn {worker_id, info} ->
-      if process_alive?(info.process_pid) do
-        Logger.warning(
-          "Found orphaned process #{info.process_pid} from previous " <>
-            "BEAM run #{info.beam_run_id}. Terminating..."
-        )
+    Logger.info("Found #{length(orphans)} orphaned entries from previous BEAM runs")
 
-        # Try graceful shutdown first
-        System.cmd("kill", ["-TERM", to_string(info.process_pid)], stderr_to_stdout: true)
-        Process.sleep(2000)
-
-        # Force kill if still alive
+    killed_count =
+      Enum.reduce(orphans, 0, fn {worker_id, info}, acc ->
         if process_alive?(info.process_pid) do
-          System.cmd("kill", ["-KILL", to_string(info.process_pid)], stderr_to_stdout: true)
-        end
-      end
+          Logger.warning(
+            "Found orphaned process #{info.process_pid} (worker: #{worker_id}) from previous " <>
+              "BEAM run #{info.beam_run_id}. Terminating..."
+          )
 
-      # Remove from DETS
+          # Try graceful shutdown first with the process group
+          pid_str = to_string(info.process_pid)
+          
+          # First try SIGTERM to the process group (negative PID)
+          case System.cmd("kill", ["-TERM", "-#{pid_str}"], stderr_to_stdout: true) do
+            {_output, 0} ->
+              Logger.info("Sent SIGTERM to process group #{pid_str}")
+            {output, _} ->
+              Logger.warning("Failed to kill process group, trying individual process: #{output}")
+              # Fallback to killing just the process
+              System.cmd("kill", ["-TERM", pid_str], stderr_to_stdout: true)
+          end
+          
+          # Immediately force kill - no waiting
+          if process_alive?(info.process_pid) do
+            Logger.warning("Process #{info.process_pid} still alive after SIGTERM, force killing...")
+            
+            # Try SIGKILL to process group first
+            case System.cmd("kill", ["-KILL", "-#{pid_str}"], stderr_to_stdout: true) do
+              {_output, 0} ->
+                Logger.info("Sent SIGKILL to process group #{pid_str}")
+              {output, _} ->
+                Logger.warning("Failed to force kill process group, trying individual process: #{output}")
+                # Fallback to killing just the process
+                System.cmd("kill", ["-KILL", pid_str], stderr_to_stdout: true)
+            end
+            
+            # Also try pkill as a last resort
+            if process_alive?(info.process_pid) do
+              Logger.error("Process #{info.process_pid} STILL alive after SIGKILL, trying more aggressive methods...")
+              
+              # Try to kill by session ID
+              case System.cmd("pkill", ["-KILL", "-s", pid_str], stderr_to_stdout: true) do
+                {output, 0} -> Logger.info("Killed processes in session #{pid_str}")
+                {output, _} -> Logger.warning("Failed to kill by session: #{output}")
+              end
+              
+              # Try to kill all python processes started by this worker
+              case System.cmd("pkill", ["-KILL", "-f", "grpc_server.py.*--port"], stderr_to_stdout: true) do
+                {output, 0} -> Logger.info("Killed matching Python processes")
+                {output, _} -> Logger.warning("Failed to kill Python processes: #{output}")
+              end
+              
+              # Final check - if STILL alive, it might be a zombie
+              if process_alive?(info.process_pid) do
+                Logger.error("Process #{info.process_pid} appears to be a zombie or unkillable!")
+              end
+            end
+          else
+            Logger.info("Process #{info.process_pid} successfully terminated")
+          end
+
+          acc + 1
+        else
+          Logger.debug("Orphaned entry #{worker_id} with PID #{info.process_pid} already dead")
+          acc
+        end
+      end)
+
+    # Remove all orphaned entries from DETS
+    Enum.each(orphans, fn {worker_id, _info} ->
       :dets.delete(dets_table, worker_id)
     end)
 
-    Logger.info("Orphan cleanup complete. Killed #{length(orphans)} orphaned processes.")
+    Logger.info("Orphan cleanup complete. Killed #{killed_count} processes, removed #{length(orphans)} entries.")
   end
 
   defp load_current_run_processes(dets_table, ets_table, beam_run_id) do
@@ -345,9 +468,46 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   defp process_alive?(pid) when is_integer(pid) do
-    case System.cmd("ps", ["-p", to_string(pid)], stderr_to_stdout: true) do
-      {output, 0} -> String.contains?(output, to_string(pid))
-      _ -> false
+    # First try kill -0 which is more reliable
+    case System.cmd("kill", ["-0", to_string(pid)], stderr_to_stdout: true) do
+      {_output, 0} ->
+        Logger.debug("Process #{pid} is alive (kill -0 succeeded)")
+        true
+        
+      {_output, _} ->
+        # Double-check with ps to avoid false negatives
+        case System.cmd("ps", ["-p", to_string(pid), "-o", "pid,stat,cmd"], stderr_to_stdout: true) do
+          {output, 0} ->
+            lines = String.split(output, "\n")
+            pid_str = to_string(pid)
+            
+            # Look for the PID in the output, checking for zombie status
+            alive = Enum.any?(lines, fn line ->
+              if String.contains?(line, pid_str) && !String.contains?(line, "PID") do
+                # Check if it's a zombie (Z in STAT column)
+                if String.contains?(line, "<defunct>") || String.contains?(line, " Z ") do
+                  Logger.debug("Process #{pid} is a zombie")
+                  false
+                else
+                  true
+                end
+              else
+                false
+              end
+            end)
+            
+            if alive do
+              Logger.debug("Process #{pid} is alive (found in ps)")
+            else
+              Logger.debug("Process #{pid} not found or is zombie")
+            end
+            
+            alive
+            
+          {output, exit_code} ->
+            Logger.debug("ps command failed with exit code #{exit_code}: #{output}")
+            false
+        end
     end
   end
 
