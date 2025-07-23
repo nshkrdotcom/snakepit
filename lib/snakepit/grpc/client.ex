@@ -126,19 +126,27 @@ defmodule Snakepit.GRPC.Client do
 
   def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     if not Map.get(channel, :mock, false) do
-      Snakepit.GRPC.ClientImpl.execute_streaming_tool(channel, session_id, tool_name, parameters, opts)
+      Snakepit.GRPC.ClientImpl.execute_streaming_tool(
+        channel,
+        session_id,
+        tool_name,
+        parameters,
+        opts
+      )
     else
       # Mock implementation for testing - return a simple stream
-      stream = Stream.iterate(1, &(&1 + 1))
-      |> Stream.take(5)
-      |> Stream.map(fn i ->
-        {:ok, %{
-          chunk_id: "mock-#{i}",
-          data: Jason.encode!(%{"step" => i, "total" => 5}),
-          is_final: i == 5
-        }}
-      end)
-      
+      stream =
+        Stream.iterate(1, &(&1 + 1))
+        |> Stream.take(5)
+        |> Stream.map(fn i ->
+          {:ok,
+           %{
+             chunk_id: "mock-#{i}",
+             data: Jason.encode!(%{"step" => i, "total" => 5}),
+             is_final: i == 5
+           }}
+        end)
+
       {:ok, stream}
     end
   end
