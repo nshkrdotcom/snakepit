@@ -431,7 +431,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
               # Try to kill by session ID
               case System.cmd("pkill", ["-KILL", "-s", pid_str], stderr_to_stdout: true) do
-                {output, 0} -> Logger.info("Killed processes in session #{pid_str}")
+                {_output, 0} -> Logger.info("Killed processes in session #{pid_str}")
                 {output, _} -> Logger.warning("Failed to kill by session: #{output}")
               end
 
@@ -439,7 +439,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
               case System.cmd("pkill", ["-KILL", "-f", "grpc_server.py.*--port"],
                      stderr_to_stdout: true
                    ) do
-                {output, 0} -> Logger.info("Killed matching Python processes")
+                {_output, 0} -> Logger.info("Killed matching Python processes")
                 {output, _} -> Logger.warning("Failed to kill Python processes: #{output}")
               end
 
