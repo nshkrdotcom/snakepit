@@ -205,6 +205,7 @@ defmodule Snakepit.Adapters.GRPCPython do
     else
       # Use the streaming endpoint
       Logger.info("[GRPCPython] Using streaming endpoint")
+      Logger.info("[GRPCPython] Channel info: #{inspect(connection.channel)}")
 
       result =
         Snakepit.GRPC.Client.execute_streaming_tool(
@@ -219,28 +220,37 @@ defmodule Snakepit.Adapters.GRPCPython do
 
       case result do
         {:ok, stream} ->
-          # BLOCK until the stream is fully processed.
-          # This prevents the race condition in the demos.
-          task =
-            Task.async(fn ->
-              Enum.each(stream, fn
-                {:ok, %Snakepit.Bridge.ToolChunk{data: data_bytes}} when is_binary(data_bytes) ->
+          Logger.info("[GRPCPython] Starting to consume stream...")
+          # Consume the stream directly without Task.async to avoid deadlock
+          try do
+            Logger.info("[GRPCPython] Starting Enum.each on stream")
+            Enum.each(stream, fn chunk ->
+              case chunk do
+                {:ok, %Snakepit.Bridge.ToolChunk{data: data_bytes, is_final: false}} when is_binary(data_bytes) ->
                   # Decode the JSON payload from the chunk
                   decoded_chunk = Jason.decode!(data_bytes)
+                  Logger.info("[GRPCPython] Decoded chunk: #{inspect(decoded_chunk)}")
                   callback_fn.(decoded_chunk)
 
+                {:ok, %Snakepit.Bridge.ToolChunk{is_final: true}} ->
+                  # Final empty chunk, ignore
+                  Logger.info("[GRPCPython] Received final chunk")
+
                 {:error, reason} ->
+                  Logger.error("[GRPCPython] Stream error: #{inspect(reason)}")
                   callback_fn.({:error, reason})
-                  # You might want to halt the stream on error
-                  # For now, we continue processing
-              end)
+                  
+                other ->
+                  Logger.warning("[GRPCPython] Unexpected chunk format: #{inspect(other)}")
+              end
             end)
-
-          # Wait for the task to finish, effectively making this a blocking call.
-          Task.await(task, timeout)
-
-          # Now that the stream is complete, return :ok.
-          :ok
+            Logger.info("[GRPCPython] Stream consumption complete")
+            :ok
+          rescue
+            e ->
+              Logger.error("[GRPCPython] Error consuming stream: #{inspect(e)}")
+              {:error, e}
+          end
 
         {:error, reason} ->
           Logger.error("[GRPCPython] Failed to initiate stream: #{inspect(reason)}")
