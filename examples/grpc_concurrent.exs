@@ -15,9 +15,6 @@ Mix.install([
   {:protobuf, "~> 0.14.1"}
 ])
 
-# Start the Snakepit application
-{:ok, _} = Application.ensure_all_started(:snakepit)
-
 defmodule ConcurrentExample do
   def run do
     IO.puts("\n=== Concurrent Operations Example ===\n")
@@ -204,12 +201,7 @@ defmodule ConcurrentExample do
   end
 end
 
-# Run the example
-ConcurrentExample.run()
-
-# Allow time for operations to complete
-Process.sleep(2000)
-
-# Graceful shutdown
-IO.puts("\nShutting down...")
-Application.stop(:snakepit)
+# Run the example with proper cleanup
+Snakepit.run_as_script(fn ->
+  ConcurrentExample.run()
+end)

@@ -53,8 +53,17 @@ mix demo.all
 mix demo.interactive
 
 # Run specific demo
-mix run -e "SnakepitShowcase.Demos.ExecutionModesDemo.run()"
+mix demo.execution_modes
 ```
+
+## Important: Process Management
+
+All demos use `Snakepit.run_as_script/2` to ensure:
+- Deterministic pool initialization (no race conditions)
+- Proper cleanup of all Python processes on exit
+- No orphaned processes after demo completion
+
+This is handled automatically by the framework - you don't need to add any cleanup code!
 
 ## Demos Overview
 

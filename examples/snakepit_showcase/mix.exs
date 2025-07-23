@@ -43,16 +43,16 @@ defmodule SnakepitShowcase.MixProject do
     [
       setup: ["deps.get"],
       demo: ["run"],
-      "demo.all": ["run -e SnakepitShowcase.DemoRunner.run_all()"],
-      "demo.interactive": ["run -e SnakepitShowcase.DemoRunner.interactive()"],
-      "demo.basic": ["run -e SnakepitShowcase.Demos.BasicDemo.run()"],
-      "demo.session": ["run -e SnakepitShowcase.Demos.SessionDemo.run()"],
-      "demo.streaming": ["run -e SnakepitShowcase.Demos.StreamingDemo.run()"],
-      "demo.concurrent": ["run -e SnakepitShowcase.Demos.ConcurrentDemo.run()"],
-      "demo.variables": ["run -e SnakepitShowcase.Demos.VariablesDemo.run()"],
-      "demo.binary": ["run -e SnakepitShowcase.Demos.BinaryDemo.run()"],
-      "demo.ml_workflow": ["run -e SnakepitShowcase.Demos.MLWorkflowDemo.run()"],
-      "demo.execution_modes": ["run -e SnakepitShowcase.Demos.ExecutionModesDemo.run()"]
+      "demo.all": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end)"],
+      "demo.interactive": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.interactive() end)"],
+      "demo.basic": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.BasicDemo.run() end)"],
+      "demo.session": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.SessionDemo.run() end)"],
+      "demo.streaming": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.StreamingDemo.run() end)"],
+      "demo.concurrent": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ConcurrentDemo.run() end)"],
+      "demo.variables": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.VariablesDemo.run() end)"],
+      "demo.binary": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.BinaryDemo.run() end)"],
+      "demo.ml_workflow": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.MLWorkflowDemo.run() end)"],
+      "demo.execution_modes": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ExecutionModesDemo.run() end)"]
     ]
   end
 end

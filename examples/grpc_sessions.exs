@@ -15,9 +15,6 @@ Mix.install([
   {:protobuf, "~> 0.14.1"}
 ])
 
-# Start the Snakepit application
-{:ok, _} = Application.ensure_all_started(:snakepit)
-
 defmodule SessionExample do
   def run do
     IO.puts("\n=== Session Management Example ===\n")
@@ -102,12 +99,7 @@ defmodule SessionExample do
   end
 end
 
-# Run the example
-SessionExample.run()
-
-# Allow time for operations to complete
-Process.sleep(1000)
-
-# Graceful shutdown
-IO.puts("\nShutting down...")
-Application.stop(:snakepit)
+# Run the example with proper cleanup
+Snakepit.run_as_script(fn ->
+  SessionExample.run()
+end)

@@ -30,8 +30,9 @@ defmodule Snakepit.Pool do
     :queue_timeout,
     :max_queue_size,
     :worker_module,
-    :adapter_module
+    :adapter_module,
     # Note: process_pids removed - ProcessRegistry is the single source of truth
+    initialization_waiters: []
   ]
 
   # Client API
@@ -124,6 +125,19 @@ defmodule Snakepit.Pool do
     GenServer.call(pool, :list_workers)
   end
 
+  @doc """
+  Waits for the pool to be fully initialized.
+
+  Returns `:ok` when all workers are ready, or `{:error, :timeout}` if
+  the pool doesn't initialize within the given timeout.
+  """
+  @spec await_ready(atom() | pid(), timeout()) :: :ok | {:error, :timeout}
+  def await_ready(pool \\ __MODULE__, timeout \\ 15_000) do
+    GenServer.call(pool, :await_ready, timeout)
+  catch
+    :exit, {:timeout, _} -> {:error, :timeout}
+  end
+
   # Server Callbacks
 
   @impl true
@@ -189,8 +203,14 @@ defmodule Snakepit.Pool do
     else
       # Initialize available set with all workers
       available = MapSet.new(workers)
+      new_state = %{state | workers: workers, available: available, initialized: true}
 
-      {:noreply, %{state | workers: workers, available: available, initialized: true}}
+      # Reply to all waiting callers
+      for from <- state.initialization_waiters do
+        GenServer.reply(from, :ok)
+      end
+
+      {:noreply, %{new_state | initialization_waiters: []}}
     end
   end
 
@@ -285,6 +305,17 @@ defmodule Snakepit.Pool do
 
   def handle_call(:list_workers, _from, state) do
     {:reply, state.workers, state}
+  end
+
+  @impl true
+  def handle_call(:await_ready, from, state) do
+    if state.initialized do
+      {:reply, :ok, state}
+    else
+      # Pool is not ready yet, queue the caller to be replied to later
+      new_waiters = [from | state.initialization_waiters]
+      {:noreply, %{state | initialization_waiters: new_waiters}}
+    end
   end
 
   @impl true

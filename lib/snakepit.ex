@@ -129,5 +129,69 @@ defmodule Snakepit do
     end
   end
 
+  @doc """
+  Starts the Snakepit application, executes a given function,
+  and ensures graceful shutdown.
+
+  This is the recommended way to use Snakepit for short-lived scripts or
+  Mix tasks to prevent orphaned processes.
+
+  It handles the full OTP application lifecycle (start, run, stop)
+  automatically.
+
+  ## Examples
+
+      # In a Mix task
+      Snakepit.run_as_script(fn ->
+        {:ok, result} = Snakepit.execute("my_command", %{data: "value"})
+        IO.inspect(result)
+      end)
+
+      # For demos or scripts
+      Snakepit.run_as_script(fn ->
+        MyApp.run_load_test()
+      end)
+
+  ## Options
+
+    * `:timeout` - Maximum time to wait for pool initialization (default: 15000ms)
+
+  ## Returns
+
+  Returns the result of the provided function, or `{:error, reason}` if
+  the pool fails to initialize.
+  """
+  @spec run_as_script((-> any()), keyword()) :: any() | {:error, term()}
+  def run_as_script(fun, opts \\ []) when is_function(fun, 0) do
+    timeout = Keyword.get(opts, :timeout, 15_000)
+
+    # Ensure all dependencies are started, including Snakepit itself
+    {:ok, _apps} = Application.ensure_all_started(:snakepit)
+
+    # Deterministically wait for the pool to be fully initialized
+    case Snakepit.Pool.await_ready(Snakepit.Pool, timeout) do
+      :ok ->
+        try do
+          fun.()
+        after
+          IO.puts("\n[Snakepit] Script execution finished. Shutting down gracefully...")
+          # This is the crucial step: ensure the application is stopped,
+          # which will trigger all terminate/2 cleanup callbacks.
+          Application.stop(:snakepit)
+
+          # Give the cleanup callbacks a moment to execute
+          # This is still needed because Application.stop is async
+          Process.sleep(500)
+
+          IO.puts("[Snakepit] Shutdown complete.")
+        end
+
+      {:error, :timeout} ->
+        IO.puts("[Snakepit] Error: Pool failed to initialize within #{timeout}ms")
+        Application.stop(:snakepit)
+        {:error, :pool_initialization_timeout}
+    end
+  end
+
   # Note: For ML/DSP program management functionality, see Snakepit.SessionHelpers
 end
