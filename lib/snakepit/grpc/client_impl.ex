@@ -430,6 +430,52 @@ defmodule Snakepit.GRPC.ClientImpl do
     end
   end
 
+  def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
+    # Convert Elixir terms to protobuf Any messages
+    proto_params_result =
+      Enum.reduce_while(parameters, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
+        case infer_and_encode_any(v) do
+          {:ok, proto_any} -> {:cont, {:ok, Map.put(acc, to_string(k), proto_any)}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+
+    with {:ok, proto_params} <- proto_params_result do
+      request = %Bridge.ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: tool_name,
+        parameters: proto_params
+      }
+
+      timeout = opts[:timeout] || @default_timeout
+      call_opts = [timeout: timeout]
+
+      case Bridge.BridgeService.Stub.execute_tool(channel, request, call_opts) do
+        {:ok, response, _headers} -> handle_tool_response(response)
+        {:ok, response} -> handle_tool_response(response)
+        {:error, reason} -> handle_error(reason)
+      end
+    end
+  end
+
+  def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
+    # Convert Elixir terms to protobuf Any messages
+    with {:ok, proto_params} <- encode_parameters(parameters) do
+      request = %Bridge.ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: tool_name,
+        parameters: proto_params,
+        stream: true
+      }
+
+      timeout = opts[:timeout] || 300_000
+      call_opts = [timeout: timeout]
+
+      # This call returns {:ok, Stream} or {:error, reason}
+      Bridge.BridgeService.Stub.execute_streaming_tool(channel, request, call_opts)
+    end
+  end
+
   # Helper functions
 
   defp decode_variable(proto_var) do
@@ -494,4 +540,41 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   defp handle_error(error), do: error
+
+  # Helper to infer type and encode to Google.Protobuf.Any
+  defp infer_and_encode_any(value) do
+    type = Snakepit.Bridge.Variables.Types.infer_type(value)
+    
+    # For complex types that would be encoded as :string, we need to handle them specially
+    if type == :string and (is_map(value) or (is_list(value) and not Enum.all?(value, &is_number/1))) do
+      # Encode complex structures as JSON strings
+      json_value = Jason.encode!(value)
+      with {:ok, any_struct, _binary_data} <- Serialization.encode_any(json_value, :string) do
+        {:ok, %Google.Protobuf.Any{type_url: any_struct.type_url, value: any_struct.value}}
+      end
+    else
+      # Use the serialization module for other types
+      with {:ok, any_struct, _binary_data} <- Serialization.encode_any(value, type) do
+        {:ok, %Google.Protobuf.Any{type_url: any_struct.type_url, value: any_struct.value}}
+      end
+    end
+  end
+
+  defp handle_tool_response(%Bridge.ExecuteToolResponse{success: true, result: any_result}) do
+    # Use the centralized decoder - this is the correct approach
+    Serialization.decode_any(any_result)
+  end
+
+  defp handle_tool_response(%Bridge.ExecuteToolResponse{success: false, error_message: error}) do
+    {:error, error}
+  end
+
+  defp encode_parameters(parameters) do
+    Enum.reduce_while(parameters, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
+      case infer_and_encode_any(v) do
+        {:ok, proto_any} -> {:cont, {:ok, Map.put(acc, to_string(k), proto_any)}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
 end

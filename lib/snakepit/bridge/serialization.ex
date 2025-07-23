@@ -137,19 +137,24 @@ defmodule Snakepit.Bridge.Serialization do
     # Extract type from URL
     type = extract_type_from_url(type_url)
 
-    with {:ok, type_atom} <- parse_type(type),
-         json_string <- ensure_string(json_bytes),
-         {:ok, json_value} <- Jason.decode(json_string),
-         typed_value <- from_json_value(json_value, type_atom),
-         {:ok, type_module} <- Types.get_type_module(type_atom),
-         {:ok, value} <- type_module.validate(typed_value) do
-      {:ok, value}
+    with {:ok, type_atom} <- parse_type(type) do
+      # For map and list, we just decode the JSON directly.
+      if type_atom in [:map, :list] do
+        Jason.decode(ensure_string(json_bytes))
+      else
+        # Standard type handling for others
+        with json_string <- ensure_string(json_bytes),
+             {:ok, json_value} <- Jason.decode(json_string),
+             typed_value <- from_json_value(json_value, type_atom),
+             {:ok, type_module} <- Types.get_type_module(type_atom),
+             {:ok, value} <- type_module.validate(typed_value) do
+          {:ok, value}
+        else
+          error -> error
+        end
+      end
     else
-      {:error, %Jason.DecodeError{} = e} ->
-        {:error, "JSON decoding failed: #{Exception.message(e)}"}
-
-      error ->
-        error
+      error -> error
     end
   end
 
@@ -275,5 +280,7 @@ defmodule Snakepit.Bridge.Serialization do
   defp parse_type("module"), do: {:ok, :module}
   defp parse_type("embedding"), do: {:ok, :embedding}
   defp parse_type("tensor"), do: {:ok, :tensor}
+  defp parse_type("map"), do: {:ok, :map}     # Add this
+  defp parse_type("list"), do: {:ok, :list}   # Add this
   defp parse_type(_), do: {:error, :unknown_type}
 end

@@ -145,19 +145,14 @@ snakepit_showcase/
 │   └── snakepit_showcase/
 │       ├── application.ex          # OTP application
 │       ├── demo_runner.ex          # Demo orchestration
-│       ├── demos/                  # Individual demo modules
-│       │   ├── basic_demo.ex
-│       │   ├── binary_demo.ex      # Binary serialization demo
-│       │   ├── concurrent_demo.ex
-│       │   ├── ml_workflow_demo.ex
-│       │   ├── session_demo.ex
-│       │   ├── streaming_demo.ex
-│       │   └── variables_demo.ex
-│       └── python_adapters/        # Python implementations
-│           └── showcase_adapter.py
-├── priv/
-│   └── python/
-│       └── requirements.txt        # Python dependencies
+│       └── demos/                  # Individual demo modules
+│           ├── basic_demo.ex
+│           ├── binary_demo.ex      # Binary serialization demo
+│           ├── concurrent_demo.ex
+│           ├── ml_workflow_demo.ex
+│           ├── session_demo.ex
+│           ├── streaming_demo.ex
+│           └── variables_demo.ex
 ├── config/                         # Application configuration
 ├── mix.exs                        # Mix project file
 └── README.md                      # This file
@@ -182,15 +177,18 @@ config :snakepit,
     pool_size: 4,
     max_overflow: 2,
     strategy: :fifo,
-    adapter_args: %{
-      adapter_module: "showcase_adapter:ShowcaseAdapter"
-    }
+    adapter_args: ["--adapter", "snakepit_bridge.adapters.showcase.showcase_adapter.ShowcaseAdapter"]
+  },
+  grpc_config: %{
+    base_port: 50051,
+    port_range: 100,
+    health_check_interval: 30_000
   }
 ```
 
 ## Python Adapter
 
-The showcase includes a comprehensive Python adapter (`showcase_adapter.py`) that demonstrates:
+The showcase uses the built-in `ShowcaseAdapter` from Snakepit's Python bridge that demonstrates:
 
 - All Snakepit features
 - Binary serialization with numpy
@@ -226,12 +224,7 @@ end
 
 ### Python Dependencies
 
-If you encounter import errors, ensure Python dependencies are installed:
-
-```bash
-cd priv/python
-pip install -r requirements.txt
-```
+The ShowcaseAdapter requires numpy for binary serialization demos. Snakepit automatically installs its dependencies when started.
 
 ### Pool Saturation
 

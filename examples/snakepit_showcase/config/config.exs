@@ -11,9 +11,7 @@ config :snakepit,
     pool_size: 4,
     max_overflow: 2,
     strategy: :fifo,
-    adapter_args: %{
-      adapter_module: "showcase_adapter:ShowcaseAdapter"
-    }
+    adapter_args: ["--adapter", "snakepit_bridge.adapters.showcase.showcase_adapter.ShowcaseAdapter"]
   },
   grpc_config: %{
     base_port: 50051,

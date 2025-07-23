@@ -115,22 +115,32 @@ defmodule Snakepit.GRPC.Client do
     end
   end
 
-  def execute_tool(_channel, session_id, tool_name, parameters, opts \\ []) do
-    proto_params =
-      Enum.into(parameters, %{}, fn {k, v} ->
-        {to_string(k), encode_any(v)}
+  def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
+    if not Map.get(channel, :mock, false) do
+      Snakepit.GRPC.ClientImpl.execute_tool(channel, session_id, tool_name, parameters, opts)
+    else
+      # Mock implementation for testing
+      {:ok, %{success: true, result: %{}, error_message: ""}}
+    end
+  end
+
+  def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
+    if not Map.get(channel, :mock, false) do
+      Snakepit.GRPC.ClientImpl.execute_streaming_tool(channel, session_id, tool_name, parameters, opts)
+    else
+      # Mock implementation for testing - return a simple stream
+      stream = Stream.iterate(1, &(&1 + 1))
+      |> Stream.take(5)
+      |> Stream.map(fn i ->
+        {:ok, %{
+          chunk_id: "mock-#{i}",
+          data: Jason.encode!(%{"step" => i, "total" => 5}),
+          is_final: i == 5
+        }}
       end)
-
-    _request = %{
-      session_id: session_id,
-      tool_name: tool_name,
-      parameters: proto_params,
-      metadata: opts[:metadata] || %{},
-      stream: opts[:stream] || false
-    }
-
-    # Placeholder for actual gRPC call
-    {:ok, %{success: true, result: %{}, error_message: ""}}
+      
+      {:ok, stream}
+    end
   end
 
   # Helper functions
