@@ -110,7 +110,7 @@ defmodule Snakepit.GRPC.ClientImpl do
     require Logger
     # Encode value
     case Serialization.encode_any(initial_value, type) do
-      {:ok, any_value} ->
+      {:ok, any_value, _binary_data} ->
         # Convert to protobuf Any
         proto_any = %Google.Protobuf.Any{
           type_url: any_value.type_url,
@@ -202,7 +202,7 @@ defmodule Snakepit.GRPC.ClientImpl do
       {:ok, current_var} ->
         # Encode value with the variable's type (type is already an atom)
         case Serialization.encode_any(value, current_var.type) do
-          {:ok, any_value} ->
+          {:ok, any_value, _binary_data} ->
             proto_any = %Google.Protobuf.Any{
               type_url: any_value.type_url,
               value: any_value.value
@@ -358,7 +358,7 @@ defmodule Snakepit.GRPC.ClientImpl do
       Enum.into(updates, %{}, fn update ->
         # Get current type for encoding
         {:ok, current_var} = get_variable(channel, session_id, update.identifier.name)
-        {:ok, any_value} = Serialization.encode_any(update.value, current_var.type)
+        {:ok, any_value, _binary_data} = Serialization.encode_any(update.value, current_var.type)
 
         {update.identifier.name,
          %Google.Protobuf.Any{

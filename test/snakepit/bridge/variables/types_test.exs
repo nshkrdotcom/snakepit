@@ -49,17 +49,17 @@ defmodule Snakepit.Bridge.Variables.TypesTest do
       alias Snakepit.Bridge.Serialization
 
       # Test encoding
-      assert {:ok, any} = Serialization.encode_any(3.14, :float)
+      assert {:ok, any, _binary_data} = Serialization.encode_any(3.14, :float)
       assert any.type_url == "type.googleapis.com/snakepit.float"
       assert Jason.decode!(any.value) == 3.14
 
-      assert {:ok, any} = Serialization.encode_any(:infinity, :float)
+      assert {:ok, any, _binary_data} = Serialization.encode_any(:infinity, :float)
       assert Jason.decode!(any.value) == "Infinity"
 
-      assert {:ok, any} = Serialization.encode_any(:negative_infinity, :float)
+      assert {:ok, any, _binary_data} = Serialization.encode_any(:negative_infinity, :float)
       assert Jason.decode!(any.value) == "-Infinity"
 
-      assert {:ok, any} = Serialization.encode_any(:nan, :float)
+      assert {:ok, any, _binary_data} = Serialization.encode_any(:nan, :float)
       assert Jason.decode!(any.value) == "NaN"
 
       # Test decoding
@@ -114,14 +114,14 @@ defmodule Snakepit.Bridge.Variables.TypesTest do
       alias Snakepit.Bridge.Serialization
 
       # Test encoding
-      assert {:ok, any} = Serialization.encode_any(42, :integer)
+      assert {:ok, any, _binary_data} = Serialization.encode_any(42, :integer)
       assert any.type_url == "type.googleapis.com/snakepit.integer"
       assert Jason.decode!(any.value) == 42
 
-      assert {:ok, any} = Serialization.encode_any(-100, :integer)
+      assert {:ok, any, _binary_data} = Serialization.encode_any(-100, :integer)
       assert Jason.decode!(any.value) == -100
 
-      assert {:ok, any} = Serialization.encode_any(0, :integer)
+      assert {:ok, any, _binary_data} = Serialization.encode_any(0, :integer)
       assert Jason.decode!(any.value) == 0
 
       # Test decoding
@@ -190,11 +190,11 @@ defmodule Snakepit.Bridge.Variables.TypesTest do
       alias Snakepit.Bridge.Serialization
 
       # Test encoding
-      assert {:ok, any} = Serialization.encode_any(true, :boolean)
+      assert {:ok, any, _binary_data} = Serialization.encode_any(true, :boolean)
       assert any.type_url == "type.googleapis.com/snakepit.boolean"
       assert Jason.decode!(any.value) == true
 
-      assert {:ok, any} = Serialization.encode_any(false, :boolean)
+      assert {:ok, any, _binary_data} = Serialization.encode_any(false, :boolean)
       assert Jason.decode!(any.value) == false
 
       # Test decoding

@@ -100,7 +100,7 @@ defmodule Snakepit.Bridge.PropertyTest do
     property "any value can be serialized and deserialized" do
       check all({type, value} <- typed_value_gen()) do
         case Serialization.encode_any(value, type) do
-          {:ok, encoded} ->
+          {:ok, encoded, _binary_data} ->
             assert {:ok, decoded} = Serialization.decode_any(encoded)
             assert decoded == value
 
@@ -114,7 +114,7 @@ defmodule Snakepit.Bridge.PropertyTest do
     property "encoded values have correct protobuf structure" do
       check all({type, value} <- typed_value_gen()) do
         case Serialization.encode_any(value, type) do
-          {:ok, %{type_url: url, value: encoded_value}} ->
+          {:ok, %{type_url: url, value: encoded_value}, _binary_data} ->
             assert String.starts_with?(url, "type.googleapis.com/snakepit.")
             assert String.ends_with?(url, to_string(type))
             assert is_binary(encoded_value)

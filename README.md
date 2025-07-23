@@ -130,6 +130,124 @@ end
 - Erlang/OTP 27+
 - External runtime (Python 3.8+, Node.js 16+, etc.) depending on adapter
 
+## 🛠️ Setup Guide
+
+### Step 1: Install Dependencies
+
+For Python/gRPC integration (recommended):
+
+```bash
+# Install Python dependencies
+pip install grpcio grpcio-tools protobuf
+
+# Or use the provided requirements file
+pip install -r priv/python/requirements.txt
+```
+
+### Step 2: Generate Protocol Buffers
+
+```bash
+# Generate Python gRPC code
+make proto-python
+
+# This creates the necessary gRPC stubs in priv/python/snakepit_bridge/grpc/
+```
+
+### Step 3: Configure Your Application
+
+Add to your `config/config.exs`:
+
+```elixir
+config :snakepit,
+  # Enable pooling (recommended for production)
+  pooling_enabled: true,
+  
+  # Choose your adapter
+  adapter_module: Snakepit.Adapters.GRPCPython,
+  
+  # Pool configuration
+  pool_config: %{
+    pool_size: System.schedulers_online() * 2,
+    startup_timeout: 10_000,
+    max_queue_size: 1000
+  },
+  
+  # gRPC configuration
+  grpc_config: %{
+    base_port: 50051,
+    port_range: 100,
+    connect_timeout: 5_000
+  },
+  
+  # Session configuration
+  session_config: %{
+    ttl: 3600,  # 1 hour default
+    cleanup_interval: 60_000  # 1 minute
+  }
+```
+
+### Step 4: Start Snakepit
+
+In your application supervisor:
+
+```elixir
+defmodule MyApp.Application do
+  use Application
+
+  def start(_type, _args) do
+    children = [
+      # Other children...
+      {Snakepit.Application, []}
+    ]
+
+    opts = [strategy: :one_for_one, name: MyApp.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
+end
+```
+
+Or start manually:
+
+```elixir
+{:ok, _} = Application.ensure_all_started(:snakepit)
+```
+
+### Step 5: Create a Custom Adapter (Optional)
+
+For custom Python functionality:
+
+```python
+# priv/python/my_adapter.py
+from snakepit_bridge.adapters.base import BaseAdapter
+
+class MyAdapter(BaseAdapter):
+    def __init__(self):
+        super().__init__()
+        # Initialize your libraries here
+        
+    async def execute_my_command(self, args):
+        # Your custom logic
+        result = do_something(args)
+        return {"status": "success", "result": result}
+```
+
+Configure it:
+
+```elixir
+# config/config.exs
+config :snakepit,
+  adapter_module: Snakepit.Adapters.GRPCPython,
+  python_adapter: "my_adapter:MyAdapter"
+```
+
+### Step 6: Verify Installation
+
+```elixir
+# In IEx
+iex> Snakepit.execute("ping", %{})
+{:ok, %{"status" => "pong", "timestamp" => 1234567890}}
+```
+
 ## 🎯 Core Concepts
 
 ### 1. **Adapters**
@@ -232,65 +350,65 @@ Application.start(:snakepit)
 
 ## 📖 Usage Examples
 
-All examples are available in the `examples/` directory. Run them directly:
+### Basic Examples
 
-```bash
-# gRPC examples
-elixir examples/grpc_non_streaming_demo.exs
-elixir examples/grpc_streaming_demo.exs
-
-# Session-based examples
-elixir examples/grpc_session_demo.exs
-
-# Advanced examples
-elixir examples/dspy_integration.exs
-elixir examples/data_science_workflow.exs
-
-# JavaScript examples (with gRPC)
-elixir examples/javascript_grpc_demo.exs
-```
-
-### Basic Stateless Execution
+#### Simple Command Execution
 
 ```elixir
-# Simple computation
-{:ok, %{"result" => 8}} = Snakepit.execute("compute", %{
-  operation: "add",
-  a: 5,
-  b: 3
+# Basic ping/pong
+{:ok, result} = Snakepit.execute("ping", %{})
+# => %{"status" => "pong", "timestamp" => 1234567890}
+
+# Computation
+{:ok, result} = Snakepit.execute("compute", %{
+  operation: "multiply",
+  a: 7,
+  b: 6
 })
+# => %{"result" => 42}
 
-# With timeout
-{:ok, result} = Snakepit.execute("long_running_task", %{data: "..."}, timeout: 60_000)
-
-# Error handling
-case Snakepit.execute("risky_operation", %{}) do
-  {:ok, result} -> handle_success(result)
-  {:error, :worker_timeout} -> handle_timeout()
-  {:error, :pool_saturated} -> handle_overload()
-  {:error, reason} -> handle_error(reason)
+# With error handling
+case Snakepit.execute("risky_operation", %{threshold: 0.5}) do
+  {:ok, result} -> 
+    IO.puts("Success: #{inspect(result)}")
+  {:error, :worker_timeout} -> 
+    IO.puts("Operation timed out")
+  {:error, {:worker_error, msg}} -> 
+    IO.puts("Worker error: #{msg}")
+  {:error, reason} -> 
+    IO.puts("Failed: #{inspect(reason)}")
 end
 ```
 
-### Session-Based Execution
+#### Session-Based State Management
 
 ```elixir
-# Create a session and maintain state
-session_id = "user_#{user.id}"
+# Create a session with variables
+session_id = "analysis_#{UUID.generate()}"
 
-# First request - initializes session
-{:ok, _} = Snakepit.execute_in_session(session_id, "initialize", %{
-  user_id: user.id,
-  preferences: user.preferences
+# Initialize session with variables
+{:ok, _} = Snakepit.Bridge.SessionStore.create_session(session_id)
+{:ok, _} = Snakepit.Bridge.SessionStore.register_variable(
+  session_id, 
+  "temperature", 
+  :float, 
+  0.7,
+  constraints: %{min: 0.0, max: 1.0}
+)
+
+# Execute commands that use session variables
+{:ok, result} = Snakepit.execute_in_session(session_id, "generate_text", %{
+  prompt: "Tell me about Elixir"
 })
 
-# Subsequent requests use same worker when possible
-{:ok, recommendations} = Snakepit.execute_in_session(session_id, "get_recommendations", %{
-  category: "books"
-})
+# Update variables
+:ok = Snakepit.Bridge.SessionStore.update_variable(session_id, "temperature", 0.9)
 
-# Session data persists across requests
-{:ok, history} = Snakepit.execute_in_session(session_id, "get_history", %{})
+# List all variables
+{:ok, vars} = Snakepit.Bridge.SessionStore.list_variables(session_id)
+
+# Cleanup when done
+:ok = Snakepit.Bridge.SessionStore.delete_session(session_id)
 ```
 
 ### ML/AI Workflow Example
@@ -721,29 +839,156 @@ Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericJavaScr
 
 ## 🛠️ Creating Custom Adapters
 
-### Python Bridge V2 Pattern (Recommended)
+### Complete Custom Adapter Example
+
+Here's a real-world example of a data science adapter with session support:
 
 ```python
-# my_custom_bridge.py
+# priv/python/data_science_adapter.py
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from snakepit_bridge.adapters.base import BaseAdapter
+from snakepit_bridge.session_context import SessionContext
+
+class DataScienceAdapter(BaseAdapter):
+    def __init__(self):
+        super().__init__()
+        self.models = {}  # Store trained models per session
+        
+    def set_session_context(self, context: SessionContext):
+        """Called when a session context is available."""
+        self.session_context = context
+        
+    async def execute_load_data(self, args):
+        """Load data from CSV and store in session."""
+        file_path = args.get("file_path")
+        if not file_path:
+            raise ValueError("file_path is required")
+            
+        # Load data
+        df = pd.read_csv(file_path)
+        
+        # Store basic info in session variables
+        if self.session_context:
+            await self.session_context.register_variable(
+                "data_shape", "list", list(df.shape)
+            )
+            await self.session_context.register_variable(
+                "columns", "list", df.columns.tolist()
+            )
+            
+        return {
+            "rows": len(df),
+            "columns": len(df.columns),
+            "column_names": df.columns.tolist(),
+            "dtypes": df.dtypes.to_dict()
+        }
+        
+    async def execute_preprocess(self, args):
+        """Preprocess data with scaling."""
+        data = args.get("data")
+        target_column = args.get("target")
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(data)
+        
+        # Separate features and target
+        X = df.drop(columns=[target_column])
+        y = df[target_column]
+        
+        # Scale features
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        
+        # Store scaler parameters in session
+        if self.session_context:
+            session_id = self.session_context.session_id
+            self.models[f"{session_id}_scaler"] = scaler
+            
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_scaled, y, test_size=0.2, random_state=42
+        )
+        
+        return {
+            "train_size": len(X_train),
+            "test_size": len(X_test),
+            "feature_means": scaler.mean_.tolist(),
+            "feature_stds": scaler.scale_.tolist()
+        }
+        
+    async def execute_train_model(self, args):
+        """Train a model and store it."""
+        model_type = args.get("model_type", "linear_regression")
+        hyperparams = args.get("hyperparams", {})
+        
+        # Import the appropriate model
+        if model_type == "linear_regression":
+            from sklearn.linear_model import LinearRegression
+            model = LinearRegression(**hyperparams)
+        elif model_type == "random_forest":
+            from sklearn.ensemble import RandomForestRegressor
+            model = RandomForestRegressor(**hyperparams)
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
+            
+        # Train model (assume data is passed or stored)
+        # ... training logic ...
+        
+        # Store model in session
+        if self.session_context:
+            session_id = self.session_context.session_id
+            model_id = f"{session_id}_{model_type}"
+            self.models[model_id] = model
+            
+            # Store model metadata as variables
+            await self.session_context.register_variable(
+                "current_model", "string", model_id
+            )
+            
+        return {
+            "model_id": model_id,
+            "model_type": model_type,
+            "training_complete": True
+        }
+
+# Usage in grpc_server.py or your bridge
+adapter = DataScienceAdapter()
+```
+
+### Simple Command Handler Pattern
+
+For simpler use cases without session management:
+
+```python
+# my_simple_adapter.py
 from snakepit_bridge import BaseCommandHandler, ProtocolHandler
 from snakepit_bridge.core import setup_graceful_shutdown, setup_broken_pipe_suppression
 
-class MyCustomHandler(BaseCommandHandler):
+class MySimpleHandler(BaseCommandHandler):
     def _register_commands(self):
-        self.register_command("my_command", self.handle_my_command)
-        self.register_command("process_data", self.handle_process_data)
+        self.register_command("uppercase", self.handle_uppercase)
+        self.register_command("word_count", self.handle_word_count)
     
-    def handle_my_command(self, args):
-        return {"result": "processed", "input": args}
+    def handle_uppercase(self, args):
+        text = args.get("text", "")
+        return {"result": text.upper()}
     
-    def handle_process_data(self, args):
-        data = args.get("data", "")
-        return {"processed": data.upper(), "length": len(data)}
+    def handle_word_count(self, args):
+        text = args.get("text", "")
+        words = text.split()
+        return {
+            "word_count": len(words),
+            "char_count": len(text),
+            "unique_words": len(set(words))
+        }
 
 def main():
     setup_broken_pipe_suppression()
     
-    command_handler = MyCustomHandler()
+    command_handler = MySimpleHandler()
     protocol_handler = ProtocolHandler(command_handler)
     setup_graceful_shutdown(protocol_handler)
     

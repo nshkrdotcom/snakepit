@@ -6,12 +6,13 @@ all supported variable types.
 """
 
 from enum import Enum
-from typing import Any, Dict, Type, Union
+from typing import Any, Dict, Type, Union, Tuple, Optional
 import json
 import struct
 from google.protobuf.any_pb2 import Any as ProtoAny
 
 from .grpc import snakepit_bridge_pb2 as pb2
+from .serialization import TypeSerializer
 
 
 class VariableType(Enum):
@@ -183,50 +184,31 @@ class BooleanValidator(TypeValidator):
             raise ValueError(f"Cannot convert {type(value).__name__} to boolean")
 
 
-def serialize_value(value: Any, var_type: VariableType) -> ProtoAny:
-    """Serialize a value to protobuf Any."""
-    # Special handling for float values
-    if var_type == VariableType.FLOAT:
-        if isinstance(value, float):
-            import math
-            if math.isnan(value):
-                json_value = "NaN"
-            elif math.isinf(value):
-                json_value = "Infinity" if value > 0 else "-Infinity"
-            else:
-                json_value = value
-        else:
-            json_value = value
-    else:
-        json_value = value
+def serialize_value(value: Any, var_type: VariableType) -> Tuple[ProtoAny, Optional[bytes]]:
+    """
+    Serialize a value to protobuf Any with optional binary data.
     
-    data = json.dumps(json_value)
-    
-    return ProtoAny(
-        type_url=f"type.googleapis.com/snakepit.{var_type.value}",
-        value=data.encode('utf-8')
-    )
+    Returns:
+        Tuple of (Any message, optional binary data)
+    """
+    # Delegate to TypeSerializer which handles binary serialization
+    return TypeSerializer.encode_any(value, var_type.value)
 
 
-def deserialize_value(proto_any: ProtoAny, expected_type: VariableType) -> Any:
-    """Deserialize a value from protobuf Any."""
-    try:
-        json_str = proto_any.value.decode('utf-8')
-        value = json.loads(json_str)
+def deserialize_value(proto_any: ProtoAny, expected_type: VariableType, binary_data: Optional[bytes] = None) -> Any:
+    """
+    Deserialize a value from protobuf Any with optional binary data.
+    
+    Args:
+        proto_any: Protobuf Any message
+        expected_type: Expected variable type
+        binary_data: Optional binary data for large values
         
-        # Handle special float values
-        if expected_type == VariableType.FLOAT:
-            if value == "NaN":
-                return float('nan')
-            elif value == "Infinity":
-                return float('inf')
-            elif value == "-Infinity":
-                return float('-inf')
-        
-        return value
-    except Exception as e:
-        # Fallback to raw value
-        return proto_any.value.decode('utf-8')
+    Returns:
+        Deserialized value
+    """
+    # Delegate to TypeSerializer which handles binary deserialization
+    return TypeSerializer.decode_any(proto_any, binary_data)
 
 
 def validate_constraints(value: Any, var_type: VariableType, constraints: Dict[str, Any]) -> None:

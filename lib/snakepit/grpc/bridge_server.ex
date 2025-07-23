@@ -140,7 +140,8 @@ defmodule Snakepit.GRPC.BridgeServer do
   def register_variable(request, _stream) do
     Logger.debug("RegisterVariable: session=#{request.session_id}, name=#{request.name}")
 
-    with {:ok, initial_value} <- decode_any_value(request.initial_value),
+    with {:ok, initial_value} <-
+           decode_any_value(request.initial_value, request.initial_binary_value),
          {:ok, constraints} <- decode_constraints(request.constraints_json),
          {:ok, var_id} <-
            SessionStore.register_variable(
@@ -211,7 +212,8 @@ defmodule Snakepit.GRPC.BridgeServer do
     # First get the variable to know its type
     with {:ok, variable} <-
            SessionStore.get_variable(request.session_id, request.variable_identifier),
-         {:ok, decoded_value} <- decode_typed_value(request.value, variable.type),
+         {:ok, decoded_value} <-
+           decode_typed_value(request.value, variable.type, request.binary_value),
          :ok <-
            SessionStore.update_variable(
              request.session_id,
@@ -291,7 +293,7 @@ defmodule Snakepit.GRPC.BridgeServer do
     )
 
     # Decode all values first
-    case decode_updates_map(request.session_id, request.updates) do
+    case decode_updates_map(request.session_id, request.updates, request.binary_updates) do
       {:ok, decoded_updates} ->
         opts = [
           atomic: request.atomic,
@@ -441,12 +443,12 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   # Encoding/Decoding Helpers
 
-  defp decode_any_value(%Any{} = any_value) do
-    Serialization.decode_any(any_value)
+  defp decode_any_value(%Any{} = any_value, binary_data \\ nil) do
+    Serialization.decode_any(any_value, binary_data)
   end
 
-  defp decode_typed_value(%Any{} = any_value, expected_type) do
-    with {:ok, decoded} <- Serialization.decode_any(any_value),
+  defp decode_typed_value(%Any{} = any_value, expected_type, binary_data \\ nil) do
+    with {:ok, decoded} <- Serialization.decode_any(any_value, binary_data),
          {:ok, validated} <- Types.validate_value(decoded, expected_type) do
       {:ok, validated}
     end
@@ -469,7 +471,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   defp encode_variable(variable, default_source \\ :ELIXIR) do
-    with {:ok, value_any} <- encode_any_value(variable.value, variable.type) do
+    with {:ok, value_any, binary_data} <- encode_any_value(variable.value, variable.type) do
       # Check metadata for source, falling back to default
       source =
         case variable.metadata["source"] do
@@ -491,7 +493,9 @@ defmodule Snakepit.GRPC.BridgeServer do
         source: source,
         last_updated_at: %Timestamp{seconds: variable.last_updated_at, nanos: 0},
         version: variable.version,
-        optimization_status: encode_optimization_status(variable)
+        optimization_status: encode_optimization_status(variable),
+        # Set binary_value if we have binary data
+        binary_value: binary_data
       }
 
       {:ok, proto_var}
@@ -500,12 +504,12 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   defp encode_any_value(value, type) do
     case Serialization.encode_any(value, type) do
-      {:ok, %{type_url: type_url, value: encoded_value}} ->
+      {:ok, %{type_url: type_url, value: encoded_value}, binary_data} ->
         {:ok,
          %Any{
            type_url: type_url,
            value: encoded_value
-         }}
+         }, binary_data}
 
       {:error, reason} ->
         {:error, "Failed to encode value: #{inspect(reason)}"}
@@ -530,7 +534,7 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  defp decode_updates_map(session_id, updates) do
+  defp decode_updates_map(session_id, updates, binary_updates \\ %{}) do
     # First get variable types for decoding
     identifiers = Map.keys(updates)
 
@@ -543,7 +547,10 @@ defmodule Snakepit.GRPC.BridgeServer do
                 {:halt, {:error, "Variable not found: #{id}"}}
 
               variable ->
-                case decode_typed_value(any_val, variable.type) do
+                # Check if we have binary data for this variable
+                binary_data = Map.get(binary_updates, id)
+
+                case decode_typed_value(any_val, variable.type, binary_data) do
                   {:ok, value} -> {:cont, {:ok, Map.put(acc, id, value)}}
                   {:error, reason} -> {:halt, {:error, reason}}
                 end

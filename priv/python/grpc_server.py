@@ -25,12 +25,89 @@ from snakepit_bridge.grpc import snakepit_bridge_pb2_grpc as pb2_grpc
 from snakepit_bridge.session_context import SessionContext
 from google.protobuf.timestamp_pb2 import Timestamp
 import json
+import functools
+import traceback
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+
+def grpc_error_handler(func):
+    """
+    Decorator to handle unexpected exceptions in gRPC service methods.
+    
+    Converts Python exceptions into proper gRPC errors with detailed
+    error messages while avoiding exposing sensitive information.
+    """
+    @functools.wraps(func)
+    async def wrapper(self, request, context):
+        method_name = func.__name__
+        try:
+            return await func(self, request, context)
+        except grpc.RpcError:
+            # Re-raise gRPC errors as-is
+            raise
+        except ValueError as e:
+            # Invalid input errors
+            logger.warning(f"{method_name} - ValueError: {str(e)}")
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
+        except NotImplementedError as e:
+            # Unimplemented features
+            logger.info(f"{method_name} - NotImplementedError: {str(e)}")
+            await context.abort(grpc.StatusCode.UNIMPLEMENTED, str(e))
+        except TimeoutError as e:
+            # Timeout errors
+            logger.warning(f"{method_name} - TimeoutError: {str(e)}")
+            await context.abort(grpc.StatusCode.DEADLINE_EXCEEDED, "Operation timed out")
+        except PermissionError as e:
+            # Permission errors
+            logger.warning(f"{method_name} - PermissionError: {str(e)}")
+            await context.abort(grpc.StatusCode.PERMISSION_DENIED, "Permission denied")
+        except FileNotFoundError as e:
+            # Resource not found
+            logger.warning(f"{method_name} - FileNotFoundError: {str(e)}")
+            await context.abort(grpc.StatusCode.NOT_FOUND, "Resource not found")
+        except Exception as e:
+            # Catch-all for unexpected errors
+            error_id = f"{method_name}_{int(time.time() * 1000)}"
+            logger.error(f"{error_id} - Unexpected error: {type(e).__name__}: {str(e)}")
+            logger.error(f"{error_id} - Traceback:\n{traceback.format_exc()}")
+            
+            # Return a generic error message to avoid exposing internals
+            await context.abort(
+                grpc.StatusCode.INTERNAL,
+                f"Internal server error (ID: {error_id}). Please check server logs for details."
+            )
+    
+    # Handle both sync and async functions
+    if asyncio.iscoroutinefunction(func):
+        return wrapper
+    else:
+        @functools.wraps(func)
+        def sync_wrapper(self, request, context):
+            method_name = func.__name__
+            try:
+                return func(self, request, context)
+            except grpc.RpcError:
+                raise
+            except ValueError as e:
+                logger.warning(f"{method_name} - ValueError: {str(e)}")
+                context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(e))
+            except NotImplementedError as e:
+                logger.info(f"{method_name} - NotImplementedError: {str(e)}")
+                context.abort(grpc.StatusCode.UNIMPLEMENTED, str(e))
+            except Exception as e:
+                error_id = f"{method_name}_{int(time.time() * 1000)}"
+                logger.error(f"{error_id} - Unexpected error: {type(e).__name__}: {str(e)}")
+                logger.error(f"{error_id} - Traceback:\n{traceback.format_exc()}")
+                context.abort(
+                    grpc.StatusCode.INTERNAL,
+                    f"Internal server error (ID: {error_id}). Please check server logs for details."
+                )
+        return sync_wrapper
 
 
 class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
@@ -137,6 +214,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     
     # Tool Execution - Stateless with Ephemeral Context
     
+    @grpc_error_handler
     async def ExecuteTool(self, request, context):
         """
         Execute a tool with an ephemeral session context.
@@ -184,6 +262,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             response.error_message = str(e)
             return response
     
+    @grpc_error_handler
     async def ExecuteStreamingTool(self, request, context):
         """Execute a streaming tool - placeholder for Stage 3."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)

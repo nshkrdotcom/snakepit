@@ -95,6 +95,11 @@ message Variable {
   // Advanced fields (Stage 4)
   string access_control_json = 10;
   OptimizationStatus optimization_status = 11;
+  
+  // Binary data field for large values (e.g., tensors, embeddings)
+  // When present, this takes precedence over the Any value field
+  // Format should be specified in metadata (e.g., "binary_format": "numpy", "dtype": "float32")
+  bytes binary_value = 12;
 }
 
 message OptimizationStatus {
@@ -110,6 +115,10 @@ message RegisterVariableRequest {
   google.protobuf.Any initial_value = 4;
   string constraints_json = 5;
   map<string, string> metadata = 6;
+  
+  // Binary data for large initial values (e.g., tensors, embeddings)
+  // When present, this takes precedence over the Any initial_value field for data
+  bytes initial_binary_value = 7;
 }
 
 message RegisterVariableResponse {
@@ -135,6 +144,10 @@ message SetVariableRequest {
   google.protobuf.Any value = 3;
   map<string, string> metadata = 4;
   int32 expected_version = 5; // For optimistic locking
+  
+  // Binary data for large values (e.g., tensors, embeddings)
+  // When present, this takes precedence over the Any value field for data
+  bytes binary_value = 6;
 }
 
 message SetVariableResponse {
@@ -160,6 +173,10 @@ message BatchSetVariablesRequest {
   map<string, google.protobuf.Any> updates = 2;
   map<string, string> metadata = 3;
   bool atomic = 4;
+  
+  // Binary data for large values, keyed by variable identifier
+  // When a key exists here, its data takes precedence over the Any value in updates
+  map<string, bytes> binary_updates = 5;
 }
 
 message BatchSetVariablesResponse {
@@ -212,6 +229,10 @@ message ExecuteToolRequest {
   map<string, google.protobuf.Any> parameters = 3;
   map<string, string> metadata = 4;
   bool stream = 5;
+  
+  // Binary parameters for large data (e.g., images, audio, video)
+  // Keys should match parameter names, metadata should describe format
+  map<string, bytes> binary_parameters = 6;
 }
 
 message ExecuteToolResponse {

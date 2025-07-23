@@ -147,6 +147,8 @@ defmodule Snakepit.Bridge.Variable do
     type: Snakepit.Bridge.OptimizationStatus,
     json_name: "optimizationStatus"
   )
+
+  field(:binary_value, 12, type: :bytes, json_name: "binaryValue")
 end
 
 defmodule Snakepit.Bridge.OptimizationStatus do
@@ -184,6 +186,8 @@ defmodule Snakepit.Bridge.RegisterVariableRequest do
     type: Snakepit.Bridge.RegisterVariableRequest.MetadataEntry,
     map: true
   )
+
+  field(:initial_binary_value, 7, type: :bytes, json_name: "initialBinaryValue")
 end
 
 defmodule Snakepit.Bridge.RegisterVariableResponse do
@@ -240,6 +244,7 @@ defmodule Snakepit.Bridge.SetVariableRequest do
   )
 
   field(:expected_version, 5, type: :int32, json_name: "expectedVersion")
+  field(:binary_value, 6, type: :bytes, json_name: "binaryValue")
 end
 
 defmodule Snakepit.Bridge.SetVariableResponse do
@@ -304,6 +309,15 @@ defmodule Snakepit.Bridge.BatchSetVariablesRequest.MetadataEntry do
   field(:value, 2, type: :string)
 end
 
+defmodule Snakepit.Bridge.BatchSetVariablesRequest.BinaryUpdatesEntry do
+  @moduledoc false
+
+  use Protobuf, map: true, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:key, 1, type: :string)
+  field(:value, 2, type: :bytes)
+end
+
 defmodule Snakepit.Bridge.BatchSetVariablesRequest do
   @moduledoc false
 
@@ -324,6 +338,13 @@ defmodule Snakepit.Bridge.BatchSetVariablesRequest do
   )
 
   field(:atomic, 4, type: :bool)
+
+  field(:binary_updates, 5,
+    repeated: true,
+    type: Snakepit.Bridge.BatchSetVariablesRequest.BinaryUpdatesEntry,
+    json_name: "binaryUpdates",
+    map: true
+  )
 end
 
 defmodule Snakepit.Bridge.BatchSetVariablesResponse.ErrorsEntry do
@@ -453,6 +474,15 @@ defmodule Snakepit.Bridge.ExecuteToolRequest.MetadataEntry do
   field(:value, 2, type: :string)
 end
 
+defmodule Snakepit.Bridge.ExecuteToolRequest.BinaryParametersEntry do
+  @moduledoc false
+
+  use Protobuf, map: true, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:key, 1, type: :string)
+  field(:value, 2, type: :bytes)
+end
+
 defmodule Snakepit.Bridge.ExecuteToolRequest do
   @moduledoc false
 
@@ -474,6 +504,13 @@ defmodule Snakepit.Bridge.ExecuteToolRequest do
   )
 
   field(:stream, 5, type: :bool)
+
+  field(:binary_parameters, 6,
+    repeated: true,
+    type: Snakepit.Bridge.ExecuteToolRequest.BinaryParametersEntry,
+    json_name: "binaryParameters",
+    map: true
+  )
 end
 
 defmodule Snakepit.Bridge.ExecuteToolResponse.MetadataEntry do

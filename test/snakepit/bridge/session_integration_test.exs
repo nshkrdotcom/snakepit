@@ -158,7 +158,7 @@ defmodule Snakepit.Bridge.SessionIntegrationTest do
       ]
 
       for {type, value} <- test_cases do
-        assert {:ok, encoded} = Serialization.encode_any(value, type)
+        assert {:ok, encoded, _binary_data} = Serialization.encode_any(value, type)
         assert is_binary(encoded.type_url)
         assert is_binary(encoded.value)
         assert String.starts_with?(encoded.type_url, "type.googleapis.com/snakepit.")

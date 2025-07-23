@@ -295,7 +295,7 @@ defmodule Snakepit.Bridge.PythonIntegrationTest do
         assert retrieved.type == type
 
         # Test serialization roundtrip
-        assert {:ok, encoded} = Serialization.encode_any(value, type)
+        assert {:ok, encoded, _binary_data} = Serialization.encode_any(value, type)
         assert {:ok, decoded} = Serialization.decode_any(encoded)
         assert decoded == value
 
