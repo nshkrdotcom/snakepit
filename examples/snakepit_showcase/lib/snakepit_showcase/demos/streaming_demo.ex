@@ -27,7 +27,7 @@ defmodule SnakepitShowcase.Demos.StreamingDemo do
     
     IO.puts("   Processing 10 steps with progress updates...")
     
-    {:ok, stream} = Snakepit.execute_streaming("stream_progress", %{steps: 10})
+    {:ok, stream} = Snakepit.execute_stream("stream_progress", %{steps: 10})
     
     stream
     |> Enum.each(fn chunk ->
@@ -42,7 +42,7 @@ defmodule SnakepitShowcase.Demos.StreamingDemo do
     
     IO.puts("   Streaming Fibonacci sequence...")
     
-    {:ok, stream} = Snakepit.execute_streaming("stream_fibonacci", %{count: 20})
+    {:ok, stream} = Snakepit.execute_stream("stream_fibonacci", %{count: 20})
     
     stream
     |> Enum.take(10)
@@ -58,7 +58,7 @@ defmodule SnakepitShowcase.Demos.StreamingDemo do
     
     IO.puts("   Generating and streaming large dataset...")
     
-    {:ok, stream} = Snakepit.execute_streaming("generate_dataset", %{
+    {:ok, stream} = Snakepit.execute_stream("generate_dataset", %{
       rows: 1000,
       chunk_size: 100
     })
@@ -79,7 +79,7 @@ defmodule SnakepitShowcase.Demos.StreamingDemo do
     IO.puts("   Starting long-running stream...")
     
     task = Task.async(fn ->
-      {:ok, stream} = Snakepit.execute_streaming("infinite_stream", %{delay_ms: 500})
+      {:ok, stream} = Snakepit.execute_stream("infinite_stream", %{delay_ms: 500})
       
       stream
       |> Stream.take(5)

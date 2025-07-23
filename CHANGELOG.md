@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Binary fields in protobuf messages: `Variable.binary_value`, `SetVariableRequest.binary_value`, etc.
 - 5-10x performance improvement for large numerical data transfers
 - Zero-configuration binary encoding with automatic threshold detection
+- Comprehensive showcase application (`examples/snakepit_showcase`) demonstrating all features
+- Dedicated binary serialization demo with performance benchmarks
 
 ### Changed
 - `Serialization.encode_any/2` now returns a 3-tuple `{:ok, any_map, binary_data}`
