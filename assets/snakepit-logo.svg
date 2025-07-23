@@ -1,20 +1,60 @@
 <svg width="256px" height="256px" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" version="1.1">
-  <polygon points="50,5 93,27.5 93,72.5 50,95 7,72.5 7,27.5" fill="#4e2a8e" />
+  <defs>
+    <linearGradient id="snakeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00e5ff; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00a1b3; stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
 
-  <g transform="translate(1, 2)">
-    <path d="M 62,64
-             C 72,64 72,52 62,52
-             C 52,52 52,40 62,40
-             C 70,40 70,30 62,30
-             L 50,30"
-          fill="none" 
-          stroke="#3776ab" 
-          stroke-width="7" 
-          stroke-linecap="round" 
-          stroke-linejoin="round"/>
+  <polygon 
+      points="50,5 95,27.5 95,72.5 50,95 5,72.5 5,27.5" 
+      fill="#2a164f" 
+      stroke="#4e2a8e"
+      stroke-width="3"
+  />
+
+  <g transform="translate(0, 5)">
+    <g>
+      <path 
+          d="M 40,75 C 20,70 20,40 35,30 C 45,22 50,35 45,45 C 40,55 30,55 30,65 C 30,75 40,75 50,70"
+          fill="none"
+          stroke="url(#snakeGradient)" 
+          stroke-width="8" 
+          stroke-linecap="round"
+      />
+      <path 
+          d="M 35,30 L 25,25 L 32,22 C 38,20 42,25 35,30 Z"
+          fill="url(#snakeGradient)"
+          stroke="#1a1a1a"
+          stroke-width="1.5"
+      />
+      <circle cx="33" cy="26" r="1.5" fill="#ff4d4d" filter="url(#glow)"/>
+      <path d="M 23,24 L 20,22 L 22,20 Z" fill="#ffffff"/>
+    </g>
     
-    <path d="M 49,30 L 42,26 L 42,34 Z" fill="#3776ab" />
-    
-    <circle cx="44" cy="30" r="1.2" fill="#ffd43b"/>
+    <g transform="translate(100, 0) scale(-1, 1)">
+      <path 
+          d="M 40,75 C 20,70 20,40 35,30 C 45,22 50,35 45,45 C 40,55 30,55 30,65 C 30,75 40,75 50,70"
+          fill="none"
+          stroke="url(#snakeGradient)" 
+          stroke-width="8" 
+          stroke-linecap="round"
+      />
+      <path 
+          d="M 35,30 L 25,25 L 32,22 C 38,20 42,25 35,30 Z"
+          fill="url(#snakeGradient)"
+          stroke="#1a1a1a"
+          stroke-width="1.5"
+      />
+      <circle cx="33" cy="26" r="1.5" fill="#ff4d4d" filter="url(#glow)"/>
+      <path d="M 23,24 L 20,22 L 22,20 Z" fill="#ffffff"/>
+    </g>
   </g>
 </svg>
