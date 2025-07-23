@@ -53,28 +53,48 @@ defmodule SnakepitLoadtest.MixProject do
     Mix.Task.run("run", [
       "-e", 
       """
-      SnakepitLoadtest.Demos.BasicLoadDemo.run(#{workers})
-      
-      # Ensure proper shutdown
-      IO.puts("\nShutting down gracefully...")
-      # Application.stop(:snakepit)
+      # Use the new managed run function
+      Snakepit.run_as_script(fn ->
+        SnakepitLoadtest.Demos.BasicLoadDemo.run(#{workers})
+      end)
       """
     ])
   end
 
   defp stress_demo(args) do
     workers = parse_workers(args, 50)
-    Mix.Task.run("run", ["-e", "SnakepitLoadtest.Demos.StressTestDemo.run(#{workers})"])
+    Mix.Task.run("run", [
+      "-e", 
+      """
+      Snakepit.run_as_script(fn ->
+        SnakepitLoadtest.Demos.StressTestDemo.run(#{workers})
+      end)
+      """
+    ])
   end
 
   defp burst_demo(args) do
     workers = parse_workers(args, 100)
-    Mix.Task.run("run", ["-e", "SnakepitLoadtest.Demos.BurstLoadDemo.run(#{workers})"])
+    Mix.Task.run("run", [
+      "-e", 
+      """
+      Snakepit.run_as_script(fn ->
+        SnakepitLoadtest.Demos.BurstLoadDemo.run(#{workers})
+      end)
+      """
+    ])
   end
 
   defp sustained_demo(args) do
     workers = parse_workers(args, 20)
-    Mix.Task.run("run", ["-e", "SnakepitLoadtest.Demos.SustainedLoadDemo.run(#{workers})"])
+    Mix.Task.run("run", [
+      "-e", 
+      """
+      Snakepit.run_as_script(fn ->
+        SnakepitLoadtest.Demos.SustainedLoadDemo.run(#{workers})
+      end)
+      """
+    ])
   end
 
   defp parse_workers(args, default) do

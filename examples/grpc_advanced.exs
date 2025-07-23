@@ -15,9 +15,6 @@ Mix.install([
   {:protobuf, "~> 0.14.1"}
 ])
 
-# Start the Snakepit application
-{:ok, _} = Application.ensure_all_started(:snakepit)
-
 defmodule AdvancedExample do
   def run do
     IO.puts("\n=== Advanced gRPC Features Example ===\n")
@@ -279,12 +276,7 @@ defmodule AdvancedExample do
   end
 end
 
-# Run the example
-AdvancedExample.run()
-
-# Allow time for operations to complete
-Process.sleep(2000)
-
-# Graceful shutdown
-IO.puts("\nShutting down...")
-Application.stop(:snakepit)
+# Run the example with proper cleanup
+Snakepit.run_as_script(fn ->
+  AdvancedExample.run()
+end)

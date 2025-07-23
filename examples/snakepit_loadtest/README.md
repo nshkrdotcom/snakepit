@@ -136,3 +136,16 @@ P99: 3189.00ms
 - Large worker counts (>200) may require system tuning
 - Monitor system resources during stress tests
 - Results vary based on hardware and system load
+
+## Process Cleanup
+
+All demo tasks use `Snakepit.run_as_script/2` to ensure:
+- Proper pool initialization before tests begin
+- Complete cleanup of all Python processes on exit
+- No orphaned processes after demo completion
+
+This happens automatically - you'll see shutdown messages like:
+```
+[Snakepit] Script execution finished. Shutting down gracefully...
+[Snakepit] Shutdown complete.
+```

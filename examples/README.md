@@ -108,6 +108,15 @@ python examples/variable_usage.py
    elixir examples/grpc_concurrent.exs
    ```
 
+## Important: Process Cleanup
+
+All example scripts use `Snakepit.run_as_script/2` to ensure proper cleanup:
+- Pool initialization is deterministic (no race conditions)
+- All Python processes are terminated when the script exits
+- No orphaned processes remain after completion
+
+This is handled automatically - you don't need to worry about manual cleanup!
+
 ## Common Configuration
 
 All examples use similar configuration:

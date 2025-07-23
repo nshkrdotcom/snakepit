@@ -26,9 +26,17 @@ When Snakepit starts, it automatically:
 ### 3. **BEAM Run Identification**
 
 Each BEAM instance gets a unique run ID:
-- Generated using `:erlang.unique_integer([:positive, :monotonic])`
+- Generated using timestamp + random component for guaranteed uniqueness
+- Format: `"#{System.system_time(:microsecond)}_#{:rand.uniform(999_999)}"`
 - Stored with each process registration
 - Used to identify orphans from previous runs
+
+### 4. **Script and Demo Support**
+
+For short-lived scripts and demos, use `Snakepit.run_as_script/2`:
+- Ensures pool is fully initialized before execution
+- Guarantees proper cleanup of all processes on exit
+- No orphaned processes after script completion
 
 ## Architecture
 
@@ -59,14 +67,20 @@ Each BEAM instance gets a unique run ID:
 
 1. **ProcessRegistry Initialization**
    ```elixir
-   # Generate unique BEAM run ID
-   beam_run_id = :erlang.unique_integer([:positive, :monotonic])
+   # Generate unique BEAM run ID with timestamp + random
+   timestamp = System.system_time(:microsecond)
+   random_component = :rand.uniform(999_999)
+   beam_run_id = "#{timestamp}_#{random_component}"
    
-   # Open DETS file
+   # Open DETS file with node-specific naming
+   node_name = node() |> to_string() |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
+   dets_file = Path.join([priv_dir, "data", "process_registry_#{node_name}.dets"])
+   
    {:ok, dets_table} = :dets.open_file(@dets_table, [
      {:file, to_charlist(dets_file)},
      {:type, :set},
-     {:auto_save, 1000}  # Auto-save every second
+     {:auto_save, 1000},  # Auto-save every second
+     {:repair, true}      # Auto-repair corrupted files
    ])
    ```
 
@@ -119,6 +133,14 @@ Every 30 seconds, ProcessRegistry:
 - Checks for dead Elixir processes
 - Removes stale entries
 - Maintains registry consistency
+
+### Application Shutdown
+
+The ApplicationCleanup module ensures clean shutdown:
+- Traps exits to guarantee `terminate/2` is called
+- Sends SIGTERM to all processes for graceful shutdown
+- Falls back to SIGKILL for unresponsive processes
+- Final safety net using `pkill` for any missed processes
 
 ## Benefits
 
@@ -207,14 +229,24 @@ The DETS file is automatically managed, but if needed:
    - Large number of orphans can slow initial cleanup
    - Normal operation resumes after cleanup
 
+4. **Processes remain after Mix tasks**
+   - Use `Snakepit.run_as_script/2` for short-lived scripts
+   - This ensures proper application shutdown
+   - Example:
+     ```elixir
+     Snakepit.run_as_script(fn ->
+       # Your code here
+     end)
+     ```
+
 ## Future Enhancements
 
 Planned improvements include:
 
-1. **Process Group Support**: Using `setsid` for better subprocess management
-2. **Configurable Settings**: Expose cleanup intervals and timeouts
-3. **Health Metrics**: Telemetry integration for monitoring
-4. **Startup Hooks**: Allow custom cleanup strategies
+1. **Configurable Settings**: Expose cleanup intervals and timeouts
+2. **Health Metrics**: Telemetry integration for monitoring
+3. **Startup Hooks**: Allow custom cleanup strategies
+4. **Distributed Process Management**: Support for multi-node deployments
 
 ## Technical Details
 

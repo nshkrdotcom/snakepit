@@ -266,17 +266,10 @@ end
 
 # Run the demo
 if GRPCChecker.check_grpc_availability() do
-  GRPCStreamingDemo.run(pool_size)
-  
-  # *** CRITICAL: Explicit graceful shutdown to trigger terminate/2 callbacks ***
-  IO.puts("\n[Demo Script] All streaming tasks complete. Waiting for final cleanup...")
-  # Wait a moment to ensure all background logs are flushed
-
-  IO.puts("[Demo Script] Initiating graceful application shutdown...")
-  # This triggers the supervision tree teardown and calls terminate/2 callbacks
-  Application.stop(:snakepit)
-
-  IO.puts("[Demo Script] Shutdown complete. Exiting.")
+  # Run with proper cleanup
+  Snakepit.run_as_script(fn ->
+    GRPCStreamingDemo.run(pool_size)
+  end)
 else
   IO.puts("\n🛠️ Setup Required:")
   IO.puts("   1. Install gRPC dependencies: make install-grpc")

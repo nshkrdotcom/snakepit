@@ -399,6 +399,33 @@ case Snakepit.execute("risky_operation", %{threshold: 0.5}) do
 end
 ```
 
+#### Running Scripts and Demos
+
+For short-lived scripts, Mix tasks, or demos that need to execute and exit cleanly, use `run_as_script/2`:
+
+```elixir
+# In a Mix task or script
+Snakepit.run_as_script(fn ->
+  # Your code here - all workers will be properly cleaned up on exit
+  {:ok, result} = Snakepit.execute("process_data", %{data: large_dataset})
+  IO.inspect(result)
+end)
+
+# With custom timeout for pool initialization
+Snakepit.run_as_script(fn ->
+  results = Enum.map(1..100, fn i ->
+    {:ok, result} = Snakepit.execute("compute", %{value: i})
+    result
+  end)
+  IO.puts("Processed #{length(results)} items")
+end, timeout: 30_000)
+```
+
+This ensures:
+- The pool waits for all workers to be ready before executing
+- All Python/external processes are properly terminated on exit
+- No orphaned processes remain after your script completes
+
 #### Session-Based State Management
 
 ```elixir

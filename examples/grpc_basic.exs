@@ -15,9 +15,6 @@ Mix.install([
   {:protobuf, "~> 0.14.1"}
 ])
 
-# Start the Snakepit application
-{:ok, _} = Application.ensure_all_started(:snakepit)
-
 defmodule BasicExample do
   def run do
     IO.puts("\n=== Basic gRPC Example ===\n")
@@ -69,12 +66,7 @@ defmodule BasicExample do
   end
 end
 
-# Run the example
-BasicExample.run()
-
-# Allow time for operations to complete
-Process.sleep(1000)
-
-# Graceful shutdown
-IO.puts("\nShutting down...")
-Application.stop(:snakepit)
+# Run the example with proper cleanup
+Snakepit.run_as_script(fn ->
+  BasicExample.run()
+end)
