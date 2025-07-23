@@ -40,7 +40,7 @@ defmodule SnakepitShowcase.Demos.VariablesDemo do
     ]
     
     Enum.each(variables, fn {name, type, initial, constraints} ->
-      {:ok, result} = Snakepit.execute_in_session(session_id, "register_variable", %{
+      {:ok, _result} = Snakepit.execute_in_session(session_id, "register_variable", %{
         name: name,
         type: type,
         initial_value: initial,
@@ -131,7 +131,7 @@ defmodule SnakepitShowcase.Demos.VariablesDemo do
       }) do
         {:ok, _} ->
           IO.puts("   ❌ Expected validation error for #{name} = #{inspect(value)}")
-        {:error, reason} ->
+        {:error, _reason} ->
           IO.puts("   ✅ Validation caught: #{name} = #{inspect(value)}")
           IO.puts("      Error: #{expected_error}")
       end

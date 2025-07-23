@@ -89,7 +89,7 @@ defmodule SnakepitShowcase.Demos.MLWorkflowDemo do
     # Train model with streaming progress
     IO.puts("   Training Random Forest classifier...")
     
-    {:ok, stream} = Snakepit.execute_streaming_in_session(
+    {:ok, stream} = Snakepit.execute_in_session_stream(
       session_id, 
       "train_model",
       %{
