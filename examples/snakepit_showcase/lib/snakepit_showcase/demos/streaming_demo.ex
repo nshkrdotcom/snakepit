@@ -81,7 +81,6 @@ defmodule SnakepitShowcase.Demos.StreamingDemo do
     end)
     
     # Let it run for a bit
-    Process.sleep(2000)
     
     # Cancel the task
     Task.shutdown(task, :brutal_kill)

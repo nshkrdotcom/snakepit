@@ -26,11 +26,6 @@ defmodule SnakepitShowcase.Demos.BinaryDemo do
       IO.puts("\n🧹 Cleaning up...")
       Snakepit.execute_in_session(session_id, "cleanup", %{})
       # Give time for cleanup to complete
-      Process.sleep(100)
-      
-      # Force shutdown of Snakepit to ensure Python processes are cleaned up
-      IO.puts("📛 Shutting down Snakepit...")
-      Application.stop(:snakepit)
     end
     
     :ok
