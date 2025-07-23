@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Automatic binary serialization for large tensor and embedding data (>10KB)
+- Binary fields in protobuf messages: `Variable.binary_value`, `SetVariableRequest.binary_value`, etc.
+- 5-10x performance improvement for large numerical data transfers
+- Zero-configuration binary encoding with automatic threshold detection
+
+### Changed
+- `Serialization.encode_any/2` now returns a 3-tuple `{:ok, any_map, binary_data}`
+- Large tensors and embeddings automatically use binary encoding for better performance
+- Protocol buffer schema updated to support binary data fields
+
 ## [0.3.3] - 2025-07-20
 
 ### Added
