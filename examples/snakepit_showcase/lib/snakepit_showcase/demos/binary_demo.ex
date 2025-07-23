@@ -9,20 +9,25 @@ defmodule SnakepitShowcase.Demos.BinaryDemo do
     # Create a session for our tests
     session_id = "binary_demo_#{System.unique_integer()}"
     
-    # Demo 1: Small tensor (uses JSON)
-    demo_small_tensor(session_id)
-    
-    # Demo 2: Large tensor (uses binary)
-    demo_large_tensor(session_id)
-    
-    # Demo 3: Performance comparison
-    demo_performance_comparison(session_id)
-    
-    # Demo 4: Embeddings
-    demo_embeddings(session_id)
-    
-    # Cleanup
-    Snakepit.execute_in_session(session_id, "cleanup", %{})
+    try do
+      # Demo 1: Small tensor (uses JSON)
+      demo_small_tensor(session_id)
+      
+      # Demo 2: Large tensor (uses binary)
+      demo_large_tensor(session_id)
+      
+      # Demo 3: Performance comparison
+      demo_performance_comparison(session_id)
+      
+      # Demo 4: Embeddings
+      demo_embeddings(session_id)
+    after
+      # Ensure proper cleanup
+      IO.puts("\n🧹 Cleaning up...")
+      Snakepit.execute_in_session(session_id, "cleanup", %{})
+      # Give time for cleanup to complete
+      Process.sleep(100)
+    end
     
     :ok
   end
@@ -72,26 +77,18 @@ defmodule SnakepitShowcase.Demos.BinaryDemo do
   defp demo_performance_comparison(session_id) do
     IO.puts("\n3️⃣ Performance Comparison")
     
-    sizes = [
-      {[10, 10], "100 elements (800B)"},
-      {[50, 50], "2,500 elements (20KB)"},
-      {[100, 100], "10,000 elements (80KB)"},
-      {[200, 200], "40,000 elements (320KB)"}
-    ]
+    # Run the benchmark
+    {:ok, result} = Snakepit.execute_in_session(session_id, "benchmark_encoding", %{
+      start_kb: 1,
+      end_kb: 40,
+      step_kb: 10
+    })
     
-    IO.puts("\n   Shape      | Size       | JSON (ms) | Binary (ms) | Speedup")
-    IO.puts("   -----------|------------|-----------|-------------|--------")
+    IO.puts("\n   Size (KB) | Encoding | JSON (ms) | Binary (ms) | Speedup")
+    IO.puts("   ----------|----------|-----------|-------------|--------")
     
-    Enum.each(sizes, fn {shape, desc} ->
-      # Force JSON encoding
-      json_time = measure_encoding(session_id, shape, false)
-      
-      # Force binary encoding
-      binary_time = measure_encoding(session_id, shape, true)
-      
-      speedup = if binary_time > 0, do: json_time / binary_time, else: 0
-      
-      IO.puts("   #{format_shape(shape)} | #{pad_string(desc, 10)} | #{pad_number(json_time, 9)} | #{pad_number(binary_time, 11)} | #{:io_lib.format("~.1fx", [speedup])}")
+    Enum.each(result["results"], fn res ->
+      IO.puts("   #{pad_number(res["size_kb"], 9)} | #{pad_string(res["encoding"], 8)} | #{pad_number(res["json_time_ms"], 9)} | #{pad_number(res["binary_time_ms"], 11)} | #{res["speedup"]}x")
     end)
   end
 
@@ -99,33 +96,27 @@ defmodule SnakepitShowcase.Demos.BinaryDemo do
     IO.puts("\n4️⃣ Embeddings Demo")
     
     # Create embeddings of different sizes
-    embedding_sizes = [128, 512, 1024, 2048]
+    embedding_configs = [
+      {"short text", 128},
+      {"medium length text for embedding", 512},
+      {"long text that will generate a larger embedding vector", 1024},
+      {"very long text with lots of content that will generate a much larger embedding vector for demonstration purposes", 2048}
+    ]
     
     IO.puts("\n   Testing embedding sizes...")
     
-    Enum.each(embedding_sizes, fn size ->
+    Enum.each(embedding_configs, fn {text, dimensions} ->
       {:ok, result} = Snakepit.execute_in_session(session_id, "create_embedding", %{
-        name: "embedding_#{size}",
-        dimensions: size,
-        batch_size: 32
+        text: text,
+        dimensions: dimensions
       })
       
-      IO.puts("   - #{size}D embedding (batch of 32):")
+      IO.puts("   - #{dimensions}D embedding:")
+      IO.puts("     Text: \"#{String.slice(text, 0, 30)}#{if String.length(text) > 30, do: "...", else: ""}\"")
       IO.puts("     Encoding: #{result["encoding"]}")
-      IO.puts("     Total size: #{result["total_bytes"]} bytes")
-      IO.puts("     Processing time: #{result["time_ms"]}ms")
+      IO.puts("     Size: #{result["size_bytes"]} bytes")
+      IO.puts("     Norm: #{result["norm"]}")
     end)
-  end
-
-  defp measure_encoding(session_id, shape, force_binary) do
-    start_time = System.monotonic_time(:millisecond)
-    
-    Snakepit.execute_in_session(session_id, "benchmark_encoding", %{
-      shape: shape,
-      force_binary: force_binary
-    })
-    
-    System.monotonic_time(:millisecond) - start_time
   end
 
   defp format_shape([x, y]), do: "[#{x}, #{y}]" |> String.pad_trailing(9)

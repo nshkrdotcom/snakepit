@@ -44,7 +44,15 @@ defmodule SnakepitShowcase.MixProject do
       setup: ["deps.get"],
       demo: ["run --no-halt"],
       "demo.all": ["run --no-halt -e SnakepitShowcase.DemoRunner.run_all()"],
-      "demo.interactive": ["run --no-halt -e SnakepitShowcase.DemoRunner.interactive()"]
+      "demo.interactive": ["run --no-halt -e SnakepitShowcase.DemoRunner.interactive()"],
+      "demo.basic": ["run --no-halt -e SnakepitShowcase.Demos.BasicDemo.run()"],
+      "demo.session": ["run --no-halt -e SnakepitShowcase.Demos.SessionDemo.run()"],
+      "demo.streaming": ["run --no-halt -e SnakepitShowcase.Demos.StreamingDemo.run()"],
+      "demo.concurrent": ["run --no-halt -e SnakepitShowcase.Demos.ConcurrentDemo.run()"],
+      "demo.variables": ["run --no-halt -e SnakepitShowcase.Demos.VariablesDemo.run()"],
+      "demo.binary": ["run -e SnakepitShowcase.Demos.BinaryDemo.run()"],
+      "demo.ml_workflow": ["run --no-halt -e SnakepitShowcase.Demos.MLWorkflowDemo.run()"],
+      "demo.execution_modes": ["run --no-halt -e SnakepitShowcase.Demos.ExecutionModesDemo.run()"]
     ]
   end
 end
