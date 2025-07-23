@@ -179,6 +179,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
         {:error, reason} ->
           Logger.error("Failed to open DETS file: #{inspect(reason)}. Deleting and recreating...")
           File.rm(dets_file)
+
           {:ok, table} =
             :dets.open_file(@dets_table, [
               {:file, to_charlist(dets_file)},
@@ -306,15 +307,18 @@ defmodule Snakepit.Pool.ProcessRegistry do
   @impl true
   def handle_call(:debug_show_all_entries, _from, state) do
     all_entries = :dets.match_object(state.dets_table, :_)
-    entries_info = Enum.map(all_entries, fn {worker_id, info} ->
-      %{
-        worker_id: worker_id,
-        process_pid: info.process_pid,
-        beam_run_id: info.beam_run_id,
-        is_current_run: info.beam_run_id == state.beam_run_id,
-        process_alive: process_alive?(info.process_pid)
-      }
-    end)
+
+    entries_info =
+      Enum.map(all_entries, fn {worker_id, info} ->
+        %{
+          worker_id: worker_id,
+          process_pid: info.process_pid,
+          beam_run_id: info.beam_run_id,
+          is_current_run: info.beam_run_id == state.beam_run_id,
+          process_alive: process_alive?(info.process_pid)
+        }
+      end)
+
     {:reply, {entries_info, state.beam_run_id}, state}
   end
 
@@ -340,7 +344,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
   @impl true
   def terminate(reason, state) do
     Logger.info("Snakepit Pool Process Registry terminating: #{inspect(reason)}")
-    
+
     # Log current state before closing
     all_entries = :dets.match_object(state.dets_table, :_)
     Logger.info("ProcessRegistry terminating with #{length(all_entries)} entries in DETS")
@@ -387,47 +391,58 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
           # Try graceful shutdown first with the process group
           pid_str = to_string(info.process_pid)
-          
+
           # First try SIGTERM to the process group (negative PID)
           case System.cmd("kill", ["-TERM", "-#{pid_str}"], stderr_to_stdout: true) do
             {_output, 0} ->
               Logger.info("Sent SIGTERM to process group #{pid_str}")
+
             {output, _} ->
               Logger.warning("Failed to kill process group, trying individual process: #{output}")
               # Fallback to killing just the process
               System.cmd("kill", ["-TERM", pid_str], stderr_to_stdout: true)
           end
-          
+
           # Immediately force kill - no waiting
           if process_alive?(info.process_pid) do
-            Logger.warning("Process #{info.process_pid} still alive after SIGTERM, force killing...")
-            
+            Logger.warning(
+              "Process #{info.process_pid} still alive after SIGTERM, force killing..."
+            )
+
             # Try SIGKILL to process group first
             case System.cmd("kill", ["-KILL", "-#{pid_str}"], stderr_to_stdout: true) do
               {_output, 0} ->
                 Logger.info("Sent SIGKILL to process group #{pid_str}")
+
               {output, _} ->
-                Logger.warning("Failed to force kill process group, trying individual process: #{output}")
+                Logger.warning(
+                  "Failed to force kill process group, trying individual process: #{output}"
+                )
+
                 # Fallback to killing just the process
                 System.cmd("kill", ["-KILL", pid_str], stderr_to_stdout: true)
             end
-            
+
             # Also try pkill as a last resort
             if process_alive?(info.process_pid) do
-              Logger.error("Process #{info.process_pid} STILL alive after SIGKILL, trying more aggressive methods...")
-              
+              Logger.error(
+                "Process #{info.process_pid} STILL alive after SIGKILL, trying more aggressive methods..."
+              )
+
               # Try to kill by session ID
               case System.cmd("pkill", ["-KILL", "-s", pid_str], stderr_to_stdout: true) do
                 {output, 0} -> Logger.info("Killed processes in session #{pid_str}")
                 {output, _} -> Logger.warning("Failed to kill by session: #{output}")
               end
-              
+
               # Try to kill all python processes started by this worker
-              case System.cmd("pkill", ["-KILL", "-f", "grpc_server.py.*--port"], stderr_to_stdout: true) do
+              case System.cmd("pkill", ["-KILL", "-f", "grpc_server.py.*--port"],
+                     stderr_to_stdout: true
+                   ) do
                 {output, 0} -> Logger.info("Killed matching Python processes")
                 {output, _} -> Logger.warning("Failed to kill Python processes: #{output}")
               end
-              
+
               # Final check - if STILL alive, it might be a zombie
               if process_alive?(info.process_pid) do
                 Logger.error("Process #{info.process_pid} appears to be a zombie or unkillable!")
@@ -449,7 +464,9 @@ defmodule Snakepit.Pool.ProcessRegistry do
       :dets.delete(dets_table, worker_id)
     end)
 
-    Logger.info("Orphan cleanup complete. Killed #{killed_count} processes, removed #{length(orphans)} entries.")
+    Logger.info(
+      "Orphan cleanup complete. Killed #{killed_count} processes, removed #{length(orphans)} entries."
+    )
   end
 
   defp load_current_run_processes(dets_table, ets_table, beam_run_id) do
@@ -473,37 +490,40 @@ defmodule Snakepit.Pool.ProcessRegistry do
       {_output, 0} ->
         Logger.debug("Process #{pid} is alive (kill -0 succeeded)")
         true
-        
+
       {_output, _} ->
         # Double-check with ps to avoid false negatives
-        case System.cmd("ps", ["-p", to_string(pid), "-o", "pid,stat,cmd"], stderr_to_stdout: true) do
+        case System.cmd("ps", ["-p", to_string(pid), "-o", "pid,stat,cmd"],
+               stderr_to_stdout: true
+             ) do
           {output, 0} ->
             lines = String.split(output, "\n")
             pid_str = to_string(pid)
-            
+
             # Look for the PID in the output, checking for zombie status
-            alive = Enum.any?(lines, fn line ->
-              if String.contains?(line, pid_str) && !String.contains?(line, "PID") do
-                # Check if it's a zombie (Z in STAT column)
-                if String.contains?(line, "<defunct>") || String.contains?(line, " Z ") do
-                  Logger.debug("Process #{pid} is a zombie")
-                  false
+            alive =
+              Enum.any?(lines, fn line ->
+                if String.contains?(line, pid_str) && !String.contains?(line, "PID") do
+                  # Check if it's a zombie (Z in STAT column)
+                  if String.contains?(line, "<defunct>") || String.contains?(line, " Z ") do
+                    Logger.debug("Process #{pid} is a zombie")
+                    false
+                  else
+                    true
+                  end
                 else
-                  true
+                  false
                 end
-              else
-                false
-              end
-            end)
-            
+              end)
+
             if alive do
               Logger.debug("Process #{pid} is alive (found in ps)")
             else
               Logger.debug("Process #{pid} not found or is zombie")
             end
-            
+
             alive
-            
+
           {output, exit_code} ->
             Logger.debug("ps command failed with exit code #{exit_code}: #{output}")
             false
