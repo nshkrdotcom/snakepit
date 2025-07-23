@@ -12,15 +12,12 @@ defmodule SnakepitLoadtest.Demos.BurstLoadDemo do
     IO.puts("Pattern: Gradual ramp-up → Peak burst → Cool down")
     IO.puts("Duration: ~45 seconds\n")
 
-    # Configure for burst handling
-    pool_size = min(div(peak_workers, 3), 50)
-    Application.put_env(:snakepit, :pool_config, %{
-      pool_size: pool_size,
-      max_overflow: pool_size * 2,  # Allow significant overflow for bursts
-      strategy: :lifo  # LIFO better for burst scenarios
-    })
-
-    {:ok, _} = Application.ensure_all_started(:snakepit)
+    # Configure for burst handling - start with smaller pool to avoid eagain
+    pool_size = min(div(peak_workers, 10), 10)  # Start with max 10 workers
+    IO.puts("Pool size: #{pool_size} workers")
+    
+    # Don't restart Snakepit - just use the existing pool
+    # The pool is already configured from config.exs with showcase adapter
 
     # Execute burst pattern
     results = execute_burst_pattern(peak_workers)

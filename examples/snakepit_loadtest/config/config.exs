@@ -11,6 +11,7 @@ config :snakepit,
   # Use the ShowcaseAdapter which has the required tools
   python_adapter: "snakepit_bridge.adapters.showcase.showcase_adapter.ShowcaseAdapter",
   pool_config: %{
+    pool_size: 10,  # Start with smaller pool to avoid eagain errors
     adapter_args: ["--adapter", "snakepit_bridge.adapters.showcase.showcase_adapter.ShowcaseAdapter"]
   }
 
