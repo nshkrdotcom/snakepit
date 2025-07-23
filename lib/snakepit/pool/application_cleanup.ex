@@ -51,26 +51,50 @@ defmodule Snakepit.Pool.ApplicationCleanup do
 
     if Enum.any?(all_pids) do
       Logger.warning(
-        "🔥 ApplicationCleanup found #{length(all_pids)} surviving processes. Forcefully terminating with SIGKILL."
+        "🔥 ApplicationCleanup found #{length(all_pids)} surviving processes. Starting graceful termination..."
       )
 
-      # No more grace. Just kill everything that's left.
-      sigkill_count = send_signal_to_processes(all_pids, "KILL")
-      Logger.warning("✅ SIGKILL sent to #{sigkill_count} surviving processes")
+      # First try SIGTERM for graceful shutdown
+      sigterm_count = send_signal_to_processes(all_pids, "TERM")
+      Logger.info("Sent SIGTERM to #{sigterm_count} processes")
+
+      # Immediately check which processes are still alive
+      # In production, you might want to add a small delay here for graceful shutdown
+      still_alive = Enum.filter(all_pids, &process_still_alive?/1)
+
+      if Enum.any?(still_alive) do
+        Logger.warning(
+          "⚠️  #{length(still_alive)} processes survived SIGTERM. Forcefully terminating with SIGKILL."
+        )
+
+        sigkill_count = send_signal_to_processes(still_alive, "KILL")
+        Logger.warning("✅ SIGKILL sent to #{sigkill_count} surviving processes")
+      else
+        Logger.info("✅ All processes terminated gracefully with SIGTERM")
+      end
     else
       Logger.info(
         "✅ ApplicationCleanup confirms all external processes were shut down correctly."
       )
     end
-    
-    # Final fallback: kill any Python grpc_server processes that might have been missed
+
+    # Final fallback: kill any Python grpc_server processes from THIS beam run that might have been missed
     # This handles cases where setsid PIDs don't match actual process PIDs
-    case System.cmd("pkill", ["-9", "-f", "grpc_server.py.*--port.*--elixir-address"], stderr_to_stdout: true) do
+    # Using the beam_run_id makes this much more targeted and safe
+    beam_run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
+
+    case System.cmd("pkill", ["-9", "-f", "grpc_server.py.*--snakepit-run-id #{beam_run_id}"],
+           stderr_to_stdout: true
+         ) do
       {_output, 0} ->
-        Logger.info("🧹 Final cleanup: killed any remaining grpc_server.py processes")
+        Logger.info(
+          "🧹 Final cleanup: killed any remaining grpc_server.py processes from run #{beam_run_id}"
+        )
+
       {_output, 1} ->
         # Exit code 1 means no processes found, which is fine
         :ok
+
       {output, code} ->
         Logger.warning("pkill returned unexpected code #{code}: #{output}")
     end
@@ -94,15 +118,29 @@ defmodule Snakepit.Pool.ApplicationCleanup do
       # First check if process exists
       case System.cmd("kill", ["-0", "#{pid}"], stderr_to_stdout: true) do
         {_output, 0} ->
-          # Process exists, now kill it
-          case System.cmd("kill", ["-#{signal}", "#{pid}"], stderr_to_stdout: true) do
-            {_output, 0} -> 
-              Logger.debug("Successfully sent #{signal} to PID #{pid}")
+          # Process exists, try to kill the process group first
+          case System.cmd("kill", ["-#{signal}", "-#{pid}"], stderr_to_stdout: true) do
+            {_output, 0} ->
+              Logger.debug("Successfully sent #{signal} to process group #{pid}")
               :ok
-            {error, _} -> 
-              Logger.debug("Failed to send #{signal} to PID #{pid}: #{error}")
-              :error
+
+            {error, _} ->
+              Logger.debug(
+                "Failed to send #{signal} to process group #{pid}: #{error}, trying individual process"
+              )
+
+              # Fallback to killing just the individual process
+              case System.cmd("kill", ["-#{signal}", "#{pid}"], stderr_to_stdout: true) do
+                {_output, 0} ->
+                  Logger.debug("Successfully sent #{signal} to individual process #{pid}")
+                  :ok
+
+                {error, _} ->
+                  Logger.debug("Failed to send #{signal} to process #{pid}: #{error}")
+                  :error
+              end
           end
+
         {_output, _} ->
           # Process doesn't exist
           Logger.debug("Process #{pid} doesn't exist, skipping")
@@ -113,20 +151,41 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     end
   end
 
+  # Check if a process is still alive
+  defp process_still_alive?(pid) when is_integer(pid) do
+    case System.cmd("kill", ["-0", "#{pid}"], stderr_to_stdout: true) do
+      {_output, 0} -> true
+      {_output, _} -> false
+    end
+  end
+
+  defp process_still_alive?(_), do: false
+
   # Keep the old function for manual cleanup calls
   defp force_kill_worker_processes(pids) do
     Enum.reduce(pids, 0, fn pid, acc ->
       try do
         # Kill process group first (negative PID)
+        # This is the proper way to kill all processes in a process group
         case System.cmd("kill", ["-KILL", "-#{pid}"], stderr_to_stdout: true) do
           {_output, 0} ->
+            Logger.debug("Successfully killed process group #{pid}")
             acc + 1
 
-          {_error, _} ->
+          {error, exit_code} ->
+            Logger.debug(
+              "Failed to kill process group #{pid} (exit code: #{exit_code}): #{error}"
+            )
+
             # Fallback to single process kill
             case System.cmd("kill", ["-KILL", "#{pid}"], stderr_to_stdout: true) do
-              {_output, 0} -> acc + 1
-              {_error, _} -> acc
+              {_output, 0} ->
+                Logger.debug("Successfully killed individual process #{pid}")
+                acc + 1
+
+              {error, exit_code} ->
+                Logger.debug("Failed to kill process #{pid} (exit code: #{exit_code}): #{error}")
+                acc
             end
         end
       rescue

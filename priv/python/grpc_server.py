@@ -547,6 +547,8 @@ def main():
                         help='Python module path to adapter class')
     parser.add_argument('--elixir-address', type=str, required=True,
                         help='Address of the Elixir gRPC server (e.g., localhost:50051)')
+    parser.add_argument('--snakepit-run-id', type=str, default='',
+                        help='Snakepit run ID for process cleanup')
     
     args = parser.parse_args()
     
