@@ -100,18 +100,19 @@ class SessionContext:
     intelligent caching to minimize gRPC calls.
     """
     
-    def __init__(self, stub: BridgeServiceStub, session_id: str):
+    def __init__(self, stub: BridgeServiceStub, session_id: str, strict_mode: bool = False):
         self.stub = stub
         self.session_id = session_id
         self._cache: Dict[str, CachedVariable] = {}
         self._cache_lock = Lock()
         self._default_ttl = timedelta(seconds=5)
         self._proxies: Dict[str, VariableProxy] = {}
+        self.strict_mode = strict_mode
         
         # Tool registry remains from Stage 0
         self._tools = {}
         
-        logger.info(f"Created SessionContext for session {session_id}")
+        logger.info(f"Created SessionContext for session {session_id} (strict_mode={strict_mode})")
     
     def __enter__(self):
         """Support using SessionContext as a context manager."""
@@ -164,7 +165,7 @@ class SessionContext:
             validate_constraints(validated_value, var_type, constraints)
         
         # Serialize for gRPC
-        value_any = serialize_value(validated_value, var_type)
+        value_any, binary_data = serialize_value(validated_value, var_type)
         
         # Convert constraints to JSON
         import json
@@ -176,7 +177,8 @@ class SessionContext:
             type=var_type.value,
             initial_value=value_any,
             constraints_json=constraints_json,
-            metadata=metadata or {}
+            metadata=metadata or {},
+            initial_binary_value=binary_data if binary_data else b""
         )
         
         response = self.stub.RegisterVariable(request)
@@ -249,7 +251,8 @@ class SessionContext:
         # Deserialize and return value
         return deserialize_value(
             variable.value,
-            VariableType(variable.type)
+            VariableType(variable.type),
+            variable.binary_value if variable.binary_value else None
         )
     
     def update_variable(
@@ -289,13 +292,14 @@ class SessionContext:
         validated_value = validator.validate(new_value)
         
         # Serialize for gRPC
-        value_any = serialize_value(validated_value, var_type)
+        value_any, binary_data = serialize_value(validated_value, var_type)
         
         request = SetVariableRequest(
             session_id=self.session_id,
             variable_identifier=identifier,
             value=value_any,
-            metadata=metadata or {}
+            metadata=metadata or {},
+            binary_value=binary_data if binary_data else b""
         )
         
         response = self.stub.SetVariable(request)
@@ -421,7 +425,7 @@ class SessionContext:
             # Process found variables
             for var_id, var in response.variables.items():
                 var_type = VariableType(var.type)
-                value = deserialize_value(var.value, var_type)
+                value = deserialize_value(var.value, var_type, var.binary_value if var.binary_value else None)
                 
                 # Update result
                 result[var_id] = value
@@ -466,6 +470,7 @@ class SessionContext:
         
         # Prepare updates with proper serialization
         serialized_updates = {}
+        binary_updates = {}
         for identifier, new_value in updates.items():
             # Get variable type from cache
             with self._cache_lock:
@@ -477,13 +482,17 @@ class SessionContext:
             # Validate and serialize
             validator = TypeValidator.get_validator(var_type)
             validated = validator.validate(new_value)
-            serialized_updates[identifier] = serialize_value(validated, var_type)
+            value_any, binary_data = serialize_value(validated, var_type)
+            serialized_updates[identifier] = value_any
+            if binary_data:
+                binary_updates[identifier] = binary_data
         
         request = BatchSetVariablesRequest(
             session_id=self.session_id,
             updates=serialized_updates,
             atomic=atomic,
-            metadata=metadata or {}
+            metadata=metadata or {},
+            binary_updates=binary_updates
         )
         
         response = self.stub.SetVariables(request)
@@ -511,11 +520,21 @@ class SessionContext:
         return self.get_variable(name)
     
     def __setitem__(self, name: str, value: Any):
-        """Allow dict-style updates: ctx['temperature'] = 0.8"""
+        """
+        Allow dict-style updates: ctx['temperature'] = 0.8
+        
+        In strict mode, only allows updating existing variables.
+        In normal mode, auto-registers new variables.
+        """
         try:
             self.update_variable(name, value)
         except VariableNotFoundError:
-            # Auto-register if doesn't exist
+            if self.strict_mode:
+                raise VariableNotFoundError(
+                    f"Variable '{name}' not found. In strict mode, variables must be explicitly "
+                    f"registered with register_variable() before assignment."
+                )
+            # Auto-register if doesn't exist (non-strict mode)
             var_type = TypeValidator.infer_type(value)
             self.register_variable(name, var_type, value)
     

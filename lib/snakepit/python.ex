@@ -349,6 +349,12 @@ defmodule Snakepit.Python do
   @doc """
   Create and configure DSPy programs with simplified syntax.
 
+  ## ⚠️ SECURITY WARNING
+
+  The `:module` program type executes arbitrary Python code via `exec()`.
+  This is a SIGNIFICANT SECURITY RISK. Only use `:module` with trusted code
+  that you have written or thoroughly reviewed. NEVER use with user input.
+
   ## Examples
 
       # Simple Q&A program
@@ -395,6 +401,18 @@ defmodule Snakepit.Python do
           "dspy.Retrieve"
 
         :module ->
+          # ⚠️ SECURITY WARNING: This executes arbitrary Python code! ⚠️
+          # The :module type uses exec() to execute the provided class_definition.
+          # This is a SIGNIFICANT SECURITY RISK if used with untrusted input.
+          # 
+          # ONLY use this with:
+          # - Code you have written yourself
+          # - Code from trusted sources that you have reviewed
+          # - NEVER with user-provided code or code from external sources
+          #
+          # Consider using predefined program types (:predict, :chain_of_thought, etc.)
+          # instead of custom modules when possible.
+          #
           # For custom modules, execute the class definition first
           class_def = Map.get(params, :class_definition)
 

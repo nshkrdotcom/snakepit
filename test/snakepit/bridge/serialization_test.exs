@@ -6,28 +6,28 @@ defmodule Snakepit.Bridge.SerializationTest do
   describe "basic type serialization" do
     test "float serialization round-trip" do
       value = 3.14
-      {:ok, any} = Serialization.encode_any(value, :float)
+      {:ok, any, _binary_data} = Serialization.encode_any(value, :float)
       {:ok, decoded} = Serialization.decode_any(any)
       assert decoded == value
     end
 
     test "integer serialization round-trip" do
       value = 42
-      {:ok, any} = Serialization.encode_any(value, :integer)
+      {:ok, any, _binary_data} = Serialization.encode_any(value, :integer)
       {:ok, decoded} = Serialization.decode_any(any)
       assert decoded == value
     end
 
     test "string serialization round-trip" do
       value = "hello world"
-      {:ok, any} = Serialization.encode_any(value, :string)
+      {:ok, any, _binary_data} = Serialization.encode_any(value, :string)
       {:ok, decoded} = Serialization.decode_any(any)
       assert decoded == value
     end
 
     test "boolean serialization round-trip" do
       for value <- [true, false] do
-        {:ok, any} = Serialization.encode_any(value, :boolean)
+        {:ok, any, _binary_data} = Serialization.encode_any(value, :boolean)
         {:ok, decoded} = Serialization.decode_any(any)
         assert decoded == value
       end
@@ -37,14 +37,14 @@ defmodule Snakepit.Bridge.SerializationTest do
   describe "special float values" do
     test "infinity values" do
       for value <- [:infinity, :negative_infinity] do
-        {:ok, any} = Serialization.encode_any(value, :float)
+        {:ok, any, _binary_data} = Serialization.encode_any(value, :float)
         {:ok, decoded} = Serialization.decode_any(any)
         assert decoded == value
       end
     end
 
     test "NaN value" do
-      {:ok, any} = Serialization.encode_any(:nan, :float)
+      {:ok, any, _binary_data} = Serialization.encode_any(:nan, :float)
       {:ok, decoded} = Serialization.decode_any(any)
       assert decoded == :nan
     end
@@ -53,28 +53,28 @@ defmodule Snakepit.Bridge.SerializationTest do
   describe "complex type serialization" do
     test "choice serialization" do
       value = "option_a"
-      {:ok, any} = Serialization.encode_any(value, :choice)
+      {:ok, any, _binary_data} = Serialization.encode_any(value, :choice)
       {:ok, decoded} = Serialization.decode_any(any)
       assert decoded == value
     end
 
     test "module serialization" do
       value = "ChainOfThought"
-      {:ok, any} = Serialization.encode_any(value, :module)
+      {:ok, any, _binary_data} = Serialization.encode_any(value, :module)
       {:ok, decoded} = Serialization.decode_any(any)
       assert decoded == value
     end
 
     test "embedding serialization" do
       value = [0.1, 0.2, 0.3, 0.4]
-      {:ok, any} = Serialization.encode_any(value, :embedding)
+      {:ok, any, _binary_data} = Serialization.encode_any(value, :embedding)
       {:ok, decoded} = Serialization.decode_any(any)
       assert decoded == value
     end
 
     test "tensor serialization" do
       value = %{"shape" => [2, 3], "data" => [1, 2, 3, 4, 5, 6]}
-      {:ok, any} = Serialization.encode_any(value, :tensor)
+      {:ok, any, _binary_data} = Serialization.encode_any(value, :tensor)
       {:ok, decoded} = Serialization.decode_any(any)
       assert decoded == value
     end
@@ -112,7 +112,7 @@ defmodule Snakepit.Bridge.SerializationTest do
 
   describe "type validation" do
     test "float accepts integers" do
-      {:ok, any} = Serialization.encode_any(42, :float)
+      {:ok, any, _binary_data} = Serialization.encode_any(42, :float)
       {:ok, decoded} = Serialization.decode_any(any)
       assert decoded == 42.0
     end
@@ -122,13 +122,13 @@ defmodule Snakepit.Bridge.SerializationTest do
     end
 
     test "integer accepts whole number floats" do
-      {:ok, any} = Serialization.encode_any(42.0, :integer)
+      {:ok, any, _binary_data} = Serialization.encode_any(42.0, :integer)
       {:ok, decoded} = Serialization.decode_any(any)
       assert decoded == 42
     end
 
     test "embedding normalizes to floats" do
-      {:ok, any} = Serialization.encode_any([1, 2, 3], :embedding)
+      {:ok, any, _binary_data} = Serialization.encode_any([1, 2, 3], :embedding)
       {:ok, decoded} = Serialization.decode_any(any)
       assert decoded == [1.0, 2.0, 3.0]
     end
