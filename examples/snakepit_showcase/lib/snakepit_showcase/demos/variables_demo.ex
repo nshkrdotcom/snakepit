@@ -78,7 +78,7 @@ defmodule SnakepitShowcase.Demos.VariablesDemo do
     {:ok, result} = Snakepit.execute_in_session(session_id, "set_variable_with_history", %{
       name: "temperature",
       value: 0.5,
-      reason: "User requested lower creativity"
+      metadata: %{"reason" => "User requested lower creativity"}
     })
     IO.puts("   Updated with history: #{result["version"]}")
   end
