@@ -11,10 +11,6 @@ config :snakepit,
     pool_size: System.schedulers_online() * 2
   },
 
-  # Wire protocol configuration
-  # Options: :auto (negotiate), :msgpack, :json
-  wire_protocol: :auto,
-
   # Worker configuration
   worker_init_timeout: 20_000,
   worker_health_check_interval: 30_000,

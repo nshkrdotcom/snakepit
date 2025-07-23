@@ -1,2 +1,0 @@
-# MessagePack dependency for high-performance wire protocol
-msgpack>=1.0.5

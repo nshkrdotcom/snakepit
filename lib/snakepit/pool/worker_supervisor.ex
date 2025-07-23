@@ -35,8 +35,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
       {:ok, #PID<0.123.0>}
   """
   def start_worker(worker_id) when is_binary(worker_id) do
-    adapter = Application.get_env(:snakepit, :adapter_module)
-    worker_module = determine_worker_module(adapter)
+    worker_module = Snakepit.GRPCWorker
 
     # Start the permanent starter supervisor, not the transient worker directly
     # This gives us automatic worker restarts without Pool intervention
@@ -58,10 +57,6 @@ defmodule Snakepit.Pool.WorkerSupervisor do
         Logger.error("Failed to start worker starter for #{worker_id}: #{inspect(reason)}")
         error
     end
-  end
-
-  defp determine_worker_module(adapter) do
-    Snakepit.Utils.determine_worker_module(adapter)
   end
 
   @doc """

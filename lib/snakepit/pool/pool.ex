@@ -398,8 +398,7 @@ defmodule Snakepit.Pool do
   # Private Functions
 
   defp start_workers_concurrently(count, startup_timeout) do
-    adapter = Application.get_env(:snakepit, :adapter_module)
-    worker_module = determine_worker_module(adapter)
+    worker_module = Snakepit.GRPCWorker
 
     Logger.info("🚀 Starting concurrent initialization of #{count} workers...")
     Logger.info("📦 Using worker type: #{inspect(worker_module)}")
@@ -432,19 +431,6 @@ defmodule Snakepit.Pool do
         nil
     end)
     |> Enum.filter(&(&1 != nil))
-  end
-
-  defp determine_worker_module(adapter) do
-    result = Snakepit.Utils.determine_worker_module(adapter)
-
-    if result == Snakepit.GRPCWorker do
-      Logger.info("🔧 Adapter #{inspect(adapter)} uses gRPC, selecting GRPCWorker")
-    else
-      Logger.info("🔧 Adapter #{inspect(adapter)} uses standard protocol, selecting Worker")
-    end
-
-    Logger.info("🔧 Worker module selected: #{inspect(result)}")
-    result
   end
 
   defp checkout_worker(state, session_id) do
@@ -540,9 +526,8 @@ defmodule Snakepit.Pool do
         module
 
       _ ->
-        # Fallback: check adapter configuration
-        adapter = Application.get_env(:snakepit, :adapter_module)
-        determine_worker_module(adapter)
+        # Fallback: use GRPCWorker
+        Snakepit.GRPCWorker
     end
   end
 
