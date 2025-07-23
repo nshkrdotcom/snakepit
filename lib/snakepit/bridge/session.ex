@@ -127,7 +127,7 @@ defmodule Snakepit.Bridge.Session do
       not (is_binary(session.last_worker_id) or is_nil(session.last_worker_id)) ->
         {:error, :invalid_last_worker_id}
 
-      not is_integer(session.ttl) or session.ttl <= 0 ->
+      not is_integer(session.ttl) or session.ttl < 0 ->
         {:error, :invalid_ttl}
 
       session.last_accessed < session.created_at ->
