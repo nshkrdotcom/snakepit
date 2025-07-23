@@ -224,9 +224,11 @@ defmodule Snakepit.Adapters.GRPCPython do
           # Consume the stream directly without Task.async to avoid deadlock
           try do
             Logger.info("[GRPCPython] Starting Enum.each on stream")
+
             Enum.each(stream, fn chunk ->
               case chunk do
-                {:ok, %Snakepit.Bridge.ToolChunk{data: data_bytes, is_final: false}} when is_binary(data_bytes) ->
+                {:ok, %Snakepit.Bridge.ToolChunk{data: data_bytes, is_final: false}}
+                when is_binary(data_bytes) ->
                   # Decode the JSON payload from the chunk
                   decoded_chunk = Jason.decode!(data_bytes)
                   Logger.info("[GRPCPython] Decoded chunk: #{inspect(decoded_chunk)}")
@@ -239,11 +241,12 @@ defmodule Snakepit.Adapters.GRPCPython do
                 {:error, reason} ->
                   Logger.error("[GRPCPython] Stream error: #{inspect(reason)}")
                   callback_fn.({:error, reason})
-                  
+
                 other ->
                   Logger.warning("[GRPCPython] Unexpected chunk format: #{inspect(other)}")
               end
             end)
+
             Logger.info("[GRPCPython] Stream consumption complete")
             :ok
           rescue

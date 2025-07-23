@@ -208,3 +208,6 @@ repomix*.xml
 *.egg-info/
 
 /grpc/
+
+# Process registry data
+/priv/data/

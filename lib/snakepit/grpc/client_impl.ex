@@ -461,6 +461,7 @@ defmodule Snakepit.GRPC.ClientImpl do
   def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     # Convert Elixir terms to protobuf Any messages
     Logger.info("[ClientImpl] execute_streaming_tool called: #{tool_name}")
+
     with {:ok, proto_params} <- encode_parameters(parameters) do
       request = %Bridge.ExecuteToolRequest{
         session_id: session_id,

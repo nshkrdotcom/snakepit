@@ -38,7 +38,6 @@ defmodule SnakepitShowcase.DemoRunner do
         {:error, reason} -> IO.puts("❌ #{name} failed: #{inspect(reason)}")
       end
       
-      Process.sleep(1000)
     end)
   end
 
