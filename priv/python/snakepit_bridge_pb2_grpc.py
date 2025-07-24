@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import snakepit_bridge_pb2 as snakepit__bridge__pb2
+import snakepit_bridge_pb2 as snakepit__bridge__pb2
 
 GRPC_GENERATED_VERSION = '1.73.1'
 GRPC_VERSION = grpc.__version__
@@ -103,6 +103,21 @@ class BridgeServiceStub(object):
                 '/snakepit.bridge.BridgeService/ExecuteStreamingTool',
                 request_serializer=snakepit__bridge__pb2.ExecuteToolRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.ToolChunk.FromString,
+                _registered_method=True)
+        self.RegisterTools = channel.unary_unary(
+                '/snakepit.bridge.BridgeService/RegisterTools',
+                request_serializer=snakepit__bridge__pb2.RegisterToolsRequest.SerializeToString,
+                response_deserializer=snakepit__bridge__pb2.RegisterToolsResponse.FromString,
+                _registered_method=True)
+        self.GetExposedElixirTools = channel.unary_unary(
+                '/snakepit.bridge.BridgeService/GetExposedElixirTools',
+                request_serializer=snakepit__bridge__pb2.GetExposedElixirToolsRequest.SerializeToString,
+                response_deserializer=snakepit__bridge__pb2.GetExposedElixirToolsResponse.FromString,
+                _registered_method=True)
+        self.ExecuteElixirTool = channel.unary_unary(
+                '/snakepit.bridge.BridgeService/ExecuteElixirTool',
+                request_serializer=snakepit__bridge__pb2.ExecuteElixirToolRequest.SerializeToString,
+                response_deserializer=snakepit__bridge__pb2.ExecuteElixirToolResponse.FromString,
                 _registered_method=True)
         self.WatchVariables = channel.unary_stream(
                 '/snakepit.bridge.BridgeService/WatchVariables',
@@ -226,6 +241,25 @@ class BridgeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RegisterTools(self, request, context):
+        """Tool Registration & Discovery
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetExposedElixirTools(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ExecuteElixirTool(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def WatchVariables(self, request, context):
         """Streaming & Reactive
         """
@@ -336,6 +370,21 @@ def add_BridgeServiceServicer_to_server(servicer, server):
                     servicer.ExecuteStreamingTool,
                     request_deserializer=snakepit__bridge__pb2.ExecuteToolRequest.FromString,
                     response_serializer=snakepit__bridge__pb2.ToolChunk.SerializeToString,
+            ),
+            'RegisterTools': grpc.unary_unary_rpc_method_handler(
+                    servicer.RegisterTools,
+                    request_deserializer=snakepit__bridge__pb2.RegisterToolsRequest.FromString,
+                    response_serializer=snakepit__bridge__pb2.RegisterToolsResponse.SerializeToString,
+            ),
+            'GetExposedElixirTools': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetExposedElixirTools,
+                    request_deserializer=snakepit__bridge__pb2.GetExposedElixirToolsRequest.FromString,
+                    response_serializer=snakepit__bridge__pb2.GetExposedElixirToolsResponse.SerializeToString,
+            ),
+            'ExecuteElixirTool': grpc.unary_unary_rpc_method_handler(
+                    servicer.ExecuteElixirTool,
+                    request_deserializer=snakepit__bridge__pb2.ExecuteElixirToolRequest.FromString,
+                    response_serializer=snakepit__bridge__pb2.ExecuteElixirToolResponse.SerializeToString,
             ),
             'WatchVariables': grpc.unary_stream_rpc_method_handler(
                     servicer.WatchVariables,
@@ -746,6 +795,87 @@ class BridgeService(object):
             '/snakepit.bridge.BridgeService/ExecuteStreamingTool',
             snakepit__bridge__pb2.ExecuteToolRequest.SerializeToString,
             snakepit__bridge__pb2.ToolChunk.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RegisterTools(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snakepit.bridge.BridgeService/RegisterTools',
+            snakepit__bridge__pb2.RegisterToolsRequest.SerializeToString,
+            snakepit__bridge__pb2.RegisterToolsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetExposedElixirTools(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snakepit.bridge.BridgeService/GetExposedElixirTools',
+            snakepit__bridge__pb2.GetExposedElixirToolsRequest.SerializeToString,
+            snakepit__bridge__pb2.GetExposedElixirToolsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ExecuteElixirTool(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/snakepit.bridge.BridgeService/ExecuteElixirTool',
+            snakepit__bridge__pb2.ExecuteElixirToolRequest.SerializeToString,
+            snakepit__bridge__pb2.ExecuteElixirToolResponse.FromString,
             options,
             channel_credentials,
             insecure,

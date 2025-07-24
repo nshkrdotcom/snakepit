@@ -11,6 +11,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   alias Snakepit.Bridge.SessionStore
   alias Snakepit.Bridge.Variables.{Variable, Types}
   alias Snakepit.Bridge.Serialization
+  alias Snakepit.Bridge.ToolRegistry
 
   alias Snakepit.Bridge.{
     PingRequest,
@@ -30,7 +31,17 @@ defmodule Snakepit.GRPC.BridgeServer do
     BatchSetVariablesResponse,
     ListVariablesResponse,
     DeleteVariableResponse,
-    OptimizationStatus
+    OptimizationStatus,
+    ExecuteToolRequest,
+    ExecuteToolResponse,
+    RegisterToolsRequest,
+    RegisterToolsResponse,
+    GetExposedElixirToolsRequest,
+    GetExposedElixirToolsResponse,
+    ExecuteElixirToolRequest,
+    ExecuteElixirToolResponse,
+    ToolSpec,
+    ParameterSpec
   }
 
   alias Snakepit.Bridge.Variable, as: ProtoVariable
@@ -425,8 +436,72 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   # TODO: Implement remaining handlers
-  def execute_tool(_request, _stream) do
-    raise GRPC.RPCError, status: :unimplemented, message: "Tool execution not yet implemented"
+  def execute_tool(%ExecuteToolRequest{} = request, _stream) do
+    Logger.info("ExecuteTool: #{request.tool_name} for session #{request.session_id}")
+
+    start_time = System.monotonic_time(:millisecond)
+
+    with {:ok, _session} <- SessionStore.get_session(request.session_id),
+         {:ok, tool} <- ToolRegistry.get_tool(request.session_id, request.tool_name),
+         {:ok, result} <- execute_tool_handler(tool, request, request.session_id) do
+      execution_time = System.monotonic_time(:millisecond) - start_time
+
+      %ExecuteToolResponse{
+        success: true,
+        result: encode_tool_result(result),
+        error_message: nil,
+        metadata: %{
+          "execution_time" => to_string(execution_time),
+          "tool_type" => to_string(tool.type)
+        },
+        execution_time_ms: execution_time
+      }
+    else
+      {:error, reason} ->
+        %ExecuteToolResponse{
+          success: false,
+          result: nil,
+          error_message: format_error(reason),
+          metadata: %{},
+          execution_time_ms: System.monotonic_time(:millisecond) - start_time
+        }
+    end
+  end
+
+  defp execute_tool_handler(%{type: :local} = tool, request, session_id) do
+    # Execute local Elixir tool
+    params = decode_tool_parameters(request.parameters)
+    ToolRegistry.execute_local_tool(session_id, tool.name, params)
+  end
+
+  defp execute_tool_handler(%{type: :remote} = tool, _request, _session_id) do
+    # Forward to Python worker - this will be implemented later
+    # For now, return an error
+    {:error, "Remote tool execution not yet implemented for tool: #{tool.name}"}
+  end
+
+  defp decode_tool_parameters(params) do
+    params
+    |> Enum.map(fn {key, any_value} ->
+      # Decode the protobuf Any value
+      decoded =
+        case any_value do
+          %Any{type_url: "type.googleapis.com/google.protobuf.StringValue", value: value} ->
+            # The value is JSON encoded as bytes, decode it
+            case Jason.decode(value) do
+              {:ok, decoded} -> decoded
+              # Return as-is if not valid JSON
+              {:error, _} -> value
+            end
+
+          _ ->
+            # Try to use the serialization module
+            Serialization.decode_any(any_value)
+        end
+
+      {key, decoded}
+    end)
+    |> Map.new()
   end
 
   def execute_streaming_tool(_request, _stream) do
@@ -575,4 +650,184 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   defp format_error(reason), do: inspect(reason)
+
+  # Tool Registration & Discovery
+
+  def register_tools(%RegisterToolsRequest{} = request, _stream) do
+    Logger.info("RegisterTools for session #{request.session_id}, worker: #{request.worker_id}")
+
+    with {:ok, _session} <- SessionStore.get_session(request.session_id) do
+      # Convert proto ToolRegistration to internal format
+      tool_specs =
+        Enum.map(request.tools, fn tool_reg ->
+          %{
+            name: tool_reg.name,
+            description: tool_reg.description,
+            parameters: tool_reg.parameters,
+            metadata:
+              Map.put(
+                tool_reg.metadata,
+                "supports_streaming",
+                to_string(tool_reg.supports_streaming)
+              ),
+            worker_id: request.worker_id
+          }
+        end)
+
+      case ToolRegistry.register_tools(request.session_id, tool_specs) do
+        {:ok, registered_names} ->
+          tool_ids =
+            Map.new(registered_names, fn name -> {name, "#{request.session_id}:#{name}"} end)
+
+          %RegisterToolsResponse{
+            success: true,
+            tool_ids: tool_ids,
+            error_message: nil
+          }
+
+        {:error, reason} ->
+          %RegisterToolsResponse{
+            success: false,
+            tool_ids: %{},
+            error_message: format_error(reason)
+          }
+      end
+    else
+      {:error, reason} ->
+        %RegisterToolsResponse{
+          success: false,
+          tool_ids: %{},
+          error_message: format_error(reason)
+        }
+    end
+  end
+
+  def get_exposed_elixir_tools(%GetExposedElixirToolsRequest{session_id: session_id}, _stream) do
+    Logger.debug("GetExposedElixirTools for session #{session_id}")
+
+    tools = ToolRegistry.list_exposed_elixir_tools(session_id)
+
+    tool_specs =
+      Enum.map(tools, fn tool ->
+        # Convert metadata, handling different value types
+        metadata =
+          Map.new(tool.metadata, fn
+            {k, v} when is_binary(v) or is_atom(v) or is_number(v) ->
+              {to_string(k), to_string(v)}
+
+            {k, v} when is_list(v) ->
+              # Don't include complex lists in metadata
+              {to_string(k), inspect(v)}
+
+            {k, v} ->
+              # For other types, use inspect
+              {to_string(k), inspect(v)}
+          end)
+
+        # Remove parameters from metadata since they're handled separately
+        metadata = Map.delete(metadata, "parameters")
+
+        %ToolSpec{
+          name: tool.name,
+          description: tool.description,
+          parameters: encode_parameter_specs(tool.parameters),
+          metadata: metadata,
+          supports_streaming: Map.get(metadata, "supports_streaming", "false") == "true",
+          required_variables: Map.get(metadata, "required_variables", [])
+        }
+      end)
+
+    %GetExposedElixirToolsResponse{
+      tools: tool_specs
+    }
+  end
+
+  def execute_elixir_tool(%ExecuteElixirToolRequest{} = request, _stream) do
+    Logger.info("ExecuteElixirTool: #{request.tool_name} for session #{request.session_id}")
+
+    start_time = System.monotonic_time(:millisecond)
+
+    with {:ok, _session} <- SessionStore.get_session(request.session_id),
+         {:ok, tool} <- ToolRegistry.get_tool(request.session_id, request.tool_name),
+         :local <- tool.type,
+         params <- decode_tool_parameters(request.parameters),
+         {:ok, result} <-
+           ToolRegistry.execute_local_tool(request.session_id, request.tool_name, params) do
+      execution_time = System.monotonic_time(:millisecond) - start_time
+
+      %ExecuteElixirToolResponse{
+        success: true,
+        result: encode_tool_result(result),
+        error_message: nil,
+        metadata: %{
+          "execution_time" => to_string(execution_time)
+        },
+        execution_time_ms: execution_time
+      }
+    else
+      :remote ->
+        %ExecuteElixirToolResponse{
+          success: false,
+          result: nil,
+          error_message: "Tool #{request.tool_name} is not an Elixir tool",
+          metadata: %{},
+          execution_time_ms: System.monotonic_time(:millisecond) - start_time
+        }
+
+      {:error, reason} ->
+        %ExecuteElixirToolResponse{
+          success: false,
+          result: nil,
+          error_message: format_error(reason),
+          metadata: %{},
+          execution_time_ms: System.monotonic_time(:millisecond) - start_time
+        }
+    end
+  end
+
+  defp encode_parameter_specs(params) when is_list(params) do
+    Enum.map(params, fn param ->
+      # Convert atom keys to strings
+      param =
+        case param do
+          %{} -> Map.new(param, fn {k, v} -> {to_string(k), v} end)
+          _ -> param
+        end
+
+      %ParameterSpec{
+        name: Map.get(param, "name", ""),
+        type: to_string(Map.get(param, "type", "any")),
+        description: to_string(Map.get(param, "description", "")),
+        required: Map.get(param, "required", false),
+        default_value: encode_default_value(Map.get(param, "default")),
+        validation_json: Jason.encode!(Map.get(param, "validation", %{}))
+      }
+    end)
+  end
+
+  defp encode_parameter_specs(_), do: []
+
+  defp encode_default_value(nil), do: nil
+  defp encode_default_value(value), do: encode_tool_result(value)
+
+  defp encode_tool_result(value) do
+    # Encode tool results as JSON since we don't know the specific type
+    case Jason.encode(value) do
+      {:ok, json_string} when is_binary(json_string) ->
+        # Ensure the value is properly encoded as bytes
+        %Any{
+          type_url: "type.googleapis.com/google.protobuf.StringValue",
+          # This should already be a binary string
+          value: json_string
+        }
+
+      {:error, _} ->
+        # Fallback: encode as string representation
+        %Any{
+          type_url: "type.googleapis.com/google.protobuf.StringValue",
+          # inspect always returns a string
+          value: inspect(value)
+        }
+    end
+  end
 end
