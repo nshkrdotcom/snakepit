@@ -31,7 +31,26 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @doc """
+  Reserves a worker slot before spawning the process.
+  This ensures we can track the process even if we crash during spawn.
+  """
+  def reserve_worker(worker_id) do
+    GenServer.call(__MODULE__, {:reserve_worker, worker_id})
+  end
+
+  @doc """
+  Activates a reserved worker with its actual process information.
+  """
+  def activate_worker(worker_id, elixir_pid, process_pid, fingerprint) do
+    GenServer.cast(
+      __MODULE__,
+      {:activate_worker, worker_id, elixir_pid, process_pid, fingerprint}
+    )
+  end
+
+  @doc """
   Registers a worker with its external process information.
+  @deprecated Use reserve_worker/1 followed by activate_worker/4 instead
   """
   def register_worker(worker_id, elixir_pid, process_pid, fingerprint) do
     GenServer.cast(__MODULE__, {:register, worker_id, elixir_pid, process_pid, fingerprint})
@@ -239,10 +258,37 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # Atomic write to both ETS and DETS
     :ets.insert(state.table, {worker_id, worker_info})
     :dets.insert(state.dets_table, {worker_id, worker_info})
-    # Rely on auto_save (1000ms) instead of blocking sync for better performance
+    # CRITICAL: Force immediate sync to prevent orphans on crash
+    :dets.sync(state.dets_table)
 
     Logger.info(
       "✅ Registered worker #{worker_id} with external process PID #{process_pid} " <>
+        "for BEAM run #{state.beam_run_id} in ProcessRegistry"
+    )
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:activate_worker, worker_id, elixir_pid, process_pid, fingerprint}, state) do
+    worker_info = %{
+      status: :active,
+      elixir_pid: elixir_pid,
+      process_pid: process_pid,
+      fingerprint: fingerprint,
+      registered_at: System.system_time(:second),
+      beam_run_id: state.beam_run_id,
+      pgid: process_pid
+    }
+
+    # Update both ETS and DETS
+    :ets.insert(state.table, {worker_id, worker_info})
+    :dets.insert(state.dets_table, {worker_id, worker_info})
+    # Sync immediately for activation too
+    :dets.sync(state.dets_table)
+
+    Logger.info(
+      "✅ Activated worker #{worker_id} with external process PID #{process_pid} " <>
         "for BEAM run #{state.beam_run_id} in ProcessRegistry"
     )
 
@@ -271,6 +317,23 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @impl true
+  def handle_call({:reserve_worker, worker_id}, _from, state) do
+    reservation_info = %{
+      status: :reserved,
+      reserved_at: System.system_time(:second),
+      beam_run_id: state.beam_run_id
+    }
+
+    # CRITICAL: Persist to DETS immediately and sync
+    :dets.insert(state.dets_table, {worker_id, reservation_info})
+    # Force immediate write to disk
+    :dets.sync(state.dets_table)
+
+    Logger.info("Reserved worker slot #{worker_id} for BEAM run #{state.beam_run_id}")
+    {:reply, :ok, state}
+  end
+
+  @impl true
   def handle_call({:get_worker_info, worker_id}, _from, state) do
     reply =
       case :ets.lookup(state.table, worker_id) do
@@ -285,17 +348,29 @@ defmodule Snakepit.Pool.ProcessRegistry do
   def handle_call(:get_active_process_pids, _from, state) do
     pids =
       :ets.tab2list(state.table)
-      |> Enum.filter(fn {_id, %{elixir_pid: pid}} -> Process.alive?(pid) end)
-      |> Enum.map(fn {_id, %{process_pid: process_pid}} -> process_pid end)
+      |> Enum.filter(fn
+        {_id, %{status: :active, elixir_pid: pid}} -> Process.alive?(pid)
+        # Legacy entries without status
+        {_id, %{elixir_pid: pid}} -> Process.alive?(pid)
+        _ -> false
+      end)
+      |> Enum.map(fn {_id, info} -> Map.get(info, :process_pid) end)
       |> Enum.filter(&(&1 != nil))
 
     {:reply, pids, state}
   end
 
+  @impl true
   def handle_call(:get_all_process_pids, _from, state) do
     pids =
       :ets.tab2list(state.table)
-      |> Enum.map(fn {_id, %{process_pid: process_pid}} -> process_pid end)
+      |> Enum.filter(fn
+        {_id, %{status: :active}} -> true
+        # Legacy entries
+        {_id, %{process_pid: _}} -> true
+        _ -> false
+      end)
+      |> Enum.map(fn {_id, info} -> Map.get(info, :process_pid) end)
       |> Enum.filter(&(&1 != nil))
 
     {:reply, pids, state}
@@ -351,6 +426,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     {:noreply, state}
   end
 
+  @impl true
   def handle_info(msg, state) do
     Logger.debug("ProcessRegistry received unexpected message: #{inspect(msg)}")
     {:noreply, state}
@@ -387,17 +463,41 @@ defmodule Snakepit.Pool.ProcessRegistry do
     all_entries = :dets.match_object(dets_table, :_)
     Logger.info("Total entries in DETS: #{length(all_entries)}")
 
-    # Get all processes from previous runs
-    orphans =
+    # 1. Get all ACTIVE processes from PREVIOUS runs (we have their PIDs)
+    old_run_orphans =
       :dets.select(dets_table, [
-        {{:"$1", :"$2"}, [{:"/=", {:map_get, :beam_run_id, :"$2"}, current_beam_run_id}],
-         [{{:"$1", :"$2"}}]}
+        {{:"$1", :"$2"},
+         [
+           {:andalso, {:"/=", {:map_get, :beam_run_id, :"$2"}, current_beam_run_id},
+            {
+              :orelse,
+              {:==, {:map_get, :status, :"$2"}, :active},
+              # Legacy entries without status field
+              {:==, {:map_size, :"$2"}, 6}
+            }}
+         ], [{{:"$1", :"$2"}}]}
       ])
 
-    Logger.info("Found #{length(orphans)} orphaned entries from previous BEAM runs")
+    Logger.info("Found #{length(old_run_orphans)} active processes from previous BEAM runs")
 
+    # 2. Get abandoned reservations from ANY run
+    # During startup, we're more aggressive - any reservation not from current run is abandoned
+    # For current run, only consider old reservations (>60s)
+    now = System.system_time(:second)
+
+    abandoned_reservations =
+      all_entries
+      |> Enum.filter(fn {_id, info} ->
+        Map.get(info, :status) == :reserved and
+          (info.beam_run_id != current_beam_run_id or
+             now - Map.get(info, :reserved_at, 0) > 60)
+      end)
+
+    Logger.info("Found #{length(abandoned_reservations)} abandoned reservations")
+
+    # Kill active processes with known PIDs
     killed_count =
-      Enum.reduce(orphans, 0, fn {worker_id, info}, acc ->
+      Enum.reduce(old_run_orphans, 0, fn {worker_id, info}, acc ->
         if process_alive?(info.process_pid) do
           Logger.warning(
             "Found orphaned process #{info.process_pid} (worker: #{worker_id}) from previous " <>
@@ -475,13 +575,40 @@ defmodule Snakepit.Pool.ProcessRegistry do
         end
       end)
 
-    # Remove all orphaned entries from DETS
-    Enum.each(orphans, fn {worker_id, _info} ->
+    # Kill processes spawned from abandoned reservations using beam_run_id
+    Enum.each(abandoned_reservations, fn {worker_id, info} ->
+      # Use the unique run ID for a safe pkill pattern
+      kill_pattern = "grpc_server.py.*--snakepit-run-id #{info.beam_run_id}"
+
+      Logger.warning(
+        "Found abandoned reservation #{worker_id} from run #{info.beam_run_id}. " <>
+          "Attempting cleanup with pattern: #{kill_pattern}"
+      )
+
+      case System.cmd("pkill", ["-9", "-f", kill_pattern], stderr_to_stdout: true) do
+        {_output, 0} ->
+          Logger.info("Successfully killed processes matching pattern: #{kill_pattern}")
+
+        {_output, 1} ->
+          # Exit code 1 means no processes found, which is fine
+          Logger.debug("No processes found matching pattern: #{kill_pattern}")
+
+        {output, code} ->
+          Logger.warning("pkill returned unexpected code #{code}: #{output}")
+      end
+    end)
+
+    # Remove all entries that don't belong to current run
+    entries_to_remove = old_run_orphans ++ abandoned_reservations
+
+    Enum.each(entries_to_remove, fn {worker_id, _info} ->
       :dets.delete(dets_table, worker_id)
     end)
 
     Logger.info(
-      "Orphan cleanup complete. Killed #{killed_count} processes, removed #{length(orphans)} entries."
+      "Orphan cleanup complete. Killed #{killed_count} processes, " <>
+        "cleaned #{length(abandoned_reservations)} abandoned reservations, " <>
+        "removed #{length(entries_to_remove)} total entries."
     )
   end
 

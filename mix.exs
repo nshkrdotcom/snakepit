@@ -69,7 +69,6 @@ defmodule Snakepit.MixProject do
         "**/*.bak",
         "priv/plts",
         "priv/python/snakepit_bridge/__pycache__",
-        "priv/python/snakepit_bridge/grpc/__pycache__",
         "priv/python/snakepit_bridge/adapters/__pycache__"
       ]
     ]

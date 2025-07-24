@@ -643,7 +643,7 @@ class SessionContext:
         
         # Send cleanup request to server
         try:
-            from .grpc.snakepit_bridge_pb2 import CleanupSessionRequest
+            from snakepit_bridge_pb2 import CleanupSessionRequest
             
             request = CleanupSessionRequest(
                 session_id=self.session_id,

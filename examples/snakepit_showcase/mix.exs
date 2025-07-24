@@ -43,16 +43,16 @@ defmodule SnakepitShowcase.MixProject do
     [
       setup: ["deps.get"],
       demo: ["run"],
-      "demo.all": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end)"],
-      "demo.interactive": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.interactive() end)"],
-      "demo.basic": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.BasicDemo.run() end)"],
-      "demo.session": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.SessionDemo.run() end)"],
-      "demo.streaming": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.StreamingDemo.run() end)"],
-      "demo.concurrent": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ConcurrentDemo.run() end)"],
-      "demo.variables": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.VariablesDemo.run() end)"],
-      "demo.binary": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.BinaryDemo.run() end)"],
-      "demo.ml_workflow": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.MLWorkflowDemo.run() end)"],
-      "demo.execution_modes": ["run -e Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ExecutionModesDemo.run() end)"]
+      "demo.all": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end)'"],
+      "demo.interactive": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.interactive() end)'"],
+      "demo.basic": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.BasicDemo.run() end)'"],
+      "demo.session": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.SessionDemo.run() end)'"],
+      "demo.streaming": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.StreamingDemo.run() end)'"],
+      "demo.concurrent": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ConcurrentDemo.run() end)'"],
+      "demo.variables": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.VariablesDemo.run() end)'"],
+      "demo.binary": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.BinaryDemo.run() end)'"],
+      "demo.ml_workflow": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.MLWorkflowDemo.run() end)'"],
+      "demo.execution_modes": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ExecutionModesDemo.run() end)'"]
     ]
   end
 end
