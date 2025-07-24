@@ -53,7 +53,6 @@ defmodule Snakepit.MixProject do
         "priv/python/requirements*.txt",
         "priv/python/setup.py",
         "priv/python/snakepit_bridge",
-        "examples",
         "assets",
         ".formatter.exs",
         "mix.exs",
