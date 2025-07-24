@@ -26,6 +26,11 @@ service BridgeService {
   rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
   rpc ExecuteStreamingTool(ExecuteToolRequest) returns (stream ToolChunk);
   
+  // Tool Registration & Discovery
+  rpc RegisterTools(RegisterToolsRequest) returns (RegisterToolsResponse);
+  rpc GetExposedElixirTools(GetExposedElixirToolsRequest) returns (GetExposedElixirToolsResponse);
+  rpc ExecuteElixirTool(ExecuteElixirToolRequest) returns (ExecuteElixirToolResponse);
+  
   // Streaming & Reactive
   rpc WatchVariables(WatchVariablesRequest) returns (stream VariableUpdate);
   
@@ -354,4 +359,48 @@ message HeartbeatRequest {
 message HeartbeatResponse {
   google.protobuf.Timestamp server_time = 1;
   bool session_valid = 2;
+}
+
+// Tool Registration & Discovery Messages
+message RegisterToolsRequest {
+  string session_id = 1;
+  repeated ToolRegistration tools = 2;
+  string worker_id = 3;
+}
+
+message ToolRegistration {
+  string name = 1;
+  string description = 2;
+  repeated ParameterSpec parameters = 3;
+  map<string, string> metadata = 4;
+  bool supports_streaming = 5;
+}
+
+message RegisterToolsResponse {
+  bool success = 1;
+  map<string, string> tool_ids = 2;
+  string error_message = 3;
+}
+
+message GetExposedElixirToolsRequest {
+  string session_id = 1;
+}
+
+message GetExposedElixirToolsResponse {
+  repeated ToolSpec tools = 1;
+}
+
+message ExecuteElixirToolRequest {
+  string session_id = 1;
+  string tool_name = 2;
+  map<string, google.protobuf.Any> parameters = 3;
+  map<string, string> metadata = 4;
+}
+
+message ExecuteElixirToolResponse {
+  bool success = 1;
+  google.protobuf.Any result = 2;
+  string error_message = 3;
+  map<string, string> metadata = 4;
+  int64 execution_time_ms = 5;
 }

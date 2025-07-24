@@ -32,6 +32,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - [Usage Examples](#usage-examples)
 - [gRPC Communication](#grpc-communication)
 - [Python Bridges](#python-bridges)
+  - [Bidirectional Tool Bridge](#bidirectional-tool-bridge)
 - [Built-in Adapters](#built-in-adapters)
 - [Creating Custom Adapters](#creating-custom-adapters)
 - [Session Management](#session-management)
@@ -86,6 +87,13 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - **Updated demo implementations** using latest best practices
 - **Comprehensive documentation** for all bridge implementations
 - **Backward compatibility** maintained for existing integrations
+
+### 🔀 **Bidirectional Tool Bridge (NEW)**
+- **Cross-language function execution** - Call Python from Elixir and vice versa
+- **Transparent tool proxying** - Remote functions appear as local functions
+- **Session-scoped isolation** - Tools are isolated by session for multi-tenancy
+- **Dynamic discovery** - Automatic tool discovery and registration
+- See [Bidirectional Tool Bridge Documentation](README_BIDIRECTIONAL_TOOL_BRIDGE.md) for details
 
 ## 🏃 Quick Start
 
@@ -906,6 +914,20 @@ See **[examples/snakepit_showcase/README.md](examples/snakepit_showcase/README.m
 
 For detailed documentation on all Python bridge implementations (V1, V2, Enhanced, gRPC), see **[README_BRIDGES.md](README_BRIDGES.md)**.
 
+### 🔄 Bidirectional Tool Bridge
+
+Snakepit supports transparent cross-language function execution between Elixir and Python:
+
+```elixir
+# Call Python functions from Elixir
+{:ok, result} = ToolRegistry.execute_tool(session_id, "python_ml_function", %{data: input})
+
+# Python can call Elixir functions transparently
+# result = ctx.call_elixir_tool("parse_json", json_string='{"test": true}')
+```
+
+For comprehensive documentation on the bidirectional tool bridge, see **[README_BIDIRECTIONAL_TOOL_BRIDGE.md](README_BIDIRECTIONAL_TOOL_BRIDGE.md)**.
+
 ## 🔌 Built-in Adapters
 
 ### gRPC Python Adapter (Streaming Specialist)
@@ -1700,6 +1722,10 @@ Logger.configure(level: :debug)
 
 - [Testing Guide](README_TESTING.md) - How to run and write tests  
 - [Unified gRPC Bridge](README_UNIFIED_GRPC_BRIDGE.md) - Stage 0, 1, and 2 implementation details
+- [Bidirectional Tool Bridge](README_BIDIRECTIONAL_TOOL_BRIDGE.md) - Cross-language function execution between Elixir and Python
+- [Process Management](README_PROCESS_MANAGEMENT.md) - Persistent tracking and orphan cleanup
+- [gRPC Communication](README_GRPC.md) - Streaming and non-streaming gRPC details
+- [Python Bridges](README_BRIDGES.md) - All Python bridge implementations
 
 ## 🤝 Contributing
 

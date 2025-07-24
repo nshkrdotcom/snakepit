@@ -11,7 +11,7 @@ import json
 import struct
 from google.protobuf.any_pb2 import Any as ProtoAny
 
-from .grpc import snakepit_bridge_pb2 as pb2
+import snakepit_bridge_pb2 as pb2
 from .serialization import TypeSerializer
 
 

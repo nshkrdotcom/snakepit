@@ -5,8 +5,8 @@ Provides variable management capabilities to DSPy modules.
 
 from typing import Any, Dict, Optional, Callable
 import grpc
-from .grpc import snakepit_bridge_pb2
-from .grpc import snakepit_bridge_pb2_grpc
+import snakepit_bridge_pb2
+import snakepit_bridge_pb2_grpc
 from .serialization import TypeSerializer
 
 

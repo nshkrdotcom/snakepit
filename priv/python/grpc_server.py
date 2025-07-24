@@ -13,6 +13,7 @@ import logging
 import signal
 import sys
 import time
+import inspect
 from concurrent import futures
 from datetime import datetime
 from typing import Optional
@@ -231,6 +232,11 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             adapter = self.adapter_class()
             adapter.set_session_context(session_context)
             
+            # Register adapter tools with the session (for new BaseAdapter)
+            if hasattr(adapter, 'register_with_session'):
+                registered_tools = adapter.register_with_session(request.session_id, self.elixir_stub)
+                logger.info(f"Registered {len(registered_tools)} tools for session {request.session_id}")
+            
             # Initialize adapter if needed
             if hasattr(adapter, 'initialize'):
                 await adapter.initialize()
@@ -312,6 +318,11 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             logger.info(f"Creating adapter instance: {self.adapter_class}")
             adapter = self.adapter_class()
             adapter.set_session_context(session_context)
+            
+            # Register adapter tools with the session (for new BaseAdapter)
+            if hasattr(adapter, 'register_with_session'):
+                registered_tools = adapter.register_with_session(request.session_id, self.elixir_stub)
+                logger.info(f"Registered {len(registered_tools)} tools for session {request.session_id}")
             
             # Initialize adapter if needed
             if hasattr(adapter, 'initialize') and inspect.iscoroutinefunction(adapter.initialize):

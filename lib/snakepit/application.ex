@@ -24,7 +24,8 @@ defmodule Snakepit.Application do
 
     # Always start SessionStore as it's needed for tests and bridge functionality
     base_children = [
-      Snakepit.Bridge.SessionStore
+      Snakepit.Bridge.SessionStore,
+      Snakepit.Bridge.ToolRegistry
     ]
 
     pool_children =

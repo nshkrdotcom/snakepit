@@ -791,6 +791,151 @@ defmodule Snakepit.Bridge.HeartbeatResponse do
   field(:session_valid, 2, type: :bool, json_name: "sessionValid")
 end
 
+defmodule Snakepit.Bridge.RegisterToolsRequest do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:session_id, 1, type: :string, json_name: "sessionId")
+  field(:tools, 2, repeated: true, type: Snakepit.Bridge.ToolRegistration)
+  field(:worker_id, 3, type: :string, json_name: "workerId")
+end
+
+defmodule Snakepit.Bridge.ToolRegistration.MetadataEntry do
+  @moduledoc false
+
+  use Protobuf, map: true, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:key, 1, type: :string)
+  field(:value, 2, type: :string)
+end
+
+defmodule Snakepit.Bridge.ToolRegistration do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:name, 1, type: :string)
+  field(:description, 2, type: :string)
+  field(:parameters, 3, repeated: true, type: Snakepit.Bridge.ParameterSpec)
+
+  field(:metadata, 4,
+    repeated: true,
+    type: Snakepit.Bridge.ToolRegistration.MetadataEntry,
+    map: true
+  )
+
+  field(:supports_streaming, 5, type: :bool, json_name: "supportsStreaming")
+end
+
+defmodule Snakepit.Bridge.RegisterToolsResponse.ToolIdsEntry do
+  @moduledoc false
+
+  use Protobuf, map: true, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:key, 1, type: :string)
+  field(:value, 2, type: :string)
+end
+
+defmodule Snakepit.Bridge.RegisterToolsResponse do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:success, 1, type: :bool)
+
+  field(:tool_ids, 2,
+    repeated: true,
+    type: Snakepit.Bridge.RegisterToolsResponse.ToolIdsEntry,
+    json_name: "toolIds",
+    map: true
+  )
+
+  field(:error_message, 3, type: :string, json_name: "errorMessage")
+end
+
+defmodule Snakepit.Bridge.GetExposedElixirToolsRequest do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:session_id, 1, type: :string, json_name: "sessionId")
+end
+
+defmodule Snakepit.Bridge.GetExposedElixirToolsResponse do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:tools, 1, repeated: true, type: Snakepit.Bridge.ToolSpec)
+end
+
+defmodule Snakepit.Bridge.ExecuteElixirToolRequest.ParametersEntry do
+  @moduledoc false
+
+  use Protobuf, map: true, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:key, 1, type: :string)
+  field(:value, 2, type: Google.Protobuf.Any)
+end
+
+defmodule Snakepit.Bridge.ExecuteElixirToolRequest.MetadataEntry do
+  @moduledoc false
+
+  use Protobuf, map: true, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:key, 1, type: :string)
+  field(:value, 2, type: :string)
+end
+
+defmodule Snakepit.Bridge.ExecuteElixirToolRequest do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:session_id, 1, type: :string, json_name: "sessionId")
+  field(:tool_name, 2, type: :string, json_name: "toolName")
+
+  field(:parameters, 3,
+    repeated: true,
+    type: Snakepit.Bridge.ExecuteElixirToolRequest.ParametersEntry,
+    map: true
+  )
+
+  field(:metadata, 4,
+    repeated: true,
+    type: Snakepit.Bridge.ExecuteElixirToolRequest.MetadataEntry,
+    map: true
+  )
+end
+
+defmodule Snakepit.Bridge.ExecuteElixirToolResponse.MetadataEntry do
+  @moduledoc false
+
+  use Protobuf, map: true, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:key, 1, type: :string)
+  field(:value, 2, type: :string)
+end
+
+defmodule Snakepit.Bridge.ExecuteElixirToolResponse do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.14.1", syntax: :proto3
+
+  field(:success, 1, type: :bool)
+  field(:result, 2, type: Google.Protobuf.Any)
+  field(:error_message, 3, type: :string, json_name: "errorMessage")
+
+  field(:metadata, 4,
+    repeated: true,
+    type: Snakepit.Bridge.ExecuteElixirToolResponse.MetadataEntry,
+    map: true
+  )
+
+  field(:execution_time_ms, 5, type: :int64, json_name: "executionTimeMs")
+end
+
 defmodule Snakepit.Bridge.BridgeService.Service do
   @moduledoc false
 
@@ -850,6 +995,20 @@ defmodule Snakepit.Bridge.BridgeService.Service do
     :ExecuteStreamingTool,
     Snakepit.Bridge.ExecuteToolRequest,
     stream(Snakepit.Bridge.ToolChunk)
+  )
+
+  rpc(:RegisterTools, Snakepit.Bridge.RegisterToolsRequest, Snakepit.Bridge.RegisterToolsResponse)
+
+  rpc(
+    :GetExposedElixirTools,
+    Snakepit.Bridge.GetExposedElixirToolsRequest,
+    Snakepit.Bridge.GetExposedElixirToolsResponse
+  )
+
+  rpc(
+    :ExecuteElixirTool,
+    Snakepit.Bridge.ExecuteElixirToolRequest,
+    Snakepit.Bridge.ExecuteElixirToolResponse
   )
 
   rpc(

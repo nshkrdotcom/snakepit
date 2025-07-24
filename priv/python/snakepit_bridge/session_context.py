@@ -12,16 +12,19 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .grpc.snakepit_bridge_pb2 import (
+from snakepit_bridge_pb2 import (
     Variable, RegisterVariableRequest, RegisterVariableResponse,
     GetVariableRequest, GetVariableResponse, SetVariableRequest, SetVariableResponse,
     BatchGetVariablesRequest, BatchGetVariablesResponse,
     BatchSetVariablesRequest, BatchSetVariablesResponse,
     ListVariablesRequest, ListVariablesResponse,
     DeleteVariableRequest, DeleteVariableResponse,
-    OptimizationStatus
+    OptimizationStatus,
+    GetExposedElixirToolsRequest, GetExposedElixirToolsResponse,
+    ExecuteElixirToolRequest, ExecuteElixirToolResponse,
+    ToolSpec
 )
-from .grpc.snakepit_bridge_pb2_grpc import BridgeServiceStub
+from snakepit_bridge_pb2_grpc import BridgeServiceStub
 from google.protobuf.any_pb2 import Any
 from .types import (
     VariableType, 
@@ -111,6 +114,10 @@ class SessionContext:
         
         # Tool registry remains from Stage 0
         self._tools = {}
+        
+        # Elixir tool proxies
+        self._elixir_tools = {}
+        self._load_elixir_tools()
         
         logger.info(f"Created SessionContext for session {session_id} (strict_mode={strict_mode})")
     
@@ -664,9 +671,117 @@ class SessionContext:
         pass
     
     def call_tool(self, tool_name: str, **kwargs):
-        """Call a tool (from Stage 0)."""
-        # Implementation remains from Stage 0
-        pass
+        """Call a tool (Python or Elixir)."""
+        # Check if it's an Elixir tool first
+        if tool_name in self._elixir_tools:
+            return self.call_elixir_tool(tool_name, **kwargs)
+        
+        # Otherwise, try Python tools
+        if tool_name in self._tools:
+            tool = self._tools[tool_name]
+            return tool(**kwargs)
+        
+        raise ValueError(f"Tool '{tool_name}' not found")
+    
+    def _load_elixir_tools(self):
+        """Load available Elixir tools from the server."""
+        try:
+            request = GetExposedElixirToolsRequest(session_id=self.session_id)
+            response = self.stub.GetExposedElixirTools(request)
+            
+            for tool_spec in response.tools:
+                proxy = self._create_tool_proxy(tool_spec)
+                self._elixir_tools[tool_spec.name] = proxy
+                
+            logger.info(f"Loaded {len(self._elixir_tools)} Elixir tools for session {self.session_id}")
+        except Exception as e:
+            logger.warning(f"Failed to load Elixir tools: {e}")
+    
+    def _create_tool_proxy(self, tool_spec: ToolSpec):
+        """Create a Python callable proxy for an Elixir tool."""
+        def proxy(**kwargs):
+            return self.call_elixir_tool(tool_spec.name, **kwargs)
+        
+        # Set metadata on the proxy function
+        proxy.__name__ = tool_spec.name
+        proxy.__doc__ = tool_spec.description
+        
+        # Add parameter information if available
+        if tool_spec.parameters:
+            param_info = []
+            for param in tool_spec.parameters:
+                param_str = f"{param.name}: {param.type}"
+                if param.required:
+                    param_str += " (required)"
+                if param.description:
+                    param_str += f" - {param.description}"
+                param_info.append(param_str)
+            
+            if proxy.__doc__:
+                proxy.__doc__ += "\n\nParameters:\n" + "\n".join(param_info)
+            else:
+                proxy.__doc__ = "Parameters:\n" + "\n".join(param_info)
+        
+        return proxy
+    
+    def call_elixir_tool(self, tool_name: str, **kwargs):
+        """
+        Execute an Elixir tool via gRPC.
+        
+        Args:
+            tool_name: Name of the Elixir tool to execute
+            **kwargs: Parameters to pass to the tool
+            
+        Returns:
+            The result from the Elixir tool
+            
+        Raises:
+            RuntimeError: If the tool execution fails
+        """
+        # Serialize parameters
+        parameters = {}
+        for key, value in kwargs.items():
+            try:
+                # Serialize to Any protobuf
+                any_value = Any()
+                # For now, use JSON serialization
+                any_value.type_url = "type.googleapis.com/google.protobuf.StringValue"
+                any_value.value = json.dumps(value).encode('utf-8')
+                parameters[key] = any_value
+            except Exception as e:
+                raise ValueError(f"Failed to serialize parameter '{key}': {e}")
+        
+        # Create request
+        request = ExecuteElixirToolRequest(
+            session_id=self.session_id,
+            tool_name=tool_name,
+            parameters=parameters,
+            metadata={}
+        )
+        
+        # Execute tool
+        try:
+            response = self.stub.ExecuteElixirTool(request)
+            
+            if response.success:
+                # Deserialize result
+                if response.result and response.result.value:
+                    # For now, assume JSON deserialization
+                    result = json.loads(response.result.value.decode('utf-8'))
+                    return result
+                else:
+                    return None
+            else:
+                raise RuntimeError(f"Elixir tool execution failed: {response.error_message}")
+                
+        except Exception as e:
+            logger.error(f"Error calling Elixir tool '{tool_name}': {e}")
+            raise
+    
+    @property
+    def elixir_tools(self) -> Dict[str, Any]:
+        """Get dictionary of available Elixir tools."""
+        return self._elixir_tools.copy()
 
 
 class VariableNamespace:

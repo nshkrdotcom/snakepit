@@ -84,6 +84,37 @@ Python client example:
 python examples/variable_usage.py
 ```
 
+### 8. **bidirectional_tools_demo.exs**
+Demonstrates Elixir tools exposed to Python:
+- Registering Elixir functions as tools
+- Tool discovery and metadata
+- Direct tool execution
+- Integration with Python adapters
+
+```bash
+elixir examples/bidirectional_tools_demo.exs
+```
+
+### 9. **python_elixir_tools_demo.py**
+Python calling Elixir tools:
+- Discovering available Elixir tools
+- Direct tool execution via gRPC
+- Using tool proxies for seamless integration
+- Hybrid Python-Elixir processing
+
+```bash
+# Option 1: Interactive demo (prompts for input)
+elixir examples/bidirectional_tools_demo.exs
+
+# Option 2: Auto-run server (recommended)
+# Terminal 1 - Start the Elixir server:
+elixir examples/bidirectional_tools_demo_auto.exs
+
+# Terminal 2 - Run the Python client:
+python examples/python_elixir_tools_demo.py
+# When prompted, just press Enter to use the default session ID
+```
+
 ## Running the Examples
 
 1. **Prerequisites**:
@@ -144,6 +175,37 @@ The examples demonstrate Snakepit's unified gRPC architecture:
 - **Session Management**: Centralized session store in Elixir with worker affinity
 - **Streaming Support**: Native gRPC streaming for real-time updates
 - **Type Safety**: Strong typing through Protocol Buffers and variable constraints
+- **Bidirectional Tool Bridge**: Seamless execution of tools across language boundaries
+
+## Bidirectional Tool Bridge
+
+The tool bridge examples (8 & 9) showcase Snakepit's advanced capability for cross-language tool execution:
+
+### Key Features:
+- **Tool Discovery**: Both Elixir and Python can discover available tools from the other side
+- **Transparent Proxying**: Tools appear as native functions in the calling language
+- **Type Safety**: Parameter specifications and validation across languages
+- **Session Integration**: Tools are scoped to sessions for proper isolation
+
+### Usage Pattern:
+1. **Elixir exposes tools** by registering them with `exposed_to_python: true`
+2. **Python discovers tools** automatically when creating a SessionContext
+3. **Tools are called** like regular functions with automatic serialization
+4. **Results flow back** with proper type conversion
+
+### Example Workflow:
+```python
+# Python side
+ctx = SessionContext(stub, session_id)
+
+# Elixir tools appear as Python functions
+result = ctx.elixir_tools["parse_json"](json_string='{"test": true}')
+
+# Or use direct call
+result = ctx.call_elixir_tool("calculate_fibonacci", n=20)
+```
+
+This enables powerful patterns where each language handles what it does best!
 
 ## Troubleshooting
 
