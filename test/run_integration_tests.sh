@@ -34,7 +34,7 @@ fi
 source venv/bin/activate || true
 
 # Install test dependencies
-pip install pytest pytest-asyncio grpcio grpcio-tools
+pip install pytest pytest-asyncio grpcio grpcio-tools numpy
 
 # Go back to project root
 cd "$PROJECT_ROOT"

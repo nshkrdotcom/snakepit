@@ -2,6 +2,7 @@
 grpcio>=1.60.0
 grpcio-tools>=1.60.0
 protobuf>=4.25.0
+numpy>=1.21.0
 
 # Optional: DSPy integration
 # dspy-ai>=2.0.0
