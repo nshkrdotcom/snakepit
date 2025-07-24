@@ -42,6 +42,20 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 
+## 🆕 What's New in v0.4.1
+
+### 🚀 **Enhanced Tool Bridge Functionality**
+- **New `process_text` tool** - Text processing with upper, lower, reverse, length operations
+- **New `get_stats` tool** - Real-time adapter and system monitoring with memory/CPU usage
+- **Fixed gRPC tool registration** - Resolved async/sync issues with UnaryUnaryCall objects
+- **Automatic session initialization** - Sessions created automatically when Python tools register
+
+### 🔧 **Tool Bridge Improvements**
+- **Remote tool dispatch** - Complete bidirectional communication between Elixir and Python
+- **Missing tool recovery** - Added adapter_info, echo, process_text, get_stats to ShowcaseAdapter
+- **Async/sync compatibility** - Fixed gRPC stub handling with proper response processing
+- **Enhanced error handling** - Better diagnostics for tool registration failures
+
 ## 🆕 What's New in v0.4
 
 ### 🛡️ **Enhanced Process Management & Reliability**
@@ -103,7 +117,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 # In your mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.4.0"}
+    {:snakepit, "~> 0.4.1"}
   ]
 end
 
@@ -138,7 +152,7 @@ end)
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.4.0"}
+    {:snakepit, "~> 0.4.1"}
   ]
 end
 ```
