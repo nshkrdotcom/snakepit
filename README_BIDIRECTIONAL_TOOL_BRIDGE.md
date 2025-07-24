@@ -409,6 +409,6 @@ When adding new features to the tool bridge:
 
 ## Related Documentation
 
-- [Implementation Plan](docs/bidirectional_tool_bridge_implementation_plan.md)
-- [As-Built Documentation](docs/bidirectional_tool_bridge_as_built.md)
 - [Main README](README.md)
+- [Unified gRPC Bridge](README_UNIFIED_GRPC_BRIDGE.md)
+- [Testing Guide](README_TESTING.md)
