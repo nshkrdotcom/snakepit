@@ -7,18 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-07-23
+
 ### Added
-- Automatic binary serialization for large tensor and embedding data (>10KB)
-- Binary fields in protobuf messages: `Variable.binary_value`, `SetVariableRequest.binary_value`, etc.
-- 5-10x performance improvement for large numerical data transfers
-- Zero-configuration binary encoding with automatic threshold detection
-- Comprehensive showcase application (`examples/snakepit_showcase`) demonstrating all features
-- Dedicated binary serialization demo with performance benchmarks
+- Complete gRPC bridge implementation with full bidirectional tool execution
+- Tool bridge streaming support for efficient real-time communication
+- Variables feature with type system (string, integer, float, boolean, choice, tensor, embedding)
+- Comprehensive process management and cleanup system
+- Process registry with enhanced tracking and orphan detection
+- SessionStore with TTL support and automatic expiration
+- BridgeServer implementation for gRPC protocol
+- StreamHandler for managing gRPC streaming responses
+- Telemetry module for comprehensive metrics and monitoring
+- MockGRPCWorker and test infrastructure improvements
+- Showcase application with multiple demo scenarios
+- Binary serialization support for large data (>10KB) with 5-10x performance improvement
+- Automatic binary encoding with threshold detection
+- Protobuf schema updates with binary fields support
+- Tool registration and discovery system
+- Elixir tool exposure to Python workers
+- Batch variable operations for performance
+- Variable watching/reactive updates support
+- Heartbeat mechanism for session health monitoring
 
 ### Changed
-- `Serialization.encode_any/2` now returns a 3-tuple `{:ok, any_map, binary_data}`
-- Large tensors and embeddings automatically use binary encoding for better performance
-- Protocol buffer schema updated to support binary data fields
+- Major refactoring from legacy bridge system to gRPC-only architecture
+- Removed all legacy bridge implementations (V1, V2, MessagePack)
+- Unified all adapters to use gRPC protocol exclusively
+- Worker module completely rewritten for gRPC support
+- Pool module enhanced with configurable adapter support
+- ProcessRegistry rewritten with improved tracking and cleanup
+- Test framework upgraded with SuperTester integration
+- Examples reorganized and updated for gRPC usage
+- Python client library restructured as snakepit_bridge package
+- Serialization module now returns 3-tuple `{:ok, any_map, binary_data}`
+- Large tensors and embeddings automatically use binary encoding
+- Integration tests updated to use new infrastructure
+
+### Fixed
+- Process cleanup and orphan detection issues
+- Worker termination and registry cleanup
+- Module redefinition warnings in test environment
+- SessionStore TTL validation and expiration timing
+- Mock adapter message handling
+- Integration test pool timeouts and shutdown
+- GitHub Actions deprecation warnings
+- Elixir version compatibility in integration tests
+
+### Removed
+- All legacy bridge implementations (generic_python.ex, generic_python_v2.ex, etc.)
+- MessagePack protocol support (moved to gRPC exclusively)
+- Old Python bridge scripts (generic_bridge.py, enhanced_bridge.py)
+- Legacy session_context.py implementation
+- V1/V2 adapter pattern in favor of unified gRPC approach
 
 ## [0.3.3] - 2025-07-20
 

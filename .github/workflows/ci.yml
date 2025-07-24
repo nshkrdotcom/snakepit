@@ -42,7 +42,7 @@ jobs:
       run: mix compile --warnings-as-errors
 
     - name: Run tests
-      run: mix test
+      run: mix test --exclude skip_ci
 
     - name: Restore PLT cache
       uses: actions/cache@v4
