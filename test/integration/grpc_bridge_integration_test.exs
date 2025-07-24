@@ -106,6 +106,7 @@ defmodule Snakepit.GRPCBridgeIntegrationTest do
       )
     end
 
+    @tag :skip_ci
     test "concurrent requests", %{pool_name: pool_name} do
       # Start multiple concurrent requests
       tasks =

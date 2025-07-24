@@ -24,7 +24,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
-- [What's New in v0.3](#whats-new-in-v03)
+- [What's New in v0.4](#whats-new-in-v04)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Core Concepts](#core-concepts)
@@ -42,12 +42,12 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 
-## 🆕 What's New in v0.3
+## 🆕 What's New in v0.4
 
 ### 🛡️ **Enhanced Process Management & Reliability**
 - **Persistent process tracking** with DETS storage survives BEAM crashes
 - **Automatic orphan cleanup** - no more zombie Python processes
-- **Pre-registration pattern (v0.3.4+)** - Prevents orphans even during startup crashes
+- **Pre-registration pattern** - Prevents orphans even during startup crashes
 - **Immediate DETS persistence** - No data loss on abrupt termination
 - **Zero-configuration reliability** - works out of the box
 - **Production-ready** - handles VM crashes, OOM kills, and power failures
@@ -103,7 +103,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 # In your mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.3.3"}
+    {:snakepit, "~> 0.4.0"}
   ]
 end
 
@@ -138,7 +138,7 @@ end)
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.3.3"}
+    {:snakepit, "~> 0.4.0"}
   ]
 end
 ```
