@@ -194,6 +194,18 @@ class BaseAdapter:
         
         try:
             response = stub.RegisterTools(request)
+            # Handle async stub returning UnaryUnaryCall - properly invoke it
+            if hasattr(response, '__await__') or hasattr(response, 'result'):
+                # This is a UnaryUnaryCall object, get the actual result
+                try:
+                    response = response.result()
+                except AttributeError:
+                    # Try calling it directly if it's a callable
+                    if callable(response):
+                        response = response()
+                    else:
+                        logger.warning("RegisterTools returned UnaryUnaryCall but couldn't extract result")
+                        return []
             if response.success:
                 logger.info(f"Registered {len(tools)} tools for session {session_id}")
                 return list(response.tool_ids.keys())

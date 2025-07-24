@@ -62,6 +62,16 @@ class ShowcaseAdapter(BaseAdapter):
     
     # Expose key handler methods as tools using the decorator
     
+    @tool(description="Get adapter information and capabilities")
+    def adapter_info(self) -> Dict[str, Any]:
+        """Return information about the adapter capabilities."""
+        return self.handlers['basic'].get_tools()['adapter_info'].func(self.session_context)
+    
+    @tool(description="Echo back provided arguments")
+    def echo(self, **kwargs) -> Dict[str, Any]:
+        """Echo back all provided arguments."""
+        return self.handlers['basic'].get_tools()['echo'].func(self.session_context, **kwargs)
+    
     @tool(description="Execute basic operations like echo and add")
     def basic_echo(self, message: str) -> str:
         """Echo a message back."""
@@ -71,6 +81,56 @@ class ShowcaseAdapter(BaseAdapter):
     def basic_add(self, a: float, b: float) -> float:
         """Add two numbers together."""
         return self.handlers['basic'].get_tools()['add'].func(self.session_context, a=a, b=b)
+    
+    @tool(description="Process text with various operations")
+    def process_text(self, text: str, operation: str = "upper") -> Dict[str, Any]:
+        """Process text with specified operation (upper, lower, reverse, length)."""
+        operations = {
+            "upper": lambda t: t.upper(),
+            "lower": lambda t: t.lower(), 
+            "reverse": lambda t: t[::-1],
+            "length": lambda t: len(t)
+        }
+        
+        if operation in operations:
+            result = operations[operation](text)
+            return {
+                "original": text,
+                "operation": operation,
+                "result": result,
+                "success": True
+            }
+        else:
+            return {
+                "original": text,
+                "operation": operation,
+                "error": f"Unknown operation: {operation}",
+                "available_operations": list(operations.keys()),
+                "success": False
+            }
+    
+    @tool(description="Get basic statistics and system information")
+    def get_stats(self) -> Dict[str, Any]:
+        """Return basic statistics about the adapter and system."""
+        import time
+        import psutil
+        import os
+        
+        return {
+            "adapter": {
+                "name": "ShowcaseAdapter",
+                "version": "2.0.0",
+                "registered_tools": len([m for m in dir(self) if hasattr(getattr(self, m), '_tool_metadata')]),
+                "session_id": self.session_context.session_id if self.session_context else None
+            },
+            "system": {
+                "timestamp": time.time(),
+                "pid": os.getpid(),
+                "memory_usage_mb": round(psutil.Process().memory_info().rss / 1024 / 1024, 2),
+                "cpu_percent": psutil.cpu_percent(interval=0.1)
+            },
+            "success": True
+        }
     
     @tool(description="Perform text analysis using ML")
     def ml_analyze_text(self, text: str) -> Dict[str, Any]:

@@ -14,6 +14,7 @@ class BasicOpsHandler:
         return {
             "ping": Tool(self.ping),
             "echo": Tool(self.echo),
+            "add": Tool(self.add),
             "error_demo": Tool(self.error_demo),
             "adapter_info": Tool(self.adapter_info),
         }
@@ -25,6 +26,10 @@ class BasicOpsHandler:
     def echo(self, ctx, **kwargs) -> Dict[str, Any]:
         """Echo back all provided arguments."""
         return {"echoed": kwargs}
+    
+    def add(self, ctx, a: float, b: float) -> float:
+        """Add two numbers together."""
+        return a + b
     
     def error_demo(self, ctx, error_type: str = "generic") -> None:
         """Demonstrate error handling with different error types."""
