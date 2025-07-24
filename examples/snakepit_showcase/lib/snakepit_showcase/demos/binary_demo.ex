@@ -117,8 +117,6 @@ defmodule SnakepitShowcase.Demos.BinaryDemo do
       IO.puts("     Norm: #{result["norm"]}")
     end)
   end
-
-  defp format_shape([x, y]), do: "[#{x}, #{y}]" |> String.pad_trailing(9)
   
   defp pad_string(str, len), do: String.pad_trailing(str, len)
   

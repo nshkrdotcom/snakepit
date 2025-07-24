@@ -162,91 +162,101 @@ defmodule Snakepit.GRPCWorker do
     worker_id = Keyword.fetch!(opts, :id)
     port = adapter.get_port()
 
-    # Generate unique session ID
-    session_id =
-      "session_#{:erlang.unique_integer([:positive, :monotonic])}_#{:erlang.system_time(:microsecond)}"
+    # CRITICAL: Reserve the worker slot BEFORE spawning the process
+    # This ensures we can track the process even if we crash during spawn
+    case Snakepit.Pool.ProcessRegistry.reserve_worker(worker_id) do
+      :ok ->
+        Logger.debug("Reserved worker slot for #{worker_id}")
+        # Generate unique session ID
+        session_id =
+          "session_#{:erlang.unique_integer([:positive, :monotonic])}_#{:erlang.system_time(:microsecond)}"
 
-    # Get the address of the central Elixir gRPC server
-    elixir_grpc_host = Application.get_env(:snakepit, :grpc_host, "localhost")
-    elixir_grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
-    elixir_address = "#{elixir_grpc_host}:#{elixir_grpc_port}"
+        # Get the address of the central Elixir gRPC server
+        elixir_grpc_host = Application.get_env(:snakepit, :grpc_host, "localhost")
+        elixir_grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
+        elixir_address = "#{elixir_grpc_host}:#{elixir_grpc_port}"
 
-    # Start the gRPC server process non-blocking
-    executable = adapter.executable_path()
-    script = adapter.script_path()
-    adapter_args = adapter.script_args() || []
+        # Start the gRPC server process non-blocking
+        executable = adapter.executable_path()
+        script = adapter.script_path()
+        adapter_args = adapter.script_args() || []
 
-    # Build args ensuring both port and elixir-address are included
-    args = adapter_args
+        # Build args ensuring both port and elixir-address are included
+        args = adapter_args
 
-    # Add port if not already present
-    args =
-      if not Enum.any?(args, &String.contains?(&1, "--port")) do
-        args ++ ["--port", to_string(port)]
-      else
-        args
-      end
+        # Add port if not already present
+        args =
+          if not Enum.any?(args, &String.contains?(&1, "--port")) do
+            args ++ ["--port", to_string(port)]
+          else
+            args
+          end
 
-    # Add elixir-address if not already present
-    args =
-      if not Enum.any?(args, &String.contains?(&1, "--elixir-address")) do
-        args ++ ["--elixir-address", elixir_address]
-      else
-        args
-      end
+        # Add elixir-address if not already present
+        args =
+          if not Enum.any?(args, &String.contains?(&1, "--elixir-address")) do
+            args ++ ["--elixir-address", elixir_address]
+          else
+            args
+          end
 
-    # Add beam-run-id for safer process cleanup
-    beam_run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
-    args = args ++ ["--snakepit-run-id", beam_run_id]
+        # Add beam-run-id for safer process cleanup
+        beam_run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
+        args = args ++ ["--snakepit-run-id", beam_run_id]
 
-    Logger.info("Starting gRPC server: #{executable} #{script} #{Enum.join(args, " ")}")
+        Logger.info("Starting gRPC server: #{executable} #{script} #{Enum.join(args, " ")}")
 
-    # Use setsid to create a new process group for easier cleanup
-    setsid_path = System.find_executable("setsid") || "/usr/bin/setsid"
+        # Use setsid to create a new process group for easier cleanup
+        setsid_path = System.find_executable("setsid") || "/usr/bin/setsid"
 
-    port_opts = [
-      :binary,
-      :exit_status,
-      :use_stdio,
-      :stderr_to_stdout,
-      {:args, [executable, script | args]},
-      {:cd, Path.dirname(script)}
-    ]
+        port_opts = [
+          :binary,
+          :exit_status,
+          :use_stdio,
+          :stderr_to_stdout,
+          {:args, [executable, script | args]},
+          {:cd, Path.dirname(script)}
+        ]
 
-    server_port = Port.open({:spawn_executable, setsid_path}, port_opts)
-    Port.monitor(server_port)
+        server_port = Port.open({:spawn_executable, setsid_path}, port_opts)
+        Port.monitor(server_port)
 
-    # Extract external process PID for cleanup registry
-    process_pid =
-      case Port.info(server_port, :os_pid) do
-        {:os_pid, pid} ->
-          Logger.info("Started gRPC server process, will listen on TCP port #{port}")
-          pid
+        # Extract external process PID for cleanup registry
+        process_pid =
+          case Port.info(server_port, :os_pid) do
+            {:os_pid, pid} ->
+              Logger.info("Started gRPC server process, will listen on TCP port #{port}")
+              pid
 
-        error ->
-          Logger.error("Failed to get gRPC server process PID: #{inspect(error)}")
-          nil
-      end
+            error ->
+              Logger.error("Failed to get gRPC server process PID: #{inspect(error)}")
+              nil
+          end
 
-    state = %{
-      id: worker_id,
-      adapter: adapter,
-      port: port,
-      server_port: server_port,
-      process_pid: process_pid,
-      session_id: session_id,
-      # Will be established in handle_continue
-      connection: nil,
-      health_check_ref: nil,
-      stats: %{
-        requests: 0,
-        errors: 0,
-        start_time: System.monotonic_time(:millisecond)
-      }
-    }
+        state = %{
+          id: worker_id,
+          adapter: adapter,
+          port: port,
+          server_port: server_port,
+          process_pid: process_pid,
+          session_id: session_id,
+          # Will be established in handle_continue
+          connection: nil,
+          health_check_ref: nil,
+          stats: %{
+            requests: 0,
+            errors: 0,
+            start_time: System.monotonic_time(:millisecond)
+          }
+        }
 
-    # Return immediately and schedule the blocking work for later
-    {:ok, state, {:continue, :connect_and_wait}}
+        # Return immediately and schedule the blocking work for later
+        {:ok, state, {:continue, :connect_and_wait}}
+
+      {:error, reason} ->
+        Logger.error("Failed to reserve worker slot for #{worker_id}: #{inspect(reason)}")
+        {:stop, {:reservation_failed, reason}}
+    end
   end
 
   @impl true
@@ -256,8 +266,8 @@ defmodule Snakepit.GRPCWorker do
       {:ok, actual_port} ->
         case state.adapter.init_grpc_connection(actual_port) do
           {:ok, connection} ->
-            # *** CRITICAL: Register with ProcessRegistry for ApplicationCleanup safety net ***
-            Snakepit.Pool.ProcessRegistry.register_worker(
+            # *** CRITICAL: Activate the reserved worker with actual process info ***
+            Snakepit.Pool.ProcessRegistry.activate_worker(
               state.id,
               self(),
               state.process_pid,

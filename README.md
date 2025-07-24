@@ -177,7 +177,7 @@ pip install -r priv/python/requirements.txt
 # Generate Python gRPC code
 make proto-python
 
-# This creates the necessary gRPC stubs in priv/python/snakepit_bridge/grpc/
+# This creates the necessary gRPC stubs in priv/python/
 ```
 
 ### Step 3: Configure Your Application

@@ -3,19 +3,17 @@
 
 cd "$(dirname "$0")"
 
-# Ensure the grpc directory exists
-mkdir -p snakepit_bridge/grpc
+# Generate directly to the python directory
 
 # Generate Python code from protobuf
 python -m grpc_tools.protoc \
   -I../proto \
-  --python_out=snakepit_bridge/grpc \
-  --pyi_out=snakepit_bridge/grpc \
-  --grpc_python_out=snakepit_bridge/grpc \
+  --python_out=. \
+  --pyi_out=. \
+  --grpc_python_out=. \
   ../proto/snakepit_bridge.proto
 
-# Touch __init__.py to ensure it's a package
-touch snakepit_bridge/grpc/__init__.py
+# No need for __init__.py in root directory
 
 echo "gRPC code generation complete!"
-echo "Generated files in: snakepit_bridge/grpc/"
+echo "Generated files in: ./"

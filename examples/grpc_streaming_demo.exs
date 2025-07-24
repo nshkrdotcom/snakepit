@@ -251,7 +251,7 @@ defmodule GRPCChecker do
         IO.puts("   mix deps.get")
         false
         
-      not File.exists?("priv/python/snakepit_bridge/grpc/snakepit_pb2.py") ->
+      not File.exists?("priv/python/snakepit_bridge_pb2.py") ->
         IO.puts("❌ Generated gRPC code not found. Run:")
         IO.puts("   make install-grpc")
         IO.puts("   make proto-python")

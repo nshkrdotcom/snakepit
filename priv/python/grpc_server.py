@@ -21,8 +21,8 @@ from typing import Optional
 # Add the package to Python path
 sys.path.insert(0, '.')
 
-from snakepit_bridge.grpc import snakepit_bridge_pb2 as pb2
-from snakepit_bridge.grpc import snakepit_bridge_pb2_grpc as pb2_grpc
+import snakepit_bridge_pb2 as pb2
+import snakepit_bridge_pb2_grpc as pb2_grpc
 from snakepit_bridge.session_context import SessionContext
 from snakepit_bridge.serialization import TypeSerializer
 from google.protobuf.timestamp_pb2 import Timestamp

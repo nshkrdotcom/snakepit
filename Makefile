@@ -2,7 +2,7 @@
 
 # Directories
 PROTO_DIR = priv/proto
-PYTHON_OUT_DIR = priv/python/snakepit_bridge/grpc
+PYTHON_OUT_DIR = priv/python
 ELIXIR_OUT_DIR = lib/snakepit/grpc
 
 # Protocol buffer source

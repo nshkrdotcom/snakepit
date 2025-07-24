@@ -5,8 +5,8 @@ import sys
 import json
 sys.path.append('/home/home/p/g/n/dspex/snakepit/priv/python')
 
-from snakepit_bridge.grpc import snakepit_bridge_pb2 as pb2
-from snakepit_bridge.grpc import snakepit_bridge_pb2_grpc as pb2_grpc
+import snakepit_bridge_pb2 as pb2
+import snakepit_bridge_pb2_grpc as pb2_grpc
 from google.protobuf.any_pb2 import Any
 
 # Connect to Python gRPC server

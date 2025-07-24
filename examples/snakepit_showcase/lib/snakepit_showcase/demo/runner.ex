@@ -54,7 +54,7 @@ defmodule SnakepitShowcase.Demo.Runner do
               end
               
               # Update context with step result
-              context = put_in(context.step_results[step_name], result)
+              _updated_context = put_in(context.step_results[step_name], result)
               {:cont, [{:ok, {step_name, result}} | acc]}
               
             {:error, reason} = error ->
@@ -164,6 +164,6 @@ defmodule SnakepitShowcase.Demo.Runner do
   end
   
   defp cleanup_resource(type, id) do
-    Logger.warn("Unknown resource type for cleanup: #{type} - #{inspect(id)}")
+    Logger.warning("Unknown resource type for cleanup: #{type} - #{inspect(id)}")
   end
 end
