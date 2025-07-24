@@ -127,9 +127,13 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         self.elixir_address = elixir_address
         self.server: Optional[grpc.aio.Server] = None
         
-        # Create a client channel to the Elixir server
+        # Create async client channel for async operations (proxying)
         self.elixir_channel = grpc.aio.insecure_channel(elixir_address)
         self.elixir_stub = pb2_grpc.BridgeServiceStub(self.elixir_channel)
+        
+        # Create sync client channel for SessionContext
+        self.sync_elixir_channel = grpc.insecure_channel(elixir_address)
+        self.sync_elixir_stub = pb2_grpc.BridgeServiceStub(self.sync_elixir_channel)
         
         logger.info(f"Python server initialized with Elixir backend at {elixir_address}")
     
@@ -137,6 +141,8 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         """Clean up resources."""
         if self.elixir_channel:
             await self.elixir_channel.close()
+        if self.sync_elixir_channel:
+            self.sync_elixir_channel.close()
     
     # Health & Session Management
     
@@ -225,8 +231,17 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         start_time = time.time()
         
         try:
+            # Ensure session exists in Elixir
+            init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
+            try:
+                self.sync_elixir_stub.InitializeSession(init_request)
+            except grpc.RpcError as e:
+                # Session might already exist, that's ok
+                if e.code() != grpc.StatusCode.ALREADY_EXISTS:
+                    logger.debug(f"InitializeSession for {request.session_id}: {e}")
+            
             # Create ephemeral context for this request
-            session_context = SessionContext(self.elixir_stub, request.session_id)
+            session_context = SessionContext(self.sync_elixir_stub, request.session_id)
             
             # Create adapter instance for this request
             adapter = self.adapter_class()
@@ -234,7 +249,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             
             # Register adapter tools with the session (for new BaseAdapter)
             if hasattr(adapter, 'register_with_session'):
-                registered_tools = adapter.register_with_session(request.session_id, self.elixir_stub)
+                registered_tools = adapter.register_with_session(request.session_id, self.sync_elixir_stub)
                 logger.info(f"Registered {len(registered_tools)} tools for session {request.session_id}")
             
             # Initialize adapter if needed
@@ -310,9 +325,18 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             f.flush()
         
         try:
+            # Ensure session exists in Elixir
+            init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
+            try:
+                self.sync_elixir_stub.InitializeSession(init_request)
+            except grpc.RpcError as e:
+                # Session might already exist, that's ok
+                if e.code() != grpc.StatusCode.ALREADY_EXISTS:
+                    logger.debug(f"InitializeSession for {request.session_id}: {e}")
+            
             # Create ephemeral context for this request
             logger.info(f"Creating SessionContext for {request.session_id}")
-            session_context = SessionContext(self.elixir_stub, request.session_id)
+            session_context = SessionContext(self.sync_elixir_stub, request.session_id)
             
             # Create adapter instance for this request
             logger.info(f"Creating adapter instance: {self.adapter_class}")
@@ -321,7 +345,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             
             # Register adapter tools with the session (for new BaseAdapter)
             if hasattr(adapter, 'register_with_session'):
-                registered_tools = adapter.register_with_session(request.session_id, self.elixir_stub)
+                registered_tools = adapter.register_with_session(request.session_id, self.sync_elixir_stub)
                 logger.info(f"Registered {len(registered_tools)} tools for session {request.session_id}")
             
             # Initialize adapter if needed

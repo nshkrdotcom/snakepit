@@ -11,6 +11,8 @@ import logging
 import json
 from dataclasses import dataclass, field
 from enum import Enum
+import asyncio
+import inspect
 
 from snakepit_bridge_pb2 import (
     Variable, RegisterVariableRequest, RegisterVariableResponse,
@@ -688,6 +690,18 @@ class SessionContext:
         try:
             request = GetExposedElixirToolsRequest(session_id=self.session_id)
             response = self.stub.GetExposedElixirTools(request)
+            # Handle async stub returning UnaryUnaryCall - properly invoke it
+            if hasattr(response, '__await__') or hasattr(response, 'result'):
+                # This is a UnaryUnaryCall object, get the actual result
+                try:
+                    response = response.result()
+                except AttributeError:
+                    # Try calling it directly if it's a callable
+                    if callable(response):
+                        response = response()
+                    else:
+                        logger.warning("GetExposedElixirTools returned UnaryUnaryCall but couldn't extract result")
+                        return
             
             for tool_spec in response.tools:
                 proxy = self._create_tool_proxy(tool_spec)

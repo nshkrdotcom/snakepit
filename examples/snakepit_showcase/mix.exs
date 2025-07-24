@@ -52,7 +52,11 @@ defmodule SnakepitShowcase.MixProject do
       "demo.variables": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.VariablesDemo.run() end)'"],
       "demo.binary": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.BinaryDemo.run() end)'"],
       "demo.ml_workflow": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.MLWorkflowDemo.run() end)'"],
-      "demo.execution_modes": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ExecutionModesDemo.run() end)'"]
+      "demo.execution_modes": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ExecutionModesDemo.run() end)'"],
+      "demo.grpc_tools": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.GrpcToolsDemo.run() end)'"],
+      
+      # --- NEW ALIAS ---
+      "showcase": ["run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.RunShowcase.run() end)'"]
     ]
   end
 end

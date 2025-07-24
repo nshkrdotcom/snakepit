@@ -335,6 +335,11 @@ defmodule Snakepit.GRPCWorker do
   end
 
   @impl true
+  def handle_call(:get_port, _from, state) do
+    {:reply, {:ok, state.port}, state}
+  end
+
+  @impl true
   def handle_call({:execute_session, session_id, command, args, timeout}, _from, state) do
     session_args = Map.put(args, :session_id, session_id)
 

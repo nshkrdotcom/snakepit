@@ -474,10 +474,20 @@ defmodule Snakepit.GRPC.BridgeServer do
     ToolRegistry.execute_local_tool(session_id, tool.name, params)
   end
 
-  defp execute_tool_handler(%{type: :remote} = tool, _request, _session_id) do
-    # Forward to Python worker - this will be implemented later
-    # For now, return an error
-    {:error, "Remote tool execution not yet implemented for tool: #{tool.name}"}
+  defp execute_tool_handler(%{type: :remote} = tool, request, session_id) do
+    # Forward to Python worker
+    Logger.debug("Executing remote tool #{tool.name} on worker #{tool.worker_id}")
+
+    with {:ok, worker_port} <- get_worker_port(tool.worker_id),
+         {:ok, channel} <- create_worker_channel(worker_port),
+         {:ok, result} <- forward_tool_to_worker(channel, request, session_id) do
+      # Channel will be cleaned up automatically
+      {:ok, result}
+    else
+      {:error, reason} ->
+        Logger.error("Failed to execute remote tool #{tool.name}: #{inspect(reason)}")
+        {:error, "Remote tool execution failed: #{inspect(reason)}"}
+    end
   end
 
   defp decode_tool_parameters(params) do
@@ -502,6 +512,65 @@ defmodule Snakepit.GRPC.BridgeServer do
       {key, decoded}
     end)
     |> Map.new()
+  end
+
+  # Helper functions for remote tool execution
+
+  defp get_worker_port(worker_id) do
+    # For now, try to get from the worker registry
+    # In a production implementation, this would be stored in a registry
+    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
+      [{pid, _}] when is_pid(pid) ->
+        # Try to get port from worker state - this is a simplified approach
+        try do
+          case GenServer.call(pid, :get_port, 1000) do
+            {:ok, port} -> {:ok, port}
+            _ -> {:error, "Could not get port from worker"}
+          end
+        catch
+          _exit, _reason -> {:error, "Worker not responding"}
+        end
+
+      [] ->
+        {:error, "Worker not found: #{worker_id}"}
+    end
+  end
+
+  defp create_worker_channel(port) do
+    try do
+      GRPC.Stub.connect("localhost:#{port}")
+    rescue
+      error -> {:error, "Failed to connect to worker: #{inspect(error)}"}
+    end
+  end
+
+  defp forward_tool_to_worker(channel, request, session_id) do
+    # Forward the ExecuteToolRequest to the Python worker's gRPC server
+    alias Snakepit.Bridge.BridgeService.Stub
+
+    # Create the request to forward to the worker
+    worker_request = %ExecuteToolRequest{
+      session_id: session_id,
+      tool_name: request.tool_name,
+      parameters: request.parameters,
+      metadata: request.metadata
+    }
+
+    try do
+      case Stub.execute_tool(channel, worker_request) do
+        {:ok, response} ->
+          if response.success do
+            {:ok, response.result}
+          else
+            {:error, response.error_message}
+          end
+
+        {:error, reason} ->
+          {:error, "gRPC call failed: #{inspect(reason)}"}
+      end
+    rescue
+      error -> {:error, "Exception during gRPC call: #{inspect(error)}"}
+    end
   end
 
   def execute_streaming_tool(_request, _stream) do
