@@ -60,6 +60,13 @@ ToolRegistry.register_elixir_tool(
 )
 ```
 
+**Note**: As of v0.4.1, the tool bridge includes automatic session initialization and enhanced tool capabilities. Sessions are automatically created when Python tools attempt to register, eliminating the need for manual session setup in most cases.
+
+### New in v0.4.1
+- **Enhanced ShowcaseAdapter** with `process_text` and `get_stats` tools
+- **Fixed gRPC tool registration** - Resolved async/sync issues with proper response handling
+- **Complete remote tool dispatch** - Bidirectional communication between Elixir and Python
+
 ### 2. Call Elixir Functions from Python
 
 ```python

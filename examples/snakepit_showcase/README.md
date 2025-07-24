@@ -11,7 +11,10 @@ A comprehensive example application demonstrating all features and best practice
 - ✅ Variable management with type validation
 - ✅ Binary serialization for large data
 - ✅ Complete ML workflows with model training/inference
-- ✅ **Execution modes guide (NEW)** - When to use each pattern
+- ✅ **Enhanced tool capabilities (v0.4.1)**:
+  - `process_text` - Text processing with upper, lower, reverse, length operations
+  - `get_stats` - Real-time adapter and system monitoring
+- ✅ **Execution modes guide** - When to use each pattern
 
 ## 🏗️ Architecture Improvements
 

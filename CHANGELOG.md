@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2025-07-24
+
+### Added
+- **New `process_text` tool** - Text processing capabilities with upper, lower, reverse, and length operations
+- **New `get_stats` tool** - Real-time adapter and system monitoring with memory usage, CPU usage, and system information
+- **Enhanced ShowcaseAdapter** - Added missing tools (adapter_info, echo, process_text, get_stats) for complete tool bridge demonstration
+
+### Fixed
+- **gRPC tool registration issues** - Resolved async/sync mismatch causing UnaryUnaryCall objects to be returned instead of actual responses
+- **Missing tool errors** - Fixed "Unknown tool: adapter_info" and "Unknown tool: echo" errors by implementing missing @tool decorated methods
+- **Automatic session initialization** - Fixed "Failed to register tools: not_found" error by automatically creating sessions before tool registration
+- **Remote tool dispatch** - Implemented complete bidirectional tool execution between Elixir BridgeServer and Python workers
+- **Async/sync compatibility** - Added proper handling for both sync and async gRPC stubs with fallback logic for UnaryUnaryCall objects
+
+### Changed
+- **BridgeServer enhancement** - Added remote tool execution capabilities with worker port lookup and gRPC forwarding
+- **Python gRPC server** - Enhanced with automatic session initialization before tool registration
+- **ShowcaseAdapter refactoring** - Expanded tool set to demonstrate full bidirectional tool bridge capabilities
+
 ## [0.4.0] - 2025-07-23
 
 ### Added
@@ -176,6 +195,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
+[0.4.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.1
 [0.4.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.0
 [0.3.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.3
 [0.3.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.2
