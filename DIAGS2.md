@@ -1,4 +1,19 @@
-# Snakepit Architecture Diagrams
+# Snakepit Architecture Diagrams (v0.4.0+)
+
+This document provides comprehensive Mermaid diagrams that illustrate Snakepit's system architecture, focusing on component relationships, data flow, and operational patterns. These diagrams complement the performance-focused diagrams in DIAGS.md by showing the complete system design.
+
+## Diagram Overview
+
+1. **High-Level System Architecture** - Component relationships and communication patterns
+2. **Request Flow Sequence** - Step-by-step execution flow with session and variable management
+3. **Supervision Tree** - OTP supervision hierarchy for fault tolerance
+4. **State Management Flow** - How state is centralized in Elixir while Python workers remain stateless  
+5. **Worker Lifecycle** - State transitions during worker lifetime
+6. **Variable System Architecture** - Class structure for type-safe variable management
+7. **Protocol Message Flow** - gRPC message flow between components
+8. **Error Handling & Recovery** - How errors are detected and recovered from
+
+These diagrams are essential for understanding how Snakepit achieves its design goals of high performance, fault tolerance, and clean separation of concerns.
 
 ## 1. High-Level System Architecture
 
@@ -15,7 +30,6 @@ graph TB
     end
     
     subgraph "Python Worker Process"
-        PORT[Port]
         GRPC[grpc_server.py<br/>gRPC Service]
         CTX[SessionContext<br/>Cache + Client]
         ADAPTER[User Adapter]
@@ -26,9 +40,7 @@ graph TB
     POOL -->|manages| WS
     WS -->|supervises| STARTER
     STARTER -->|monitors| WORKER
-    WORKER -->|spawns| PORT
-    WORKER -->|gRPC| GRPC
-    PORT -.->|stdio| GRPC
+    WORKER -->|spawns & gRPC| GRPC
     
     POOL -->|session ops| SS
     SS -->|stores state| ETS[(ETS Table)]
@@ -47,6 +59,8 @@ graph TB
     style GRPC fill:#fff9c4
     style CTX fill:#fff59d
 ```
+
+This diagram shows the overall system components and their relationships. Key insight: Python workers are completely stateless - all state management happens in the Elixir SessionStore, enabling easy scaling and crash recovery.
 
 ## 2. Request Flow Sequence
 
@@ -84,6 +98,8 @@ sequenceDiagram
     Pool-->>App: Result
 ```
 
+This sequence shows how variable access patterns work. Python workers call back to Elixir for variable operations, maintaining the stateless design while enabling session-based workflows.
+
 ## 3. Supervision Tree
 
 ```mermaid
@@ -120,6 +136,8 @@ graph TD
     style SN fill:#ffc107
 ```
 
+The supervision tree implements the "Permanent Wrapper" pattern where Worker.Starters supervise individual workers. This decouples the Pool from worker restart logic and provides automatic recovery.
+
 ## 4. State Management Flow
 
 ```mermaid
@@ -150,6 +168,8 @@ graph LR
     style ETS fill:#4fc3f7
 ```
 
+This diagram illustrates the key architectural principle: stateless Python workers with centralized Elixir state. The SessionContext provides local caching to reduce gRPC round-trips while maintaining consistency.
+
 ## 5. Worker Lifecycle
 
 ```mermaid
@@ -178,6 +198,8 @@ stateDiagram-v2
     
     Stopping --> [*]: Clean shutdown
 ```
+
+The worker lifecycle emphasizes fault tolerance and automatic recovery. Workers transition through well-defined states with automatic restart via the supervision tree when failures occur.
 
 ## 6. Variable System Architecture
 
@@ -241,6 +263,8 @@ classDiagram
     SessionContext --> SessionStore : gRPC calls
 ```
 
+The variable system class diagram shows the relationship between Elixir-side storage (SessionStore) and Python-side caching (SessionContext). This design enables type-safe variable management across language boundaries.
+
 ## 7. Protocol Message Flow
 
 ```mermaid
@@ -282,6 +306,8 @@ graph TB
     style TOOL fill:#fff9c4
     style STORE fill:#81d4fa
 ```
+
+This message flow diagram shows how gRPC protobuf messages flow through the system. The protocol handles both tool execution and variable management through a unified interface.
 
 ## 8. Error Handling & Recovery
 
@@ -329,21 +355,26 @@ graph TD
     style OK fill:#c8e6c9
 ```
 
-## Usage Notes
+The error handling diagram shows Snakepit's multi-layered approach to fault tolerance. Various detection mechanisms feed into recovery strategies, ensuring system resilience.
 
-These diagrams illustrate:
+## Architecture Principles Illustrated
 
-1. **System Architecture**: The overall structure and component relationships
-2. **Request Flow**: How a request moves through the system
-3. **Supervision Tree**: OTP supervision hierarchy for fault tolerance
-4. **State Management**: How state is centralized in Elixir
-5. **Worker Lifecycle**: States a worker goes through
-6. **Variable System**: Class structure for variable management
-7. **Protocol Flow**: How gRPC messages flow between components
-8. **Error Handling**: How errors are detected and recovered from
+These diagrams demonstrate key architectural principles that make Snakepit production-ready:
 
-To render these diagrams, use any tool that supports Mermaid syntax, such as:
-- GitHub/GitLab (renders automatically in markdown)
-- Mermaid Live Editor (https://mermaid.live)
-- VS Code with Mermaid extension
-- Many documentation tools (MkDocs, Docusaurus, etc.)
+1. **Stateless Workers**: Python processes hold no persistent state, enabling easy scaling
+2. **Centralized State**: All session data managed in Elixir SessionStore with ETS backing
+3. **Fault Tolerance**: Multi-level supervision with automatic recovery
+4. **Performance**: Non-blocking operations and concurrent execution throughout
+5. **Type Safety**: Structured variable system with validation and constraints
+6. **Protocol Efficiency**: Modern gRPC with protobuf for reliable communication
+
+## Rendering These Diagrams
+
+To render these diagrams, use any tool that supports Mermaid syntax:
+- **GitHub/GitLab**: Renders automatically in markdown
+- **Mermaid Live Editor**: https://mermaid.live  
+- **VS Code**: Install Mermaid extension
+- **Documentation Tools**: MkDocs, Docusaurus, GitBook, etc.
+- **ExDoc**: These diagrams are included in the generated documentation
+
+The diagrams provide visual understanding of how Snakepit achieves its design goals of high performance, fault tolerance, and clean separation between Elixir orchestration and Python execution.

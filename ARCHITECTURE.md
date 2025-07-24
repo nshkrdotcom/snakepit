@@ -2,7 +2,7 @@
 
 ## Overview
 
-Snakepit is a high-performance Python bridge for Elixir that enables seamless execution of Python code from Elixir applications. It uses a modern gRPC-based architecture with stateless Python workers and centralized session management in Elixir.
+Snakepit is a high-performance Python bridge for Elixir that enables seamless execution of Python code from Elixir applications. It uses a pure gRPC-based architecture with stateless Python workers and centralized session management in Elixir.
 
 ## High-Level Architecture
 
@@ -165,15 +165,14 @@ The system uses a unified gRPC protocol defined in `priv/proto/snakepit_bridge.p
 6. For variables: Python may call back to Elixir SessionStore
 7. Response returned through the chain
 
-## Migration from Legacy Design
+## Architecture Evolution
 
-The current architecture replaces an older stdio-based design that had critical flaws:
-- **Old**: Stateful Python processes with local variable storage
-- **New**: Stateless Python workers with centralized SessionStore
-- **Old**: Text-based stdio protocol
-- **New**: Binary gRPC protocol with protobuf
-- **Old**: No session affinity or caching
-- **New**: Intelligent routing and multi-level caching
+As of v0.4.0, Snakepit uses a unified gRPC-only architecture that provides:
+- **Stateless Python workers** with centralized SessionStore for state management
+- **Binary gRPC protocol** with protobuf for efficient communication
+- **Intelligent routing** with session affinity and multi-level caching
+- **Native streaming support** for real-time progress updates
+- **Bidirectional tool execution** between Elixir and Python
 
 ## Binary Serialization
 
