@@ -60,7 +60,8 @@ defmodule Snakepit.MixProject do
         "LICENSE*",
         "CHANGELOG*",
         "DIAGS*",
-        "ARCHITECTURE*"
+        "ARCHITECTURE*",
+        "priv/python/BINARY_SERIALIZATION.md"
       ],
       exclude_patterns: [
         "**/__pycache__",
@@ -96,7 +97,8 @@ defmodule Snakepit.MixProject do
         "README_UNIFIED_GRPC_BRIDGE.md",
         "ARCHITECTURE.md",
         "DIAGS.md",
-        "DIAGS2.md"
+        "DIAGS2.md",
+        "priv/python/BINARY_SERIALIZATION.md"
       ],
       assets: %{"assets" => "assets"},
       logo: "assets/snakepit-logo.svg",

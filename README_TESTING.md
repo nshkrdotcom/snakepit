@@ -164,5 +164,5 @@ The test suite is designed to run in CI environments:
 ## Related Documentation
 
 - [Main README](README.md) - Project overview
-- [gRPC Integration Plan](docs/GRPC_INTEGRATION_PLAN.md) - Protocol details
-- [Stage 0 Completion Report](docs/stage0_completion_report.md) - Implementation status
+- [Unified gRPC Bridge](README_UNIFIED_GRPC_BRIDGE.md) - Protocol details
+- [Main README](README.md) - Implementation status

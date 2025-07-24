@@ -167,7 +167,7 @@ Low priority items for future consideration:
 
 ## References
 
-- [Stage 0 Specification](../docs/specs/unified_grpc_bridge/40_revised_stage0_protocol_foundation.md)
-- [Stage 1 Specification](../docs/specs/unified_grpc_bridge/41_revised_stage1_core_variables_and_tools.md)
-- [Stage 2 Specification](../docs/specs/unified_grpc_bridge/42_revised_stage2_cognitive_layer_integration.md)
-- [Implementation Plan](../docs/specs/unified_grpc_bridge/implementation_plan_stage2_compliance.md)
+- [Main README](README.md)
+- [Testing Guide](README_TESTING.md)
+- [Process Management](README_PROCESS_MANAGEMENT.md)
+- [gRPC Communication](README_GRPC.md)

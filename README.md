@@ -914,7 +914,7 @@ See **[examples/snakepit_showcase/README.md](examples/snakepit_showcase/README.m
 
 ## 🐍 Python Bridges
 
-For detailed documentation on all Python bridge implementations (V1, V2, Enhanced, gRPC), see **[README_BRIDGES.md](README_BRIDGES.md)**.
+For detailed documentation on all Python bridge implementations (V1, V2, Enhanced, gRPC), see the Python Bridges section below.
 
 ### 🔄 Bidirectional Tool Bridge
 
@@ -1727,7 +1727,7 @@ Logger.configure(level: :debug)
 - [Bidirectional Tool Bridge](README_BIDIRECTIONAL_TOOL_BRIDGE.md) - Cross-language function execution between Elixir and Python
 - [Process Management](README_PROCESS_MANAGEMENT.md) - Persistent tracking and orphan cleanup
 - [gRPC Communication](README_GRPC.md) - Streaming and non-streaming gRPC details
-- [Python Bridges](README_BRIDGES.md) - All Python bridge implementations
+- Python Bridge Implementations - See sections above for V1, V2, Enhanced, and gRPC bridges
 
 ## 🤝 Contributing
 
@@ -1801,7 +1801,7 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 - [GitHub Repository](https://github.com/nshkrdotcom/snakepit)
 - [Example Projects](https://github.com/nshkrdotcom/snakepit/tree/main/examples)
 - [gRPC Bridge Documentation](README_GRPC.md)
-- [Python Bridge Documentation](README_BRIDGES.md)
+- Python Bridge Documentation - See sections above
 
 ---
 
