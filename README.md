@@ -47,6 +47,8 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 ### 🛡️ **Enhanced Process Management & Reliability**
 - **Persistent process tracking** with DETS storage survives BEAM crashes
 - **Automatic orphan cleanup** - no more zombie Python processes
+- **Pre-registration pattern (v0.3.4+)** - Prevents orphans even during startup crashes
+- **Immediate DETS persistence** - No data loss on abrupt termination
 - **Zero-configuration reliability** - works out of the box
 - **Production-ready** - handles VM crashes, OOM kills, and power failures
 - See [Process Management Documentation](README_PROCESS_MANAGEMENT.md) for details
