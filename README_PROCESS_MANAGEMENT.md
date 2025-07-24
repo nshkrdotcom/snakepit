@@ -84,47 +84,101 @@ For short-lived scripts and demos, use `Snakepit.run_as_script/2`:
    ])
    ```
 
-2. **Orphan Cleanup**
+2. **Enhanced Orphan Cleanup (v0.3.4+)**
    ```elixir
-   # Find processes from previous runs
-   orphans = :dets.select(dets_table, [
+   # Find ALL entries from previous runs
+   all_entries = :dets.match_object(dets_table, :_)
+   
+   # 1. Clean up ACTIVE processes with known PIDs
+   old_run_orphans = :dets.select(dets_table, [
      {{:"$1", :"$2"}, 
-      [{:"/=", {:map_get, :beam_run_id, :"$2"}, current_beam_run_id}], 
+      [{:andalso, 
+        {:"/=", {:map_get, :beam_run_id, :"$2"}, current_beam_run_id},
+        {:orelse,
+          {:==, {:map_get, :status, :"$2"}, :active},
+          {:==, {:map_size, :"$2"}, 6}  # Legacy entries
+        }
+      }], 
       [{{:"$1", :"$2"}}]}
    ])
    
-   # Clean up each orphan
-   Enum.each(orphans, fn {worker_id, info} ->
-     if process_alive?(info.process_pid) do
-       # Try graceful shutdown
-       System.cmd("kill", ["-TERM", to_string(info.process_pid)])
-       Process.sleep(2000)
-       
-       # Force kill if needed
-       if process_alive?(info.process_pid) do
-         System.cmd("kill", ["-KILL", to_string(info.process_pid)])
-       end
-     end
+   # 2. Clean up RESERVED slots (processes that started but never activated)
+   abandoned_reservations = 
+     all_entries
+     |> Enum.filter(fn {_id, info} ->
+       Map.get(info, :status) == :reserved and 
+       (info.beam_run_id != current_beam_run_id or 
+        (now - Map.get(info, :reserved_at, 0)) > 60)
+     end)
+   
+   # Kill processes using beam_run_id for safety
+   Enum.each(abandoned_reservations, fn {worker_id, info} ->
+     kill_pattern = "grpc_server.py.*--snakepit-run-id #{info.beam_run_id}"
+     System.cmd("pkill", ["-9", "-f", kill_pattern])
    end)
    ```
 
-### Worker Registration
+### Pre-Registration Pattern (v0.3.4+)
 
-When a new worker starts:
+The worker registration now follows a two-phase commit pattern to prevent orphans:
+
+#### Phase 1: Reserve Before Spawn
+```elixir
+# In GRPCWorker.init/1 - BEFORE spawning the process
+case Snakepit.Pool.ProcessRegistry.reserve_worker(worker_id) do
+  :ok ->
+    # Reservation is persisted to DETS with immediate sync
+    # Now safe to spawn the process
+    port = Port.open({:spawn_executable, setsid_path}, port_opts)
+    # ...
+  
+  {:error, reason} ->
+    # Failed to reserve, don't spawn
+    {:stop, {:reservation_failed, reason}}
+end
+```
+
+#### Phase 2: Activate After Spawn
+```elixir
+# In GRPCWorker.handle_continue/2 - AFTER process is running
+process_pid = Port.info(server_port, :os_pid)
+
+# Activate the reservation with actual process info
+Snakepit.Pool.ProcessRegistry.activate_worker(
+  worker_id,
+  self(),
+  process_pid,
+  "grpc_worker"
+)
+```
+
+### Worker Registration Details
+
+The registration process now uses status tracking:
 
 ```elixir
+# Phase 1: Reservation
+reservation_info = %{
+  status: :reserved,
+  reserved_at: System.system_time(:second),
+  beam_run_id: state.beam_run_id
+}
+:dets.insert(state.dets_table, {worker_id, reservation_info})
+:dets.sync(state.dets_table)  # IMMEDIATE persistence
+
+# Phase 2: Activation
 worker_info = %{
+  status: :active,
   elixir_pid: elixir_pid,
   process_pid: process_pid,
   fingerprint: fingerprint,
   registered_at: System.system_time(:second),
   beam_run_id: state.beam_run_id,
-  pgid: process_pid  # Process Group ID
+  pgid: process_pid
 }
-
-# Write to both ETS and DETS
 :ets.insert(state.table, {worker_id, worker_info})
 :dets.insert(state.dets_table, {worker_id, worker_info})
+:dets.sync(state.dets_table)  # IMMEDIATE persistence
 ```
 
 ### Periodic Health Checks
@@ -148,6 +202,8 @@ The ApplicationCleanup module ensures clean shutdown:
 2. **Production Ready**: Handles edge cases like VM crashes, OOM kills, and power failures
 3. **Zero Configuration**: Works out of the box with sensible defaults
 4. **Transparent**: No changes required to existing code
+5. **Prevents Race Conditions (v0.3.4+)**: Pre-registration pattern ensures no orphans even when crashing during worker startup
+6. **Immediate Persistence**: All DETS operations use sync() to prevent data loss on abrupt termination
 
 ## Configuration
 
