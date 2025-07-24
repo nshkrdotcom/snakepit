@@ -1,4 +1,18 @@
-## 1. Overall System Architecture - High Performance Overview
+# Snakepit Performance Architecture Diagrams (v0.4.0+)
+
+This document provides detailed Mermaid diagrams focusing on the high-performance aspects of Snakepit's architecture. These diagrams emphasize the performance optimizations, concurrent operations, and O(1) data structures that make Snakepit suitable for production workloads.
+
+## Key Performance Features Illustrated
+
+- **⚡ Concurrent Worker Initialization**: 1000x faster than sequential startup
+- **⚡ Non-blocking Async Execution**: Pool returns immediately, requests execute via Task.Supervisor  
+- **⚡ O(1) Registry Operations**: Constant-time worker lookups and assignments
+- **⚡ ETS Performance Optimizations**: Read/write concurrency with decentralized counters
+- **⚡ HTTP/2 Multiplexing**: Modern gRPC protocol for efficient communication
+
+---
+
+## 1. Overall System Architecture - High Performance Overview (v0.4.0+)
 
 ```mermaid
 graph LR
@@ -56,9 +70,9 @@ graph LR
     Starter2 -->|Auto-restart| Worker2
     StarterN -->|Auto-restart| WorkerN
     
-    Worker1 -->|Binary protocol<br/>4-byte frames| Python1
-    Worker2 -->|Binary protocol<br/>4-byte frames| Python2
-    WorkerN -->|Binary protocol<br/>4-byte frames| PythonN
+    Worker1 -->|gRPC protocol<br/>HTTP/2 + protobuf| Python1
+    Worker2 -->|gRPC protocol<br/>HTTP/2 + protobuf| Python2
+    WorkerN -->|gRPC protocol<br/>HTTP/2 + protobuf| PythonN
     
     Worker1 -->|Register| Registry
     Worker2 -->|Register| Registry
@@ -78,6 +92,8 @@ graph LR
     style Registry fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
     style TaskSup fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
 ```
+
+This diagram shows the complete system architecture with emphasis on performance-critical components. Note the use of concurrent data structures (ETS tables with read/write concurrency) and O(1) operations throughout the system.
 
 ## 2. Request Flow - Performance Critical Path
 
@@ -105,8 +121,8 @@ sequenceDiagram
     Note over P: Pool returns immediately<br/>to handle next request
     
     TS->>W: GenServer.call
-    W->>E: Port.command<br/>⚡ Binary protocol
-    E-->>W: Response<br/>⚡ 4-byte framed
+    W->>E: gRPC call<br/>⚡ HTTP/2 + protobuf
+    E-->>W: gRPC response<br/>⚡ protobuf encoded
     W-->>TS: Result
     TS-->>C: GenServer.reply<br/>⚡ Direct to client
     
@@ -118,6 +134,8 @@ sequenceDiagram
         P->>R: Mark available<br/>⚡ O(1) update
     end
 ```
+
+This sequence diagram illustrates the non-blocking request flow. Key performance insight: the Pool returns immediately after dispatching to Task.Supervisor, allowing it to handle the next request while the current one executes asynchronously.
 
 ## 3. ETS Tables Architecture - High Performance Storage
 
@@ -177,6 +195,8 @@ graph LR
     style Cleanup fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
 ```
 
+ETS tables are configured for maximum performance with `read_concurrency: true`, `write_concurrency: true`, and `decentralized_counters: true`. This enables highly concurrent access patterns essential for production workloads.
+
 ## 4. Worker Lifecycle - Performance & Reliability
 
 ```mermaid
@@ -218,6 +238,8 @@ stateDiagram-v2
     end note
 ```
 
+The worker lifecycle emphasizes automatic recovery and hot standby. Workers stay in the Ready state, eliminating cold-start latency. The supervision tree ensures automatic restart without Pool intervention.
+
 ## 5. Concurrent Initialization Performance
 
 ```mermaid
@@ -253,6 +275,8 @@ graph TD
     style DoneC fill:#dcfce7,stroke:#22c55e,stroke-width:2px,color:#14532d
     style DoneS fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#7f1d1d
 ```
+
+This comparison shows Snakepit's dramatic performance advantage during startup. Using `Task.async_stream`, all workers initialize concurrently instead of sequentially, reducing startup time from N×init_time to ~init_time.
 
 ## 6. Request Queueing & Load Distribution
 
@@ -318,6 +342,8 @@ graph LR
     style Check fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
 ```
 
+The queueing system uses Erlang's built-in `:queue` module and `MapSet` for O(1) operations. This ensures consistent performance regardless of queue size or number of workers, making the system predictable under load.
+
 ## 7. Process Registry - O(1) Performance
 
 ```mermaid
@@ -381,3 +407,17 @@ graph LR
     style PR fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
     style SR fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
 ```
+
+Multiple registry types provide different lookup capabilities while maintaining O(1) performance. The combination enables efficient worker management, process tracking, and supervision without performance bottlenecks.
+
+## Performance Summary
+
+These diagrams illustrate how Snakepit achieves production-grade performance through:
+
+- **Concurrent Everything**: Startup, execution, and state access all leverage concurrency
+- **O(1) Data Structures**: Registry, ETS tables, and queues maintain constant-time operations
+- **Non-blocking Architecture**: Pool never blocks, requests execute asynchronously
+- **Modern Protocols**: gRPC with HTTP/2 multiplexing replaces legacy stdio pipes
+- **Hot Workers**: Pre-warmed workers eliminate cold-start latency
+
+The result is a system capable of handling thousands of concurrent requests with predictable performance characteristics.

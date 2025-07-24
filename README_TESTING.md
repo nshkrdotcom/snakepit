@@ -44,11 +44,8 @@ Some tests intentionally trigger warnings to verify error handling. These are **
    ```
    This occurs during test cleanup when the gRPC server is forcefully terminated. It's expected behavior.
 
-2. **~~Deprecated Server Configuration~~ (Fixed)**
-   ```
-   deprecated: servers as argument of GRPC.Server.Supervisor, please use GRPC.Endpoint
-   ```
-   This deprecation warning has been resolved by creating a proper GRPC.Endpoint module.
+2. **Server Configuration**
+   All gRPC server configuration warnings have been resolved in the current implementation.
 
 ### Test Statistics
 

@@ -53,13 +53,15 @@ defmodule Snakepit.MixProject do
         "priv/python/requirements*.txt",
         "priv/python/setup.py",
         "priv/python/snakepit_bridge",
+        "examples",
         "assets",
         ".formatter.exs",
         "mix.exs",
         "README*",
         "LICENSE*",
         "CHANGELOG*",
-        "DIAGS*"
+        "DIAGS*",
+        "ARCHITECTURE*"
       ],
       exclude_patterns: [
         "**/__pycache__",
@@ -86,7 +88,17 @@ defmodule Snakepit.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "README_GRPC.md", "README_BRIDGES.md", "README_BIDIRECTIONAL_TOOL_BRIDGE.md", "README_PROCESS_MANAGEMENT.md", "DIAGS.md", "DIAGS2.md"],
+      extras: [
+        "README.md",
+        "README_GRPC.md",
+        "README_BIDIRECTIONAL_TOOL_BRIDGE.md",
+        "README_PROCESS_MANAGEMENT.md",
+        "README_TESTING.md",
+        "README_UNIFIED_GRPC_BRIDGE.md",
+        "ARCHITECTURE.md",
+        "DIAGS.md",
+        "DIAGS2.md"
+      ],
       assets: %{"assets" => "assets"},
       logo: "assets/snakepit-logo.svg",
       before_closing_head_tag: &docs_before_closing_head_tag/1,
