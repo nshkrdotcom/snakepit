@@ -53,7 +53,6 @@ defmodule Snakepit.MixProject do
         "priv/python/requirements*.txt",
         "priv/python/setup.py",
         "priv/python/snakepit_bridge",
-        "priv/javascript",
         "assets",
         ".formatter.exs",
         "mix.exs",
@@ -69,7 +68,9 @@ defmodule Snakepit.MixProject do
         "**/*.bak",
         "priv/plts",
         "priv/python/snakepit_bridge/__pycache__",
-        "priv/python/snakepit_bridge/adapters/__pycache__"
+        "priv/python/snakepit_bridge/adapters/__pycache__",
+        "priv/python/snakepit_bridge/adapters/showcase/__pycache__",
+        "priv/python/snakepit_bridge/adapters/showcase/handlers/__pycache__"
       ]
     ]
   end
@@ -85,7 +86,7 @@ defmodule Snakepit.MixProject do
   defp docs do
     [
       main: "readme",
-      extras: ["README.md", "README_GRPC.md", "README_BRIDGES.md", "DIAGS.md"],
+      extras: ["README.md", "README_GRPC.md", "README_BRIDGES.md", "README_BIDIRECTIONAL_TOOL_BRIDGE.md", "README_PROCESS_MANAGEMENT.md", "DIAGS.md", "DIAGS2.md"],
       assets: %{"assets" => "assets"},
       logo: "assets/snakepit-logo.svg",
       before_closing_head_tag: &docs_before_closing_head_tag/1,
