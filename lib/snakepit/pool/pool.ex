@@ -153,7 +153,7 @@ defmodule Snakepit.Pool do
     queue_timeout = Application.get_env(:snakepit, :pool_queue_timeout, @default_queue_timeout)
     max_queue_size = Application.get_env(:snakepit, :pool_max_queue_size, @default_max_queue_size)
 
-    worker_module = opts[:worker_module] || Snakepit.GRPCWorker
+    worker_module = opts[:worker_module] || Application.get_env(:snakepit, :worker_module, Snakepit.GenericWorker)
     adapter_module = opts[:adapter_module] || Application.get_env(:snakepit, :adapter_module)
 
     state = %__MODULE__{
@@ -525,25 +525,36 @@ defmodule Snakepit.Pool do
   end
 
   defp get_preferred_worker(session_id) do
-    case Snakepit.Bridge.SessionStore.get_session(session_id) do
-      {:ok, session} ->
-        case Map.get(session, :last_worker_id) do
-          nil -> {:error, :not_found}
-          worker_id -> {:ok, worker_id}
-        end
-
-      {:error, :not_found} ->
-        {:error, :not_found}
+    # Session affinity is now handled by the adapter implementation
+    # Core infrastructure provides basic round-robin distribution
+    adapter_module = Application.get_env(:snakepit, :adapter_module)
+    
+    if adapter_module && function_exported?(adapter_module, :get_session_worker, 1) do
+      case adapter_module.get_session_worker(session_id) do
+        {:ok, worker_id} -> {:ok, worker_id}
+        _ -> {:error, :not_found}
+      end
+    else
+      {:error, :not_found}
     end
   end
 
   defp store_session_affinity(session_id, worker_id) do
-    # Store the worker affinity in a supervised task for better error logging
-    Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
-      :ok = Snakepit.Bridge.SessionStore.store_worker_session(session_id, worker_id)
-      Logger.debug("Stored session affinity: #{session_id} -> #{worker_id}")
-      :ok
-    end)
+    # Session affinity storage is delegated to the adapter
+    adapter_module = Application.get_env(:snakepit, :adapter_module)
+    
+    if adapter_module && function_exported?(adapter_module, :store_session_worker, 2) do
+      Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+        case adapter_module.store_session_worker(session_id, worker_id) do
+          :ok -> 
+            Logger.debug("Stored session affinity: #{session_id} -> #{worker_id}")
+            :ok
+          {:error, reason} ->
+            Logger.warning("Failed to store session affinity: #{inspect(reason)}")
+            :ok
+        end
+      end)
+    end
   end
 
   defp execute_on_worker(worker_id, command, args, opts) do
@@ -568,8 +579,8 @@ defmodule Snakepit.Pool do
         module
 
       _ ->
-        # Fallback: use GRPCWorker
-        Snakepit.GRPCWorker
+        # Fallback: use configured worker module
+        Application.get_env(:snakepit, :worker_module, Snakepit.GenericWorker)
     end
   end
 
