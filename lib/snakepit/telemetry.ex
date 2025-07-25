@@ -1,58 +1,74 @@
 defmodule Snakepit.Telemetry do
   @moduledoc """
-  Telemetry event definitions for Snakepit.
+  Cognitive-ready telemetry infrastructure for Snakepit.
+  
+  Provides telemetry events for core infrastructure operations with
+  hooks for adapter-specific enhancement and future cognitive features.
   """
 
   require Logger
 
   @doc """
-  Lists all telemetry events used by Snakepit.
+  Lists all core telemetry events used by Snakepit infrastructure.
   """
   def events do
-    session_events() ++ variable_events() ++ program_events()
+    pool_events() ++ worker_events() ++ adapter_events() ++ cognitive_events()
   end
 
   @doc """
-  Session-related telemetry events.
+  Pool-related telemetry events.
   """
-  def session_events do
+  def pool_events do
     [
-      [:snakepit, :session_store, :session, :created],
-      [:snakepit, :session_store, :session, :accessed],
-      [:snakepit, :session_store, :session, :deleted],
-      [:snakepit, :session_store, :session, :expired]
+      [:snakepit, :pool, :started],
+      [:snakepit, :pool, :stopped],
+      [:snakepit, :pool, :worker, :added],
+      [:snakepit, :pool, :worker, :removed],
+      [:snakepit, :pool, :execution, :start],
+      [:snakepit, :pool, :execution, :stop],
+      [:snakepit, :pool, :execution, :error]
     ]
   end
 
   @doc """
-  Variable-related telemetry events.
+  Worker-related telemetry events.
   """
-  def variable_events do
+  def worker_events do
     [
-      # Variable operations
-      [:snakepit, :session_store, :variable, :registered],
-      [:snakepit, :session_store, :variable, :get],
-      [:snakepit, :session_store, :variable, :updated],
-      [:snakepit, :session_store, :variable, :deleted],
-
-      # Batch operations
-      [:snakepit, :session_store, :variables, :batch_get],
-      [:snakepit, :session_store, :variables, :batch_update],
-
-      # Validation
-      [:snakepit, :session_store, :variable, :validation_failed],
-      [:snakepit, :session_store, :variable, :constraint_violation]
+      [:snakepit, :worker, :started],
+      [:snakepit, :worker, :stopped],
+      [:snakepit, :worker, :command, :start],
+      [:snakepit, :worker, :command, :stop],
+      [:snakepit, :worker, :command, :error],
+      [:snakepit, :worker, :stream, :start],
+      [:snakepit, :worker, :stream, :stop]
     ]
   end
 
   @doc """
-  Program-related telemetry events.
+  Adapter-related telemetry events.
   """
-  def program_events do
+  def adapter_events do
     [
-      [:snakepit, :session_store, :program, :stored],
-      [:snakepit, :session_store, :program, :retrieved],
-      [:snakepit, :session_store, :program, :deleted]
+      [:snakepit, :adapter, :initialized],
+      [:snakepit, :adapter, :terminated],
+      [:snakepit, :adapter, :execute, :start],
+      [:snakepit, :adapter, :execute, :stop],
+      [:snakepit, :adapter, :execute, :error],
+      [:snakepit, :adapter, :performance_metrics]
+    ]
+  end
+
+  @doc """
+  Cognitive-ready telemetry events for future enhancement.
+  """
+  def cognitive_events do
+    [
+      [:snakepit, :cognitive, :session, :created],
+      [:snakepit, :cognitive, :session, :accessed],
+      [:snakepit, :cognitive, :session, :destroyed],
+      [:snakepit, :cognitive, :learning, :pattern_detected],
+      [:snakepit, :cognitive, :optimization, :applied]
     ]
   end
 
@@ -60,42 +76,55 @@ defmodule Snakepit.Telemetry do
   Attaches default handlers for all events.
   """
   def attach_handlers do
-    attach_session_handlers()
-    attach_variable_handlers()
-    attach_program_handlers()
+    attach_pool_handlers()
+    attach_worker_handlers()
+    attach_adapter_handlers()
+    attach_cognitive_handlers()
   end
 
   @doc """
-  Attaches default handlers for session events.
+  Attaches default handlers for pool events.
   """
-  def attach_session_handlers do
+  def attach_pool_handlers do
     :telemetry.attach_many(
-      "snakepit-session-logger",
-      session_events(),
+      "snakepit-pool-logger",
+      pool_events(),
       &handle_event/4,
       nil
     )
   end
 
   @doc """
-  Attaches default handlers for variable events.
+  Attaches default handlers for worker events.
   """
-  def attach_variable_handlers do
+  def attach_worker_handlers do
     :telemetry.attach_many(
-      "snakepit-variable-logger",
-      variable_events(),
+      "snakepit-worker-logger",
+      worker_events(),
       &handle_event/4,
       nil
     )
   end
 
   @doc """
-  Attaches default handlers for program events.
+  Attaches default handlers for adapter events.
   """
-  def attach_program_handlers do
+  def attach_adapter_handlers do
     :telemetry.attach_many(
-      "snakepit-program-logger",
-      program_events(),
+      "snakepit-adapter-logger",
+      adapter_events(),
+      &handle_event/4,
+      nil
+    )
+  end
+
+  @doc """
+  Attaches default handlers for cognitive events.
+  """
+  def attach_cognitive_handlers do
+    :telemetry.attach_many(
+      "snakepit-cognitive-logger",
+      cognitive_events(),
       &handle_event/4,
       nil
     )
@@ -103,94 +132,108 @@ defmodule Snakepit.Telemetry do
 
   # Event handlers
 
-  defp handle_event(
-         [:snakepit, :session_store, :variable, :registered],
-         _measurements,
-         metadata,
-         _
-       ) do
-    Logger.info("Variable registered: type=#{metadata.type} session=#{metadata.session_id}")
+  # Pool event handlers
+  defp handle_event([:snakepit, :pool, :started], _measurements, metadata, _) do
+    Logger.info("Pool started with #{metadata.worker_count} workers")
   end
 
-  defp handle_event([:snakepit, :session_store, :variable, :updated], measurements, metadata, _) do
-    Logger.debug("Variable updated: type=#{metadata.type} version=#{measurements.version}")
+  defp handle_event([:snakepit, :pool, :stopped], _measurements, metadata, _) do
+    Logger.info("Pool stopped: #{metadata.reason}")
   end
 
-  defp handle_event([:snakepit, :session_store, :variable, :get], _measurements, metadata, _) do
-    cache_status = if metadata[:cache_hit], do: "hit", else: "miss"
-    Logger.debug("Variable retrieved: session=#{metadata.session_id} cache=#{cache_status}")
+  defp handle_event([:snakepit, :pool, :worker, :added], _measurements, metadata, _) do
+    Logger.debug("Worker added to pool: #{metadata.worker_id}")
   end
 
-  defp handle_event([:snakepit, :session_store, :variable, :deleted], _measurements, metadata, _) do
-    Logger.info("Variable deleted: session=#{metadata.session_id}")
+  defp handle_event([:snakepit, :pool, :worker, :removed], _measurements, metadata, _) do
+    Logger.debug("Worker removed from pool: #{metadata.worker_id}")
   end
 
-  defp handle_event(
-         [:snakepit, :session_store, :variables, :batch_get],
-         measurements,
-         metadata,
-         _
-       ) do
-    Logger.debug("Batch get: count=#{measurements.count} session=#{metadata.session_id}")
+  defp handle_event([:snakepit, :pool, :execution, :start], _measurements, metadata, _) do
+    Logger.debug("Pool execution started: #{metadata.command}")
   end
 
-  defp handle_event(
-         [:snakepit, :session_store, :variables, :batch_update],
-         measurements,
-         metadata,
-         _
-       ) do
-    Logger.debug("Batch update: count=#{measurements.count} session=#{metadata.session_id}")
+  defp handle_event([:snakepit, :pool, :execution, :stop], measurements, metadata, _) do
+    Logger.debug("Pool execution completed: #{metadata.command} (#{measurements.duration}ms)")
   end
 
-  defp handle_event(
-         [:snakepit, :session_store, :variable, :validation_failed],
-         _measurements,
-         metadata,
-         _
-       ) do
-    Logger.warning("Variable validation failed: type=#{metadata.type} reason=#{metadata.reason}")
+  defp handle_event([:snakepit, :pool, :execution, :error], _measurements, metadata, _) do
+    Logger.warning("Pool execution error: #{metadata.command} - #{metadata.error}")
   end
 
-  defp handle_event(
-         [:snakepit, :session_store, :variable, :constraint_violation],
-         _measurements,
-         metadata,
-         _
-       ) do
-    Logger.warning(
-      "Variable constraint violation: type=#{metadata.type} constraint=#{metadata.constraint}"
-    )
+  # Worker event handlers
+  defp handle_event([:snakepit, :worker, :started], _measurements, metadata, _) do
+    Logger.debug("Worker started: #{metadata.worker_id}")
   end
 
-  # Session event handlers
-  defp handle_event([:snakepit, :session_store, :session, :created], _measurements, metadata, _) do
-    Logger.info("Session created: #{metadata.session_id}")
+  defp handle_event([:snakepit, :worker, :stopped], _measurements, metadata, _) do
+    Logger.debug("Worker stopped: #{metadata.worker_id}")
   end
 
-  defp handle_event([:snakepit, :session_store, :session, :accessed], _measurements, metadata, _) do
-    Logger.debug("Session accessed: #{metadata.session_id}")
+  defp handle_event([:snakepit, :worker, :command, :start], _measurements, metadata, _) do
+    Logger.debug("Worker command started: #{metadata.worker_id} -> #{metadata.command}")
   end
 
-  defp handle_event([:snakepit, :session_store, :session, :deleted], _measurements, metadata, _) do
-    Logger.info("Session deleted: #{metadata.session_id}")
+  defp handle_event([:snakepit, :worker, :command, :stop], measurements, metadata, _) do
+    Logger.debug("Worker command completed: #{metadata.worker_id} (#{measurements.duration}ms)")
   end
 
-  defp handle_event([:snakepit, :session_store, :session, :expired], measurements, _metadata, _) do
-    Logger.info("Sessions expired: count=#{measurements.count}")
+  defp handle_event([:snakepit, :worker, :command, :error], _measurements, metadata, _) do
+    Logger.warning("Worker command error: #{metadata.worker_id} - #{metadata.error}")
   end
 
-  # Program event handlers
-  defp handle_event([:snakepit, :session_store, :program, :stored], _measurements, metadata, _) do
-    Logger.debug("Program stored: #{metadata.program_id} in session #{metadata.session_id}")
+  defp handle_event([:snakepit, :worker, :stream, :start], _measurements, metadata, _) do
+    Logger.debug("Worker stream started: #{metadata.worker_id}")
   end
 
-  defp handle_event([:snakepit, :session_store, :program, :retrieved], _measurements, metadata, _) do
-    Logger.debug("Program retrieved: #{metadata.program_id} from session #{metadata.session_id}")
+  defp handle_event([:snakepit, :worker, :stream, :stop], measurements, metadata, _) do
+    Logger.debug("Worker stream completed: #{metadata.worker_id} (#{measurements.duration}ms)")
   end
 
-  defp handle_event([:snakepit, :session_store, :program, :deleted], _measurements, metadata, _) do
-    Logger.debug("Program deleted: #{metadata.program_id} from session #{metadata.session_id}")
+  # Adapter event handlers
+  defp handle_event([:snakepit, :adapter, :initialized], _measurements, metadata, _) do
+    Logger.info("Adapter initialized: #{metadata.adapter_module}")
+  end
+
+  defp handle_event([:snakepit, :adapter, :terminated], _measurements, metadata, _) do
+    Logger.info("Adapter terminated: #{metadata.adapter_module}")
+  end
+
+  defp handle_event([:snakepit, :adapter, :execute, :start], _measurements, metadata, _) do
+    Logger.debug("Adapter execution started: #{metadata.command}")
+  end
+
+  defp handle_event([:snakepit, :adapter, :execute, :stop], measurements, metadata, _) do
+    Logger.debug("Adapter execution completed: #{metadata.command} (#{measurements.duration}ms)")
+  end
+
+  defp handle_event([:snakepit, :adapter, :execute, :error], _measurements, metadata, _) do
+    Logger.warning("Adapter execution error: #{metadata.command} - #{metadata.error}")
+  end
+
+  defp handle_event([:snakepit, :adapter, :performance_metrics], measurements, metadata, _) do
+    Logger.debug("Adapter performance metrics: #{inspect(measurements)} #{inspect(metadata)}")
+  end
+
+  # Cognitive event handlers (placeholders for future enhancement)
+  defp handle_event([:snakepit, :cognitive, :session, :created], _measurements, metadata, _) do
+    Logger.debug("Cognitive session created: #{metadata.session_id}")
+  end
+
+  defp handle_event([:snakepit, :cognitive, :session, :accessed], _measurements, metadata, _) do
+    Logger.debug("Cognitive session accessed: #{metadata.session_id}")
+  end
+
+  defp handle_event([:snakepit, :cognitive, :session, :destroyed], _measurements, metadata, _) do
+    Logger.debug("Cognitive session destroyed: #{metadata.session_id}")
+  end
+
+  defp handle_event([:snakepit, :cognitive, :learning, :pattern_detected], _measurements, metadata, _) do
+    Logger.info("Learning pattern detected: #{metadata.pattern_type}")
+  end
+
+  defp handle_event([:snakepit, :cognitive, :optimization, :applied], _measurements, metadata, _) do
+    Logger.info("Cognitive optimization applied: #{metadata.optimization_type}")
   end
 
   # Catch-all handler for any unhandled events
@@ -198,5 +241,18 @@ defmodule Snakepit.Telemetry do
     Logger.debug(
       "Telemetry event: #{inspect(event)} measurements=#{inspect(measurements)} metadata=#{inspect(metadata)}"
     )
+  end
+
+  @doc """
+  Emit a telemetry event with measurements and metadata.
+  
+  This is a convenience function for emitting telemetry events from
+  infrastructure code with proper error handling.
+  """
+  def emit(event, measurements \\ %{}, metadata \\ %{}) do
+    :telemetry.execute(event, measurements, metadata)
+  rescue
+    error ->
+      Logger.debug("Failed to emit telemetry event #{inspect(event)}: #{inspect(error)}")
   end
 end

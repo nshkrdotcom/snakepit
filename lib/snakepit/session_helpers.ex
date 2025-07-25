@@ -1,133 +1,86 @@
 defmodule Snakepit.SessionHelpers do
   @moduledoc """
-  Session helpers for ML/DSP workflows with program management.
+  Basic session helpers for cognitive-ready infrastructure.
 
-  This module provides domain-specific session functionality for ML frameworks
-  that use program creation and execution patterns (like DSPy, LangChain, etc.).
+  This module provides minimal session functionality that delegates
+  domain-specific behavior to adapter implementations.
 
-  For generic session management, use `Snakepit.execute_in_session/4` directly.
+  The cognitive-ready architecture allows adapters to provide enhanced
+  session functionality while maintaining clean separation.
   """
 
   @doc """
-  Executes a command in session context with ML program management.
+  Executes a command in session context with optional adapter enhancement.
 
-  This function enhances the arguments with session data and handles
-  post-processing like storing program metadata for session continuity.
+  This function delegates to the configured adapter for session management
+  if available, otherwise provides basic session affinity.
 
   ## Examples
 
-      # Create a program and store metadata
-      {:ok, response} = Snakepit.SessionHelpers.execute_program_command(
+      # Basic session execution
+      {:ok, result} = Snakepit.SessionHelpers.execute_in_context(
         "my_session", 
-        "create_program", 
-        %{signature: "input -> output"}
-      )
-
-      # Execute a program using stored metadata
-      {:ok, result} = Snakepit.SessionHelpers.execute_program_command(
-        "my_session",
-        "execute_program", 
-        %{program_id: "123", input: "data"}
+        "my_command", 
+        %{data: "value"}
       )
   """
-  def execute_program_command(session_id, command, args, opts \\ []) do
-    # Enhance args with session data
-    enhanced_args = enhance_args_with_program_data(args, session_id, command)
-
+  def execute_in_context(session_id, command, args, opts \\ []) do
     # Add session_id to opts for session affinity
     opts_with_session = Keyword.put(opts, :session_id, session_id)
 
+    # Check if adapter provides session enhancement
+    adapter_module = Application.get_env(:snakepit, :adapter_module)
+    
+    enhanced_args = if adapter_module && function_exported?(adapter_module, :enhance_session_args, 3) do
+      case adapter_module.enhance_session_args(session_id, command, args) do
+        {:ok, enhanced} -> enhanced
+        {:error, _} -> args
+      end
+    else
+      args
+    end
+
+    # Execute with enhanced arguments
     case Snakepit.execute_in_session(session_id, command, enhanced_args, opts_with_session) do
-      {:ok, response} when command == "create_program" ->
-        # Store program data in SessionStore after creation
-        case store_program_data_after_creation(session_id, args, response) do
-          {:error, reason} ->
-            require Logger
-            Logger.warning("Program created but failed to store metadata: #{inspect(reason)}")
-
-          :ok ->
-            :ok
+      {:ok, response} ->
+        # Allow adapter to handle post-processing
+        if adapter_module && function_exported?(adapter_module, :handle_session_response, 4) do
+          case adapter_module.handle_session_response(session_id, command, args, response) do
+            {:ok, processed_response} -> {:ok, processed_response}
+            {:error, _} -> {:ok, response}  # Fallback to original response
+          end
+        else
+          {:ok, response}
         end
-
-        {:ok, response}
 
       result ->
         result
     end
   end
 
-  # Private helper functions
-
-  # Enhanced args with program data from session
-  defp enhance_args_with_program_data(args, session_id, command) do
-    base_args =
-      if session_id,
-        do: Map.put(args, :session_id, session_id),
-        else: Map.put(args, :session_id, "anonymous")
-
-    # For execute_program commands, fetch program data from SessionStore
-    if command == "execute_program" do
-      program_id = Map.get(args, :program_id)
-
-      case Snakepit.Bridge.SessionStore.get_program(session_id, program_id) do
-        {:ok, program_data} ->
-          Map.put(base_args, :program_data, program_data)
-
-        {:error, _reason} ->
-          # Program not found in session store - let external process handle the error
-          base_args
-      end
+  @doc """
+  Get session statistics from the adapter if available.
+  """
+  def get_session_stats(session_id) do
+    adapter_module = Application.get_env(:snakepit, :adapter_module)
+    
+    if adapter_module && function_exported?(adapter_module, :get_session_stats, 1) do
+      adapter_module.get_session_stats(session_id)
     else
-      base_args
+      {:error, :not_supported}
     end
   end
 
-  # Store program data after creation
-  defp store_program_data_after_creation(session_id, _create_args, create_response) do
-    if session_id != nil and session_id != "anonymous" do
-      program_id = Map.get(create_response, "program_id")
-
-      if program_id do
-        # Extract complete serializable program data from external process response
-        program_data = %{
-          program_id: program_id,
-          signature_def:
-            Map.get(create_response, "signature_def", Map.get(create_response, "signature", %{})),
-          signature_class: Map.get(create_response, "signature_class"),
-          field_mapping: Map.get(create_response, "field_mapping", %{}),
-          fallback_used: Map.get(create_response, "fallback_used", false),
-          created_at: System.system_time(:second),
-          execution_count: 0,
-          last_executed: nil,
-          program_type: Map.get(create_response, "program_type", "predict"),
-          signature: Map.get(create_response, "signature", %{})
-        }
-
-        store_program_in_session(session_id, program_id, program_data)
-      end
-    end
-  end
-
-  # Store program in SessionStore
-  defp store_program_in_session(session_id, program_id, program_data) do
-    if session_id != nil and session_id != "anonymous" do
-      case Snakepit.Bridge.SessionStore.get_session(session_id) do
-        {:ok, _session} ->
-          # Update existing session
-          Snakepit.Bridge.SessionStore.store_program(session_id, program_id, program_data)
-
-        {:error, :not_found} ->
-          # Create new session with program
-          case Snakepit.Bridge.SessionStore.create_session(session_id) do
-            {:ok, _session} ->
-              Snakepit.Bridge.SessionStore.store_program(session_id, program_id, program_data)
-
-            error ->
-              error
-          end
-      end
+  @doc """
+  Clear session data through the adapter if available.
+  """
+  def clear_session(session_id) do
+    adapter_module = Application.get_env(:snakepit, :adapter_module)
+    
+    if adapter_module && function_exported?(adapter_module, :clear_session, 1) do
+      adapter_module.clear_session(session_id)
     else
-      :ok
+      {:error, :not_supported}
     end
   end
 end

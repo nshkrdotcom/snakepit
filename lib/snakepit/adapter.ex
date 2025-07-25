@@ -1,120 +1,215 @@
 defmodule Snakepit.Adapter do
   @moduledoc """
-  Behaviour for implementing adapters in Snakepit.
-
-  Adapters define how to communicate with external processes (Python, Node.js, etc.)
-  and what commands they support. This allows Snakepit to be truly generalized
-  and support multiple ML frameworks or external systems.
-
-  ## Required Callbacks
-
-  - `executable_path/0` - Returns the path to the runtime executable (python3, node, etc.)
-  - `script_path/0` - Returns the path to the external script to execute
-  - `script_args/0` - Returns additional arguments for the script
-  - `supported_commands/0` - Returns list of commands this adapter supports
-  - `validate_command/2` - Validates a command and its arguments
-
-  ## Optional Callbacks
-
-  - `process_response/2` - Post-process responses from the external process
-  - `prepare_args/2` - Pre-process arguments before sending to external process
-
-  ## Example Implementation
-
-      defmodule MyApp.PythonMLAdapter do
-        @behaviour Snakepit.Adapter
-        
-        def executable_path, do: System.find_executable("python3") || System.find_executable("python")
-        def script_path, do: Path.join(:code.priv_dir(:my_app), "python/ml_bridge.py")
-        def script_args, do: ["--mode", "pool-worker"]
-        def supported_commands, do: ["predict", "train", "ping"]
-        
-        def validate_command("predict", args) do
-          if Map.has_key?(args, :input), do: :ok, else: {:error, :missing_input}
-        end
-        def validate_command("ping", _args), do: :ok
-        def validate_command(cmd, _), do: {:error, {:unsupported_command, cmd}}
-      end
+  Behavior for cognitive-ready external process adapters.
+  
+  Defines the interface that bridge packages must implement to integrate
+  with Snakepit Core infrastructure. Includes cognitive-ready hooks for
+  future enhancement.
   """
 
   @doc """
-  Returns the path to the runtime executable.
-
-  This is the interpreter or runtime that will execute the script.
-  Examples: "python3", "node", "ruby", "R", etc.
+  Execute a command through the external process.
+  
+  This is the core integration point between Snakepit and bridge implementations.
+  
+  ## Parameters
+  
+    * `command` - The command string to execute
+    * `args` - Arguments as a map
+    * `opts` - Options including worker_pid, session_id, timeout, etc.
+  
+  ## Returns
+  
+    * `{:ok, result}` - Successful execution with result
+    * `{:error, reason}` - Execution failed with reason
+  
+  ## Cognitive-Ready Features
+  
+  Implementations should collect telemetry data for future cognitive enhancement:
+  - Execution time tracking
+  - Success/failure patterns
+  - Resource usage patterns
+  - Performance characteristics
   """
-  @callback executable_path() :: String.t()
+  @callback execute(command :: String.t(), args :: map(), opts :: keyword()) :: 
+    {:ok, term()} | {:error, term()}
 
   @doc """
-  Returns the path to the external script that will be executed.
-
-  This should be an absolute path to a script that implements the
-  bridge protocol for communication with Snakepit.
+  Execute a streaming command with callback.
+  
+  Optional callback for adapters that support streaming operations.
+  
+  ## Parameters
+  
+    * `command` - The streaming command to execute
+    * `args` - Arguments as a map
+    * `callback` - Function called for each streaming result
+    * `opts` - Options including session context
+  
+  ## Returns
+  
+    * `:ok` - Streaming completed successfully
+    * `{:error, reason}` - Streaming failed
   """
-  @callback script_path() :: String.t()
+  @callback execute_stream(
+    command :: String.t(), 
+    args :: map(), 
+    callback :: (term() -> any()), 
+    opts :: keyword()
+  ) :: :ok | {:error, term()}
 
   @doc """
-  Returns additional command-line arguments for the script.
-
-  These arguments will be passed to the script when it's started.
-  Common examples: ["--mode", "pool-worker"], ["--config", "prod"]
+  Check if adapter uses gRPC protocol.
+  
+  Used by core infrastructure to optimize communication patterns.
   """
-  @callback script_args() :: [String.t()]
+  @callback uses_grpc?() :: boolean()
 
   @doc """
-  Returns a list of commands that this adapter supports.
-
-  This is used for validation and documentation purposes.
+  Check if adapter supports streaming operations.
+  
+  Used by core infrastructure to route streaming requests appropriately.
   """
-  @callback supported_commands() :: [String.t()]
+  @callback supports_streaming?() :: boolean()
 
   @doc """
-  Validates that a command and its arguments are valid for this adapter.
-
-  Returns `:ok` if valid, `{:error, reason}` if invalid.
+  Initialize adapter with configuration.
+  
+  Called once during pool startup to initialize adapter-specific resources.
+  
+  ## Parameters
+  
+    * `config` - Configuration keyword list
+  
+  ## Returns
+  
+    * `{:ok, adapter_state}` - Successful initialization with state
+    * `{:error, reason}` - Initialization failed
+  
+  ## Cognitive-Ready Features
+  
+  Implementations should:
+  - Set up telemetry collection infrastructure
+  - Initialize performance monitoring
+  - Prepare for cognitive enhancement hooks
   """
-  @callback validate_command(command :: String.t(), args :: map()) ::
-              :ok | {:error, term()}
+  @callback init(config :: keyword()) :: {:ok, term()} | {:error, term()}
 
   @doc """
-  Optional callback to process responses from the external process.
-
-  This allows adapters to transform or validate responses before
-  they're returned to the caller.
+  Clean up adapter resources.
+  
+  Called during pool shutdown to clean up adapter-specific resources.
   """
-  @callback process_response(command :: String.t(), response :: term()) ::
-              {:ok, term()} | {:error, term()}
+  @callback terminate(reason :: term(), adapter_state :: term()) :: term()
 
   @doc """
-  Optional callback to prepare arguments before sending to external process.
-
-  This allows adapters to transform arguments into the format
-  expected by their external script.
+  Start a worker process for this adapter.
+  
+  Called to start individual worker processes that will handle commands.
+  
+  ## Parameters
+  
+    * `adapter_state` - State returned from init/1
+    * `worker_id` - Unique identifier for this worker
+  
+  ## Returns
+  
+    * `{:ok, worker_pid}` - Worker started successfully
+    * `{:error, reason}` - Worker startup failed
   """
-  @callback prepare_args(command :: String.t(), args :: map()) :: map()
+  @callback start_worker(adapter_state :: term(), worker_id :: term()) :: 
+    {:ok, pid()} | {:error, term()}
 
   @doc """
-  Optional callback to get a command-specific timeout in milliseconds.
-
-  This allows adapters to specify appropriate timeouts for different
-  commands based on their expected execution time.
+  Get cognitive-ready metadata about adapter capabilities.
+  
+  Optional callback that provides metadata for intelligent routing and optimization.
+  
+  ## Returns
+  
+  Map containing:
+    * `:cognitive_capabilities` - List of supported cognitive features
+    * `:performance_characteristics` - Expected performance patterns
+    * `:resource_requirements` - Resource usage patterns
+    * `:optimization_hints` - Hints for optimization
   """
-  @callback command_timeout(command :: String.t(), args :: map()) :: pos_integer()
-
-  @optional_callbacks [process_response: 2, prepare_args: 2, command_timeout: 2]
+  @callback get_cognitive_metadata() :: map()
 
   @doc """
-  Default implementation for process_response - just returns the response as-is.
+  Report performance metrics to adapter for learning.
+  
+  Optional callback that allows core infrastructure to provide performance
+  feedback to adapters for self-optimization.
+  
+  ## Parameters
+  
+    * `metrics` - Performance metrics map
+    * `context` - Execution context
   """
-  def default_process_response(_command, response), do: {:ok, response}
+  @callback report_performance_metrics(metrics :: map(), context :: map()) :: :ok
+
+  # Optional callbacks
+  @optional_callbacks [
+    execute_stream: 4,
+    uses_grpc?: 0,
+    supports_streaming?: 0,
+    init: 1,
+    terminate: 2,
+    start_worker: 2,
+    get_cognitive_metadata: 0,
+    report_performance_metrics: 2
+  ]
 
   @doc """
-  Default implementation for prepare_args - just returns args as-is.
+  Validate that a module properly implements the Snakepit.Adapter behavior.
+  
+  ## Examples
+  
+      iex> Snakepit.Adapter.validate_implementation(MyBridge.Adapter)
+      :ok
+      
+      iex> Snakepit.Adapter.validate_implementation(InvalidModule)
+      {:error, [:missing_execute_callback]}
   """
-  def default_prepare_args(_command, args), do: args
+  def validate_implementation(module) do
+    required_callbacks = [
+      {:execute, 3}
+    ]
+    
+    missing_callbacks = Enum.filter(required_callbacks, fn {function, arity} ->
+      not function_exported?(module, function, arity)
+    end)
+    
+    if Enum.empty?(missing_callbacks) do
+      :ok
+    else
+      {:error, missing_callbacks}
+    end
+  end
 
   @doc """
-  Default implementation for command_timeout - returns 30 seconds.
+  Get default cognitive metadata template.
+  
+  Provides a template that adapter implementations can use as a starting point.
   """
-  def default_command_timeout(_command, _args), do: 30_000
+  def default_cognitive_metadata do
+    %{
+      cognitive_capabilities: [],
+      performance_characteristics: %{
+        typical_latency_ms: 100,
+        throughput_ops_per_sec: 10,
+        resource_intensity: :medium
+      },
+      resource_requirements: %{
+        memory_mb: 100,
+        cpu_usage: :low,
+        network_usage: :medium
+      },
+      optimization_hints: [
+        :supports_batching,
+        :benefits_from_caching,
+        :session_affinity_beneficial
+      ]
+    }
+  end
 end
