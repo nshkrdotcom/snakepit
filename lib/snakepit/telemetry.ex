@@ -244,6 +244,19 @@ defmodule Snakepit.Telemetry do
   end
 
   @doc """
+  Detach all telemetry handlers.
+  """
+  def detach_handlers do
+    :telemetry.detach("snakepit-pool-logger")
+    :telemetry.detach("snakepit-worker-logger")
+    :telemetry.detach("snakepit-adapter-logger")
+    :telemetry.detach("snakepit-cognitive-logger")
+  rescue
+    error ->
+      Logger.debug("Failed to detach telemetry handlers: #{inspect(error)}")
+  end
+
+  @doc """
   Emit a telemetry event with measurements and metadata.
   
   This is a convenience function for emitting telemetry events from

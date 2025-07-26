@@ -19,8 +19,18 @@ defmodule Snakepit.GenericWorker do
   # Client API
   
   @doc """
-  Starts a generic worker with the given ID and adapter.
+  Starts a generic worker with the given options.
+  
+  Accepts either:
+  - Two arguments: worker_id and adapter_module
+  - One argument: keyword list with :id and :adapter keys
   """
+  def start_link(opts) when is_list(opts) do
+    worker_id = Keyword.fetch!(opts, :id)
+    adapter_module = Keyword.fetch!(opts, :adapter)
+    GenServer.start_link(__MODULE__, {worker_id, adapter_module})
+  end
+
   def start_link(worker_id, adapter_module) do
     GenServer.start_link(__MODULE__, {worker_id, adapter_module})
   end
@@ -55,14 +65,21 @@ defmodule Snakepit.GenericWorker do
   
   @impl true
   def init({worker_id, adapter_module}) do
+    Logger.debug("GenericWorker.init: worker_id=#{worker_id}, adapter_module=#{inspect(adapter_module)}")
+    
     # Validate adapter implements required behavior
     case Snakepit.Adapter.validate_implementation(adapter_module) do
       :ok ->
         # Initialize adapter
         case initialize_adapter(adapter_module) do
           {:ok, adapter_state} ->
-            # Register worker with process registry
-            :ok = register_worker(worker_id, adapter_module)
+            # Register worker with process registry if registry is available
+            case register_worker(worker_id, adapter_module) do
+              {:ok, _} -> :ok
+              {:error, reason} -> 
+                Logger.debug("Worker registry not available: #{inspect(reason)}")
+                :ok  # Continue without registration for standalone testing
+            end
             
             state = %__MODULE__{
               id: worker_id,
@@ -182,19 +199,27 @@ defmodule Snakepit.GenericWorker do
   end
   
   defp register_worker(worker_id, adapter_module) do
-    metadata = %{
-      worker_module: __MODULE__,
-      adapter_module: adapter_module,
-      started_at: DateTime.utc_now()
-    }
-    
-    Registry.register(Snakepit.Pool.Registry, worker_id, metadata)
+    if Process.whereis(Snakepit.Pool.Registry) do
+      metadata = %{
+        worker_module: __MODULE__,
+        adapter_module: adapter_module,
+        started_at: DateTime.utc_now()
+      }
+      
+      Registry.register(Snakepit.Pool.Registry, worker_id, metadata)
+    else
+      {:error, :registry_not_available}
+    end
   end
   
   defp get_worker_pid(worker_id) do
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [{pid, _metadata}] -> {:ok, pid}
-      [] -> {:error, :worker_not_found}
+    if Process.whereis(Snakepit.Pool.Registry) do
+      case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
+        [{pid, _metadata}] -> {:ok, pid}
+        [] -> {:error, :worker_not_found}
+      end
+    else
+      {:error, :registry_not_available}
     end
   end
   

@@ -1,14 +1,17 @@
 defmodule Snakepit.Application do
   @moduledoc """
-  Application supervisor for Snakepit pooler.
+  Pure infrastructure application supervisor for Snakepit core.
 
-  Starts the core infrastructure:
+  Starts only the core pooling and session infrastructure:
   - Registry for worker process registration
-  - StarterRegistry for worker starter supervisors
+  - StarterRegistry for worker starter supervisors  
   - ProcessRegistry for external PID tracking
-  - SessionStore for session management
   - WorkerSupervisor for managing worker processes
   - Pool manager for request distribution
+  - Telemetry infrastructure
+
+  Bridge-specific functionality (SessionStore, ToolRegistry, gRPC) is handled
+  by bridge packages that depend on Snakepit core.
   """
 
   use Application
@@ -16,16 +19,13 @@ defmodule Snakepit.Application do
 
   @impl true
   def start(_type, _args) do
-    # Check if pooling is enabled (default: false to prevent auto-start issues)
-    pooling_enabled = Application.get_env(:snakepit, :pooling_enabled, false)
+    # Check if pooling is enabled (default: true for core infrastructure)
+    pooling_enabled = Application.get_env(:snakepit, :pooling_enabled, true)
 
-    # Get gRPC config for the Elixir server
-    grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
-
-    # Always start SessionStore as it's needed for tests and bridge functionality
+    # Base infrastructure (always started)
     base_children = [
-      Snakepit.Bridge.SessionStore,
-      Snakepit.Bridge.ToolRegistry
+      # Telemetry infrastructure
+      {Task, fn -> Snakepit.Telemetry.attach_handlers() end}
     ]
 
     pool_children =
@@ -33,13 +33,9 @@ defmodule Snakepit.Application do
         pool_config = Application.get_env(:snakepit, :pool_config, %{})
         pool_size = Map.get(pool_config, :pool_size, System.schedulers_online() * 2)
 
-        Logger.info("🚀 Starting Snakepit with pooling enabled (size: #{pool_size})")
+        Logger.info("🚀 Starting Snakepit core infrastructure (pool size: #{pool_size})")
 
         [
-          # Start the central gRPC server that manages state
-          {GRPC.Server.Supervisor,
-           endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true},
-
           # Task supervisor for async pool operations
           {Task.Supervisor, name: Snakepit.TaskSupervisor},
 
@@ -62,13 +58,29 @@ defmodule Snakepit.Application do
           {Snakepit.Pool, [size: pool_size]}
         ]
       else
-        Logger.info("🔧 Starting Snakepit with pooling disabled")
+        Logger.info("🔧 Starting Snakepit with pooling disabled (testing mode)")
         []
       end
 
     children = base_children ++ pool_children
 
     opts = [strategy: :one_for_one, name: Snakepit.Supervisor]
-    Supervisor.start_link(children, opts)
+    
+    case Supervisor.start_link(children, opts) do
+      {:ok, pid} ->
+        Logger.info("✅ Snakepit core infrastructure started successfully")
+        {:ok, pid}
+        
+      {:error, reason} ->
+        Logger.error("❌ Failed to start Snakepit core infrastructure: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+  
+  @impl true
+  def stop(_state) do
+    Logger.info("🛑 Stopping Snakepit core infrastructure")
+    Snakepit.Telemetry.detach_handlers()
+    :ok
   end
 end
