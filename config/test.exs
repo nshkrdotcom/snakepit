@@ -2,8 +2,8 @@ import Config
 
 # Test configuration
 config :snakepit,
-  # Enable pooling for tests
-  pooling_enabled: true,
+  # Disable pooling during application startup, enable manually in tests
+  pooling_enabled: false,
 
   # Use smaller pool size for tests
   pool_config: %{
@@ -14,8 +14,8 @@ config :snakepit,
   worker_init_timeout: 5_000,
   worker_health_check_interval: 5_000,
 
-  # Configure the adapter module
-  adapter_module: Snakepit.Adapters.GRPCPython,
+  # Configure the adapter module - use mock adapter for core infrastructure tests
+  adapter_module: Snakepit.TestAdapters.MockAdapter,
 
   # Configure test environment for gRPC bridge
   python_path: System.get_env("PYTHON_PATH", "python3"),
