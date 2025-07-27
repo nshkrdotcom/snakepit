@@ -83,6 +83,11 @@ defmodule Snakepit.Pool.Worker.Starter do
         Logger.debug(
           "Starting worker starter for #{worker_id} with module #{inspect(worker_module)}"
         )
+        
+        # Log adapter state for debugging
+        if String.contains?(worker_id, "_47_") or String.contains?(worker_id, "_48_") do
+          Logger.info("🔍 Worker.Starter #{worker_id} - adapter_state: #{inspect(adapter_state)}")
+        end
 
         adapter = adapter_module || Application.get_env(:snakepit, :adapter_module)
 
