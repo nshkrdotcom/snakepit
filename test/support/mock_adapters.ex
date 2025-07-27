@@ -36,8 +36,6 @@ defmodule Snakepit.TestAdapters.MockAdapter do
     :ok
   end
 
-  @impl Snakepit.Adapter
-  def uses_grpc?, do: false
 
   @impl Snakepit.Adapter
   def supports_streaming?, do: true
@@ -149,8 +147,6 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
     end
   end
 
-  @impl Snakepit.Adapter
-  def uses_grpc?, do: true
 
   @impl Snakepit.Adapter
   def supports_streaming?, do: true
@@ -243,8 +239,6 @@ defmodule Snakepit.TestAdapters.FailingAdapter do
     {:error, "Mock initialization failure"}
   end
 
-  @impl Snakepit.Adapter
-  def uses_grpc?, do: false
 
   @impl Snakepit.Adapter
   def supports_streaming?, do: false
@@ -327,8 +321,6 @@ defmodule Snakepit.TestAdapters.SessionAffinityAdapter do
   
   # Standard adapter callbacks
 
-  @impl Snakepit.Adapter
-  def uses_grpc?, do: false
 
   @impl Snakepit.Adapter 
   def supports_streaming?, do: false

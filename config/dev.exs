@@ -6,5 +6,6 @@ config :logger, level: :debug
 
 # Configure Snakepit for development
 config :snakepit,
-  # Use the gRPC Python adapter
-  adapter_module: Snakepit.Adapters.GRPCPython
+  # Use the mock adapter for development testing
+  # The real adapter (SnakepitGRPCBridge.Adapter) is in the bridge layer
+  adapter_module: Snakepit.TestAdapters.MockAdapter
