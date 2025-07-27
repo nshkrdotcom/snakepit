@@ -49,6 +49,12 @@ defmodule Snakepit.Pool.Worker.Starter do
     )
   end
 
+  def start_link({worker_id, worker_module, adapter_module, adapter_state}) when is_binary(worker_id) do
+    Supervisor.start_link(__MODULE__, {worker_id, worker_module, adapter_module, adapter_state},
+      name: via_name(worker_id)
+    )
+  end
+
   @doc """
   Returns a via tuple for this starter supervisor.
   """
@@ -62,6 +68,10 @@ defmodule Snakepit.Pool.Worker.Starter do
   end
 
   def init({worker_id, worker_module, adapter_module}) do
+    init({worker_id, worker_module, adapter_module, nil})
+  end
+
+  def init({worker_id, worker_module, adapter_module, adapter_state}) do
     # Check if the Pool is already terminating
     case Process.whereis(Snakepit.Pool) do
       nil ->
@@ -79,7 +89,7 @@ defmodule Snakepit.Pool.Worker.Starter do
         children = [
           %{
             id: worker_id,
-            start: {worker_module, :start_link, [[id: worker_id, adapter: adapter]]},
+            start: {worker_module, :start_link, [[id: worker_id, adapter: adapter, adapter_state: adapter_state]]},
             # Within this supervisor, the worker restarts on crashes but not during shutdown
             restart: :transient,
             type: :worker

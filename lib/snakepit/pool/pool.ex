@@ -31,6 +31,7 @@ defmodule Snakepit.Pool do
     :max_queue_size,
     :worker_module,
     :adapter_module,
+    :adapter_state,
     # Note: process_pids removed - ProcessRegistry is the single source of truth
     initialization_waiters: []
   ]
@@ -156,6 +157,9 @@ defmodule Snakepit.Pool do
     worker_module = opts[:worker_module] || Application.get_env(:snakepit, :worker_module, Snakepit.GenericWorker)
     adapter_module = opts[:adapter_module] || Application.get_env(:snakepit, :adapter_module)
 
+    # Initialize adapter state ONCE before starting workers
+    adapter_state = initialize_adapter(adapter_module)
+
     state = %__MODULE__{
       size: size,
       workers: [],
@@ -174,7 +178,8 @@ defmodule Snakepit.Pool do
       queue_timeout: queue_timeout,
       max_queue_size: max_queue_size,
       worker_module: worker_module,
-      adapter_module: adapter_module
+      adapter_module: adapter_module,
+      adapter_state: adapter_state
     }
 
     # Start concurrent worker initialization
@@ -192,7 +197,8 @@ defmodule Snakepit.Pool do
         state.size,
         state.startup_timeout,
         state.worker_module,
-        state.adapter_module
+        state.adapter_module,
+        state.adapter_state
       )
 
     elapsed = System.monotonic_time(:millisecond) - start_time
@@ -441,7 +447,27 @@ defmodule Snakepit.Pool do
 
   # Private Functions
 
-  defp start_workers_concurrently(count, startup_timeout, worker_module, adapter_module) do
+  defp initialize_adapter(nil), do: nil
+  defp initialize_adapter(adapter_module) do
+    if function_exported?(adapter_module, :init, 1) do
+      # Get config from Snakepit or fallback to bridge app
+      config = Application.get_env(:snakepit, :adapter_config,
+                 Application.get_env(:snakepit_grpc_bridge, :adapter_config, %{}))
+      
+      case adapter_module.init(config) do
+        {:ok, adapter_state} ->
+          Logger.info("✅ Adapter #{inspect(adapter_module)} initialized successfully")
+          adapter_state
+        {:error, reason} ->
+          Logger.error("❌ Failed to initialize adapter: #{inspect(reason)}")
+          nil
+      end
+    else
+      nil
+    end
+  end
+
+  defp start_workers_concurrently(count, startup_timeout, worker_module, adapter_module, adapter_state) do
     Logger.info("🚀 Starting concurrent initialization of #{count} workers...")
     Logger.info("📦 Using worker type: #{inspect(worker_module)}")
 
@@ -450,7 +476,7 @@ defmodule Snakepit.Pool do
       fn i ->
         worker_id = "pool_worker_#{i}_#{:erlang.unique_integer([:positive])}"
 
-        case Snakepit.Pool.WorkerSupervisor.start_worker(worker_id, worker_module, adapter_module) do
+        case Snakepit.Pool.WorkerSupervisor.start_worker(worker_id, worker_module, adapter_module, adapter_state) do
           {:ok, _pid} ->
             Logger.info("✅ Worker #{i}/#{count} ready: #{worker_id}")
             worker_id

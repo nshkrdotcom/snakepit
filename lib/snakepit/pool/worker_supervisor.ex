@@ -34,11 +34,11 @@ defmodule Snakepit.Pool.WorkerSupervisor do
       iex> Snakepit.Pool.WorkerSupervisor.start_worker("worker_123")
       {:ok, #PID<0.123.0>}
   """
-  def start_worker(worker_id, worker_module \\ Snakepit.GRPCWorker, adapter_module \\ nil)
+  def start_worker(worker_id, worker_module \\ Snakepit.GRPCWorker, adapter_module \\ nil, adapter_state \\ nil)
       when is_binary(worker_id) do
     # Start the permanent starter supervisor, not the transient worker directly
     # This gives us automatic worker restarts without Pool intervention
-    child_spec = {Snakepit.Pool.Worker.Starter, {worker_id, worker_module, adapter_module}}
+    child_spec = {Snakepit.Pool.Worker.Starter, {worker_id, worker_module, adapter_module, adapter_state}}
 
     case DynamicSupervisor.start_child(__MODULE__, child_spec) do
       {:ok, starter_pid} ->
