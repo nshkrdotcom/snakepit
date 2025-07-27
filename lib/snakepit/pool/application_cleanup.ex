@@ -83,12 +83,13 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     # Using the beam_run_id makes this much more targeted and safe
     beam_run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
 
-    case System.cmd("pkill", ["-9", "-f", "grpc_server.py.*--snakepit-run-id #{beam_run_id}"],
+    script_pattern = get_script_pattern()
+    case System.cmd("pkill", ["-9", "-f", "#{script_pattern}.*--snakepit-run-id #{beam_run_id}"],
            stderr_to_stdout: true
          ) do
       {_output, 0} ->
         Logger.info(
-          "🧹 Final cleanup: killed any remaining grpc_server.py processes from run #{beam_run_id}"
+          "🧹 Final cleanup: killed any remaining #{script_pattern} processes from run #{beam_run_id}"
         )
 
       {_output, 1} ->
@@ -205,5 +206,16 @@ defmodule Snakepit.Pool.ApplicationCleanup do
           acc
       end
     end)
+  end
+  
+  # Get the script pattern from adapter config or use default
+  defp get_script_pattern do
+    case Application.get_env(:snakepit, :adapter_config) do
+      %{script_pattern: pattern} when is_binary(pattern) ->
+        pattern
+      _ ->
+        # Default to the original pattern for backward compatibility
+        "grpc_server.py"
+    end
   end
 end

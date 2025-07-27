@@ -164,6 +164,10 @@ defmodule Snakepit.Adapter do
       iex> Snakepit.Adapter.validate_implementation(InvalidModule)
       {:error, [:missing_execute_callback]}
   """
+  def validate_implementation(nil) do
+    {:error, [:no_adapter_configured]}
+  end
+  
   def validate_implementation(module) when is_atom(module) do
     # Ensure the module is loaded before checking exports
     case Code.ensure_loaded(module) do
@@ -185,10 +189,6 @@ defmodule Snakepit.Adapter do
       {:error, reason} ->
         {:error, {:module_load_failed, reason}}
     end
-  end
-  
-  def validate_implementation(nil) do
-    {:error, [:no_adapter_configured]}
   end
 
   @doc """

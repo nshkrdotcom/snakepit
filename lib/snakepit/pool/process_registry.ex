@@ -512,9 +512,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
           # First verify this is actually a Python grpc_server process
           case System.cmd("ps", ["-p", pid_str, "-o", "cmd="], stderr_to_stdout: true) do
             {output, 0} ->
-              if String.contains?(output, "grpc_server.py") do
+              script_pattern = get_script_pattern()
+              if String.contains?(output, script_pattern) do
                 Logger.info(
-                  "Confirmed PID #{pid_str} (PGID #{pgid_str}) is a grpc_server process"
+                  "Confirmed PID #{pid_str} (PGID #{pgid_str}) is a #{script_pattern} process"
                 )
 
                 # Try to kill the entire process group first
@@ -560,7 +561,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
                 end
               else
                 Logger.warning(
-                  "PID #{pid_str} is not a grpc_server process, skipping: #{String.trim(output)}"
+                  "PID #{pid_str} is not a #{script_pattern} process, skipping: #{String.trim(output)}"
                 )
               end
 
@@ -578,7 +579,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # Kill processes spawned from abandoned reservations using beam_run_id
     Enum.each(abandoned_reservations, fn {worker_id, info} ->
       # Use the unique run ID for a safe pkill pattern
-      kill_pattern = "grpc_server.py.*--snakepit-run-id #{info.beam_run_id}"
+      script_pattern = get_script_pattern()
+      kill_pattern = "#{script_pattern}.*--snakepit-run-id #{info.beam_run_id}"
 
       Logger.warning(
         "Found abandoned reservation #{worker_id} from run #{info.beam_run_id}. " <>
@@ -691,5 +693,16 @@ defmodule Snakepit.Pool.ProcessRegistry do
     end)
 
     length(dead_workers)
+  end
+  
+  # Get the script pattern from adapter config or use default
+  defp get_script_pattern do
+    case Application.get_env(:snakepit, :adapter_config) do
+      %{script_pattern: pattern} when is_binary(pattern) ->
+        pattern
+      _ ->
+        # Default to the original pattern for backward compatibility
+        "grpc_server.py"
+    end
   end
 end
