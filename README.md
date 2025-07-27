@@ -12,7 +12,7 @@
 
 ## 🚀 What is Snakepit?
 
-Snakepit is a battle-tested Elixir library that provides a robust pooling system for managing external processes (Python, Node.js, Ruby, R, etc.). Born from the need for reliable ML/AI integrations, it offers:
+Snakepit is a battle-tested Elixir library that provides a robust pooling system for managing external processes (Python, Node.js, Ruby, R, etc.). It offers:
 
 - **Lightning-fast concurrent initialization** - 1000x faster than sequential approaches
 - **Session-based execution** with automatic worker affinity
@@ -481,13 +481,13 @@ session_id = "analysis_#{UUID.generate()}"
 :ok = Snakepit.Bridge.SessionStore.delete_session(session_id)
 ```
 
-### ML/AI Workflow Example
+### Stateful Workflow Example
 
 ```elixir
-# Using SessionHelpers for ML program management
+# Using SessionHelpers for stateful program management
 alias Snakepit.SessionHelpers
 
-# Create an ML program/model
+# Create a stateful program
 {:ok, response} = SessionHelpers.execute_program_command(
   "ml_session_123",
   "create_program",

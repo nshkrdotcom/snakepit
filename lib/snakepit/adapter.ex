@@ -58,12 +58,6 @@ defmodule Snakepit.Adapter do
     opts :: keyword()
   ) :: :ok | {:error, term()}
 
-  @doc """
-  Check if adapter uses gRPC protocol.
-  
-  Used by core infrastructure to optimize communication patterns.
-  """
-  @callback uses_grpc?() :: boolean()
 
   @doc """
   Check if adapter supports streaming operations.
@@ -151,7 +145,6 @@ defmodule Snakepit.Adapter do
   # Optional callbacks
   @optional_callbacks [
     execute_stream: 4,
-    uses_grpc?: 0,
     supports_streaming?: 0,
     init: 1,
     terminate: 2,
