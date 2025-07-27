@@ -97,7 +97,7 @@ defmodule Snakepit do
 
     adapter = Application.get_env(:snakepit, :adapter_module)
 
-    unless function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+    unless function_exported?(adapter, :supports_streaming?, 0) and adapter.supports_streaming?() do
       {:error, :streaming_not_supported}
     else
       Snakepit.Pool.execute_stream(command, args, callback_fn, opts)
@@ -114,7 +114,7 @@ defmodule Snakepit do
 
     adapter = Application.get_env(:snakepit, :adapter_module)
 
-    unless function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+    unless function_exported?(adapter, :supports_streaming?, 0) and adapter.supports_streaming?() do
       {:error, :streaming_not_supported}
     else
       opts_with_session = Keyword.put(opts, :session_id, session_id)
