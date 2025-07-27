@@ -157,8 +157,16 @@ defmodule Snakepit.Pool do
     worker_module = opts[:worker_module] || Application.get_env(:snakepit, :worker_module, Snakepit.GenericWorker)
     adapter_module = opts[:adapter_module] || Application.get_env(:snakepit, :adapter_module)
 
-    # Initialize adapter state ONCE before starting workers
-    adapter_state = initialize_adapter(adapter_module)
+    Logger.info("🔍 Pool config - worker_module: #{inspect(worker_module)}, adapter_module: #{inspect(adapter_module)}")
+
+    # CHANGED: Receive pre-initialized adapter state from the platform layer
+    adapter_state = opts[:adapter_state]
+    
+    if adapter_state do
+      Logger.info("✅ Pool received pre-initialized adapter_state")
+    else
+      Logger.warning("⚠️ Pool received no adapter_state - workers may fail to start")
+    end
 
     state = %__MODULE__{
       size: size,
@@ -447,34 +455,20 @@ defmodule Snakepit.Pool do
 
   # Private Functions
 
-  defp initialize_adapter(nil), do: nil
-  defp initialize_adapter(adapter_module) do
-    if function_exported?(adapter_module, :init, 1) do
-      # Get config from Snakepit or fallback to bridge app
-      config = Application.get_env(:snakepit, :adapter_config,
-                 Application.get_env(:snakepit_grpc_bridge, :adapter_config, %{}))
-      
-      case adapter_module.init(config) do
-        {:ok, adapter_state} ->
-          Logger.info("✅ Adapter #{inspect(adapter_module)} initialized successfully")
-          adapter_state
-        {:error, reason} ->
-          Logger.error("❌ Failed to initialize adapter: #{inspect(reason)}")
-          nil
-      end
-    else
-      nil
-    end
-  end
-
   defp start_workers_concurrently(count, startup_timeout, worker_module, adapter_module, adapter_state) do
     Logger.info("🚀 Starting concurrent initialization of #{count} workers...")
     Logger.info("📦 Using worker type: #{inspect(worker_module)}")
+    Logger.info("🔍 Adapter state present: #{adapter_state != nil}")
 
     1..count
     |> Task.async_stream(
       fn i ->
         worker_id = "pool_worker_#{i}_#{:erlang.unique_integer([:positive])}"
+
+        # Log adapter state for workers that are failing
+        if i in [47, 48] do
+          Logger.info("🔍 Worker #{i} - adapter_state: #{inspect(adapter_state)}")
+        end
 
         case Snakepit.Pool.WorkerSupervisor.start_worker(worker_id, worker_module, adapter_module, adapter_state) do
           {:ok, _pid} ->
