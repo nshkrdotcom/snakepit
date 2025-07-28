@@ -28,41 +28,42 @@ defmodule Snakepit.Application do
       {Task, fn -> Snakepit.Telemetry.attach_handlers() end}
     ]
 
+    # Core infrastructure children (always started)
+    infrastructure_children = [
+      # Task supervisor for async pool operations
+      {Task.Supervisor, name: Snakepit.TaskSupervisor},
+
+      # Registry for worker process registration
+      Snakepit.Pool.Registry,
+
+      # Registry for worker starter supervisors
+      Snakepit.Pool.Worker.StarterRegistry,
+
+      # Process registry for PID tracking
+      Snakepit.Pool.ProcessRegistry,
+
+      # Application cleanup for hard process termination guarantees
+      Snakepit.Pool.ApplicationCleanup,
+
+      # Worker supervisor for managing worker processes
+      Snakepit.Pool.WorkerSupervisor
+    ]
+
     pool_children =
       if pooling_enabled do
         pool_config = Application.get_env(:snakepit, :pool_config, %{})
         pool_size = Map.get(pool_config, :pool_size, System.schedulers_online() * 2)
 
-        Logger.info("🚀 Starting Snakepit core infrastructure (pool size: #{pool_size})")
+        Logger.info("🚀 Starting Snakepit core infrastructure with pool (size: #{pool_size})")
 
-        [
-          # Task supervisor for async pool operations
-          {Task.Supervisor, name: Snakepit.TaskSupervisor},
-
-          # Registry for worker process registration
-          Snakepit.Pool.Registry,
-
-          # Registry for worker starter supervisors
-          Snakepit.Pool.Worker.StarterRegistry,
-
-          # Process registry for PID tracking
-          Snakepit.Pool.ProcessRegistry,
-
-          # Application cleanup for hard process termination guarantees
-          Snakepit.Pool.ApplicationCleanup,
-
-          # Worker supervisor for managing worker processes
-          Snakepit.Pool.WorkerSupervisor,
-
-          # Main pool manager
-          {Snakepit.Pool, [size: pool_size]}
-        ]
+        # Add the Pool GenServer only when pooling is enabled
+        [{Snakepit.Pool, [size: pool_size]}]
       else
-        Logger.info("🔧 Starting Snakepit with pooling disabled (testing mode)")
+        Logger.info("🔧 Starting Snakepit core infrastructure without pool (platform will manage pool)")
         []
       end
 
-    children = base_children ++ pool_children
+    children = base_children ++ infrastructure_children ++ pool_children
 
     opts = [strategy: :one_for_one, name: Snakepit.Supervisor]
     
