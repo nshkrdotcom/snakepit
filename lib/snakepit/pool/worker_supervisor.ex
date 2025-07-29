@@ -34,7 +34,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
       iex> Snakepit.Pool.WorkerSupervisor.start_worker("worker_123")
       {:ok, #PID<0.123.0>}
   """
-  def start_worker(worker_id, worker_module \\ Snakepit.GRPCWorker, adapter_module \\ nil, adapter_state \\ nil)
+  def start_worker(worker_id, worker_module \\ Snakepit.GenericWorker, adapter_module \\ nil, adapter_state \\ nil)
       when is_binary(worker_id) do
     # Start the permanent starter supervisor, not the transient worker directly
     # This gives us automatic worker restarts without Pool intervention
