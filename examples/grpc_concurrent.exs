@@ -25,19 +25,19 @@ defmodule ConcurrentExample do
     tasks = for i <- 1..10 do
       Task.async(fn ->
         start = System.monotonic_time(:millisecond)
-        {:ok, result} = Snakepit.execute("compute", %{
-          task_id: i,
-          expression: "#{i} * #{i}",
-          operation: "square"
-        })
-        duration = System.monotonic_time(:millisecond) - start
-        {i, result["result"], duration}
+        case Snakepit.execute("add", %{a: i, b: i}) do
+          {:ok, result} ->
+            duration = System.monotonic_time(:millisecond) - start
+            {i, result, duration}
+          {:error, reason} ->
+            {i, {:error, reason}, 0}
+        end
       end)
     end
-    
+
     results = Task.await_many(tasks, 10_000)
     Enum.each(results, fn {id, result, duration} ->
-      IO.puts("  Task #{id}: result=#{result}, duration=#{duration}ms")
+      IO.puts("  Task #{id}: result=#{inspect(result)}, duration=#{duration}ms")
     end)
     
     # 2. Pool saturation test
@@ -50,9 +50,9 @@ defmodule ConcurrentExample do
         task_start = System.monotonic_time(:millisecond)
         wait_time = task_start - start_time
         
-        {:ok, result} = Snakepit.execute("slow_operation", %{
+        {:ok, result} = Snakepit.execute("echo", %{
           task_id: i,
-          delay: 500  # 500ms operation
+          message: "Task #{i}"
         })
         
         task_end = System.monotonic_time(:millisecond)
@@ -91,9 +91,9 @@ defmodule ConcurrentExample do
       # Medium operations
       for i <- 1..3 do
         Task.async(fn ->
-          {:ok, result} = Snakepit.execute("compute", %{
+          {:ok, result} = Snakepit.execute("echo", %{
             id: "medium_#{i}",
-            expression: "sum(range(1000))"
+            message: "Medium task #{i}"
           })
           {:medium, i, result}
         end)
@@ -102,9 +102,9 @@ defmodule ConcurrentExample do
       # Slow operations
       for i <- 1..2 do
         Task.async(fn ->
-          {:ok, result} = Snakepit.execute("slow_operation", %{
+          {:ok, result} = Snakepit.execute("echo", %{
             id: "slow_#{i}",
-            delay: 1000
+            message: "Slow task #{i}"
           })
           {:slow, i, result}
         end)
@@ -126,7 +126,7 @@ defmodule ConcurrentExample do
     # Initialize sessions concurrently
     init_tasks = for session <- sessions do
       Task.async(fn ->
-        {:ok, _} = Snakepit.execute_in_session(session, "initialize_session", %{})
+        {:ok, _} = Snakepit.execute_in_session(session, "ping", %{})
         {:ok, _} = Snakepit.execute_in_session(session, "register_variable", %{
           name: "counter",
           type: "integer",

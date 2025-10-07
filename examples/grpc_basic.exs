@@ -38,30 +38,27 @@ defmodule BasicExample do
     
     Process.sleep(100)
     
-    # 3. Compute command (simple calculation)
-    IO.puts("\n3. Compute command:")
-    case Snakepit.execute("compute", %{
-      expression: "2 + 2",
-      operation: "evaluate"
-    }) do
-      {:ok, result} -> IO.inspect(result, label: "Compute result")
+    # 3. Add command (simple calculation)
+    IO.puts("\n3. Add command:")
+    case Snakepit.execute("add", %{a: 2, b: 2}) do
+      {:ok, result} -> IO.inspect(result, label: "Add result")
       {:error, reason} -> IO.puts("Error: #{inspect(reason)}")
     end
-    
+
     Process.sleep(100)
-    
-    # 4. Error handling example
-    IO.puts("\n4. Error handling:")
-    case Snakepit.execute("invalid_command", %{}) do
+
+    # 4. Get adapter info
+    IO.puts("\n4. Adapter info:")
+    case Snakepit.execute("adapter_info", %{}) do
+      {:ok, result} -> IO.inspect(result, label: "Adapter info")
+      {:error, reason} -> IO.puts("Error: #{inspect(reason)}")
+    end
+
+    # 5. Error handling example
+    IO.puts("\n5. Error handling:")
+    case Snakepit.execute("nonexistent_tool", %{}) do
       {:ok, result} -> IO.inspect(result, label: "Unexpected success")
       {:error, reason} -> IO.puts("Expected error: #{inspect(reason)}")
-    end
-    
-    # 5. Custom timeout example
-    IO.puts("\n5. Custom timeout:")
-    case Snakepit.execute("slow_operation", %{delay: 100}, timeout: 5000) do
-      {:ok, result} -> IO.inspect(result, label: "Slow operation result")
-      {:error, reason} -> IO.puts("Error: #{inspect(reason)}")
     end
   end
 end
