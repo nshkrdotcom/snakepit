@@ -77,7 +77,6 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   def list_workers do
     DynamicSupervisor.which_children(__MODULE__)
     |> Enum.map(fn {_, pid, _, _} -> pid end)
-    |> Enum.filter(&Process.alive?/1)
   end
 
   @doc """
