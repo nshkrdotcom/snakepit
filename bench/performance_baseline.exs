@@ -38,7 +38,8 @@ defmodule SnakepitBenchmark do
       Application.stop(:snakepit)
       :timer.sleep(100)
 
-      # Configure pool size
+      # Configure adapter and pool
+      Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
       Application.put_env(:snakepit, :pool_config, %{pool_size: size})
       Application.put_env(:snakepit, :pooling_enabled, true)
 
@@ -70,7 +71,9 @@ defmodule SnakepitBenchmark do
 
     # Ensure snakepit running with good pool size
     Application.stop(:snakepit)
+    Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
     Application.put_env(:snakepit, :pool_config, %{pool_size: 8})
+    Application.put_env(:snakepit, :pooling_enabled, true)
     {:ok, _} = Application.ensure_all_started(:snakepit)
     :timer.sleep(1000)
 
