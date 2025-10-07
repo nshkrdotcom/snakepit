@@ -194,15 +194,6 @@ defmodule Snakepit.Pool.ApplicationCleanup do
           Logger.error("Failed to kill process with invalid PID #{inspect(pid)}: #{inspect(e)}")
           # Continue, but log the problem
           acc
-
-        # Log other unexpected errors explicitly  
-        e ->
-          Logger.error(
-            "Unexpected exception during worker cleanup for PID #{inspect(pid)}: #{inspect(e)}"
-          )
-
-          # Continue cleanup for other processes
-          acc
       end
     end)
   end
