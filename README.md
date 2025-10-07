@@ -431,11 +431,8 @@ elixir examples/grpc_basic.exs
 # Concurrent execution and pool utilization (default: 4 workers)
 elixir examples/grpc_concurrent.exs
 
-# High-concurrency test (100 workers)
+# High-concurrency test (100 workers - tested limit)
 elixir examples/grpc_concurrent.exs 100
-
-# Stress test (120 workers on fast machine)
-elixir examples/grpc_concurrent.exs 120
 
 # Session management and affinity
 elixir examples/grpc_sessions.exs
