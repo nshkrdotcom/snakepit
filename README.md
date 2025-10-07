@@ -173,18 +173,28 @@ end
 - Erlang/OTP 27+
 - External runtime (Python 3.8+, Node.js 16+, etc.) depending on adapter
 
-## 🛠️ Setup Guide
+> **📘 For detailed installation instructions** (including platform-specific guides for Ubuntu, macOS, Windows/WSL, Docker, virtual environments, and troubleshooting), see the **[Complete Installation Guide](docs/INSTALLATION.md)**.
 
-### Step 1: Install Dependencies
+## 🛠️ Quick Setup
+
+### Step 1: Install Python Dependencies
 
 For Python/gRPC integration (recommended):
 
 ```bash
 # Install Python dependencies
-pip install grpcio grpcio-tools protobuf
+pip install grpcio grpcio-tools protobuf numpy
 
 # Or use the provided requirements file
-pip install -r priv/python/requirements.txt
+cd deps/snakepit/priv/python
+pip install -r requirements.txt
+```
+
+**Virtual Environment (Recommended)**:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r deps/snakepit/priv/python/requirements.txt
 ```
 
 ### Step 2: Generate Protocol Buffers
@@ -255,7 +265,24 @@ Or start manually:
 {:ok, _} = Application.ensure_all_started(:snakepit)
 ```
 
-### Step 5: Create a Custom Adapter (Optional)
+### Step 5: Verify Installation
+
+```bash
+# Verify Python dependencies
+python3 -c "import grpc; print('✅ gRPC installed:', grpc.__version__)"
+
+# Run tests
+mix test
+
+# Try an example
+elixir examples/grpc_basic.exs
+```
+
+**Expected output**: Should see gRPC connections and successful command execution.
+
+> **💡 Troubleshooting**: If you see `ModuleNotFoundError: No module named 'grpc'`, the Python dependencies aren't installed. See [Installation Guide](docs/INSTALLATION.md#troubleshooting) for help.
+
+### Step 6: Create a Custom Adapter (Optional)
 
 For custom Python functionality:
 
