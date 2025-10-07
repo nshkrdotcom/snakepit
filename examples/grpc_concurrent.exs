@@ -2,11 +2,30 @@
 
 # Concurrent Operations with gRPC Example
 # Demonstrates parallel task execution and pool utilization
+#
+# Usage: elixir examples/grpc_concurrent.exs [pool_size]
+# Default pool_size: 4
+# Example: elixir examples/grpc_concurrent.exs 100
+
+pool_size = case System.argv() do
+  [size_str] ->
+    case Integer.parse(size_str) do
+      {size, ""} when size > 0 -> size
+      _ ->
+        IO.puts("⚠️ Invalid pool size '#{size_str}', using default: 4")
+        4
+    end
+  [] -> 4
+  _ ->
+    IO.puts("⚠️ Usage: elixir examples/grpc_concurrent.exs [pool_size]")
+    IO.puts("Using default: 4")
+    4
+end
 
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :pooling_enabled, true)
-Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
+Application.put_env(:snakepit, :pool_config, %{pool_size: pool_size})
 Application.put_env(:snakepit, :grpc_port, 50051)
 
 Mix.install([
@@ -16,9 +35,10 @@ Mix.install([
 ])
 
 defmodule ConcurrentExample do
-  def run do
-    IO.puts("\n=== Concurrent Operations Example ===\n")
-    
+  def run(pool_size) do
+    IO.puts("\n=== Concurrent Operations Example ===")
+    IO.puts("Pool Size: #{pool_size} workers\n")
+
     # 1. Simple parallel execution
     IO.puts("1. Parallel task execution:")
     
@@ -203,5 +223,5 @@ end
 
 # Run the example with proper cleanup
 Snakepit.run_as_script(fn ->
-  ConcurrentExample.run()
+  ConcurrentExample.run(pool_size)
 end)
