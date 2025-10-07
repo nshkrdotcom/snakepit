@@ -420,7 +420,35 @@ Application.start(:snakepit)
 
 ## 📖 Usage Examples
 
-### Basic Examples
+### Running the Examples
+
+All examples are ready to run from the command line:
+
+```bash
+# Basic gRPC operations (ping, echo, add)
+elixir examples/grpc_basic.exs
+
+# Concurrent execution and pool utilization
+elixir examples/grpc_concurrent.exs
+
+# Session management and affinity
+elixir examples/grpc_sessions.exs
+
+# Streaming operations
+elixir examples/grpc_streaming.exs
+
+# Variable system demonstration
+elixir examples/grpc_variables.exs
+
+# Bidirectional tool bridge (Elixir ↔ Python)
+elixir examples/bidirectional_tools_demo.exs
+```
+
+**Prerequisites**: Python dependencies installed (see [Installation Guide](docs/INSTALLATION.md))
+
+**Expected**: Each example demonstrates specific Snakepit features with clear output.
+
+### Code Examples
 
 #### Simple Command Execution
 
