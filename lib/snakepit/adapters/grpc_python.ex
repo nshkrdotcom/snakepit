@@ -66,8 +66,9 @@ defmodule Snakepit.Adapters.GRPCPython do
       # Use custom adapter args if provided
       adapter_args
     else
-      # Default to enhanced bridge adapter
-      ["--adapter", "snakepit_bridge.adapters.enhanced.EnhancedBridge"]
+      # Default to ShowcaseAdapter - fully functional reference implementation
+      # For custom adapters, set pool_config.adapter_args or use TemplateAdapter as starting point
+      ["--adapter", "snakepit_bridge.adapters.showcase.ShowcaseAdapter"]
     end
   end
 
