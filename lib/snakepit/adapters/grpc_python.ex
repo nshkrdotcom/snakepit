@@ -45,8 +45,31 @@ defmodule Snakepit.Adapters.GRPCPython do
 
   @impl true
   def executable_path do
-    # Find Python executable
-    System.find_executable("python3") || System.find_executable("python")
+    # Priority order for finding Python:
+    # 1. Explicit configuration (highest priority)
+    Application.get_env(:snakepit, :python_executable) ||
+      # 2. Environment variable
+      System.get_env("SNAKEPIT_PYTHON") ||
+      # 3. Auto-detect virtual environment (dev convenience)
+      find_venv_python() ||
+      # 4. System Python (fallback for production)
+      System.find_executable("python3") || System.find_executable("python")
+  end
+
+  defp find_venv_python do
+    candidates = [
+      # Project root venv
+      ".venv/bin/python3",
+      # Parent directory venv (for examples/ subdirectory)
+      "../.venv/bin/python3",
+      # VIRTUAL_ENV variable (if venv activated)
+      System.get_env("VIRTUAL_ENV") &&
+        Path.join([System.get_env("VIRTUAL_ENV"), "bin", "python3"])
+    ]
+
+    Enum.find_value(candidates, fn path ->
+      path && File.exists?(Path.expand(path)) && Path.expand(path)
+    end)
   end
 
   @impl true
