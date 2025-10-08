@@ -459,9 +459,39 @@ defmodule Snakepit.Pool.ProcessRegistry do
   defp cleanup_orphaned_processes(dets_table, current_beam_run_id) do
     Logger.warning("Starting orphan cleanup for BEAM run #{current_beam_run_id}")
 
-    # First, log all entries in DETS for debugging
+    # Get all entries in DETS
     all_entries = :dets.match_object(dets_table, :_)
     Logger.info("Total entries in DETS: #{length(all_entries)}")
+
+    # Aggressive cleanup: Remove stale entries from DETS
+    # OPTIMIZATION: Only do expensive process checks for entries from different runs
+    # Current run entries are handled by normal cleanup
+
+    stale_entries =
+      all_entries
+      |> Enum.filter(fn {_worker_id, info} ->
+        cond do
+          # Different run - assume stale (processes should be dead)
+          # Don't check if alive - too slow for 100s of entries
+          info.beam_run_id != current_beam_run_id ->
+            true
+
+          # Malformed entry (no process_pid or beam_run_id)
+          not Map.has_key?(info, :process_pid) or not Map.has_key?(info, :beam_run_id) ->
+            true
+
+          # Old reservation (>5 min)
+          Map.get(info, :status) == :reserved &&
+              System.system_time(:second) - Map.get(info, :reserved_at, 0) > 300 ->
+            true
+
+          # Current run entries - keep (will be cleaned up normally)
+          true ->
+            false
+        end
+      end)
+
+    Logger.info("Found #{length(stale_entries)} stale entries to remove (from previous runs)")
 
     # 1. Get all ACTIVE processes from PREVIOUS runs (we have their PIDs)
     old_run_orphans =
@@ -598,8 +628,14 @@ defmodule Snakepit.Pool.ProcessRegistry do
       end
     end)
 
-    # Remove all entries that don't belong to current run
-    entries_to_remove = old_run_orphans ++ abandoned_reservations
+    # Combine all entries to remove:
+    # - Orphans from old runs (active processes to kill)
+    # - Abandoned reservations (never activated)
+    # - Stale entries (dead/malformed/old)
+    entries_to_remove =
+      (old_run_orphans ++ abandoned_reservations ++ stale_entries)
+      # Remove duplicates
+      |> Enum.uniq_by(fn {worker_id, _} -> worker_id end)
 
     Enum.each(entries_to_remove, fn {worker_id, _info} ->
       :dets.delete(dets_table, worker_id)
@@ -608,7 +644,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
     Logger.info(
       "Orphan cleanup complete. Killed #{killed_count} processes, " <>
         "cleaned #{length(abandoned_reservations)} abandoned reservations, " <>
-        "removed #{length(entries_to_remove)} total entries."
+        "removed #{length(stale_entries)} stale entries, " <>
+        "total removed: #{length(entries_to_remove)} entries."
     )
   end
 

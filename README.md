@@ -42,6 +42,33 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 
+## 🆕 What's New in v0.4.2
+
+### 🧹 **Systematic Cleanup & Quality Improvements**
+- **Removed ~1,000 LOC dead code** - Deleted unused modules and aspirational APIs
+- **Fixed adapter defaults** - ShowcaseAdapter now default (fully functional)
+- **DETS cleanup optimization** - Prevents indefinite growth, fast startup
+- **Atomic session creation** - Eliminates race condition error logs
+- **Python venv auto-detection** - Automatically finds .venv for development
+- **Issue #2 addressed** - Simplified OTP patterns, removed redundant checks
+
+### 📚 **Enhanced Documentation**
+- **Complete installation guide** - Platform-specific (Ubuntu, macOS, WSL, Docker)
+- **External process supervision design** - Multi-mode architecture (coupled, supervised, independent, distributed)
+- **Adapter selection guide** - Clear explanation of TemplateAdapter vs ShowcaseAdapter
+- **Example status clarity** - Working vs WIP examples clearly marked
+
+### 🐛 **Bug Fixes**
+- Fixed ProcessRegistry DETS accumulation (1994+ stale entries)
+- Fixed race condition in concurrent session initialization
+- Fixed example parameter mismatches
+- Removed catch-all rescue clause (follows "let it crash")
+
+### ⚡ **Performance**
+- 100 workers: ~3 seconds initialization
+- 1400-1500 operations/second sustained
+- DETS cleanup: O(1) vs O(n) process checks
+
 ## 🆕 What's New in v0.4.1
 
 ### 🚀 **Enhanced Tool Bridge Functionality**
@@ -173,7 +200,7 @@ end
 - Erlang/OTP 27+
 - External runtime (Python 3.8+, Node.js 16+, etc.) depending on adapter
 
-> **📘 For detailed installation instructions** (including platform-specific guides for Ubuntu, macOS, Windows/WSL, Docker, virtual environments, and troubleshooting), see the **[Complete Installation Guide](docs/INSTALLATION.md)**.
+> **📘 For detailed installation instructions** (including platform-specific guides for Ubuntu, macOS, Windows/WSL, Docker, virtual environments, and troubleshooting), see the **[Complete Installation Guide](guides/INSTALLATION.md)**.
 
 ## 🛠️ Quick Setup
 
@@ -280,7 +307,7 @@ elixir examples/grpc_basic.exs
 
 **Expected output**: Should see gRPC connections and successful command execution.
 
-> **💡 Troubleshooting**: If you see `ModuleNotFoundError: No module named 'grpc'`, the Python dependencies aren't installed. See [Installation Guide](docs/INSTALLATION.md#troubleshooting) for help.
+> **💡 Troubleshooting**: If you see `ModuleNotFoundError: No module named 'grpc'`, the Python dependencies aren't installed. See [Installation Guide](guides/INSTALLATION.md#troubleshooting) for help.
 
 ### Step 6: Create a Custom Adapter (Optional)
 
@@ -420,7 +447,60 @@ Application.start(:snakepit)
 
 ## 📖 Usage Examples
 
-### Basic Examples
+### Running the Examples
+
+#### ✅ Working Examples (Fully Functional)
+
+These examples work out-of-the-box with the default ShowcaseAdapter:
+
+```bash
+# Basic gRPC operations (ping, echo, add)
+elixir examples/grpc_basic.exs
+
+# Concurrent execution and pool utilization (default: 4 workers)
+elixir examples/grpc_concurrent.exs
+
+# High-concurrency stress test (100 workers)
+elixir examples/grpc_concurrent.exs 100
+
+# Bidirectional tool bridge (Elixir ↔ Python tools)
+elixir examples/bidirectional_tools_demo.exs
+```
+
+**Performance**: 1400-1500 ops/sec, 100 workers in ~3 seconds
+
+---
+
+#### ⚠️ Work-in-Progress Examples
+
+These examples demonstrate aspirational features but require additional tool implementations:
+
+```bash
+# Session management - needs parameter fixes
+elixir examples/grpc_sessions.exs
+# Status: Partial - register_variable parameter mismatch
+
+# Variable system - needs parameter fixes
+elixir examples/grpc_variables.exs
+# Status: Partial - requires 'constraints' parameter
+
+# Advanced features - needs custom tools
+elixir examples/grpc_advanced.exs
+# Status: WIP - requires validate_input, transform_data, etc.
+
+# Streaming - needs streaming tool implementations
+elixir examples/grpc_streaming.exs
+elixir examples/grpc_streaming_demo.exs 100
+# Status: WIP - requires streaming-specific tools
+```
+
+**Note**: These examples were written for a more complete adapter. Contributions welcome to implement missing tools in ShowcaseAdapter.
+
+---
+
+**Prerequisites**: Python dependencies installed (see [Installation Guide](guides/INSTALLATION.md))
+
+### Code Examples
 
 #### Simple Command Execution
 

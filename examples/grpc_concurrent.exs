@@ -2,11 +2,30 @@
 
 # Concurrent Operations with gRPC Example
 # Demonstrates parallel task execution and pool utilization
+#
+# Usage: elixir examples/grpc_concurrent.exs [pool_size]
+# Default pool_size: 4
+# Example: elixir examples/grpc_concurrent.exs 100
+
+pool_size = case System.argv() do
+  [size_str] ->
+    case Integer.parse(size_str) do
+      {size, ""} when size > 0 -> size
+      _ ->
+        IO.puts("⚠️ Invalid pool size '#{size_str}', using default: 4")
+        4
+    end
+  [] -> 4
+  _ ->
+    IO.puts("⚠️ Usage: elixir examples/grpc_concurrent.exs [pool_size]")
+    IO.puts("Using default: 4")
+    4
+end
 
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :pooling_enabled, true)
-Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
+Application.put_env(:snakepit, :pool_config, %{pool_size: pool_size})
 Application.put_env(:snakepit, :grpc_port, 50051)
 
 Mix.install([
@@ -16,28 +35,29 @@ Mix.install([
 ])
 
 defmodule ConcurrentExample do
-  def run do
-    IO.puts("\n=== Concurrent Operations Example ===\n")
-    
+  def run(pool_size) do
+    IO.puts("\n=== Concurrent Operations Example ===")
+    IO.puts("Pool Size: #{pool_size} workers\n")
+
     # 1. Simple parallel execution
     IO.puts("1. Parallel task execution:")
     
     tasks = for i <- 1..10 do
       Task.async(fn ->
         start = System.monotonic_time(:millisecond)
-        {:ok, result} = Snakepit.execute("compute", %{
-          task_id: i,
-          expression: "#{i} * #{i}",
-          operation: "square"
-        })
-        duration = System.monotonic_time(:millisecond) - start
-        {i, result["result"], duration}
+        case Snakepit.execute("add", %{a: i, b: i}) do
+          {:ok, result} ->
+            duration = System.monotonic_time(:millisecond) - start
+            {i, result, duration}
+          {:error, reason} ->
+            {i, {:error, reason}, 0}
+        end
       end)
     end
-    
+
     results = Task.await_many(tasks, 10_000)
     Enum.each(results, fn {id, result, duration} ->
-      IO.puts("  Task #{id}: result=#{result}, duration=#{duration}ms")
+      IO.puts("  Task #{id}: result=#{inspect(result)}, duration=#{duration}ms")
     end)
     
     # 2. Pool saturation test
@@ -50,9 +70,9 @@ defmodule ConcurrentExample do
         task_start = System.monotonic_time(:millisecond)
         wait_time = task_start - start_time
         
-        {:ok, result} = Snakepit.execute("slow_operation", %{
+        {:ok, result} = Snakepit.execute("echo", %{
           task_id: i,
-          delay: 500  # 500ms operation
+          message: "Task #{i}"
         })
         
         task_end = System.monotonic_time(:millisecond)
@@ -83,7 +103,7 @@ defmodule ConcurrentExample do
       # Fast operations
       for i <- 1..5 do
         Task.async(fn ->
-          {:ok, result} = Snakepit.execute("ping", %{id: "fast_#{i}"})
+          {:ok, result} = Snakepit.execute("ping", %{})
           {:fast, i, result}
         end)
       end,
@@ -91,9 +111,9 @@ defmodule ConcurrentExample do
       # Medium operations
       for i <- 1..3 do
         Task.async(fn ->
-          {:ok, result} = Snakepit.execute("compute", %{
+          {:ok, result} = Snakepit.execute("echo", %{
             id: "medium_#{i}",
-            expression: "sum(range(1000))"
+            message: "Medium task #{i}"
           })
           {:medium, i, result}
         end)
@@ -102,9 +122,9 @@ defmodule ConcurrentExample do
       # Slow operations
       for i <- 1..2 do
         Task.async(fn ->
-          {:ok, result} = Snakepit.execute("slow_operation", %{
+          {:ok, result} = Snakepit.execute("echo", %{
             id: "slow_#{i}",
-            delay: 1000
+            message: "Slow task #{i}"
           })
           {:slow, i, result}
         end)
@@ -126,11 +146,12 @@ defmodule ConcurrentExample do
     # Initialize sessions concurrently
     init_tasks = for session <- sessions do
       Task.async(fn ->
-        {:ok, _} = Snakepit.execute_in_session(session, "initialize_session", %{})
+        {:ok, _} = Snakepit.execute_in_session(session, "ping", %{})
         {:ok, _} = Snakepit.execute_in_session(session, "register_variable", %{
           name: "counter",
           type: "integer",
-          initial_value: 0
+          initial_value: 0,
+          constraints: %{}  # Required parameter
         })
         session
       end)
@@ -151,7 +172,7 @@ defmodule ConcurrentExample do
       end
     end |> List.flatten()
     
-    update_results = Task.await_many(update_tasks, 10_000)
+    _update_results = Task.await_many(update_tasks, 10_000)
     
     # Get final values
     final_tasks = for session <- sessions do
@@ -169,13 +190,7 @@ defmodule ConcurrentExample do
       IO.puts("    #{session}: #{value}")
     end)
     
-    # Cleanup sessions
-    cleanup_tasks = for session <- sessions do
-      Task.async(fn ->
-        Snakepit.execute_in_session(session, "cleanup_session", %{delete_all: true})
-      end)
-    end
-    Task.await_many(cleanup_tasks)
+    # Sessions auto-cleanup via SessionStore TTL - no manual cleanup needed
     
     # 5. Performance benchmark
     IO.puts("\n5. Performance benchmark:")
@@ -203,5 +218,5 @@ end
 
 # Run the example with proper cleanup
 Snakepit.run_as_script(fn ->
-  ConcurrentExample.run()
+  ConcurrentExample.run(pool_size)
 end)

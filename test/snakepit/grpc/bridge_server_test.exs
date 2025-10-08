@@ -69,7 +69,7 @@ defmodule Snakepit.GRPC.BridgeServerTest do
       assert response.error_message == nil
     end
 
-    test "handles duplicate session", %{session_id: session_id} do
+    test "handles duplicate session gracefully", %{session_id: session_id} do
       # First create
       {:ok, _} = SessionStore.create_session(session_id)
 
@@ -78,9 +78,12 @@ defmodule Snakepit.GRPC.BridgeServerTest do
         metadata: %{}
       }
 
-      assert_raise GRPC.RPCError, ~r/already exists/, fn ->
-        BridgeServer.initialize_session(request, nil)
-      end
+      # Duplicate init should succeed (idempotent operation)
+      response = BridgeServer.initialize_session(request, nil)
+      assert response.success == true
+
+      # Session should still exist and be usable
+      assert {:ok, _session} = SessionStore.get_session(session_id)
     end
   end
 
