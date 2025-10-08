@@ -172,7 +172,7 @@ defmodule ConcurrentExample do
       end
     end |> List.flatten()
     
-    update_results = Task.await_many(update_tasks, 10_000)
+    _update_results = Task.await_many(update_tasks, 10_000)
     
     # Get final values
     final_tasks = for session <- sessions do
@@ -190,13 +190,7 @@ defmodule ConcurrentExample do
       IO.puts("    #{session}: #{value}")
     end)
     
-    # Cleanup sessions
-    cleanup_tasks = for session <- sessions do
-      Task.async(fn ->
-        Snakepit.execute_in_session(session, "cleanup_session", %{delete_all: true})
-      end)
-    end
-    Task.await_many(cleanup_tasks)
+    # Sessions auto-cleanup via SessionStore TTL - no manual cleanup needed
     
     # 5. Performance benchmark
     IO.puts("\n5. Performance benchmark:")
