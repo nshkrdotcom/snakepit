@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2025-10-07
+
+### Fixed
+- **DETS accumulation bug** - Fixed ProcessRegistry indefinite growth (1994+ stale entries cleaned up)
+- **Session creation race condition** - Implemented atomic session creation with `:ets.insert_new` to eliminate concurrent initialization errors
+- **Resource cleanup race condition** - Fixed `wait_for_worker_cleanup` to check actual resources (port availability + registry cleanup) instead of dead Elixir PID
+- **Test cleanup race condition** - Added proper error handling in test teardown for already-stopped workers
+- **ExDoc warnings** - Fixed documentation references by moving INSTALLATION.md to guides/ and adding to ExDoc extras
+
+### Changed
+- **ApplicationCleanup simplified** - Reduced from 217 to 122 LOC (44% reduction), changed to emergency-only handler with telemetry
+- **Worker.Starter documentation** - Added comprehensive moduledoc with ADR-001 link explaining external process management rationale
+- **DETS cleanup optimization** - Changed from O(n) per-PID syscalls to O(1) beam_run_id-based cleanup
+- **Process.alive? filter removed** - Eliminated redundant check (Supervisor.which_children already returns alive children only)
+
+### Added
+- **ADR-001** - Architecture Decision Record documenting Worker.Starter supervision pattern rationale
+- **External Process Supervision Design** - Comprehensive 1074-line design document covering multi-mode architecture
+- **Issue #2 critical review** - Detailed analysis addressing all community feedback concerns
+- **Performance benchmarks** - Added baseline benchmarks showing 1400-1500 ops/sec sustained throughput
+- **Telemetry in ApplicationCleanup** - Added events for tracking orphan detection and emergency cleanup
+
+### Removed
+- **Dead code cleanup** - Removed 1,000+ LOC of unused/aspirational code:
+  - Snakepit.Python module (530 LOC, referenced non-existent adapter)
+  - GRPCBridge adapter (95 LOC, never used)
+  - Dead Python adapters (dspy_streaming.py, enhanced.py, grpc_streaming.py - 561 LOC)
+  - Redundant helper functions in ApplicationCleanup (95 LOC)
+  - Catch-all rescue clauses (follows "let it crash" philosophy)
+
+### Performance
+- 100 workers initialize in ~3 seconds (unchanged)
+- 1400-1500 operations/second sustained (maintained)
+- DETS cleanup now O(1) vs O(n) (significant improvement for large process counts)
+
+### Documentation
+- Complete installation guide with platform-specific instructions (Ubuntu, macOS, WSL, Docker)
+- Marked working vs WIP examples clearly (3 working, 6 aspirational)
+- Added comprehensive analysis documents (150KB total)
+
+### Testing
+- All 139/139 tests passing ✅
+- No orphaned processes ✅
+- Clean shutdown behavior validated ✅
+
 ## [0.4.1] - 2025-07-24
 
 ### Added
@@ -195,6 +240,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
+[0.4.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.2
 [0.4.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.1
 [0.4.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.0
 [0.3.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.3
