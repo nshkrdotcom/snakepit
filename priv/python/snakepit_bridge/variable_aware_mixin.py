@@ -1,6 +1,15 @@
 """
-VariableAwareMixin for DSPy integration.
-Provides variable management capabilities to DSPy modules.
+VariableAwareMixin for Python Integration
+
+Provides variable management capabilities for any Python class, enabling
+automatic synchronization with Elixir-managed session variables.
+
+This mixin can be used with:
+- Machine learning libraries (DSPy, scikit-learn, PyTorch, etc.)
+- Data processing tools (Pandas, NumPy)
+- Any Python class that benefits from external configuration
+
+Originally designed for DSPy but generic enough for universal use.
 """
 
 from typing import Any, Dict, Optional, Callable
