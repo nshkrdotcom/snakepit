@@ -467,7 +467,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # OPTIMIZATION: Only do expensive process checks for entries from different runs
     # Current run entries are handled by normal cleanup
 
-    stale_entries = all_entries
+    stale_entries =
+      all_entries
       |> Enum.filter(fn {_worker_id, info} ->
         cond do
           # Different run - assume stale (processes should be dead)
@@ -481,7 +482,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
           # Old reservation (>5 min)
           Map.get(info, :status) == :reserved &&
-          System.system_time(:second) - Map.get(info, :reserved_at, 0) > 300 ->
+              System.system_time(:second) - Map.get(info, :reserved_at, 0) > 300 ->
             true
 
           # Current run entries - keep (will be cleaned up normally)
@@ -631,8 +632,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # - Orphans from old runs (active processes to kill)
     # - Abandoned reservations (never activated)
     # - Stale entries (dead/malformed/old)
-    entries_to_remove = (old_run_orphans ++ abandoned_reservations ++ stale_entries)
-    |> Enum.uniq_by(fn {worker_id, _} -> worker_id end)  # Remove duplicates
+    entries_to_remove =
+      (old_run_orphans ++ abandoned_reservations ++ stale_entries)
+      # Remove duplicates
+      |> Enum.uniq_by(fn {worker_id, _} -> worker_id end)
 
     Enum.each(entries_to_remove, fn {worker_id, _info} ->
       :dets.delete(dets_table, worker_id)

@@ -533,7 +533,10 @@ defmodule Snakepit.Bridge.SessionStore do
           false ->
             # Session already exists - return the existing one
             Logger.debug("Session #{session_id} already exists - reusing (concurrent init)")
-            [{^session_id, {_last_accessed, _ttl, existing_session}}] = :ets.lookup(state.table, session_id)
+
+            [{^session_id, {_last_accessed, _ttl, existing_session}}] =
+              :ets.lookup(state.table, session_id)
+
             {:reply, {:ok, existing_session}, state}
         end
 

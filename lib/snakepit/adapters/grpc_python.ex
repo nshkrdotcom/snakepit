@@ -47,12 +47,12 @@ defmodule Snakepit.Adapters.GRPCPython do
   def executable_path do
     # Priority order for finding Python:
     # 1. Explicit configuration (highest priority)
+    # 2. Environment variable
+    # 3. Auto-detect virtual environment (dev convenience)
+    # 4. System Python (fallback for production)
     Application.get_env(:snakepit, :python_executable) ||
-      # 2. Environment variable
       System.get_env("SNAKEPIT_PYTHON") ||
-      # 3. Auto-detect virtual environment (dev convenience)
       find_venv_python() ||
-      # 4. System Python (fallback for production)
       System.find_executable("python3") || System.find_executable("python")
   end
 
