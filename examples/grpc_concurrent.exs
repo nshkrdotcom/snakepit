@@ -103,7 +103,7 @@ defmodule ConcurrentExample do
       # Fast operations
       for i <- 1..5 do
         Task.async(fn ->
-          {:ok, result} = Snakepit.execute("ping", %{id: "fast_#{i}"})
+          {:ok, result} = Snakepit.execute("ping", %{})
           {:fast, i, result}
         end)
       end,
@@ -150,7 +150,8 @@ defmodule ConcurrentExample do
         {:ok, _} = Snakepit.execute_in_session(session, "register_variable", %{
           name: "counter",
           type: "integer",
-          initial_value: 0
+          initial_value: 0,
+          constraints: %{}  # Required parameter
         })
         session
       end)
