@@ -91,6 +91,7 @@ defmodule Snakepit.MixProject do
       main: "readme",
       extras: [
         "README.md",
+        "guides/INSTALLATION.md",
         "README_GRPC.md",
         "README_BIDIRECTIONAL_TOOL_BRIDGE.md",
         "README_PROCESS_MANAGEMENT.md",
