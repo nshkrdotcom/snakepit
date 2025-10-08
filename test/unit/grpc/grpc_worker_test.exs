@@ -17,7 +17,13 @@ defmodule Snakepit.GRPCWorkerTest do
       assert_receive {:grpc_ready, ^port}, 5_000
 
       on_exit(fn ->
-        if Process.alive?(worker), do: GenServer.stop(worker)
+        if Process.alive?(worker) do
+          try do
+            GenServer.stop(worker)
+          catch
+            :exit, _ -> :ok  # Already stopped
+          end
+        end
       end)
 
       %{worker: worker, port: port}
@@ -103,7 +109,13 @@ defmodule Snakepit.GRPCWorkerTest do
       assert_receive {:grpc_ready, ^port}, 5_000
 
       on_exit(fn ->
-        if Process.alive?(worker), do: GenServer.stop(worker)
+        if Process.alive?(worker) do
+          try do
+            GenServer.stop(worker)
+          catch
+            :exit, _ -> :ok  # Already stopped
+          end
+        end
       end)
 
       %{worker: worker}
