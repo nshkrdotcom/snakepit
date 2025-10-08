@@ -61,6 +61,7 @@ defmodule Snakepit.MixProject do
         "CHANGELOG*",
         "DIAGS*",
         "ARCHITECTURE*",
+        "INSTALLATION.md",
         "priv/python/BINARY_SERIALIZATION.md"
       ],
       exclude_patterns: [
