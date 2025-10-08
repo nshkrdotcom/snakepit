@@ -200,7 +200,7 @@ end
 - Erlang/OTP 27+
 - External runtime (Python 3.8+, Node.js 16+, etc.) depending on adapter
 
-> **📘 For detailed installation instructions** (including platform-specific guides for Ubuntu, macOS, Windows/WSL, Docker, virtual environments, and troubleshooting), see the **[Complete Installation Guide](INSTALLATION.md)**.
+> **📘 For detailed installation instructions** (including platform-specific guides for Ubuntu, macOS, Windows/WSL, Docker, virtual environments, and troubleshooting), see the **[Complete Installation Guide](guides/INSTALLATION.md)**.
 
 ## 🛠️ Quick Setup
 
@@ -307,7 +307,7 @@ elixir examples/grpc_basic.exs
 
 **Expected output**: Should see gRPC connections and successful command execution.
 
-> **💡 Troubleshooting**: If you see `ModuleNotFoundError: No module named 'grpc'`, the Python dependencies aren't installed. See [Installation Guide](INSTALLATION.md#troubleshooting) for help.
+> **💡 Troubleshooting**: If you see `ModuleNotFoundError: No module named 'grpc'`, the Python dependencies aren't installed. See [Installation Guide](guides/INSTALLATION.md#troubleshooting) for help.
 
 ### Step 6: Create a Custom Adapter (Optional)
 
@@ -498,7 +498,7 @@ elixir examples/grpc_streaming_demo.exs 100
 
 ---
 
-**Prerequisites**: Python dependencies installed (see [Installation Guide](INSTALLATION.md))
+**Prerequisites**: Python dependencies installed (see [Installation Guide](guides/INSTALLATION.md))
 
 ### Code Examples
 

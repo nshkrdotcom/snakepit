@@ -54,6 +54,7 @@ defmodule Snakepit.MixProject do
         "priv/python/setup.py",
         "priv/python/snakepit_bridge",
         "assets",
+        "guides",
         ".formatter.exs",
         "mix.exs",
         "README*",
@@ -61,7 +62,6 @@ defmodule Snakepit.MixProject do
         "CHANGELOG*",
         "DIAGS*",
         "ARCHITECTURE*",
-        "INSTALLATION.md",
         "priv/python/BINARY_SERIALIZATION.md"
       ],
       exclude_patterns: [
