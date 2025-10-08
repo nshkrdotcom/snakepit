@@ -211,3 +211,6 @@ repomix*.xml
 
 # Process registry data
 /priv/data/
+
+# Arsenal repository clone
+/arsenal/
