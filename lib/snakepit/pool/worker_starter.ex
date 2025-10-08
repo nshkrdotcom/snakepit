@@ -2,25 +2,55 @@ defmodule Snakepit.Pool.Worker.Starter do
   @moduledoc """
   Supervisor wrapper for individual workers that provides automatic restart capability.
 
-  This module implements the "Permanent Wrapper" pattern that allows DynamicSupervisor
-  to automatically restart workers when they crash, while keeping the actual worker
-  process as :transient (so it doesn't restart during coordinated shutdown).
+  This module implements the "Permanent Wrapper" pattern for managing workers that
+  control external OS processes (Python gRPC servers).
+
+  ## Architecture Decision
+
+  **See**: `docs/architecture/adr-001-worker-starter-supervision-pattern.md` for
+  detailed rationale, alternatives considered, and trade-offs.
+
+  ## Why This Pattern?
+
+  **TL;DR**: Workers manage external Python processes, not just Elixir state.
+  This pattern provides:
+  - Automatic restart without Pool intervention
+  - Atomic resource cleanup (worker + Python process)
+  - Future extensibility for per-worker resources
+
+  **Trade-off**: Extra process (~1KB) per worker for better encapsulation.
 
   ## Architecture
 
   ```
   DynamicSupervisor (WorkerSupervisor)
-  └── Worker.Starter (permanent, one per worker)
-      └── Worker (transient, actual worker process)
+  └── Worker.Starter (Supervisor, :permanent)
+      └── GRPCWorker (GenServer, :transient)
+          └── Port → Python grpc_server.py
   ```
 
-  When a Worker crashes:
-  1. Worker.Starter detects the crash via its :one_for_one strategy
-  2. Worker.Starter automatically restarts the Worker (because Worker is :permanent in this context)
-  3. Pool is notified via :DOWN message but doesn't need to manage restarts
-  4. New Worker re-registers itself automatically
+  ## Lifecycle
 
-  This decouples the Pool from worker replacement logic.
+  **When GRPCWorker crashes**:
+  1. Worker.Starter detects crash via :one_for_one strategy
+  2. Worker.Starter automatically restarts GRPCWorker
+  3. Pool notified via :DOWN but doesn't manage restart
+  4. New GRPCWorker spawns new Python process and re-registers
+
+  **When Worker.Starter terminates**:
+  1. GRPCWorker receives shutdown signal
+  2. GRPCWorker.terminate sends SIGTERM to Python
+  3. Python process exits gracefully
+  4. Worker.Starter confirms all children stopped
+  5. Clean atomic shutdown
+
+  This decouples Pool (availability management) from Worker lifecycle (crash/restart).
+
+  ## Related
+
+  - **Issue #2**: Community feedback questioning this complexity
+  - **ADR-001**: Full architecture decision record with alternatives
+  - **External Process Design**: `docs/20251007_external_process_supervision_design.md`
   """
 
   use Supervisor
