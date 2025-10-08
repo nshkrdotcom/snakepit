@@ -66,6 +66,7 @@ defmodule Snakepit.GRPC.BridgeServer do
 
     case SessionStore.create_session(request.session_id, metadata: request.metadata) do
       {:ok, _session} ->
+        # Success - session was created or already existed (both are fine)
         %InitializeSessionResponse{
           success: true,
           error_message: nil,
@@ -74,12 +75,8 @@ defmodule Snakepit.GRPC.BridgeServer do
           initial_variables: %{}
         }
 
-      {:error, :already_exists} ->
-        raise GRPC.RPCError,
-          status: :already_exists,
-          message: "Session already exists: #{request.session_id}"
-
       {:error, reason} ->
+        # Only raise on actual errors (not :already_exists, which is now handled)
         raise GRPC.RPCError,
           status: :internal,
           message: format_error(reason)
