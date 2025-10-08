@@ -24,6 +24,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
+- [⚠️ Deprecation Notice](#️-deprecation-notice-v043)
 - [What's New in v0.4](#whats-new-in-v04)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
@@ -41,6 +42,79 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - [Performance](#performance)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
+
+## ⚠️ Deprecation Notice (v0.4.3)
+
+### DSPy Integration Deprecated
+
+The DSPy-specific integration (`snakepit_bridge.dspy_integration`) is **deprecated** as of v0.4.3 and will be removed in v0.5.0.
+
+**Why?** Following clean architecture principles:
+- Snakepit is a **generic** Python bridge (like JDBC for databases)
+- DSPy is a **domain-specific** library for prompt programming
+- Domain logic belongs in applications (DSPex), not infrastructure (Snakepit)
+
+**Affected Code**
+If you're importing these classes from Snakepit:
+```python
+from snakepit_bridge.dspy_integration import (
+    VariableAwarePredict,
+    VariableAwareChainOfThought,
+    VariableAwareReAct,
+    VariableAwareProgramOfThought,
+)
+```
+
+**Migration Path**
+For **DSPex users**, update your imports to:
+```python
+from dspex_adapters.dspy_variable_integration import (
+    VariableAwarePredict,
+    VariableAwareChainOfThought,
+    VariableAwareReAct,
+    VariableAwareProgramOfThought,
+)
+```
+
+No API changes - it's a drop-in replacement.
+
+For **non-DSPex users**, if you're using these classes directly:
+1. Option A: Switch to DSPex for DSPy integration
+2. Option B: Copy the code to your project before v0.5.0
+3. Option C: Pin Snakepit to `~> 0.4.3` (not recommended)
+
+**Timeline**
+- **v0.4.3** (Oct 2025): Deprecation warnings added, code still works
+- **v0.5.0** (Q1 2026): DSPy integration removed from Snakepit
+
+**Documentation**
+- [Migration Guide](https://github.com/nshkrdotcom/dspex/blob/main/docs/architecture_review_20251007/04_DECOUPLING_PLAN.md)
+- [Architecture Decision](https://github.com/nshkrdotcom/dspex/blob/main/docs/architecture_review_20251007/09_ARCHITECTURE_DECISION_RECORD.md)
+
+**Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
+
+---
+
+## 🆕 What's New in v0.4.3
+
+### Deprecated
+- **DSPy Integration** (`snakepit_bridge.dspy_integration`)
+  - Deprecated in favor of DSPex-native integration
+  - Will be removed in v0.5.0
+  - See deprecation notice above for migration path
+
+### Documentation
+- Added comprehensive deprecation warnings
+- Updated `VariableAwareMixin` to emphasize generic applicability
+- Added migration guide for DSPex users
+- Clarified architectural boundaries (Snakepit = infrastructure, DSPex = domain)
+
+### Notes
+- **No breaking changes** - existing code continues to work with warnings
+- Core Snakepit functionality unaffected
+- Non-DSPy users unaffected
+
+---
 
 ## 🆕 What's New in v0.4.2
 

@@ -6,10 +6,48 @@ DSPex variable system. It enables automatic synchronization of module parameters
 with session variables managed by the Elixir backend.
 """
 
+import warnings
 import asyncio
 import logging
 from typing import Any, Dict, Optional, List, Union, Callable
 from functools import wraps
+
+# ============================================================================
+# DEPRECATION WARNING
+# ============================================================================
+_DEPRECATION_MESSAGE = """
+╔══════════════════════════════════════════════════════════════════════╗
+║                      DEPRECATION WARNING                             ║
+╠══════════════════════════════════════════════════════════════════════╣
+║                                                                      ║
+║ This module is DEPRECATED and will be removed in Snakepit v0.5.0    ║
+║                                                                      ║
+║ DSPy integration has moved to DSPex where it belongs:                ║
+║   https://github.com/nshkrdotcom/dspex                              ║
+║                                                                      ║
+║ Deprecated classes:                                                  ║
+║   • VariableAwarePredict                                            ║
+║   • VariableAwareChainOfThought                                     ║
+║   • VariableAwareReAct                                              ║
+║   • VariableAwareProgramOfThought                                   ║
+║   • ModuleVariableResolver                                          ║
+║   • create_variable_aware_program()                                 ║
+║                                                                      ║
+║ Migration (DSPex users):                                            ║
+║   from dspex_adapters.dspy_variable_integration import ...          ║
+║                                                                      ║
+║ Timeline:                                                            ║
+║   • v0.4.3 (now): Deprecation warnings                              ║
+║   • v0.5.0 (2026-Q1): Module removed                                ║
+║                                                                      ║
+║ See: https://github.com/nshkrdotcom/dspex/blob/main/docs/          ║
+║      architecture_review_20251007/00_OVERVIEW.md                    ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+"""
+
+warnings.warn(_DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=2)
+# ============================================================================
 
 try:
     import dspy
