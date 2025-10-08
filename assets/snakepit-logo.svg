@@ -35,7 +35,7 @@
   />
 
   <!-- Intertwined Snakes -->
-  <g transform="translate(2, 2)">
+  <g transform="translate(0.0, 0.0)">
     <!-- Snake 1 (Blue) -->
     <g>
       <path 
