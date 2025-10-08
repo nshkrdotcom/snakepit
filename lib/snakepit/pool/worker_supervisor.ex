@@ -155,7 +155,8 @@ defmodule Snakepit.Pool.WorkerSupervisor do
         _ -> nil
       end
     catch
-      :exit, _ -> nil  # Worker already dead or not responding
+      # Worker already dead or not responding
+      :exit, _ -> nil
     end
   end
 
@@ -175,7 +176,8 @@ defmodule Snakepit.Pool.WorkerSupervisor do
     end
   end
 
-  defp port_available?(nil), do: true  # No port to check
+  # No port to check
+  defp port_available?(nil), do: true
 
   defp registry_cleaned?(worker_id) do
     case Snakepit.Pool.Registry.get_worker_pid(worker_id) do

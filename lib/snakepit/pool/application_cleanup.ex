@@ -27,7 +27,6 @@ defmodule Snakepit.Pool.ApplicationCleanup do
   # Note: Worker process tracking is handled entirely by ProcessRegistry.
   # ApplicationCleanup queries ProcessRegistry during shutdown for process cleanup.
 
-
   # This is called when the VM is shutting down
   #
   # IMPORTANT: This is an EMERGENCY handler. It should rarely do actual work.
