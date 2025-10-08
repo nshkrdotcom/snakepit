@@ -42,6 +42,33 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 
+## 🆕 What's New in v0.4.2
+
+### 🧹 **Systematic Cleanup & Quality Improvements**
+- **Removed ~1,000 LOC dead code** - Deleted unused modules and aspirational APIs
+- **Fixed adapter defaults** - ShowcaseAdapter now default (fully functional)
+- **DETS cleanup optimization** - Prevents indefinite growth, fast startup
+- **Atomic session creation** - Eliminates race condition error logs
+- **Python venv auto-detection** - Automatically finds .venv for development
+- **Issue #2 addressed** - Simplified OTP patterns, removed redundant checks
+
+### 📚 **Enhanced Documentation**
+- **Complete installation guide** - Platform-specific (Ubuntu, macOS, WSL, Docker)
+- **External process supervision design** - Multi-mode architecture (coupled, supervised, independent, distributed)
+- **Adapter selection guide** - Clear explanation of TemplateAdapter vs ShowcaseAdapter
+- **Example status clarity** - Working vs WIP examples clearly marked
+
+### 🐛 **Bug Fixes**
+- Fixed ProcessRegistry DETS accumulation (1994+ stale entries)
+- Fixed race condition in concurrent session initialization
+- Fixed example parameter mismatches
+- Removed catch-all rescue clause (follows "let it crash")
+
+### ⚡ **Performance**
+- 100 workers: ~3 seconds initialization
+- 1400-1500 operations/second sustained
+- DETS cleanup: O(1) vs O(n) process checks
+
 ## 🆕 What's New in v0.4.1
 
 ### 🚀 **Enhanced Tool Bridge Functionality**
