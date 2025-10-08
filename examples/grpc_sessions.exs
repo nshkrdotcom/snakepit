@@ -23,14 +23,9 @@ defmodule SessionExample do
     session_id = "demo_session_#{System.unique_integer([:positive])}"
     IO.puts("Session ID: #{session_id}")
     
-    # 1. Initialize session
+    # 1. Initialize session (via first call)
     IO.puts("\n1. Initializing session:")
-    {:ok, _} = Snakepit.execute_in_session(session_id, "initialize_session", %{
-      config: %{
-        cache_enabled: true,
-        telemetry_enabled: false
-      }
-    })
+    {:ok, _} = Snakepit.execute_in_session(session_id, "ping", %{})
     IO.puts("Session initialized")
     
     # 2. Register a variable in the session

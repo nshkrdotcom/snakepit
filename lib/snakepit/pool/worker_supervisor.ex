@@ -77,7 +77,6 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   def list_workers do
     DynamicSupervisor.which_children(__MODULE__)
     |> Enum.map(fn {_, pid, _, _} -> pid end)
-    |> Enum.filter(&Process.alive?/1)
   end
 
   @doc """
@@ -93,9 +92,12 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   def restart_worker(worker_id) do
     case Snakepit.Pool.Registry.get_worker_pid(worker_id) do
       {:ok, old_pid} ->
-        # Worker exists, terminate it and wait for cleanup before starting new one
+        # Get the port before terminating so we can check if it's released
+        old_port = get_worker_port(old_pid)
+
+        # Worker exists, terminate it and wait for resource cleanup
         with :ok <- DynamicSupervisor.terminate_child(__MODULE__, old_pid),
-             :ok <- wait_for_worker_cleanup(old_pid) do
+             :ok <- wait_for_resource_cleanup(worker_id, old_port) do
           start_worker(worker_id)
         else
           # Propagate termination/cleanup errors
@@ -108,29 +110,77 @@ defmodule Snakepit.Pool.WorkerSupervisor do
     end
   end
 
-  @cleanup_retry_interval Application.compile_env(:snakepit, :cleanup_retry_interval, 100)
-  @cleanup_max_retries Application.compile_env(:snakepit, :cleanup_max_retries, 10)
+  @cleanup_retry_interval Application.compile_env(:snakepit, :cleanup_retry_interval, 50)
+  @cleanup_max_retries Application.compile_env(:snakepit, :cleanup_max_retries, 20)
 
-  # Wait for a specific PID to terminate to avoid race conditions
-  defp wait_for_worker_cleanup(pid, retries \\ @cleanup_max_retries) do
-    if retries > 0 and Process.alive?(pid) do
-      # Monitor the specific PID we want to wait for
-      ref = Process.monitor(pid)
-
-      receive do
-        {:DOWN, ^ref, :process, ^pid, _reason} ->
+  # Wait for external resources to be released after worker termination.
+  #
+  # This is necessary because:
+  # 1. DynamicSupervisor.terminate_child waits for Elixir process termination
+  # 2. But external OS process + ports may still be shutting down
+  # 3. Starting a new worker immediately can cause port binding conflicts
+  #
+  # We check:
+  # - Port availability (can we bind to it?)
+  # - Registry cleanup (entry removed?)
+  #
+  # This prevents race conditions on worker restart.
+  defp wait_for_resource_cleanup(worker_id, old_port, retries \\ @cleanup_max_retries) do
+    if retries > 0 do
+      cond do
+        # Check if resources are released
+        (is_nil(old_port) or port_available?(old_port)) and registry_cleaned?(worker_id) ->
+          Logger.debug("Resources released for #{worker_id}, safe to restart")
           :ok
-      after
-        @cleanup_retry_interval ->
-          Process.demonitor(ref, [:flush])
-          wait_for_worker_cleanup(pid, retries - 1)
+
+        true ->
+          # Resources still in use, wait and retry
+          Process.sleep(@cleanup_retry_interval)
+          wait_for_resource_cleanup(worker_id, old_port, retries - 1)
       end
     else
-      if Process.alive?(pid) do
-        {:error, :cleanup_timeout}
-      else
-        :ok
+      Logger.warning(
+        "Resource cleanup timeout for #{worker_id} after #{@cleanup_max_retries} retries, " <>
+          "proceeding with restart anyway"
+      )
+
+      {:error, :cleanup_timeout}
+    end
+  end
+
+  defp get_worker_port(worker_pid) do
+    try do
+      case GenServer.call(worker_pid, :get_port, 1000) do
+        {:ok, port} -> port
+        _ -> nil
       end
+    catch
+      :exit, _ -> nil  # Worker already dead or not responding
+    end
+  end
+
+  defp port_available?(port) when is_integer(port) do
+    # Try to bind to the port to verify it's available
+    case :gen_tcp.listen(port, [:binary, active: false, reuseaddr: true]) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        true
+
+      {:error, :eaddrinuse} ->
+        false
+
+      {:error, _other} ->
+        # Other errors (permission, etc) - assume unavailable
+        false
+    end
+  end
+
+  defp port_available?(nil), do: true  # No port to check
+
+  defp registry_cleaned?(worker_id) do
+    case Snakepit.Pool.Registry.get_worker_pid(worker_id) do
+      {:error, :not_found} -> true
+      {:ok, _pid} -> false
     end
   end
 end

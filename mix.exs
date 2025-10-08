@@ -4,7 +4,7 @@ defmodule Snakepit.MixProject do
   def project do
     [
       app: :snakepit,
-      version: "0.4.1",
+      version: "0.4.2",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -54,6 +54,7 @@ defmodule Snakepit.MixProject do
         "priv/python/setup.py",
         "priv/python/snakepit_bridge",
         "assets",
+        "guides",
         ".formatter.exs",
         "mix.exs",
         "README*",
@@ -90,6 +91,7 @@ defmodule Snakepit.MixProject do
       main: "readme",
       extras: [
         "README.md",
+        "guides/INSTALLATION.md",
         "README_GRPC.md",
         "README_BIDIRECTIONAL_TOOL_BRIDGE.md",
         "README_PROCESS_MANAGEMENT.md",

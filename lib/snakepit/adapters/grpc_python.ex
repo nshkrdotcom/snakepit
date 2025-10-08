@@ -45,8 +45,31 @@ defmodule Snakepit.Adapters.GRPCPython do
 
   @impl true
   def executable_path do
-    # Find Python executable
-    System.find_executable("python3") || System.find_executable("python")
+    # Priority order for finding Python:
+    # 1. Explicit configuration (highest priority)
+    # 2. Environment variable
+    # 3. Auto-detect virtual environment (dev convenience)
+    # 4. System Python (fallback for production)
+    Application.get_env(:snakepit, :python_executable) ||
+      System.get_env("SNAKEPIT_PYTHON") ||
+      find_venv_python() ||
+      System.find_executable("python3") || System.find_executable("python")
+  end
+
+  defp find_venv_python do
+    candidates = [
+      # Project root venv
+      ".venv/bin/python3",
+      # Parent directory venv (for examples/ subdirectory)
+      "../.venv/bin/python3",
+      # VIRTUAL_ENV variable (if venv activated)
+      System.get_env("VIRTUAL_ENV") &&
+        Path.join([System.get_env("VIRTUAL_ENV"), "bin", "python3"])
+    ]
+
+    Enum.find_value(candidates, fn path ->
+      path && File.exists?(Path.expand(path)) && Path.expand(path)
+    end)
   end
 
   @impl true
@@ -66,8 +89,9 @@ defmodule Snakepit.Adapters.GRPCPython do
       # Use custom adapter args if provided
       adapter_args
     else
-      # Default to enhanced bridge adapter
-      ["--adapter", "snakepit_bridge.adapters.enhanced.EnhancedBridge"]
+      # Default to ShowcaseAdapter - fully functional reference implementation
+      # For custom adapters, set pool_config.adapter_args or use TemplateAdapter as starting point
+      ["--adapter", "snakepit_bridge.adapters.showcase.ShowcaseAdapter"]
     end
   end
 
