@@ -464,22 +464,19 @@ defmodule Snakepit.Pool.ProcessRegistry do
     Logger.info("Total entries in DETS: #{length(all_entries)}")
 
     # Aggressive cleanup: Remove stale entries from DETS
-    # An entry is stale if:
-    # 1. From a different BEAM run AND process is dead
-    # 2. Has no process_pid (malformed entry)
-    # 3. Reserved but never activated (>5 minutes old)
+    # OPTIMIZATION: Only do expensive process checks for entries from different runs
+    # Current run entries are handled by normal cleanup
 
     stale_entries = all_entries
       |> Enum.filter(fn {_worker_id, info} ->
         cond do
-          # Different run AND dead process
-          info.beam_run_id != current_beam_run_id &&
-          Map.has_key?(info, :process_pid) &&
-          not process_alive?(info.process_pid) ->
+          # Different run - assume stale (processes should be dead)
+          # Don't check if alive - too slow for 100s of entries
+          info.beam_run_id != current_beam_run_id ->
             true
 
-          # Malformed entry (no process_pid)
-          not Map.has_key?(info, :process_pid) ->
+          # Malformed entry (no process_pid or beam_run_id)
+          not Map.has_key?(info, :process_pid) or not Map.has_key?(info, :beam_run_id) ->
             true
 
           # Old reservation (>5 min)
@@ -487,13 +484,13 @@ defmodule Snakepit.Pool.ProcessRegistry do
           System.system_time(:second) - Map.get(info, :reserved_at, 0) > 300 ->
             true
 
-          # Default: keep
+          # Current run entries - keep (will be cleaned up normally)
           true ->
             false
         end
       end)
 
-    Logger.info("Found #{length(stale_entries)} stale entries to remove")
+    Logger.info("Found #{length(stale_entries)} stale entries to remove (from previous runs)")
 
     # 1. Get all ACTIVE processes from PREVIOUS runs (we have their PIDs)
     old_run_orphans =
