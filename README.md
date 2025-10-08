@@ -422,7 +422,9 @@ Application.start(:snakepit)
 
 ### Running the Examples
 
-All examples are ready to run from the command line:
+#### ✅ Working Examples (Fully Functional)
+
+These examples work out-of-the-box with the default ShowcaseAdapter:
 
 ```bash
 # Basic gRPC operations (ping, echo, add)
@@ -431,30 +433,45 @@ elixir examples/grpc_basic.exs
 # Concurrent execution and pool utilization (default: 4 workers)
 elixir examples/grpc_concurrent.exs
 
-# High-concurrency test (100 workers - tested limit)
+# High-concurrency stress test (100 workers)
 elixir examples/grpc_concurrent.exs 100
 
-# Session management and affinity
-elixir examples/grpc_sessions.exs
-
-# Streaming operations
-elixir examples/grpc_streaming.exs
-
-# Variable system demonstration
-elixir examples/grpc_variables.exs
-
-# Bidirectional tool bridge (Elixir ↔ Python)
+# Bidirectional tool bridge (Elixir ↔ Python tools)
 elixir examples/bidirectional_tools_demo.exs
 ```
 
+**Performance**: 1400-1500 ops/sec, 100 workers in ~3 seconds
+
+---
+
+#### ⚠️ Work-in-Progress Examples
+
+These examples demonstrate aspirational features but require additional tool implementations:
+
+```bash
+# Session management - needs parameter fixes
+elixir examples/grpc_sessions.exs
+# Status: Partial - register_variable parameter mismatch
+
+# Variable system - needs parameter fixes
+elixir examples/grpc_variables.exs
+# Status: Partial - requires 'constraints' parameter
+
+# Advanced features - needs custom tools
+elixir examples/grpc_advanced.exs
+# Status: WIP - requires validate_input, transform_data, etc.
+
+# Streaming - needs streaming tool implementations
+elixir examples/grpc_streaming.exs
+elixir examples/grpc_streaming_demo.exs 100
+# Status: WIP - requires streaming-specific tools
+```
+
+**Note**: These examples were written for a more complete adapter. Contributions welcome to implement missing tools in ShowcaseAdapter.
+
+---
+
 **Prerequisites**: Python dependencies installed (see [Installation Guide](docs/INSTALLATION.md))
-
-**Expected**: Each example demonstrates specific Snakepit features with clear output.
-
-**Performance Notes**:
-- 100 workers initialize in ~3-4 seconds
-- Concurrent operations scale linearly with pool size
-- Tests show 1000x speedup vs sequential initialization
 
 ### Code Examples
 
