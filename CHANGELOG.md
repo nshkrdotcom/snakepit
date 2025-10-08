@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2025-10-07
+
+### Deprecated
+- **DSPy Integration** (`snakepit_bridge.dspy_integration`)
+  - Deprecated in favor of DSPex-native integration
+  - Will be removed in v0.5.0
+  - Deprecation warnings added to all DSPy-specific classes:
+    - `VariableAwarePredict`
+    - `VariableAwareChainOfThought`
+    - `VariableAwareReAct`
+    - `VariableAwareProgramOfThought`
+    - `ModuleVariableResolver`
+    - `create_variable_aware_program()`
+  - See migration guide: https://github.com/nshkrdotcom/dspex/blob/main/docs/architecture_review_20251007/04_DECOUPLING_PLAN.md
+
+### Changed
+- **VariableAwareMixin** docstring updated to emphasize generic applicability
+  - Clarified it's generic, not DSPy-specific
+  - Can be used with any Python library (scikit-learn, PyTorch, Pandas, etc.)
+
+### Documentation
+- Added prominent deprecation notice to README
+- Added migration guide for DSPex users
+- Clarified architectural boundaries (Snakepit = infrastructure, DSPex = domain)
+- Added comprehensive architecture review documents
+
+### Notes
+- **No breaking changes** - existing code continues to work with deprecation warnings
+- Core Snakepit functionality unaffected
+- Non-DSPy users unaffected
+- Deprecation period: 3-6 months before removal in v0.5.0
+
+---
+
 ## [0.4.2] - 2025-10-07
 
 ### Fixed
