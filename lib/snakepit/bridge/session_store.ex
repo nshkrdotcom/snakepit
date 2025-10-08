@@ -513,26 +513,32 @@ defmodule Snakepit.Bridge.SessionStore do
 
   @impl true
   def handle_call({:create_session, session_id, opts}, _from, state) do
-    case :ets.lookup(state.table, session_id) do
-      [{^session_id, _existing_session}] ->
-        {:reply, {:error, :already_exists}, state}
+    # Set default TTL if not provided
+    opts = Keyword.put_new(opts, :ttl, state.default_ttl)
+    session = Session.new(session_id, opts)
 
-      [] ->
-        # Set default TTL if not provided
-        opts = Keyword.put_new(opts, :ttl, state.default_ttl)
-        session = Session.new(session_id, opts)
+    case Session.validate(session) do
+      :ok ->
+        # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
+        ets_record = {session_id, {session.last_accessed, session.ttl, session}}
 
-        case Session.validate(session) do
-          :ok ->
-            # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
-            ets_record = {session_id, {session.last_accessed, session.ttl, session}}
-            :ets.insert(state.table, ets_record)
+        # Atomic insert-if-not-exists
+        case :ets.insert_new(state.table, ets_record) do
+          true ->
+            # We created the session
+            Logger.debug("Created new session: #{session_id}")
             new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
             {:reply, {:ok, session}, %{state | stats: new_stats}}
 
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
+          false ->
+            # Session already exists - return the existing one
+            Logger.debug("Session #{session_id} already exists - reusing (concurrent init)")
+            [{^session_id, {_last_accessed, _ttl, existing_session}}] = :ets.lookup(state.table, session_id)
+            {:reply, {:ok, existing_session}, state}
         end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
