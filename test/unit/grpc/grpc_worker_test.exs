@@ -21,7 +21,8 @@ defmodule Snakepit.GRPCWorkerTest do
           try do
             GenServer.stop(worker)
           catch
-            :exit, _ -> :ok  # Already stopped
+            # Already stopped
+            :exit, _ -> :ok
           end
         end
       end)
@@ -113,7 +114,8 @@ defmodule Snakepit.GRPCWorkerTest do
           try do
             GenServer.stop(worker)
           catch
-            :exit, _ -> :ok  # Already stopped
+            # Already stopped
+            :exit, _ -> :ok
           end
         end
       end)
