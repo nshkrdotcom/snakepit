@@ -26,10 +26,6 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
       "compute",
       "slow_operation",
       "initialize_session",
-      "register_variable",
-      "get_variable",
-      "set_variable",
-      "list_variables",
       "cleanup_session"
     ]
   end
@@ -69,18 +65,6 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
 
       "initialize_session" ->
         {:ok, %{"session_id" => args["session_id"] || "test_session"}}
-
-      "register_variable" ->
-        {:ok, %{"id" => "var_#{System.unique_integer([:positive])}"}}
-
-      "get_variable" ->
-        {:ok, %{"name" => args["name"], "value" => 42, "type" => "integer"}}
-
-      "set_variable" ->
-        {:ok, %{"name" => args["name"], "value" => args["value"]}}
-
-      "list_variables" ->
-        {:ok, %{"variables" => []}}
 
       "cleanup_session" ->
         {:ok, %{"status" => "cleaned"}}

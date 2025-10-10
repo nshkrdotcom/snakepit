@@ -2,12 +2,6 @@
 Code.ensure_loaded?(Supertester.UnifiedTestFoundation) ||
   raise "Supertester not found. Run: mix deps.get"
 
-# Import Supertester helpers globally for all tests
-# This provides OTP-compliant testing utilities and prevents concurrency isolation issues
-import Supertester.OTPHelpers
-import Supertester.GenServerHelpers
-import Supertester.Assertions
-
 # Test support files are automatically compiled by Mix
 
 # Ensure proper application shutdown after all tests complete

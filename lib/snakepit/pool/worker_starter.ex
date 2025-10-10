@@ -74,7 +74,14 @@ defmodule Snakepit.Pool.Worker.Starter do
   end
 
   def start_link({worker_id, worker_module, adapter_module}) when is_binary(worker_id) do
-    Supervisor.start_link(__MODULE__, {worker_id, worker_module, adapter_module},
+    Supervisor.start_link(__MODULE__, {worker_id, worker_module, adapter_module, nil},
+      name: via_name(worker_id)
+    )
+  end
+
+  def start_link({worker_id, worker_module, adapter_module, pool_name})
+      when is_binary(worker_id) do
+    Supervisor.start_link(__MODULE__, {worker_id, worker_module, adapter_module, pool_name},
       name: via_name(worker_id)
     )
   end
@@ -88,38 +95,56 @@ defmodule Snakepit.Pool.Worker.Starter do
 
   @impl true
   def init({worker_id, worker_module}) do
-    init({worker_id, worker_module, nil})
+    init({worker_id, worker_module, nil, nil})
   end
 
   def init({worker_id, worker_module, adapter_module}) do
+    init({worker_id, worker_module, adapter_module, nil})
+  end
+
+  def init({worker_id, worker_module, adapter_module, pool_name}) do
     # Check if the Pool is already terminating
-    case Process.whereis(Snakepit.Pool) do
-      nil ->
-        # Pool is dead, don't start workers
-        Logger.debug("Aborting worker starter for #{worker_id} - Pool is dead")
-        :ignore
+    # For dynamic pools, we can't check a specific name, so skip this check if pool_name is a PID
+    should_check_global_pool = pool_name == nil || pool_name == Snakepit.Pool
 
-      _pid ->
-        Logger.debug(
-          "Starting worker starter for #{worker_id} with module #{inspect(worker_module)}"
-        )
+    if should_check_global_pool do
+      case Process.whereis(Snakepit.Pool) do
+        nil ->
+          # Global pool is dead, don't start workers
+          Logger.debug("Aborting worker starter for #{worker_id} - Global pool is dead")
+          :ignore
 
-        adapter = adapter_module || Application.get_env(:snakepit, :adapter_module)
-
-        children = [
-          %{
-            id: worker_id,
-            start: {worker_module, :start_link, [[id: worker_id, adapter: adapter]]},
-            # Within this supervisor, the worker restarts on crashes but not during shutdown
-            restart: :transient,
-            # CRITICAL: Give worker time to gracefully shutdown (send SIGTERM, wait for Python)
-            # Default is 5000ms, but we explicitly set it to ensure it's not :brutal_kill
-            shutdown: 5000,
-            type: :worker
-          }
-        ]
-
-        Supervisor.init(children, strategy: :one_for_one)
+        _pid ->
+          do_init_worker(worker_id, worker_module, adapter_module, pool_name)
+      end
+    else
+      # Using a custom pool (like in tests), always proceed
+      do_init_worker(worker_id, worker_module, adapter_module, pool_name)
     end
+  end
+
+  defp do_init_worker(worker_id, worker_module, adapter_module, pool_name) do
+    Logger.debug("Starting worker starter for #{worker_id} with module #{inspect(worker_module)}")
+
+    adapter = adapter_module || Application.get_env(:snakepit, :adapter_module)
+
+    # CRITICAL FIX: Pass pool_name to worker so it knows which pool to notify when ready
+    # Default to Snakepit.Pool for backward compatibility (production use)
+    worker_opts = [id: worker_id, adapter: adapter, pool_name: pool_name || Snakepit.Pool]
+
+    children = [
+      %{
+        id: worker_id,
+        start: {worker_module, :start_link, [worker_opts]},
+        # Within this supervisor, the worker restarts on crashes but not during shutdown
+        restart: :transient,
+        # CRITICAL: Give worker time to gracefully shutdown (send SIGTERM, wait for Python)
+        # Default is 5000ms, but we explicitly set it to ensure it's not :brutal_kill
+        shutdown: 5000,
+        type: :worker
+      }
+    ]
+
+    Supervisor.init(children, strategy: :one_for_one)
   end
 end
