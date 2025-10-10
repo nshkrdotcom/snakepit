@@ -2,18 +2,12 @@ defmodule Snakepit.Bridge.Session do
   @moduledoc """
   Session data structure for centralized session management.
 
-  Extended in Stage 1 to support variables alongside programs.
-  Variables are stored by ID with a name index for fast lookups.
+  Stores program metadata and session state for worker affinity.
   """
-
-  alias Snakepit.Bridge.Variables.Variable
 
   @type t :: %__MODULE__{
           id: String.t(),
           programs: map(),
-          variables: %{String.t() => Variable.t()},
-          # name -> id mapping
-          variable_index: %{String.t() => String.t()},
           metadata: map(),
           created_at: integer(),
           last_accessed: integer(),
@@ -30,13 +24,9 @@ defmodule Snakepit.Bridge.Session do
     :last_worker_id,
     :ttl,
     programs: %{},
-    variables: %{},
-    variable_index: %{},
     metadata: %{},
     stats: %{
-      variable_count: 0,
-      program_count: 0,
-      total_variable_updates: 0
+      program_count: 0
     }
   ]
 
@@ -245,147 +235,6 @@ defmodule Snakepit.Bridge.Session do
   end
 
   @doc """
-  Adds or updates a variable in the session.
-
-  Updates both the variables map and the name index.
-  Also updates session statistics.
-  """
-  @spec put_variable(t(), String.t(), Variable.t()) :: t()
-  def put_variable(%__MODULE__{} = session, var_id, %Variable{} = variable)
-      when is_binary(var_id) do
-    # Check if it's an update
-    is_update = Map.has_key?(session.variables, var_id)
-
-    # Update variables map
-    variables = Map.put(session.variables, var_id, variable)
-
-    # Update name index
-    variable_index = Map.put(session.variable_index, to_string(variable.name), var_id)
-
-    # Update stats
-    stats =
-      if is_update do
-        %{session.stats | total_variable_updates: session.stats.total_variable_updates + 1}
-      else
-        %{
-          session.stats
-          | variable_count: session.stats.variable_count + 1,
-            total_variable_updates: session.stats.total_variable_updates + 1
-        }
-      end
-
-    %{session | variables: variables, variable_index: variable_index, stats: stats}
-  end
-
-  @doc """
-  Gets a variable by ID or name.
-
-  Supports both atom and string identifiers. Names are resolved
-  through the variable index for O(1) lookup.
-  """
-  @spec get_variable(t(), String.t() | atom()) :: {:ok, Variable.t()} | {:error, :not_found}
-  def get_variable(%__MODULE__{} = session, identifier) when is_atom(identifier) do
-    get_variable(session, to_string(identifier))
-  end
-
-  def get_variable(%__MODULE__{} = session, identifier) when is_binary(identifier) do
-    # First check if it's a direct ID
-    case Map.get(session.variables, identifier) do
-      nil ->
-        # Try to resolve as a name through the index
-        case Map.get(session.variable_index, identifier) do
-          nil ->
-            {:error, :not_found}
-
-          var_id ->
-            # Get by resolved ID
-            case Map.get(session.variables, var_id) do
-              # Shouldn't happen
-              nil -> {:error, :not_found}
-              variable -> {:ok, variable}
-            end
-        end
-
-      variable ->
-        {:ok, variable}
-    end
-  end
-
-  @doc """
-  Removes a variable from the session.
-  """
-  @spec delete_variable(t(), String.t() | atom()) :: t()
-  def delete_variable(%__MODULE__{} = session, identifier) do
-    case get_variable(session, identifier) do
-      {:ok, variable} ->
-        # Remove from variables
-        variables = Map.delete(session.variables, variable.id)
-
-        # Remove from index
-        variable_index = Map.delete(session.variable_index, to_string(variable.name))
-
-        # Update stats
-        stats = %{session.stats | variable_count: session.stats.variable_count - 1}
-
-        %{session | variables: variables, variable_index: variable_index, stats: stats}
-
-      {:error, :not_found} ->
-        session
-    end
-  end
-
-  @doc """
-  Lists all variables in the session.
-
-  Returns them sorted by creation time (oldest first).
-  """
-  @spec list_variables(t()) :: [Variable.t()]
-  def list_variables(%__MODULE__{} = session) do
-    session.variables
-    |> Map.values()
-    |> Enum.sort_by(& &1.created_at)
-  end
-
-  @doc """
-  Lists variables matching a pattern.
-
-  Supports wildcards: "temp_*" matches "temp_1", "temp_2", etc.
-  """
-  @spec list_variables(t(), String.t()) :: [Variable.t()]
-  def list_variables(%__MODULE__{} = session, pattern) when is_binary(pattern) do
-    regex =
-      pattern
-      |> String.replace("*", ".*")
-      |> Regex.compile!()
-
-    session.variables
-    |> Map.values()
-    |> Enum.filter(fn var ->
-      Regex.match?(regex, to_string(var.name))
-    end)
-    |> Enum.sort_by(& &1.created_at)
-  end
-
-  @doc """
-  Checks if a variable exists by name or ID.
-  """
-  @spec has_variable?(t(), String.t() | atom()) :: boolean()
-  def has_variable?(%__MODULE__{} = session, identifier) do
-    case get_variable(session, identifier) do
-      {:ok, _} -> true
-      {:error, :not_found} -> false
-    end
-  end
-
-  @doc """
-  Gets all variable names in the session.
-  """
-  @spec variable_names(t()) :: [String.t()]
-  def variable_names(%__MODULE__{} = session) do
-    Map.keys(session.variable_index)
-  end
-
-  @doc """
   Gets session statistics.
   """
   @spec get_stats(t()) :: map()
@@ -393,7 +242,7 @@ defmodule Snakepit.Bridge.Session do
     Map.merge(session.stats, %{
       age: System.monotonic_time(:second) - session.created_at,
       time_since_access: System.monotonic_time(:second) - session.last_accessed,
-      total_items: session.stats.variable_count + session.stats.program_count
+      total_items: session.stats.program_count
     })
   end
 end

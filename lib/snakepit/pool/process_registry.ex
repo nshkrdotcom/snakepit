@@ -287,9 +287,9 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # Sync immediately for activation too
     :dets.sync(state.dets_table)
 
-    Logger.info(
-      "✅ Activated worker #{worker_id} with external process PID #{process_pid} " <>
-        "for BEAM run #{state.beam_run_id} in ProcessRegistry"
+    Logger.warning(
+      "🆕 WORKER ACTIVATED: #{worker_id} | PID #{process_pid} | " <>
+        "BEAM run #{state.beam_run_id} | Elixir PID: #{inspect(elixir_pid)}"
     )
 
     {:noreply, state}
@@ -539,10 +539,20 @@ defmodule Snakepit.Pool.ProcessRegistry do
           pgid = Map.get(info, :pgid, info.process_pid)
           pgid_str = to_string(pgid)
 
-          # First verify this is actually a Python grpc_server process
+          # CRITICAL: Verify this is actually a Python grpc_server process with the OLD beam_run_id
+          # This prevents killing NEW workers if OS reused the PID
           case System.cmd("ps", ["-p", pid_str, "-o", "cmd="], stderr_to_stdout: true) do
             {output, 0} ->
-              if String.contains?(output, "grpc_server.py") do
+              # Must match BOTH grpc_server.py AND the original beam_run_id
+              expected_run_id_pattern = "--snakepit-run-id #{info.beam_run_id}"
+
+              Logger.warning(
+                "🔍 PID REUSE CHECK: PID #{pid_str} | Expected run_id: #{info.beam_run_id} | " <>
+                  "Current BEAM run_id: #{current_beam_run_id} | Process cmd: #{String.trim(output)}"
+              )
+
+              if String.contains?(output, "grpc_server.py") &&
+                   String.contains?(output, expected_run_id_pattern) do
                 Logger.info(
                   "Confirmed PID #{pid_str} (PGID #{pgid_str}) is a grpc_server process"
                 )
@@ -589,9 +599,17 @@ defmodule Snakepit.Pool.ProcessRegistry do
                   Logger.info("Process #{pid_str} successfully terminated with SIGTERM")
                 end
               else
-                Logger.warning(
-                  "PID #{pid_str} is not a grpc_server process, skipping: #{String.trim(output)}"
-                )
+                # PID was reused for a different process or different beam_run_id
+                if String.contains?(output, "grpc_server.py") do
+                  Logger.warning(
+                    "PID #{pid_str} is a grpc_server process but with DIFFERENT beam_run_id. " <>
+                      "OS reused PID for new worker! Skipping kill. Command: #{String.trim(output)}"
+                  )
+                else
+                  Logger.debug(
+                    "PID #{pid_str} is not a grpc_server process, skipping: #{String.trim(output)}"
+                  )
+                end
               end
 
             {_output, _} ->

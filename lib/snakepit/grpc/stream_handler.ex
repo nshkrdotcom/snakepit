@@ -57,12 +57,10 @@ defmodule Snakepit.GRPC.StreamHandler do
   defp decode_any_value(nil), do: nil
 
   defp decode_any_value(any) do
-    case Snakepit.Bridge.Serialization.decode_any(%{
-           type_url: any.type_url,
-           value: any.value
-         }) do
+    # Simple JSON decoder - variable serialization system removed
+    case Jason.decode(any.value) do
       {:ok, value} -> value
-      _ -> nil
+      {:error, _} -> any.value
     end
   end
 end

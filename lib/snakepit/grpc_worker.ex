@@ -434,7 +434,7 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def terminate(reason, state) do
-    Logger.info("gRPC worker #{inspect(self())} terminating with reason: #{inspect(reason)}")
+    Logger.debug("gRPC worker #{state.id} terminating: #{inspect(reason)}")
 
     # Graceful shutdown logic should only apply to a normal :shutdown
     # For crashes, we want to exit immediately and let the supervisor handle it.
