@@ -80,11 +80,6 @@ defmodule BridgeTestRunner do
             {:unit,
              %{
                files: [
-                 "test/snakepit/bridge/serialization_test.exs",
-                 "test/snakepit/bridge/variables/variable_test.exs",
-                 "test/snakepit/bridge/variables/types_test.exs",
-                 "test/snakepit/bridge/session_test.exs",
-                 "test/snakepit/bridge/session_store_variables_test.exs",
                  "test/snakepit/grpc/bridge_server_test.exs"
                ],
                tags: []

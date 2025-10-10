@@ -2,8 +2,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   @moduledoc """
   gRPC server implementation for the Snakepit Bridge service.
 
-  Handles variable operations, tool execution, and session management
-  through the unified bridge protocol.
+  Handles tool execution and session management through the unified bridge protocol.
   """
 
   use GRPC.Server, service: Snakepit.Bridge.BridgeService.Service
@@ -57,9 +56,7 @@ defmodule Snakepit.GRPC.BridgeServer do
         %InitializeSessionResponse{
           success: true,
           error_message: nil,
-          # Stage 2
-          available_tools: %{},
-          initial_variables: %{}
+          available_tools: %{}
         }
 
       {:error, reason} ->
@@ -97,7 +94,6 @@ defmodule Snakepit.GRPC.BridgeServer do
           session_id: session_id,
           metadata: metadata,
           created_at: %Timestamp{seconds: session.created_at, nanos: 0},
-          variable_count: 0,
           tool_count: tool_count
         }
 
@@ -369,8 +365,7 @@ defmodule Snakepit.GRPC.BridgeServer do
           description: tool.description,
           parameters: encode_parameter_specs(tool.parameters),
           metadata: metadata,
-          supports_streaming: Map.get(metadata, "supports_streaming", "false") == "true",
-          required_variables: Map.get(metadata, "required_variables", [])
+          supports_streaming: Map.get(metadata, "supports_streaming", "false") == "true"
         }
       end)
 

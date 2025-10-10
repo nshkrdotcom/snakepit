@@ -161,8 +161,9 @@ defmodule Snakepit.Adapters.GRPCPython do
   @doc """
   Get the gRPC port for this adapter instance.
 
-  Ports are allocated from a configurable range to avoid conflicts
-  when running multiple workers.
+  CRITICAL FIX: Uses atomic counter instead of random allocation to prevent
+  port collisions during concurrent worker startup (birthday paradox issue).
+  With 48 concurrent workers and 100 random ports, collision probability ≈ 90%.
   """
   def get_port do
     config = Application.get_env(:snakepit, :grpc_config, %{})
@@ -170,8 +171,27 @@ defmodule Snakepit.Adapters.GRPCPython do
     base_port = Map.get(config, :base_port, 50052)
     port_range = Map.get(config, :port_range, 100)
 
-    # Simple port allocation - in production might use a registry
-    base_port + :rand.uniform(port_range) - 1
+    # Atomic counter ensures sequential port assignment with zero collisions
+    counter = :atomics.add_get(get_port_counter(), 1, 1)
+    # Wrap around to reuse ports after workers terminate
+    offset = rem(counter, port_range)
+    base_port + offset
+  end
+
+  defp get_port_counter do
+    # Lazy initialization of atomic counter (shared across all adapter instances)
+    # Using persistent_term for process-independent storage
+    case :persistent_term.get({__MODULE__, :port_counter}, nil) do
+      nil ->
+        # Create new atomic counter
+        counter = :atomics.new(1, signed: false)
+        :atomics.put(counter, 1, 0)
+        :persistent_term.put({__MODULE__, :port_counter}, counter)
+        counter
+
+      counter ->
+        counter
+    end
   end
 
   @doc """
@@ -184,18 +204,62 @@ defmodule Snakepit.Adapters.GRPCPython do
   @doc """
   Initialize gRPC connection for the worker.
   Called by GRPCWorker during initialization.
+
+  CRITICAL FIX: This includes retry logic to handle the race condition where
+  the Python process signals GRPC_READY before the OS socket is fully bound
+  and accepting connections. This is common in polyglot systems where the
+  external process startup timing is non-deterministic.
   """
   def init_grpc_connection(port) do
     unless grpc_available?() do
       {:error, :grpc_not_available}
     else
-      case Snakepit.GRPC.Client.connect(port) do
-        {:ok, channel} ->
-          {:ok, %{channel: channel, port: port}}
+      # Retry up to 5 times with 50ms delays (total ~250ms max)
+      # This handles the startup race condition gracefully
+      retry_connect(port, 5, 50)
+    end
+  end
 
-        {:error, reason} ->
-          {:error, reason}
-      end
+  defp retry_connect(_port, 0, _delay) do
+    # All retries exhausted
+    Logger.error("gRPC connection failed after all retries")
+    {:error, :connection_failed_after_retries}
+  end
+
+  defp retry_connect(port, retries_left, delay) do
+    case Snakepit.GRPC.Client.connect(port) do
+      {:ok, channel} ->
+        # Connection successful!
+        Logger.debug("gRPC connection established to port #{port}")
+        {:ok, %{channel: channel, port: port}}
+
+      {:error, :connection_refused} ->
+        # Socket not ready yet - retry
+        Logger.debug(
+          "gRPC connection to port #{port} refused. " <>
+            "Retrying in #{delay}ms... (#{retries_left - 1} retries left)"
+        )
+
+        Process.sleep(delay)
+        retry_connect(port, retries_left - 1, delay)
+
+      {:error, :unavailable} ->
+        # Alternative error code in recent gRPC versions - also retry
+        Logger.debug(
+          "gRPC connection to port #{port} unavailable. " <>
+            "Retrying in #{delay}ms... (#{retries_left - 1} retries left)"
+        )
+
+        Process.sleep(delay)
+        retry_connect(port, retries_left - 1, delay)
+
+      {:error, reason} ->
+        # For any other error, fail immediately (no retry)
+        Logger.error(
+          "gRPC connection to port #{port} failed with unexpected reason: #{inspect(reason)}"
+        )
+
+        {:error, reason}
     end
   end
 

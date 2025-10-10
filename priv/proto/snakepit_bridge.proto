@@ -12,34 +12,15 @@ service BridgeService {
   rpc CleanupSession(CleanupSessionRequest) returns (CleanupSessionResponse);
   rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
-  
-  // Variable Operations
-  rpc GetVariable(GetVariableRequest) returns (GetVariableResponse);
-  rpc SetVariable(SetVariableRequest) returns (SetVariableResponse);
-  rpc GetVariables(BatchGetVariablesRequest) returns (BatchGetVariablesResponse);
-  rpc SetVariables(BatchSetVariablesRequest) returns (BatchSetVariablesResponse);
-  rpc RegisterVariable(RegisterVariableRequest) returns (RegisterVariableResponse);
-  rpc ListVariables(ListVariablesRequest) returns (ListVariablesResponse);
-  rpc DeleteVariable(DeleteVariableRequest) returns (DeleteVariableResponse);
-  
+
   // Tool Execution
   rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse);
   rpc ExecuteStreamingTool(ExecuteToolRequest) returns (stream ToolChunk);
-  
+
   // Tool Registration & Discovery
   rpc RegisterTools(RegisterToolsRequest) returns (RegisterToolsResponse);
   rpc GetExposedElixirTools(GetExposedElixirToolsRequest) returns (GetExposedElixirToolsResponse);
   rpc ExecuteElixirTool(ExecuteElixirToolRequest) returns (ExecuteElixirToolResponse);
-  
-  // Streaming & Reactive
-  rpc WatchVariables(WatchVariablesRequest) returns (stream VariableUpdate);
-  
-  // Advanced Features (Stage 4)
-  rpc AddDependency(AddDependencyRequest) returns (AddDependencyResponse);
-  rpc StartOptimization(StartOptimizationRequest) returns (StartOptimizationResponse);
-  rpc StopOptimization(StopOptimizationRequest) returns (StopOptimizationResponse);
-  rpc GetVariableHistory(GetVariableHistoryRequest) returns (GetVariableHistoryResponse);
-  rpc RollbackVariable(RollbackVariableRequest) returns (RollbackVariableResponse);
 }
 
 // Core Messages
@@ -68,7 +49,6 @@ message InitializeSessionResponse {
   bool success = 1;
   string error_message = 2;
   map<string, ToolSpec> available_tools = 3;
-  map<string, Variable> initial_variables = 4;
 }
 
 message CleanupSessionRequest {
@@ -81,134 +61,6 @@ message CleanupSessionResponse {
   int32 resources_cleaned = 2;
 }
 
-// Variable Messages
-message Variable {
-  string id = 1;
-  string name = 2;
-  string type = 3;
-  google.protobuf.Any value = 4;
-  string constraints_json = 5;
-  map<string, string> metadata = 6;
-  enum Source {
-    ELIXIR = 0;
-    PYTHON = 1;
-  }
-  Source source = 7;
-  google.protobuf.Timestamp last_updated_at = 8;
-  int32 version = 9;
-  
-  // Advanced fields (Stage 4)
-  string access_control_json = 10;
-  OptimizationStatus optimization_status = 11;
-  
-  // Binary data field for large values (e.g., tensors, embeddings)
-  // When present, this takes precedence over the Any value field
-  // Format should be specified in metadata (e.g., "binary_format": "numpy", "dtype": "float32")
-  bytes binary_value = 12;
-}
-
-message OptimizationStatus {
-  bool optimizing = 1;
-  string optimizer_id = 2;
-  google.protobuf.Timestamp started_at = 3;
-}
-
-message RegisterVariableRequest {
-  string session_id = 1;
-  string name = 2;
-  string type = 3;
-  google.protobuf.Any initial_value = 4;
-  string constraints_json = 5;
-  map<string, string> metadata = 6;
-  
-  // Binary data for large initial values (e.g., tensors, embeddings)
-  // When present, this takes precedence over the Any initial_value field for data
-  bytes initial_binary_value = 7;
-}
-
-message RegisterVariableResponse {
-  bool success = 1;
-  string variable_id = 2;
-  string error_message = 3;
-}
-
-message GetVariableRequest {
-  string session_id = 1;
-  string variable_identifier = 2; // Can be ID or name
-  bool bypass_cache = 3;
-}
-
-message GetVariableResponse {
-  Variable variable = 1;
-  bool from_cache = 2;
-}
-
-message SetVariableRequest {
-  string session_id = 1;
-  string variable_identifier = 2;
-  google.protobuf.Any value = 3;
-  map<string, string> metadata = 4;
-  int32 expected_version = 5; // For optimistic locking
-  
-  // Binary data for large values (e.g., tensors, embeddings)
-  // When present, this takes precedence over the Any value field for data
-  bytes binary_value = 6;
-}
-
-message SetVariableResponse {
-  bool success = 1;
-  string error_message = 2;
-  int32 new_version = 3;
-}
-
-message BatchGetVariablesRequest {
-  string session_id = 1;
-  repeated string variable_identifiers = 2;
-  bool include_metadata = 3;
-  bool bypass_cache = 4;
-}
-
-message BatchGetVariablesResponse {
-  map<string, Variable> variables = 1;
-  repeated string missing_variables = 2;
-}
-
-message BatchSetVariablesRequest {
-  string session_id = 1;
-  map<string, google.protobuf.Any> updates = 2;
-  map<string, string> metadata = 3;
-  bool atomic = 4;
-  
-  // Binary data for large values, keyed by variable identifier
-  // When a key exists here, its data takes precedence over the Any value in updates
-  map<string, bytes> binary_updates = 5;
-}
-
-message BatchSetVariablesResponse {
-  bool success = 1;
-  map<string, string> errors = 2;
-  map<string, int32> new_versions = 3;
-}
-
-message ListVariablesRequest {
-  string session_id = 1;
-  string pattern = 2; // Optional wildcard pattern for filtering
-}
-
-message ListVariablesResponse {
-  repeated Variable variables = 1;
-}
-
-message DeleteVariableRequest {
-  string session_id = 1;
-  string variable_identifier = 2; // Can be ID or name
-}
-
-message DeleteVariableResponse {
-  bool success = 1;
-  string error_message = 2;
-}
-
 // Tool Messages
 message ToolSpec {
   string name = 1;
@@ -216,7 +68,6 @@ message ToolSpec {
   repeated ParameterSpec parameters = 3;
   map<string, string> metadata = 4;
   bool supports_streaming = 5;
-  repeated string required_variables = 6;
 }
 
 message ParameterSpec {
@@ -234,7 +85,7 @@ message ExecuteToolRequest {
   map<string, google.protobuf.Any> parameters = 3;
   map<string, string> metadata = 4;
   bool stream = 5;
-  
+
   // Binary parameters for large data (e.g., images, audio, video)
   // Keys should match parameter names, metadata should describe format
   map<string, bytes> binary_parameters = 6;
@@ -255,89 +106,6 @@ message ToolChunk {
   map<string, string> metadata = 4;
 }
 
-// Streaming Messages
-message WatchVariablesRequest {
-  string session_id = 1;
-  repeated string variable_identifiers = 2;
-  bool include_initial_values = 3;
-}
-
-message VariableUpdate {
-  string variable_id = 1;
-  Variable variable = 2;
-  string update_source = 3;
-  map<string, string> update_metadata = 4;
-  google.protobuf.Timestamp timestamp = 5;
-  string update_type = 6; // "value_change", "constraint_change", etc.
-}
-
-// Advanced Messages (Stage 4)
-message AddDependencyRequest {
-  string session_id = 1;
-  string from_variable = 2;
-  string to_variable = 3;
-  string dependency_type = 4;
-}
-
-message AddDependencyResponse {
-  bool success = 1;
-  string error_message = 2;
-}
-
-message StartOptimizationRequest {
-  string session_id = 1;
-  string variable_identifier = 2;
-  string optimizer_id = 3;
-  map<string, string> optimizer_config = 4;
-}
-
-message StartOptimizationResponse {
-  bool success = 1;
-  string error_message = 2;
-  string optimization_id = 3;
-}
-
-message StopOptimizationRequest {
-  string session_id = 1;
-  string variable_identifier = 2;
-  bool force = 3;
-}
-
-message StopOptimizationResponse {
-  bool success = 1;
-  google.protobuf.Any final_value = 2;
-}
-
-message GetVariableHistoryRequest {
-  string session_id = 1;
-  string variable_identifier = 2;
-  int32 limit = 3;
-}
-
-message GetVariableHistoryResponse {
-  repeated VariableHistoryEntry entries = 1;
-}
-
-message VariableHistoryEntry {
-  int32 version = 1;
-  google.protobuf.Any value = 2;
-  google.protobuf.Timestamp timestamp = 3;
-  string changed_by = 4;
-  map<string, string> metadata = 5;
-}
-
-message RollbackVariableRequest {
-  string session_id = 1;
-  string variable_identifier = 2;
-  int32 target_version = 3;
-}
-
-message RollbackVariableResponse {
-  bool success = 1;
-  Variable variable = 2;
-  string error_message = 3;
-}
-
 // Session Management Messages
 message GetSessionRequest {
   string session_id = 1;
@@ -347,8 +115,7 @@ message GetSessionResponse {
   string session_id = 1;
   map<string, string> metadata = 2;
   google.protobuf.Timestamp created_at = 3;
-  int32 variable_count = 4;
-  int32 tool_count = 5;
+  int32 tool_count = 4;
 }
 
 message HeartbeatRequest {

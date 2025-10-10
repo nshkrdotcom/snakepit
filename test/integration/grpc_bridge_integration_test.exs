@@ -56,7 +56,7 @@ defmodule Snakepit.GRPCBridgeIntegrationTest do
       assert result["echoed"]["test"] == "data"
     end
 
-    test "session-based execution", %{pool_name: pool_name} do
+    test "session-based tool execution", %{pool_name: pool_name} do
       session_id = "test_session_#{System.unique_integer([:positive])}"
 
       # Initialize session
@@ -67,36 +67,16 @@ defmodule Snakepit.GRPCBridgeIntegrationTest do
           5_000
         )
 
-      # Register variable
+      # Execute a tool in the session context
       {:ok, result} =
         GenServer.call(
           pool_name,
-          {
-            :execute,
-            "register_variable",
-            %{name: "counter", type: "integer", initial_value: 0},
-            [session_id: session_id]
-          },
-          5_000
-        )
-
-      assert result["id"] != nil
-
-      # Get variable
-      {:ok, result} =
-        GenServer.call(
-          pool_name,
-          {
-            :execute,
-            "get_variable",
-            %{name: "counter"},
-            [session_id: session_id]
-          },
+          {:execute, "compute", %{}, [session_id: session_id]},
           5_000
         )
 
       # Mock returns 42
-      assert result["value"] == 42
+      assert result["result"] == 42
 
       # Cleanup
       GenServer.call(

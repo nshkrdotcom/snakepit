@@ -314,8 +314,8 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             return response
     
     @grpc_error_handler
-    def ExecuteStreamingTool(self, request, context):
-        """Executes a streaming tool."""
+    async def ExecuteStreamingTool(self, request, context):
+        """Executes a streaming tool (supports both sync and async generators)."""
         logger.info(f"ExecuteStreamingTool: {request.tool_name} for session {request.session_id}")
         logger.info(f"ExecuteStreamingTool request.stream: {request.stream}")
         
@@ -348,31 +348,31 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                 registered_tools = adapter.register_with_session(request.session_id, self.sync_elixir_stub)
                 logger.info(f"Registered {len(registered_tools)} tools for session {request.session_id}")
             
-            # Initialize adapter if needed
-            if hasattr(adapter, 'initialize') and inspect.iscoroutinefunction(adapter.initialize):
-                # Can't await in a sync function, so skip async initialization
-                logger.warning("Skipping async adapter initialization in streaming context")
-            elif hasattr(adapter, 'initialize'):
-                adapter.initialize()
-            
+            # CRITICAL FIX: Initialize adapter (async-safe now that method is async)
+            if hasattr(adapter, 'initialize'):
+                if inspect.iscoroutinefunction(adapter.initialize):
+                    await adapter.initialize()
+                else:
+                    adapter.initialize()
+
             # Decode parameters from protobuf Any using TypeSerializer
             arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
             # Also handle binary parameters if present
             for key, binary_val in request.binary_parameters.items():
                 arguments[key] = pickle.loads(binary_val)
-            
+
             # Execute the tool
             if not hasattr(adapter, 'execute_tool'):
-                context.abort(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support tool execution")
+                await context.abort(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support tool execution")
                 return
-            
-            # Can't await in sync function - just call it directly
-            import inspect
-            
+
+            # CRITICAL FIX: Support both sync and async execute_tool
             if inspect.iscoroutinefunction(adapter.execute_tool):
-                # Can't handle async execute_tool in sync ExecuteStreamingTool
-                context.abort(grpc.StatusCode.UNIMPLEMENTED, "Async adapters not supported for streaming")
-                return
+                stream_iterator = await adapter.execute_tool(
+                    tool_name=request.tool_name,
+                    arguments=arguments,
+                    context=session_context
+                )
             else:
                 stream_iterator = adapter.execute_tool(
                     tool_name=request.tool_name,
@@ -389,30 +389,26 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             logger.info(f"Stream iterator type: {type(stream_iterator)}")
             logger.info(f"Has __aiter__: {hasattr(stream_iterator, '__aiter__')}")
             logger.info(f"Has __iter__: {hasattr(stream_iterator, '__iter__')}")
-            
-            # Since ExecuteStreamingTool is now sync, we can only handle sync iterators
+
+            # CRITICAL FIX: Handle both async and sync generators uniformly
             if hasattr(stream_iterator, '__aiter__'):
-                # Can't handle async generators in a sync function
-                logger.error("Tool returned async generator but ExecuteStreamingTool is sync")
-                context.abort(grpc.StatusCode.INTERNAL, "Async generators not supported")
-                return
-            elif hasattr(stream_iterator, '__iter__'):
-                logger.info(f"Processing sync iterator for {request.tool_name}")
-                # Debug to file
+                # Async generator - use async for
+                logger.info(f"Processing async generator for {request.tool_name}")
                 with open("/tmp/grpc_streaming_debug.log", "a") as f:
-                    f.write(f"Starting iteration at {time.time()}\n")
+                    f.write(f"Starting async iteration at {time.time()}\n")
                     f.flush()
-                    
-                for chunk_data in stream_iterator:
-                    logger.info(f"Got chunk data: {chunk_data}")
+
+                async for chunk_data in stream_iterator:
+                    logger.info(f"Got async chunk data: {chunk_data}")
                     with open("/tmp/grpc_streaming_debug.log", "a") as f:
-                        f.write(f"Got chunk: {chunk_data} at {time.time()}\n")
+                        f.write(f"Got async chunk: {chunk_data} at {time.time()}\n")
                         f.flush()
-                    # This is the same processing logic
+
                     if isinstance(chunk_data, StreamChunk):
                         data_payload = chunk_data.data
                     else:
                         data_payload = chunk_data
+
                     data_bytes = json.dumps(data_payload).encode('utf-8')
                     chunk_id_counter += 1
                     chunk = pb2.ToolChunk(
@@ -420,13 +416,45 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                         data=data_bytes,
                         is_final=False
                     )
-                    logger.info(f"Yielding chunk {chunk_id_counter}: {chunk.chunk_id}")
+                    logger.info(f"Yielding async chunk {chunk_id_counter}: {chunk.chunk_id}")
                     with open("/tmp/grpc_streaming_debug.log", "a") as f:
-                        f.write(f"Yielding chunk_id={chunk.chunk_id} at {time.time()}\n")
+                        f.write(f"Yielding async chunk_id={chunk.chunk_id} at {time.time()}\n")
                         f.flush()
                     yield chunk
+
+            elif hasattr(stream_iterator, '__iter__'):
+                # Sync generator - use regular for
+                logger.info(f"Processing sync iterator for {request.tool_name}")
+                with open("/tmp/grpc_streaming_debug.log", "a") as f:
+                    f.write(f"Starting sync iteration at {time.time()}\n")
+                    f.flush()
+
+                for chunk_data in stream_iterator:
+                    logger.info(f"Got sync chunk data: {chunk_data}")
+                    with open("/tmp/grpc_streaming_debug.log", "a") as f:
+                        f.write(f"Got sync chunk: {chunk_data} at {time.time()}\n")
+                        f.flush()
+
+                    if isinstance(chunk_data, StreamChunk):
+                        data_payload = chunk_data.data
+                    else:
+                        data_payload = chunk_data
+
+                    data_bytes = json.dumps(data_payload).encode('utf-8')
+                    chunk_id_counter += 1
+                    chunk = pb2.ToolChunk(
+                        chunk_id=f"{request.tool_name}-{chunk_id_counter}",
+                        data=data_bytes,
+                        is_final=False
+                    )
+                    logger.info(f"Yielding sync chunk {chunk_id_counter}: {chunk.chunk_id}")
+                    with open("/tmp/grpc_streaming_debug.log", "a") as f:
+                        f.write(f"Yielding sync chunk_id={chunk.chunk_id} at {time.time()}\n")
+                        f.flush()
+                    yield chunk
+
             else:
-                # This handles non-generator returns
+                # Non-generator return
                 logger.info(f"Non-generator return from {request.tool_name}")
                 data_bytes = json.dumps(stream_iterator).encode('utf-8')
                 yield pb2.ToolChunk(
@@ -488,13 +516,11 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
 async def serve_with_shutdown(port: int, adapter_module: str, elixir_address: str, shutdown_event: asyncio.Event):
     """Start the stateless gRPC server with proper shutdown handling."""
-    # print(f"GRPC_SERVER_LOG: Starting serve function with fixed shutdown (v4)", flush=True)
-    
     # Import the adapter
     module_parts = adapter_module.split('.')
     module_name = '.'.join(module_parts[:-1])
     class_name = module_parts[-1]
-    
+
     try:
         module = __import__(module_name, fromlist=[class_name])
         adapter_class = getattr(module, class_name)
@@ -515,19 +541,20 @@ async def serve_with_shutdown(port: int, adapter_module: str, elixir_address: st
     servicer.set_server(server)
     
     pb2_grpc.add_BridgeServiceServicer_to_server(servicer, server)
-    
+
     # Listen on port
     actual_port = server.add_insecure_port(f'[::]:{port}')
     
     if actual_port == 0 and port != 0:
         logger.error(f"Failed to bind to port {port}")
         sys.exit(1)
-    
+
     await server.start()
-    
+
     # Signal that the server is ready
-    print(f"GRPC_READY:{actual_port}", flush=True)
-    # print(f"GRPC_SERVER_LOG: Server started with new shutdown logic v2", flush=True)
+    # CRITICAL: Use logger instead of print() for reliable capture via :stderr_to_stdout
+    logger.info(f"GRPC_READY:{actual_port}")
+
     logger.info(f"gRPC server started on port {actual_port}")
     logger.info(f"Connected to Elixir backend at {elixir_address}")
     
@@ -574,7 +601,6 @@ async def shutdown(server):
 
 
 def main():
-    # print(f"GRPC_SERVER_LOG: main() called at {datetime.now()}", flush=True)
     parser = argparse.ArgumentParser(description='DSPex gRPC Bridge Server')
     parser.add_argument('--port', type=int, default=0,
                         help='Port to listen on (0 for dynamic allocation)')
@@ -584,7 +610,7 @@ def main():
                         help='Address of the Elixir gRPC server (e.g., localhost:50051)')
     parser.add_argument('--snakepit-run-id', type=str, default='',
                         help='Snakepit run ID for process cleanup')
-    
+
     args = parser.parse_args()
     
     # Set up signal handlers at the module level before running asyncio
@@ -598,12 +624,12 @@ def main():
     
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
-    
+
     # Create and run the server with the shutdown event
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     shutdown_event = asyncio.Event()
-    
+
     try:
         loop.run_until_complete(serve_with_shutdown(args.port, args.adapter, args.elixir_address, shutdown_event))
     finally:

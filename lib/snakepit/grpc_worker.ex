@@ -160,6 +160,9 @@ defmodule Snakepit.GRPCWorker do
   def init(opts) do
     adapter = Keyword.fetch!(opts, :adapter)
     worker_id = Keyword.fetch!(opts, :id)
+    # CRITICAL FIX: Get pool_name from opts so worker knows which pool to notify
+    # This can be an atom (registered name) or a PID
+    pool_name = Keyword.get(opts, :pool_name, Snakepit.Pool)
     port = adapter.get_port()
 
     # CRITICAL: Reserve the worker slot BEFORE spawning the process
@@ -235,6 +238,7 @@ defmodule Snakepit.GRPCWorker do
 
         state = %{
           id: worker_id,
+          pool_name: pool_name,
           adapter: adapter,
           port: port,
           server_port: server_port,
@@ -277,6 +281,10 @@ defmodule Snakepit.GRPCWorker do
             Logger.info(
               "gRPC worker #{state.id} registered process PID #{state.process_pid} with ProcessRegistry."
             )
+
+            # CRITICAL FIX: Notify the pool (using the name/PID passed from Pool) that worker is ready
+            # This ensures correct pool routing for both production and test environments
+            GenServer.cast(state.pool_name, {:worker_ready, state.id})
 
             # Schedule health checks
             health_ref = schedule_health_check()
@@ -406,7 +414,7 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_info({port, {:data, data}}, %{server_port: port} = state) do
-    # Always log server output for debugging
+    # Log server output for debugging
     output = String.trim(to_string(data))
 
     if output != "" do
@@ -478,24 +486,33 @@ defmodule Snakepit.GRPCWorker do
       Process.cancel_timer(state.health_check_ref)
     end
 
-    # The Port will be closed automatically when the GenServer terminates.
-    # Calling Port.close() is still good practice if you need to be explicit.
-    # Gracefully handle port closing, as it may already be closed.
+    # CRITICAL FIX: Defensively close port with comprehensive error handling
+    # This ensures cleanup runs even during brutal kills (:kill reason)
     if state.server_port do
-      try do
-        Port.close(state.server_port)
-      rescue
-        # An ArgumentError is raised if the port is already closed.
-        # This is an expected race condition, so we can safely ignore it.
-        ArgumentError ->
-          :ok
-      end
+      safe_close_port(state.server_port)
     end
 
     # *** CRITICAL: Unregister from ProcessRegistry as the very last step ***
     Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
 
     :ok
+  end
+
+  # CRITICAL FIX: Defensive port cleanup that handles all exit scenarios
+  defp safe_close_port(port) do
+    try do
+      Port.close(port)
+    rescue
+      # ArgumentError is raised if the port is already closed
+      ArgumentError -> :ok
+      # Catch any other exceptions
+      _ -> :ok
+    catch
+      # Handle exits (e.g., from brutal :kill)
+      :exit, _ -> :ok
+      # Handle throws
+      :throw, _ -> :ok
+    end
   end
 
   # Private functions

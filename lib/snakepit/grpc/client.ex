@@ -2,9 +2,6 @@ defmodule Snakepit.GRPC.Client do
   @moduledoc """
   gRPC client for the unified bridge protocol.
   Delegates to the real implementation when available.
-
-  NOTE: Variable-related functions have been removed.
-  Variable management will be implemented in the DSPex client library.
   """
 
   require Logger
@@ -31,7 +28,7 @@ defmodule Snakepit.GRPC.Client do
       Snakepit.GRPC.ClientImpl.initialize_session(channel, session_id, config, opts)
     else
       # Mock implementation
-      {:ok, %{success: true, available_tools: %{}, initial_variables: %{}}}
+      {:ok, %{success: true, available_tools: %{}}}
     end
   end
 

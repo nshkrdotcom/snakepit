@@ -1,9 +1,6 @@
 defmodule Snakepit.GRPC.ClientImpl do
   @moduledoc """
   Real gRPC client implementation using generated stubs.
-
-  NOTE: Variable-related functions have been removed.
-  Variable management will be implemented in the DSPex client library.
   """
 
   require Logger
@@ -77,7 +74,6 @@ defmodule Snakepit.GRPC.ClientImpl do
          %{
            success: response.success,
            available_tools: response.available_tools,
-           initial_variables: response.initial_variables,
            error_message: response.error_message
          }}
 
