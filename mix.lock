@@ -19,6 +19,6 @@
   "protobuf": {:hex, :protobuf, "0.14.1", "9ac0582170df27669ccb2ef6cb0a3d55020d58896edbba330f20d0748881530a", [:mix], [{:jason, "~> 1.2", [hex: :jason, repo: "hexpm", optional: true]}], "hexpm", "39a9d49d346e3ed597e5ae3168a43d9603870fc159419617f584cdf6071f0e25"},
   "ranch": {:hex, :ranch, "2.2.0", "25528f82bc8d7c6152c57666ca99ec716510fe0925cb188172f41ce93117b1b0", [:make, :rebar3], [], "hexpm", "fa0b99a1780c80218a4197a59ea8d3bdae32fbff7e88527d7d8a4787eff4f8e7"},
   "stream_data": {:hex, :stream_data, "1.2.0", "58dd3f9e88afe27dc38bef26fce0c84a9e7a96772b2925c7b32cd2435697a52b", [:mix], [], "hexpm", "eb5c546ee3466920314643edf68943a5b14b32d1da9fe01698dc92b73f89a9ed"},
-  "supertester": {:hex, :supertester, "0.1.0", "59e1d00631804282f217eef6bac43211a87f03c09fc1eea8e3fcbbd0fa37bf7b", [:mix], [{:stream_data, "~> 1.0", [hex: :stream_data, repo: "hexpm", optional: true]}], "hexpm", "0ea08b03fe0845137dc031873c2e7419856e0a1207ea40bfb27b5e19a90bd1ac"},
+  "supertester": {:hex, :supertester, "0.2.0", "9c675e475ce1ed24f433fabdde9968165d5f38430ea4c4bc59f7f724d11a8537", [:mix], [{:stream_data, "~> 1.0", [hex: :stream_data, repo: "hexpm", optional: true]}], "hexpm", "fdbee3f257a4ced8dfa30ffa14b84639a5b735e5f0c549c6a1c3bf37ad9845ef"},
   "telemetry": {:hex, :telemetry, "1.3.0", "fedebbae410d715cf8e7062c96a1ef32ec22e764197f70cda73d82778d61e7a2", [:rebar3], [], "hexpm", "7015fc8919dbe63764f4b4b87a95b7c0996bd539e0d499be6ec9d7f3875b79e6"},
 }

@@ -52,14 +52,15 @@ defmodule Snakepit.Application do
           # Process registry for PID tracking
           Snakepit.Pool.ProcessRegistry,
 
-          # Application cleanup for hard process termination guarantees
-          Snakepit.Pool.ApplicationCleanup,
-
           # Worker supervisor for managing worker processes
           Snakepit.Pool.WorkerSupervisor,
 
           # Main pool manager
-          {Snakepit.Pool, [size: pool_size]}
+          {Snakepit.Pool, [size: pool_size]},
+
+          # Application cleanup for hard process termination guarantees
+          # MUST BE LAST - terminates FIRST to ensure workers have shut down
+          Snakepit.Pool.ApplicationCleanup
         ]
       else
         Logger.info("🔧 Starting Snakepit with pooling disabled")

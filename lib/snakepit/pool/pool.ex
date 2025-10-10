@@ -429,11 +429,10 @@ defmodule Snakepit.Pool do
     {:noreply, state}
   end
 
-  # REPLACED: Go back to a simple, non-orchestrating terminate.
-  # The supervisor will handle shutting down the WorkerSupervisor, which cascades.
   @impl true
   def terminate(reason, _state) do
     Logger.info("🛑 Pool manager terminating with reason: #{inspect(reason)}.")
+    # Supervision tree will handle worker shutdown via WorkerSupervisor
     :ok
   end
 

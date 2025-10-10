@@ -17,7 +17,7 @@ defmodule Snakepit.TestCase do
       # Ensure clean application state
       setup_all do
         Application.ensure_all_started(:snakepit)
-        on_exit(fn -> Snakepit.TestHelpers.cleanup_all_sessions() end)
+        :ok
       end
     end
   end

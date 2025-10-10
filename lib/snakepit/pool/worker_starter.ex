@@ -112,6 +112,9 @@ defmodule Snakepit.Pool.Worker.Starter do
             start: {worker_module, :start_link, [[id: worker_id, adapter: adapter]]},
             # Within this supervisor, the worker restarts on crashes but not during shutdown
             restart: :transient,
+            # CRITICAL: Give worker time to gracefully shutdown (send SIGTERM, wait for Python)
+            # Default is 5000ms, but we explicitly set it to ensure it's not :brutal_kill
+            shutdown: 5000,
             type: :worker
           }
         ]

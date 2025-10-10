@@ -33,7 +33,7 @@ defmodule Snakepit.MixProject do
       {:grpc, "~> 0.10.2"},
       {:protobuf, "~> 0.14.1"},
       {:stream_data, "~> 1.0", only: [:test]},
-      {:supertester, "~> 0.1.0", only: :test},
+      {:supertester, "~> 0.2.0", only: :test},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
