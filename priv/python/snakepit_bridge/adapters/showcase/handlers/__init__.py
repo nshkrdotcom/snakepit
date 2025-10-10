@@ -9,7 +9,6 @@ from .session_ops import SessionOpsHandler
 from .binary_ops import BinaryOpsHandler
 from .streaming_ops import StreamingOpsHandler
 from .concurrent_ops import ConcurrentOpsHandler
-from .variable_ops import VariableOpsHandler
 from .ml_workflow import MLWorkflowHandler
 
 __all__ = [
@@ -18,6 +17,5 @@ __all__ = [
     'BinaryOpsHandler',
     'StreamingOpsHandler',
     'ConcurrentOpsHandler',
-    'VariableOpsHandler',
     'MLWorkflowHandler'
 ]
