@@ -355,7 +355,7 @@ The codebase is **production-ready** with:
 ---
 
 **See Also**:
-- [Complete Installation Guide](INSTALLATION.md)
+- [Complete Installation Guide](../guides/INSTALLATION.md)
 - [Main README](../README.md)
-- [Technical Assessment](technical-assessment-issue-2.md)
-- [Recommendations](recommendations-issue-2.md)
+- [Technical Assessment](archive/analysis/technical-assessment-issue-2.md)
+- [Recommendations](archive/analysis/recommendations-issue-2.md)
