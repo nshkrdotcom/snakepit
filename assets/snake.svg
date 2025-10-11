@@ -5,8 +5,8 @@
       <stop offset="100%" style="stop-color:#4b8bbe; stop-opacity:1" />
     </linearGradient>
   </defs>
-  <path d="M 50,80 C 20,85 15,50 35,40 C 55,30 60,50 50,60 C 40,70 30,75 50,80 Z"
-        fill="none" stroke="url(#snakeGrad)" stroke-width="10" stroke-linecap="round"/>
-  <path d="M 35,40 L 28,35 L 38,35 C 45,35 45,40 35,40 Z" fill="url(#snakeGrad)"/>
-  <circle cx="33" cy="37" r="2" fill="#ffd43b"/>
+  <path d="M 50,95 C 10,100 5,50 35,35 C 65,20 75,50 60,70 C 45,90 25,92 50,95 Z"
+        fill="none" stroke="url(#snakeGrad)" stroke-width="14" stroke-linecap="round"/>
+  <path d="M 35,35 L 22,25 L 38,27 C 48,28 48,35 35,35 Z" fill="url(#snakeGrad)"/>
+  <circle cx="32" cy="31" r="3" fill="#ffd43b"/>
 </svg>
