@@ -16,14 +16,19 @@ defmodule Snakepit.PoolThroughputTest do
 
       {:ok, pool_sup} = DynamicSupervisor.start_link(strategy: :one_for_one)
 
-      {:ok, _pool} =
+      {:ok, pool_pid} =
         DynamicSupervisor.start_child(pool_sup, {
           Snakepit.Pool,
-          Keyword.put(pool_config, :name, pool_name)
+          Map.put(pool_config, :name, pool_name)
         })
 
-      # Let pool initialize
-      Process.sleep(100)
+      # Wait for pool to be initialized (using Supertester pattern)
+      assert_eventually(
+        fn ->
+          Process.alive?(pool_pid) and :sys.get_state(pool_pid).initialized
+        end,
+        timeout: 5_000
+      )
 
       on_exit(fn ->
         DynamicSupervisor.stop(pool_sup)

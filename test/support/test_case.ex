@@ -7,6 +7,8 @@ defmodule Snakepit.TestCase do
   defmacro __using__(opts \\ []) do
     quote do
       use ExUnit.Case, async: unquote(Keyword.get(opts, :async, true))
+      # TODO: Upgrade to :full_isolation after refactoring tests to use setup_isolated_genserver
+      # Current tests use manual worker creation which conflicts with Supertester's cleanup
       use Supertester.UnifiedTestFoundation, isolation: :basic
 
       import Supertester.OTPHelpers

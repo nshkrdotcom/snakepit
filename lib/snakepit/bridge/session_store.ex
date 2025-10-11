@@ -578,9 +578,7 @@ defmodule Snakepit.Bridge.SessionStore do
   @spec store_program(String.t(), String.t(), map()) :: :ok | {:error, term()}
   def store_program(session_id, program_id, program_data) do
     update_session(session_id, fn session ->
-      programs = Map.get(session, :programs, %{})
-      updated_programs = Map.put(programs, program_id, program_data)
-      Map.put(session, :programs, updated_programs)
+      Session.put_program(session, program_id, program_data)
     end)
     |> case do
       {:ok, _} -> :ok

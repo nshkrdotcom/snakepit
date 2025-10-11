@@ -127,11 +127,12 @@ defmodule Snakepit.GRPCWorkerTest do
       # Send a manual health check to the mock worker
       send(worker, :health_check)
 
-      # Give it time to process
-      Process.sleep(50)
+      # Ensure health check message was processed (using Supertester pattern)
+      :ok = wait_for_genserver_sync(worker, 1_000)
 
-      # Worker should still be alive
+      # Worker should still be alive and responsive
       assert Process.alive?(worker)
+      assert_genserver_responsive(worker)
     end
   end
 

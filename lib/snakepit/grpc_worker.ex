@@ -32,6 +32,11 @@ defmodule Snakepit.GRPCWorker do
   use GenServer
   require Logger
 
+  # Add Supertester sync handler for testing (only loaded in test env)
+  if Mix.env() == :test do
+    use Supertester.TestableGenServer
+  end
+
   def child_spec(opts) when is_list(opts) do
     %{
       id: Keyword.get(opts, :id, __MODULE__),

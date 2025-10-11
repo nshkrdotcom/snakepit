@@ -4,6 +4,7 @@ defmodule Snakepit.Test.MockGRPCWorker do
   """
 
   use GenServer
+  use Supertester.TestableGenServer
   require Logger
 
   # Module interface expected by Pool
@@ -81,9 +82,7 @@ defmodule Snakepit.Test.MockGRPCWorker do
     {:reply, state.stats, state}
   end
 
-  def handle_call(:__supertester_sync__, _from, state) do
-    {:reply, :ok, state}
-  end
+  # Note: __supertester_sync__ handler is automatically injected by TestableGenServer
 
   @impl true
   def handle_info(:health_check, state) do
