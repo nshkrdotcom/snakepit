@@ -42,50 +42,50 @@ defmodule StreamingDemo do
     IO.puts("📊 Demo 1: Progress Updates")
     IO.puts("-" |> String.duplicate(40))
 
-    {:ok, _} =
-      Snakepit.execute_stream("ping_stream", %{count: 5}, fn chunk ->
-        IO.puts("  #{inspect(chunk)}")
-      end)
+    case Snakepit.execute_stream("ping_stream", %{count: 5}, fn chunk ->
+           IO.puts("  #{inspect(chunk)}")
+         end) do
+      :ok -> IO.puts("  ✅ Streaming completed")
+      {:ok, _} -> IO.puts("  ✅ Streaming completed")
+      {:error, reason} -> IO.puts("  ⚠️  Streaming error: #{inspect(reason)}")
+    end
 
     IO.puts("")
 
-    # Demo 2: Batch processing
-    IO.puts("🔄 Demo 2: Batch Processing")
+    # Demo 2: Simple echo demonstration (non-streaming)
+    IO.puts("🔄 Demo 2: Simple Operations")
     IO.puts("-" |> String.duplicate(40))
 
     items = ["apple", "banana", "cherry", "date", "elderberry"]
 
-    {:ok, _} =
-      Snakepit.execute_stream("batch_inference", %{items: items}, fn chunk ->
-        IO.puts("  Processed: #{inspect(chunk)}")
+    results =
+      Enum.map(items, fn item ->
+        {:ok, result} = Snakepit.execute("echo", %{item: item})
+        IO.puts("  Processed: #{item}")
+        result
       end)
+
+    IO.puts("  ✅ Processed #{length(results)} items")
 
     IO.puts("")
 
-    # Demo 3: Multiple concurrent streams
-    IO.puts("⚡ Demo 3: Concurrent Streams")
+    # Demo 3: Concurrent operations
+    IO.puts("⚡ Demo 3: Concurrent Operations")
     IO.puts("-" |> String.duplicate(40))
 
     tasks =
       for i <- 1..3 do
         Task.async(fn ->
-          result_count = :atomics.new(1, [])
-
-          {:ok, _} =
-            Snakepit.execute_stream("ping_stream", %{count: 3}, fn _chunk ->
-              :atomics.add(result_count, 1, 1)
-            end)
-
-          :atomics.get(result_count, 1)
+          {:ok, result} = Snakepit.execute("ping", %{})
+          result
         end)
       end
 
     results = Task.await_many(tasks, 30_000)
-    IO.puts("  Received chunks: #{inspect(results)}")
-    IO.puts("  Total: #{Enum.sum(results)} chunks from #{length(tasks)} concurrent streams")
+    IO.puts("  Completed: #{length(results)} concurrent operations")
 
     IO.puts("")
-    IO.puts("✅ Streaming demo complete!")
+    IO.puts("✅ Demo complete!")
   end
 end
 

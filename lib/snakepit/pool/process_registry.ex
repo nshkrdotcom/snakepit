@@ -492,9 +492,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
             beam_dead = not Snakepit.ProcessKiller.process_alive?(info.beam_os_pid)
 
             if beam_dead do
-              Logger.info(
-                "Entry #{inspect(_worker_id)} is stale: BEAM OS PID #{info.beam_os_pid} is dead"
-              )
+              Logger.info("Entry is stale: BEAM OS PID #{info.beam_os_pid} is dead")
 
               true
             else

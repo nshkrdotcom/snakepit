@@ -414,6 +414,294 @@ When adding new features to the tool bridge:
 4. Update this documentation
 5. Add examples demonstrating the feature
 
+## ToolRegistry API Reference
+
+The `Snakepit.Bridge.ToolRegistry` module provides the core API for managing tools in the bidirectional tool bridge.
+
+### Elixir Tool Registration
+
+#### `register_elixir_tool/4`
+
+Register an Elixir function to be callable from Python.
+
+```elixir
+@spec register_elixir_tool(String.t(), String.t(), function(), map()) :: :ok | {:error, term()}
+```
+
+**Parameters:**
+- `session_id` (String) - The session ID to register the tool under
+- `tool_name` (String) - The name of the tool (used when calling from Python)
+- `function` (function/1) - The Elixir function to execute (must accept a map of parameters)
+- `metadata` (map) - Tool metadata including:
+  - `:description` (String) - Human-readable description
+  - `:exposed_to_python` (boolean) - Must be `true` to be callable from Python
+  - `:parameters` (list) - List of parameter definitions (optional)
+
+**Example:**
+```elixir
+ToolRegistry.register_elixir_tool(
+  "session_123",
+  "calculate_stats",
+  &MyModule.calculate_stats/1,
+  %{
+    description: "Calculate statistics for a list of numbers",
+    exposed_to_python: true,
+    parameters: [
+      %{name: "numbers", type: "array", required: true},
+      %{name: "operation", type: "string", required: false}
+    ]
+  }
+)
+```
+
+### Tool Execution
+
+#### `execute_tool/3`
+
+Execute a tool (either Elixir or Python) by name.
+
+```elixir
+@spec execute_tool(String.t(), String.t(), map()) :: {:ok, term()} | {:error, term()}
+```
+
+**Parameters:**
+- `session_id` (String) - The session ID
+- `tool_name` (String) - Name of the tool to execute
+- `parameters` (map) - Parameters to pass to the tool
+
+**Example:**
+```elixir
+{:ok, result} = ToolRegistry.execute_tool(
+  "session_123",
+  "python_ml_function",
+  %{"data" => [1, 2, 3], "threshold" => 0.5}
+)
+```
+
+#### `execute_local_tool/3`
+
+Execute an Elixir tool directly (without going through gRPC).
+
+```elixir
+@spec execute_local_tool(String.t(), String.t(), map()) :: {:ok, term()} | {:error, term()}
+```
+
+**Parameters:**
+- `session_id` (String) - The session ID
+- `tool_name` (String) - Name of the Elixir tool
+- `parameters` (map) - Parameters to pass to the tool
+
+**Example:**
+```elixir
+{:ok, result} = ToolRegistry.execute_local_tool(
+  "session_123",
+  "parse_json",
+  %{"json_string" => ~s({"test": true})}
+)
+```
+
+### Tool Discovery
+
+#### `list_exposed_elixir_tools/1`
+
+List all Elixir tools that are exposed to Python for a given session.
+
+```elixir
+@spec list_exposed_elixir_tools(String.t()) :: list(map())
+```
+
+**Parameters:**
+- `session_id` (String) - The session ID
+
+**Returns:** List of tool metadata maps
+
+**Example:**
+```elixir
+tools = ToolRegistry.list_exposed_elixir_tools("session_123")
+# => [
+#   %{name: "parse_json", description: "Parse a JSON string", ...},
+#   %{name: "calculate_stats", description: "Calculate statistics", ...}
+# ]
+
+Enum.each(tools, fn tool ->
+  IO.puts("#{tool.name}: #{tool.description}")
+end)
+```
+
+#### `get_tool/2`
+
+Get metadata for a specific tool.
+
+```elixir
+@spec get_tool(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
+```
+
+**Parameters:**
+- `session_id` (String) - The session ID
+- `tool_name` (String) - Name of the tool
+
+**Example:**
+```elixir
+{:ok, tool_meta} = ToolRegistry.get_tool("session_123", "parse_json")
+IO.inspect(tool_meta)
+# => %{
+#   name: "parse_json",
+#   type: :local,
+#   description: "Parse a JSON string",
+#   function: #Function<...>,
+#   parameters: [...]
+# }
+```
+
+### Session Management
+
+#### `cleanup_session/1`
+
+Clean up all tools registered for a session.
+
+```elixir
+@spec cleanup_session(String.t()) :: :ok
+```
+
+**Parameters:**
+- `session_id` (String) - The session ID to clean up
+
+**Example:**
+```elixir
+# When done with a session
+:ok = ToolRegistry.cleanup_session("session_123")
+```
+
+#### `list_sessions/0`
+
+List all sessions that have registered tools.
+
+```elixir
+@spec list_sessions() :: list(String.t())
+```
+
+**Returns:** List of session IDs
+
+**Example:**
+```elixir
+session_ids = ToolRegistry.list_sessions()
+# => ["session_123", "session_456", "session_789"]
+
+IO.puts("Active sessions: #{length(session_ids)}")
+```
+
+### Complete Workflow Example
+
+```elixir
+alias Snakepit.Bridge.{ToolRegistry, SessionStore}
+
+# 1. Create session
+{:ok, _} = SessionStore.create_session("my_session")
+
+# 2. Register Elixir tools
+ToolRegistry.register_elixir_tool(
+  "my_session",
+  "data_validator",
+  &MyApp.validate_data/1,
+  %{
+    description: "Validate data structure",
+    exposed_to_python: true,
+    parameters: [
+      %{name: "data", type: "object", required: true},
+      %{name: "schema", type: "string", required: true}
+    ]
+  }
+)
+
+ToolRegistry.register_elixir_tool(
+  "my_session",
+  "transform_result",
+  &MyApp.transform/1,
+  %{
+    description: "Transform result to required format",
+    exposed_to_python: true
+  }
+)
+
+# 3. List available tools
+tools = ToolRegistry.list_exposed_elixir_tools("my_session")
+IO.puts("Available tools for Python:")
+Enum.each(tools, fn tool ->
+  IO.puts("  - #{tool.name}: #{tool.description}")
+end)
+
+# 4. Execute a tool from Elixir
+{:ok, validation_result} = ToolRegistry.execute_local_tool(
+  "my_session",
+  "data_validator",
+  %{"data" => %{name: "test"}, "schema" => "user"}
+)
+
+# 5. Python can now discover and call these tools
+# From Python:
+# ctx = SessionContext(stub, "my_session")
+# result = ctx.call_elixir_tool("data_validator", data={...}, schema="user")
+
+# 6. Clean up when done
+ToolRegistry.cleanup_session("my_session")
+SessionStore.delete_session("my_session")
+```
+
+### Error Handling
+
+```elixir
+# Tool not found
+case ToolRegistry.execute_tool("session_123", "nonexistent_tool", %{}) do
+  {:ok, result} ->
+    IO.inspect(result)
+  {:error, :not_found} ->
+    IO.puts("Tool not found")
+  {:error, reason} ->
+    IO.puts("Error: #{inspect(reason)}")
+end
+
+# Invalid parameters
+case ToolRegistry.execute_tool("session_123", "my_tool", %{invalid: "params"}) do
+  {:ok, result} ->
+    IO.inspect(result)
+  {:error, {:validation_error, msg}} ->
+    IO.puts("Invalid parameters: #{msg}")
+  {:error, reason} ->
+    IO.puts("Error: #{inspect(reason)}")
+end
+```
+
+### Advanced: Python Tool Discovery
+
+When Python tools register with the session, they become available for execution from Elixir:
+
+```python
+# Python side
+from snakepit_bridge.base_adapter import BaseAdapter, tool
+
+class MyAdapter(BaseAdapter):
+    @tool(description="Process data with ML model")
+    def ml_process(self, data: list, model: str = "default"):
+        # Process with ML model
+        return {"predictions": [...], "confidence": 0.95}
+
+# Automatically registers with session when adapter is initialized
+adapter = MyAdapter()
+adapter.register_with_session(session_id, stub)
+```
+
+```elixir
+# Elixir side - call the Python tool
+{:ok, result} = ToolRegistry.execute_tool(
+  session_id,
+  "ml_process",
+  %{"data" => [1, 2, 3], "model" => "resnet50"}
+)
+
+IO.inspect(result)
+# => %{"predictions" => [...], "confidence" => 0.95}
+```
+
 ## Related Documentation
 
 - [Main README](README.md)

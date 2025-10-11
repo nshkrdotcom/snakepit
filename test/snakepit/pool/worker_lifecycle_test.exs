@@ -167,27 +167,4 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
       _ -> 0
     end
   end
-
-  defp find_orphaned_processes(beam_run_id) do
-    case System.cmd("pgrep", ["-f", "grpc_server.py.*--snakepit-run-id #{beam_run_id}"],
-           stderr_to_stdout: true
-         ) do
-      {"", 1} ->
-        []
-
-      {output, 0} ->
-        output
-        |> String.split("\n", trim: true)
-        |> Enum.map(fn pid_str ->
-          case Integer.parse(pid_str) do
-            {pid, ""} -> pid
-            _ -> nil
-          end
-        end)
-        |> Enum.reject(&is_nil/1)
-
-      _ ->
-        []
-    end
-  end
 end
