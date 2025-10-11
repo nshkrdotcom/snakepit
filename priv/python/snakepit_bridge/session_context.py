@@ -73,11 +73,12 @@ class SessionContext:
             response = self.stub.GetExposedElixirTools(request)
 
             tools = {}
-            for tool_name, tool_spec in response.tools.items():
-                tools[tool_name] = {
+            # Note: response.tools is a repeated field (list), not a map
+            for tool_spec in response.tools:
+                tools[tool_spec.name] = {
                     'name': tool_spec.name,
                     'description': tool_spec.description,
-                    'parameters': dict(tool_spec.parameters)
+                    'parameters': dict(tool_spec.parameters) if hasattr(tool_spec.parameters, 'items') else {}
                 }
 
             logger.info(f"Loaded {len(tools)} Elixir tools for session {self.session_id}")
@@ -110,24 +111,41 @@ class SessionContext:
             )
 
         try:
-            # Convert kwargs to protobuf Struct
-            params_struct = Struct()
+            # Convert kwargs to protobuf map<string, Any>
+            # parameters field is map<string, google.protobuf.Any> not Struct
+            from google.protobuf import any_pb2, wrappers_pb2
+            import json
+
+            params_map = {}
             for key, value in kwargs.items():
-                if isinstance(value, (str, int, float, bool)):
-                    params_struct[key] = value
+                # Encode each value as a protobuf Any
+                any_value = any_pb2.Any()
+                if isinstance(value, str):
+                    wrapper = wrappers_pb2.StringValue(value=value)
+                    any_value.Pack(wrapper)
+                elif isinstance(value, (int, float)):
+                    # For numbers, just encode as JSON string
+                    any_value.type_url = "type.googleapis.com/google.protobuf.Value"
+                    any_value.value = json.dumps(value).encode('utf-8')
+                elif isinstance(value, bool):
+                    wrapper = wrappers_pb2.BoolValue(value=value)
+                    any_value.Pack(wrapper)
                 else:
-                    params_struct[key] = str(value)
+                    # Default: convert to string
+                    wrapper = wrappers_pb2.StringValue(value=str(value))
+                    any_value.Pack(wrapper)
+                params_map[key] = any_value
 
             request = ExecuteElixirToolRequest(
                 session_id=self.session_id,
                 tool_name=tool_name,
-                parameters=params_struct
+                parameters=params_map
             )
 
             response = self.stub.ExecuteElixirTool(request)
 
             if not response.success:
-                raise RuntimeError(f"Tool execution failed: {response.error}")
+                raise RuntimeError(f"Tool execution failed: {response.error_message}")
 
             # Convert protobuf Any to Python value
             result = response.result

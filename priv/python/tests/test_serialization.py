@@ -11,91 +11,91 @@ from google.protobuf import any_pb2
 
 class TestBasicTypes(unittest.TestCase):
     """Test serialization of basic types."""
-    
+
     def test_float_roundtrip(self):
         value = 3.14
-        any_msg = TypeSerializer.encode_any(value, 'float')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'float')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, value)
-    
+
     def test_integer_roundtrip(self):
         value = 42
-        any_msg = TypeSerializer.encode_any(value, 'integer')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'integer')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, value)
-    
+
     def test_string_roundtrip(self):
         value = "hello world"
-        any_msg = TypeSerializer.encode_any(value, 'string')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'string')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, value)
-    
+
     def test_boolean_roundtrip(self):
         for value in [True, False]:
-            any_msg = TypeSerializer.encode_any(value, 'boolean')
-            decoded = TypeSerializer.decode_any(any_msg)
+            any_msg, binary_data = TypeSerializer.encode_any(value, 'boolean')
+            decoded = TypeSerializer.decode_any(any_msg, binary_data)
             self.assertEqual(decoded, value)
 
 
 class TestSpecialFloatValues(unittest.TestCase):
     """Test special float values."""
-    
+
     def test_nan(self):
         value = float('nan')
-        any_msg = TypeSerializer.encode_any(value, 'float')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'float')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertTrue(np.isnan(decoded))
-    
+
     def test_infinity(self):
         value = float('inf')
-        any_msg = TypeSerializer.encode_any(value, 'float')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'float')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, float('inf'))
-    
+
     def test_negative_infinity(self):
         value = float('-inf')
-        any_msg = TypeSerializer.encode_any(value, 'float')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'float')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, float('-inf'))
 
 
 class TestComplexTypes(unittest.TestCase):
     """Test serialization of complex types."""
-    
+
     def test_choice_roundtrip(self):
         value = "option_a"
-        any_msg = TypeSerializer.encode_any(value, 'choice')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'choice')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, value)
-    
+
     def test_module_roundtrip(self):
         value = "ChainOfThought"
-        any_msg = TypeSerializer.encode_any(value, 'module')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'module')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, value)
-    
+
     def test_embedding_roundtrip(self):
         value = [0.1, 0.2, 0.3, 0.4]
-        any_msg = TypeSerializer.encode_any(value, 'embedding')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'embedding')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, value)
-    
+
     def test_embedding_numpy_array(self):
         value = np.array([0.1, 0.2, 0.3, 0.4])
-        any_msg = TypeSerializer.encode_any(value, 'embedding')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'embedding')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, value.tolist())
-    
+
     def test_tensor_dict_roundtrip(self):
         value = {'shape': [2, 3], 'data': [1, 2, 3, 4, 5, 6]}
-        any_msg = TypeSerializer.encode_any(value, 'tensor')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'tensor')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         np.testing.assert_array_equal(decoded, np.array([1, 2, 3, 4, 5, 6]).reshape(2, 3))
-    
+
     def test_tensor_numpy_array(self):
         value = np.array([[1, 2, 3], [4, 5, 6]])
-        any_msg = TypeSerializer.encode_any(value, 'tensor')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(value, 'tensor')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         np.testing.assert_array_equal(decoded, value)
 
 
@@ -152,24 +152,24 @@ class TestConstraintValidation(unittest.TestCase):
 
 class TestTypeValidation(unittest.TestCase):
     """Test type validation and normalization."""
-    
+
     def test_float_accepts_integers(self):
-        any_msg = TypeSerializer.encode_any(42, 'float')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(42, 'float')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, 42.0)
-    
+
     def test_integer_rejects_floats_with_decimals(self):
         with self.assertRaises(ValueError):
             TypeSerializer.encode_any(3.14, 'integer')
-    
+
     def test_integer_accepts_whole_floats(self):
-        any_msg = TypeSerializer.encode_any(42.0, 'integer')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any(42.0, 'integer')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, 42)
-    
+
     def test_embedding_normalizes_to_floats(self):
-        any_msg = TypeSerializer.encode_any([1, 2, 3], 'embedding')
-        decoded = TypeSerializer.decode_any(any_msg)
+        any_msg, binary_data = TypeSerializer.encode_any([1, 2, 3], 'embedding')
+        decoded = TypeSerializer.decode_any(any_msg, binary_data)
         self.assertEqual(decoded, [1.0, 2.0, 3.0])
 
 
@@ -181,22 +181,29 @@ class TestCrossLanguageCompatibility(unittest.TestCase):
         elixir_any = any_pb2.Any()
         elixir_any.type_url = "dspex.variables/float"
         elixir_any.value = b"3.14"
-        
-        decoded = TypeSerializer.decode_any(elixir_any)
+
+        decoded = TypeSerializer.decode_any(elixir_any, None)
         self.assertEqual(decoded, 3.14)
     
     def test_elixir_special_float_values(self):
-        # Test special values
-        for elixir_value, expected in [("\"NaN\"", float('nan')), 
-                                       ("\"Infinity\"", float('inf')),
-                                       ("\"-Infinity\"", float('-inf'))]:
+        # Test special values - these are JSON-encoded strings from Elixir
+        test_cases = [
+            ("\"NaN\"", float('nan')),
+            ("\"Infinity\"", float('inf')),
+            ("\"-Infinity\"", float('-inf'))
+        ]
+
+        for elixir_json, expected in test_cases:
             elixir_any = any_pb2.Any()
             elixir_any.type_url = "dspex.variables/float"
-            elixir_any.value = elixir_value.encode('utf-8')
-            
-            decoded = TypeSerializer.decode_any(elixir_any)
-            if elixir_value == "\"NaN\"":
-                self.assertTrue(np.isnan(decoded))
+            elixir_any.value = elixir_json.encode('utf-8')
+
+            decoded = TypeSerializer.decode_any(elixir_any, None)
+
+            # All special values should be decoded to floats
+            if np.isnan(expected):
+                self.assertTrue(isinstance(decoded, float), f"Expected float, got {type(decoded)}")
+                self.assertTrue(np.isnan(decoded), f"Expected NaN, got {decoded}")
             else:
                 self.assertEqual(decoded, expected)
 
