@@ -10,7 +10,7 @@
 [![Hex Version](https://img.shields.io/hexpm/v/snakepit.svg)](https://hex.pm/packages/snakepit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-## <img src="assets/rocket.svg" alt="rocket" width="24" height="24"> What is Snakepit?
+## 🚀 What is Snakepit?
 
 Snakepit is a battle-tested Elixir library that provides a robust pooling system for managing external processes (Python, Node.js, Ruby, R, etc.). Born from the need for reliable ML/AI integrations, it offers:
 
@@ -22,7 +22,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - **Built on OTP primitives** - DynamicSupervisor, Registry, GenServer
 - **Production-ready** with telemetry, health checks, and graceful shutdowns
 
-## <img src="assets/table-of-contents.svg" alt="table of contents" width="24" height="24"> Table of Contents
+## 📋 Table of Contents
 
 - [Breaking Changes (v0.5.0)](#️-breaking-changes-v050)
 - [What's New in v0.5](#whats-new-in-v05)
@@ -43,7 +43,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 
-## <img src="assets/warning.svg" alt="warning" width="24" height="24"> Breaking Changes (v0.5.0)
+## ⚠️ Breaking Changes (v0.5.0)
 
 ### DSPy Integration Removed
 
@@ -95,7 +95,7 @@ For **non-DSPex users**, if you're using these classes directly:
 
 ---
 
-## <img src="assets/new.svg" alt="new" width="24" height="24"> What's New in v0.5.0
+## 🆕 What's New in v0.5.0
 
 ### Breaking Changes
 - **DSPy Integration Removed** - As announced in v0.4.3
@@ -125,9 +125,9 @@ For **non-DSPex users**, if you're using these classes directly:
 
 ---
 
-## <img src="assets/new.svg" alt="new" width="24" height="24"> What's New in v0.4.2
+## 🆕 What's New in v0.4.2
 
-### <img src="assets/sparkles.svg" alt="sparkles" width="20" height="20"> **Systematic Cleanup & Quality Improvements**
+### ✨ **Systematic Cleanup & Quality Improvements**
 - **Removed ~1,000 LOC dead code** - Deleted unused modules and aspirational APIs
 - **Fixed adapter defaults** - ShowcaseAdapter now default (fully functional)
 - **DETS cleanup optimization** - Prevents indefinite growth, fast startup
@@ -135,7 +135,7 @@ For **non-DSPex users**, if you're using these classes directly:
 - **Python venv auto-detection** - Automatically finds .venv for development
 - **Issue #2 addressed** - Simplified OTP patterns, removed redundant checks
 
-### <img src="assets/books.svg" alt="books" width="20" height="20"> **Enhanced Documentation**
+### 📚 **Enhanced Documentation**
 - **Complete installation guide** - Platform-specific (Ubuntu, macOS, WSL, Docker)
 - **ADR-001** - Architecture Decision Record for Worker.Starter pattern
 - **External process supervision design** - Multi-mode architecture (coupled, supervised, independent, distributed)
@@ -143,7 +143,7 @@ For **non-DSPex users**, if you're using these classes directly:
 - **Adapter selection guide** - Clear explanation of TemplateAdapter vs ShowcaseAdapter
 - **Example status clarity** - Working vs WIP examples clearly marked
 
-### <img src="assets/bug.svg" alt="bug" width="20" height="20"> **Bug Fixes**
+### 🐛 **Bug Fixes**
 - Fixed ProcessRegistry DETS accumulation (1994+ stale entries)
 - Fixed race condition in concurrent session initialization
 - Fixed resource cleanup race (wait_for_worker_cleanup checked dead PID instead of actual resources)
@@ -151,28 +151,28 @@ For **non-DSPex users**, if you're using these classes directly:
 - Fixed all ExDoc documentation warnings
 - Removed catch-all rescue clause (follows "let it crash")
 
-### <img src="assets/lightning.svg" alt="lightning" width="20" height="20"> **Performance**
+### ⚡ **Performance**
 - 100 workers: ~3 seconds initialization
 - 1400-1500 operations/second sustained
 - DETS cleanup: O(1) vs O(n) process checks
 
-## <img src="assets/new.svg" alt="new" width="24" height="24"> What's New in v0.4.1
+## 🆕 What's New in v0.4.1
 
-### <img src="assets/rocket.svg" alt="rocket" width="20" height="20"> **Enhanced Tool Bridge Functionality**
+### 🚀 **Enhanced Tool Bridge Functionality**
 - **New `process_text` tool** - Text processing with upper, lower, reverse, length operations
 - **New `get_stats` tool** - Real-time adapter and system monitoring with memory/CPU usage
 - **Fixed gRPC tool registration** - Resolved async/sync issues with UnaryUnaryCall objects
 - **Automatic session initialization** - Sessions created automatically when Python tools register
 
-### <img src="assets/tools.svg" alt="tools" width="20" height="20"/> **Tool Bridge Improvements**
+### 🔧 **Tool Bridge Improvements**
 - **Remote tool dispatch** - Complete bidirectional communication between Elixir and Python
 - **Missing tool recovery** - Added adapter_info, echo, process_text, get_stats to ShowcaseAdapter
 - **Async/sync compatibility** - Fixed gRPC stub handling with proper response processing
 - **Enhanced error handling** - Better diagnostics for tool registration failures
 
-## <img src="assets/new.svg" alt="new" width="24" height="24"/> What's New in v0.4
+## 🆕 What's New in v0.4
 
-### <img src="assets/shield.svg" alt="shield" width="20" height="20"/> **Enhanced Process Management & Reliability**
+### 🛡️ **Enhanced Process Management & Reliability**
 - **Persistent process tracking** with DETS storage survives BEAM crashes
 - **Automatic orphan cleanup** - no more zombie Python processes
 - **Pre-registration pattern** - Prevents orphans even during startup crashes
@@ -181,51 +181,51 @@ For **non-DSPex users**, if you're using these classes directly:
 - **Production-ready** - handles VM crashes, OOM kills, and power failures
 - See [Process Management Documentation](README_PROCESS_MANAGEMENT.md) for details
 
-### <img src="assets/wave.svg" alt="wave" width="20" height="20"/> **Native gRPC Streaming**
+### 👋 **Native gRPC Streaming**
 - **Real-time progress updates** for long-running operations
 - **HTTP/2 multiplexing** for concurrent requests
 - **Cancellable operations** with graceful stream termination
 - **Built-in health checks** and rich error handling
 
-### <img src="assets/rocket.svg" alt="rocket" width="20" height="20"/> **Binary Serialization for Large Data**
+### 🚀 **Binary Serialization for Large Data**
 - **Automatic binary encoding** for tensors and embeddings > 10KB
 - **5-10x faster** than JSON for large numerical arrays
 - **Zero configuration** - works automatically
 - **Backward compatible** - smaller data still uses JSON
 - **Modern architecture** with protocol buffers
 
-### <img src="assets/package.svg" alt="package" width="20" height="20"/> **High-Performance Design**
+### 📦 **High-Performance Design**
 - **Efficient binary transfers** with protocol buffers
 - **HTTP/2 multiplexing** for concurrent operations
 - **Native binary data handling** perfect for ML models and images
 - **18-36% smaller message sizes** for improved performance
 
-### <img src="assets/target.svg" alt="target" width="20" height="20"/> **Comprehensive Showcase Application**
+### 🎯 **Comprehensive Showcase Application**
 - **Complete example app** at `examples/snakepit_showcase`
 - **Demonstrates all features** including binary serialization
 - **Performance benchmarks** showing 5-10x speedup
 - **Ready-to-run demos** for all Snakepit capabilities
 
-### <img src="assets/snake.svg" alt="snake" width="20" height="20"/> **Python Bridge V2 Architecture**
+### 🐍 **Python Bridge V2 Architecture**
 - **Production-ready packaging** with pip install support
 - **Enhanced error handling** and robust shutdown management
 - **Console script integration** for deployment flexibility
 - **Type checking support** with proper py.typed markers
 
-### <img src="assets/refresh.svg" alt="refresh" width="20" height="20"/> **Bridge Migration & Compatibility**
+### 🔄 **Bridge Migration & Compatibility**
 - **Deprecated V1 Python bridge** in favor of V2 architecture
 - **Updated demo implementations** using latest best practices
 - **Comprehensive documentation** for all bridge implementations
 - **Backward compatibility** maintained for existing integrations
 
-### <img src="assets/refresh.svg" alt="refresh" width="20" height="20"/> **Bidirectional Tool Bridge (NEW)**
+### 🔄 **Bidirectional Tool Bridge (NEW)**
 - **Cross-language function execution** - Call Python from Elixir and vice versa
 - **Transparent tool proxying** - Remote functions appear as local functions
 - **Session-scoped isolation** - Tools are isolated by session for multi-tenancy
 - **Dynamic discovery** - Automatic tool discovery and registration
 - See [Bidirectional Tool Bridge Documentation](README_BIDIRECTIONAL_TOOL_BRIDGE.md) for details
 
-## <img src="assets/fire.svg" alt="fire" width="24" height="24"/> Quick Start
+## 🔥 Quick Start
 
 ```elixir
 # In your mix.exs
@@ -259,7 +259,7 @@ Snakepit.execute_stream("batch_process", %{items: [1, 2, 3]}, fn chunk ->
 end)
 ```
 
-## <img src="assets/package.svg" alt="package" width="24" height="24"/> Installation
+## 📦 Installation
 
 ### Hex Package
 
@@ -289,7 +289,7 @@ end
 
 > **Note:** For detailed installation instructions (including platform-specific guides for Ubuntu, macOS, Windows/WSL, Docker, virtual environments, and troubleshooting), see the **[Complete Installation Guide](guides/INSTALLATION.md)**.
 
-## <img src="assets/tools.svg" alt="tools" width="24" height="24"/> Quick Setup
+## 🔧 Quick Setup
 
 ### Step 1: Install Python Dependencies
 
@@ -448,7 +448,7 @@ iex> Snakepit.execute("ping", %{})
 {:ok, %{"status" => "pong", "timestamp" => 1234567890}}
 ```
 
-## <img src="assets/target.svg" alt="target" width="24" height="24"/> Core Concepts
+## 🎯 Core Concepts
 
 ### 1. **Adapters**
 Adapters define how Snakepit communicates with external processes. They specify:
@@ -478,7 +478,7 @@ Sessions provide:
 - TTL-based expiration
 - Centralized storage in ETS
 
-## <img src="assets/gear.svg" alt="gear" width="24" height="24"/> Configuration
+## ⚙️ Configuration
 
 ### Basic Configuration
 
@@ -548,7 +548,7 @@ Application.stop(:snakepit)
 Application.start(:snakepit)
 ```
 
-## <img src="assets/book.svg" alt="book" width="24" height="24"/> Usage Examples
+## 📖 Usage Examples
 
 ### Running the Examples
 
@@ -767,11 +767,11 @@ end)
 results = Task.await_many(tasks, 30_000)
 ```
 
-## <img src="assets/wave.svg" alt="wave" width="24" height="24"/> gRPC Communication
+## 👋 gRPC Communication
 
 Snakepit supports modern gRPC-based communication for advanced streaming capabilities, real-time progress updates, and superior performance.
 
-### <img src="assets/rocket.svg" alt="rocket" width="20" height="20"/> **Getting Started with gRPC**
+### 🚀 **Getting Started with gRPC**
 
 #### Upgrade to gRPC (3 Steps):
 ```bash
@@ -806,7 +806,7 @@ Snakepit.execute_stream("batch_inference", %{
 end)
 ```
 
-### <img src="assets/table-of-contents.svg" alt="list" width="20" height="20"/> **gRPC Features**
+### 📋 **gRPC Features**
 
 | Feature | gRPC Non-Streaming | gRPC Streaming |
 |---------|-------------------|----------------|
@@ -817,7 +817,7 @@ end)
 | **Health Checks** | Built-in | Built-in |
 | **Error Handling** | Rich Status | Rich Status |
 
-### <img src="assets/target.svg" alt="target" width="20" height="20"/> **Two gRPC Modes Explained**
+### 🎯 **Two gRPC Modes Explained**
 
 #### **Mode 1: gRPC Non-Streaming** 
 **Use this for:** Standard request-response operations
@@ -865,7 +865,7 @@ end)
 - Processing large datasets or batches
 - Better user experience with live feedback
 
-### <img src="assets/tools.svg" alt="tools" width="20" height="20"/> **Setup Instructions**
+### 🔧 **Setup Instructions**
 
 #### Install gRPC Dependencies
 ```bash
@@ -882,7 +882,7 @@ elixir examples/grpc_non_streaming_demo.exs
 elixir examples/grpc_streaming_demo.exs
 ```
 
-### <img src="assets/document.svg" alt="document" width="20" height="20"/> **Complete Examples**
+### 📄 **Complete Examples**
 
 #### **Non-Streaming Examples (Standard API)**
 ```elixir
@@ -957,7 +957,7 @@ end)
 # Try it: elixir examples/grpc_streaming_demo.exs
 ```
 
-### <img src="assets/rocket.svg" alt="rocket" width="20" height="20"/> **Performance & Benefits**
+### 🚀 **Performance & Benefits**
 
 #### **Why Upgrade to gRPC?**
 
@@ -985,7 +985,7 @@ User experience:        "Wait..." vs "Wait..." vs Real-time updates
 Cancellation:           Kill process vs Kill process vs Graceful stream close
 ```
 
-### <img src="assets/table-of-contents.svg" alt="list" width="20" height="20"/> **Quick Decision Guide**
+### 📋 **Quick Decision Guide**
 
 **Choose your mode based on your needs:**
 
@@ -1040,7 +1040,7 @@ pip install grpcio protobuf grpcio-tools
 
 For comprehensive gRPC documentation, see **[README_GRPC.md](README_GRPC.md)**.
 
-## <img src="assets/binary.svg" alt="binary" width="24" height="24"/> Binary Serialization
+## 💾 Binary Serialization
 
 Snakepit automatically optimizes large data transfers using binary serialization:
 
@@ -1097,7 +1097,7 @@ Snakepit automatically optimizes large data transfers using binary serialization
    - Large data: Binary (Pickle on Python, ETF on Elixir)
 4. **Zero Configuration**: Works out of the box
 
-## <img src="assets/target.svg" alt="target" width="24" height="24"/> Showcase Application
+## 🎯 Showcase Application
 
 Explore all Snakepit features with our comprehensive showcase application:
 
@@ -1139,11 +1139,11 @@ Shows:
 
 See **[examples/snakepit_showcase/README.md](examples/snakepit_showcase/README.md)** for full documentation.
 
-## <img src="assets/snake.svg" alt="snake" width="24" height="24"/> Python Bridges
+## 🐍 Python Bridges
 
 For detailed documentation on all Python bridge implementations (V1, V2, Enhanced, gRPC), see the Python Bridges section below.
 
-### <img src="assets/refresh.svg" alt="refresh" width="20" height="20"/> Bidirectional Tool Bridge
+### 🔄 Bidirectional Tool Bridge
 
 Snakepit supports transparent cross-language function execution between Elixir and Python:
 
@@ -1157,7 +1157,7 @@ Snakepit supports transparent cross-language function execution between Elixir a
 
 For comprehensive documentation on the bidirectional tool bridge, see **[README_BIDIRECTIONAL_TOOL_BRIDGE.md](README_BIDIRECTIONAL_TOOL_BRIDGE.md)**.
 
-## <img src="assets/plug.svg" alt="plug" width="24" height="24"/> Built-in Adapters
+## 🔌 Built-in Adapters
 
 ### gRPC Python Adapter (Streaming Specialist)
 
@@ -1294,7 +1294,7 @@ end)
 
 For custom tools, see [Creating Custom Adapters](#creating-custom-adapters) below.
 
-## <img src="assets/tools.svg" alt="tools" width="24" height="24"/> Creating Custom Adapters
+## 🔧 Creating Custom Adapters
 
 ### Complete Custom Adapter Example
 
@@ -1607,7 +1607,7 @@ Signal.trap('INT') { exit(0) }
 BridgeHandler.new.run
 ```
 
-## <img src="assets/storage.svg" alt="storage" width="24" height="24"/> Session Management
+## 💿 Session Management
 
 ### Session Store API
 
@@ -1658,7 +1658,7 @@ stats = SessionStore.get_stats()
 {:ok, template} = SessionStore.get_global_program("template_1")
 ```
 
-## <img src="assets/chart.svg" alt="chart" width="24" height="24"/> Monitoring & Telemetry
+## 📊 Monitoring & Telemetry
 
 ### Available Events
 
@@ -1728,7 +1728,7 @@ stats = Snakepit.get_stats()
 # }
 ```
 
-## <img src="assets/architecture.svg" alt="architecture" width="24" height="24"/> Architecture Deep Dive
+## 🏗️ Architecture Deep Dive
 
 ### Component Overview
 
@@ -1802,7 +1802,7 @@ stats = Snakepit.get_stats()
    - Workers close ports gracefully (SIGTERM)
    - ApplicationCleanup ensures no orphaned processes (SIGKILL)
 
-## <img src="assets/lightning.svg" alt="lightning" width="24" height="24"/> Performance
+## ⚡ Performance
 
 ### gRPC Performance Benchmarks
 
@@ -1845,7 +1845,7 @@ Connection overhead:
 4. **Session TTL**: Balance memory usage vs cache hits
 5. **Health Checks**: Increase interval for stable workloads
 
-## <img src="assets/binary.svg" alt="binary" width="24" height="24"/> Binary Serialization
+## 💾 Binary Serialization (Detailed)
 
 ### Overview
 
@@ -1937,7 +1937,7 @@ The following fields support binary data:
 2. **Format Lock-in**: Binary data uses platform-specific formats (ETF/pickle)
 3. **Debugging**: Binary data is not human-readable in logs/inspection
 
-## <img src="assets/tools.svg" alt="tools" width="24" height="24"/> Troubleshooting
+## 🔧 Troubleshooting
 
 ### Common Issues
 
@@ -2006,7 +2006,7 @@ Logger.configure(level: :debug)
 :sys.get_state(Snakepit.Pool)
 ```
 
-## <img src="assets/books.svg" alt="books" width="24" height="24"/> Additional Documentation
+## 📚 Additional Documentation
 
 - [Testing Guide](README_TESTING.md) - How to run and write tests  
 - [Unified gRPC Bridge](README_UNIFIED_GRPC_BRIDGE.md) - Stage 0, 1, and 2 implementation details
@@ -2015,7 +2015,7 @@ Logger.configure(level: :debug)
 - [gRPC Communication](README_GRPC.md) - Streaming and non-streaming gRPC details
 - Python Bridge Implementations - See sections above for V1, V2, Enhanced, and gRPC bridges
 
-## <img src="assets/handshake.svg" alt="handshake" width="24" height="24"/> Contributing
+## 🤝 Contributing
 
 We welcome contributions! Please see our [Contributing Guide](https://github.com/nshkrdotcom/snakepit/blob/main/CONTRIBUTING.md) for details.
 
@@ -2054,17 +2054,17 @@ mix test --cover
 mix test test/snakepit_test.exs:42
 ```
 
-## <img src="assets/document.svg" alt="document" width="24" height="24"/> License
+## 📄 License
 
 Snakepit is released under the MIT License. See the [LICENSE](https://github.com/nshkrdotcom/snakepit/blob/main/LICENSE) file for details.
 
-## <img src="assets/pray.svg" alt="pray" width="24" height="24"/> Acknowledgments
+## 🙏 Acknowledgments
 
 - Inspired by the need for reliable ML/AI integrations in Elixir
 - Built on battle-tested OTP principles
 - Special thanks to the Elixir community
 
-## <img src="assets/chart.svg" alt="chart" width="24" height="24"/> Development Status
+## 📊 Development Status
 
 **v0.5.0 (Current Release)**
 - **DSPy integration removed** - Clean architecture separation achieved
@@ -2082,7 +2082,7 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 - Advanced telemetry and monitoring features
 - Distributed worker pools
 
-## <img src="assets/books.svg" alt="books" width="24" height="24"/> Resources
+## 📚 Resources
 
 - [Hex Package](https://hex.pm/packages/snakepit)
 - [API Documentation](https://hexdocs.pm/snakepit)
@@ -2093,4 +2093,4 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 
 ---
 
-Made with <img src="assets/heart.svg" alt="love" width="16" height="16"/> by [NSHkr](https://github.com/nshkrdotcom)
+Made with ❤️ by [NSHkr](https://github.com/nshkrdotcom)
