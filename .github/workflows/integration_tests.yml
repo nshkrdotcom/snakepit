@@ -31,7 +31,10 @@ jobs:
           deps
           _build
           ~/.cache/pip
-        key: ${{ runner.os }}-mix-pip-${{ hashFiles('**/mix.lock', '**/requirements.txt') }}
+        key: ${{ runner.os }}-mix-pip-${{ hashFiles('**/mix.lock', 'priv/python/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-mix-pip-
+          ${{ runner.os }}-mix-
     
     - name: Install Elixir dependencies
       run: |
@@ -39,9 +42,7 @@ jobs:
         mix compile
     
     - name: Install Python dependencies
-      run: |
-        cd priv/python
-        pip install pytest pytest-asyncio grpcio grpcio-tools
+      run: pip install -r priv/python/requirements.txt
     
     - name: Run unit tests
       run: mix test --exclude skip_ci
