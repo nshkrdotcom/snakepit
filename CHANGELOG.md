@@ -10,34 +10,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.0] - 2025-10-10
 
 ### Added
+- **Process Management & Lifecycle**
+  - New `Snakepit.RunId` module for unique process run identification with nanosecond precision
+  - New `Snakepit.ProcessKiller` module for robust OS-level process cleanup with SIGTERM/SIGKILL escalation
+  - Enhanced `ProcessRegistry` with run_id tracking and improved cleanup logic
+  - Added `scripts/setup_python.sh` for automated Python environment setup
+
 - **Test Infrastructure Improvements**
   - Added comprehensive Supertester refactoring plan (SUPERTESTER_REFACTOR_PLAN.md)
   - Phase 1 foundation updates complete with TestableGenServer support
   - New `assert_eventually` helper for polling conditions without Process.sleep
   - Enhanced test documentation and baseline establishment
+  - New worker lifecycle tests for process management validation
+  - New application cleanup tests with run_id integration
 
 - **Python Cleanup & Testing**
   - Created Python test infrastructure with `test_python.sh` script
   - Added comprehensive SessionContext test suite (15 tests)
   - Created Elixir integration tests for Python SessionContext (9 tests)
   - Python cleanup summary documentation (PYTHON_CLEANUP_SUMMARY.md)
+  - Enhanced Python gRPC server with improved process management and signal handling
 
 - **Documentation**
   - Phase 1 completion report with detailed test results
   - Python cleanup and testing infrastructure summary
   - Enhanced test planning and refactoring documentation
+  - Added comprehensive process management design documents (robust_process_cleanup_with_run_id.md)
+  - Added implementation summaries and debugging session reports
+  - New production deployment checklist (PRODUCTION_DEPLOYMENT_CHECKLIST.md)
+  - New example status documentation (EXAMPLE_STATUS_FINAL.md)
+  - Enhanced README with new icons and improved organization
+  - Added README_GRPC.md (304 lines) and README_BIDIRECTIONAL_TOOL_BRIDGE.md (288 lines)
+  - Created docs/archive/ structure for historical analysis and design documents
+
+- **Assets & Branding**
+  - Added 29 new SVG icons for documentation (architecture, binary, book, bug, chart, etc.)
+  - New snakepit-icon.svg for branding
+  - Enhanced visual documentation throughout
 
 ### Changed
+- **Process Management Improvements**
+  - `ApplicationCleanup` rewritten with run_id-based cleanup strategy
+  - `GRPCWorker` enhanced with run_id tracking and improved termination handling
+  - `ProcessRegistry` optimized cleanup from O(n) to O(1) operations using run_id
+  - Enhanced `GRPCPython` adapter with run_id support
+
 - **Code Cleanup**
   - Removed ~1,500 LOC of dead Python code
   - Deleted obsolete backup files and unused modules
   - Streamlined Python SessionContext from 845 to 169 lines
   - Cleaned up test infrastructure and removed duplicate code
+  - Archived ~60 historical documentation files to docs/archive/
+
+- **Examples Refactoring**
+  - Simplified grpc_streaming_demo.exs (334 → 44 lines effective)
+  - Refactored grpc_advanced.exs for better clarity (365 lines optimized)
+  - Enhanced grpc_sessions.exs with improved structure (170 lines)
+  - Streamlined grpc_streaming.exs (97 lines optimized)
+  - Improved grpc_concurrent.exs with better patterns (320 lines refactored)
 
 - **Test Coverage**
   - Increased total test coverage from 27 to 51 tests (+89%)
   - 37 Elixir tests passing (27 + 9 new integration tests + 1 new helper test)
   - 15 Python SessionContext tests passing
+  - Enhanced test helpers with improved synchronization and cleanup
+
+- **Build Configuration**
+  - Enhanced mix.exs with expanded documentation and package metadata
+  - Updated dependencies and build configurations
 
 ### Removed
 - **DSPy Integration** (as announced in v0.4.3)
@@ -48,16 +88,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed unused CLI directory referencing non-existent modules
   - All `__pycache__/` directories cleaned up
 
+- **Variables Feature (Temporary Removal)**
+  - Removed incomplete variables implementation pending future redesign:
+    - `lib/snakepit/bridge/variables.ex` (44 lines)
+    - `lib/snakepit/bridge/variables/variable.ex` (217 lines)
+    - `lib/snakepit/bridge/variables/types.ex` (98 lines)
+    - All variable type modules (boolean, choice, embedding, float, integer, module, string, tensor)
+    - `examples/grpc_variables.exs` (177 lines)
+    - `lib/snakepit_showcase/demos/variables_demo.ex` (140 lines)
+    - Related test files and Python code
+
+- **Deprecated Components**
+  - Removed `lib/snakepit/bridge/serialization.ex` (288 lines)
+  - Removed `lib/snakepit/grpc/stream_handler.ex` (68 lines)
+  - Removed integration test infrastructure (`test/integration/` directory)
+  - Removed property-based tests pending refactor
+  - Removed session and serialization tests pending redesign
+
 ### Fixed
-- Isolation level configuration documented (staying with :basic until test refactoring)
-- Test infrastructure conflicts between manual cleanup and Supertester automatic cleanup resolved
-- Enhanced debugging capabilities for test failures
+- **Process Cleanup & Lifecycle**
+  - Fixed race conditions in worker cleanup and termination
+  - Improved OS-level process cleanup with proper signal handling
+  - Enhanced DETS cleanup with run_id-based identification
+  - Fixed test flakiness with improved synchronization
+
+- **gRPC & Session Management**
+  - Improved session initialization and cleanup in Python gRPC server
+  - Enhanced error handling in bidirectional tool bridge
+  - Better isolation between test runs
+
+- **Test Infrastructure**
+  - Isolation level configuration documented (staying with :basic until test refactoring)
+  - Test infrastructure conflicts between manual cleanup and Supertester automatic cleanup resolved
+  - Enhanced debugging capabilities for test failures
 
 ### Notes
-- **Breaking Changes**: DSPy integration fully removed (deprecated in v0.4.3)
-- Users must migrate to DSPex for DSPy functionality (see v0.4.3 migration guide)
+- **Breaking Changes**:
+  - DSPy integration fully removed (deprecated in v0.4.3)
+  - Variables feature temporarily removed pending redesign
+  - Users must migrate to DSPex for DSPy functionality (see v0.4.3 migration guide)
 - Test suite reliability improved with better synchronization patterns
 - Foundation laid for full Supertester conformance in future releases
+- Process management significantly improved with run_id tracking system
+- Documentation reorganized with archive structure for historical content
 
 ---
 
