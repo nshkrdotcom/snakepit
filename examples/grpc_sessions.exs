@@ -1,12 +1,12 @@
 #!/usr/bin/env elixir
 
 # Session Management with gRPC Example
-# Demonstrates stateful operations with session affinity
+# Demonstrates session affinity and stateful operation routing
 
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :pooling_enabled, true)
-Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
+Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
 Application.put_env(:snakepit, :grpc_port, 50051)
 
 Mix.install([
@@ -18,79 +18,103 @@ Mix.install([
 defmodule SessionExample do
   def run do
     IO.puts("\n=== Session Management Example ===\n")
-    
-    # Create a unique session ID
-    session_id = "demo_session_#{System.unique_integer([:positive])}"
-    IO.puts("Session ID: #{session_id}")
-    
-    # 1. Initialize session (via first call)
-    IO.puts("\n1. Initializing session:")
-    {:ok, _} = Snakepit.execute_in_session(session_id, "ping", %{})
-    IO.puts("Session initialized")
-    
-    # 2. Register a variable in the session
-    IO.puts("\n2. Registering variable in session:")
-    {:ok, result} = Snakepit.execute_in_session(session_id, "register_variable", %{
-      name: "counter",
-      type: "integer",
-      initial_value: 0,
-      constraints: %{min: 0, max: 100}
-    })
-    IO.inspect(result, label: "Variable registered")
-    
-    # 3. Update the variable multiple times
-    IO.puts("\n3. Updating variable in session:")
-    for i <- 1..5 do
-      {:ok, result} = Snakepit.execute_in_session(session_id, "set_variable", %{
-        name: "counter",
-        value: i * 10
-      })
-      IO.puts("Counter updated to: #{result["value"]}")
-      Process.sleep(100)
-    end
-    
-    # 4. Retrieve variable from session
-    IO.puts("\n4. Retrieving variable from session:")
-    {:ok, result} = Snakepit.execute_in_session(session_id, "get_variable", %{
-      name: "counter"
-    })
-    IO.inspect(result, label: "Current counter value")
-    
-    # 5. Store computation result in session
-    IO.puts("\n5. Storing computation result:")
-    {:ok, _} = Snakepit.execute_in_session(session_id, "register_variable", %{
-      name: "computation_result",
-      type: "string",
-      initial_value: ""
-    })
-    
-    {:ok, _} = Snakepit.execute_in_session(session_id, "set_variable", %{
-      name: "computation_result",
-      value: "Processed #{result["value"]} items"
-    })
-    
-    # 6. List all variables in session
-    IO.puts("\n6. Listing all session variables:")
-    {:ok, variables} = Snakepit.execute_in_session(session_id, "list_variables", %{})
-    Enum.each(variables["variables"], fn var ->
-      IO.puts("  - #{var["name"]} (#{var["type"]}): #{inspect(var["value"])}")
+
+    # Create unique session IDs
+    sessions = for i <- 1..3, do: "demo_session_#{i}_#{System.unique_integer([:positive])}"
+    IO.puts("Created #{length(sessions)} sessions")
+
+    # 1. Session affinity - same session should prefer same worker
+    IO.puts("\n1. Testing session affinity:")
+
+    Enum.each(sessions, fn session_id ->
+      # Make multiple calls with the same session_id
+      worker_ids =
+        for _ <- 1..5 do
+          {:ok, result} = Snakepit.execute_in_session(session_id, "ping", %{})
+          result["worker_id"] || "unknown"
+        end
+
+      unique_workers = Enum.uniq(worker_ids)
+      IO.puts("  #{session_id}: Used #{length(unique_workers)} worker(s) for 5 calls")
+      IO.puts("    Workers: #{inspect(unique_workers)}")
+
+      if length(unique_workers) == 1 do
+        IO.puts("    ✅ Perfect affinity - all calls used same worker")
+      else
+        IO.puts("    ⚠️  Affinity not perfect - multiple workers used")
+      end
     end)
-    
-    # 7. Demonstrate session affinity
-    IO.puts("\n7. Session affinity check:")
-    worker_ids = for _ <- 1..3 do
-      {:ok, result} = Snakepit.execute_in_session(session_id, "ping", %{})
-      result["worker_id"] || "unknown"
+
+    # 2. Concurrent session operations
+    IO.puts("\n2. Concurrent operations across sessions:")
+
+    tasks =
+      for session_id <- sessions do
+        Task.async(fn ->
+          results =
+            for i <- 1..3 do
+              {:ok, result} =
+                Snakepit.execute_in_session(session_id, "add", %{
+                  a: i,
+                  b: i * 2
+                })
+
+              result
+            end
+
+          {session_id, results}
+        end)
+      end
+
+    results = Task.await_many(tasks, 10_000)
+
+    Enum.each(results, fn {session_id, session_results} ->
+      IO.puts("  #{session_id}: Completed #{length(session_results)} operations")
+    end)
+
+    # 3. Session isolation - operations in different sessions use different workers
+    IO.puts("\n3. Testing session isolation:")
+
+    session_to_worker =
+      Enum.map(sessions, fn session_id ->
+        {:ok, result} = Snakepit.execute_in_session(session_id, "ping", %{})
+        {session_id, result["worker_id"] || "unknown"}
+      end)
+
+    Enum.each(session_to_worker, fn {session_id, worker_id} ->
+      IO.puts("  #{session_id} → Worker: #{worker_id}")
+    end)
+
+    unique_workers_used = session_to_worker |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+    IO.puts("\n  Total unique workers used: #{length(unique_workers_used)}")
+
+    if length(unique_workers_used) == length(sessions) do
+      IO.puts("  ✅ Perfect isolation - each session has its own worker")
+    else
+      IO.puts(
+        "  ℹ️  Some sessions share workers (expected with #{length(sessions)} sessions on 4 workers)"
+      )
     end
-    IO.puts("Worker IDs for session calls: #{inspect(worker_ids)}")
-    IO.puts("(Should prefer the same worker when possible)")
-    
-    # 8. Clean up session
-    IO.puts("\n8. Cleaning up session:")
-    {:ok, _} = Snakepit.execute_in_session(session_id, "cleanup_session", %{
-      delete_all: true
-    })
-    IO.puts("Session cleaned up")
+
+    # 4. Session statistics
+    IO.puts("\n4. Session statistics:")
+
+    session_info =
+      Enum.map(session_to_worker, fn {session_id, worker_id} ->
+        case Snakepit.Bridge.SessionStore.get_session(session_id) do
+          {:ok, session} ->
+            IO.puts("  #{session_id}:")
+            IO.puts("    Worker: #{worker_id}")
+            IO.puts("    Created: #{Map.get(session, :created_at, "unknown")}")
+            IO.puts("    Last accessed: #{Map.get(session, :last_accessed_at, "unknown")}")
+
+          {:error, :not_found} ->
+            IO.puts("  #{session_id}: Not found in SessionStore")
+        end
+      end)
+
+    IO.puts("\n✅ Session management example complete")
+    IO.puts("Sessions will auto-expire after TTL (default: 3600s)")
   end
 end
 

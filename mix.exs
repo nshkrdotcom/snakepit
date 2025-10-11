@@ -55,14 +55,29 @@ defmodule Snakepit.MixProject do
         "priv/python/snakepit_bridge",
         "assets",
         "guides",
+        # Current documentation
+        "docs/GRPC_QUICK_REFERENCE.md",
+        "docs/TEST_AND_EXAMPLE_STATUS.md",
+        "docs/EXAMPLE_TEST_RESULTS.md",
+        "docs/ECOSYSTEM_ARCHITECTURE.md",
+        "docs/DSPEX_PRODUCTION_STRATEGY.md",
+        "docs/code-standards",
+        "docs/architecture",
+        # Build configuration
         ".formatter.exs",
         "mix.exs",
-        "README*",
+        # Root documentation
+        "README.md",
+        "README_GRPC.md",
+        "README_BIDIRECTIONAL_TOOL_BRIDGE.md",
+        "README_PROCESS_MANAGEMENT.md",
+        "README_TESTING.md",
+        "README_UNIFIED_GRPC_BRIDGE.md",
+        "ARCHITECTURE.md",
+        "DIAGS.md",
+        "DIAGS2.md",
         "LICENSE*",
-        "CHANGELOG*",
-        "DIAGS*",
-        "ARCHITECTURE*",
-        "priv/python/BINARY_SERIALIZATION.md"
+        "CHANGELOG.md"
       ],
       exclude_patterns: [
         "**/__pycache__",
@@ -70,6 +85,8 @@ defmodule Snakepit.MixProject do
         "**/*.egg-info",
         "**/*.bak",
         "priv/plts",
+        "priv/data",
+        "docs/archive",
         "priv/python/snakepit_bridge/__pycache__",
         "priv/python/snakepit_bridge/adapters/__pycache__",
         "priv/python/snakepit_bridge/adapters/showcase/__pycache__",
@@ -90,17 +107,43 @@ defmodule Snakepit.MixProject do
     [
       main: "readme",
       extras: [
+        # Main documentation
         "README.md",
-        "guides/INSTALLATION.md",
-        "README_GRPC.md",
-        "README_BIDIRECTIONAL_TOOL_BRIDGE.md",
-        "README_PROCESS_MANAGEMENT.md",
-        "README_TESTING.md",
-        "README_UNIFIED_GRPC_BRIDGE.md",
-        "ARCHITECTURE.md",
-        "DIAGS.md",
-        "DIAGS2.md",
-        "priv/python/BINARY_SERIALIZATION.md"
+        "CHANGELOG.md",
+
+        # Getting started
+        {"guides/INSTALLATION.md", title: "Installation Guide"},
+
+        # Core documentation
+        {"ARCHITECTURE.md", title: "System Architecture"},
+        {"DIAGS.md", title: "Performance Architecture"},
+        {"DIAGS2.md", title: "Architecture Diagrams"},
+
+        # Feature documentation
+        {"README_GRPC.md", title: "gRPC Streaming Guide"},
+        {"README_BIDIRECTIONAL_TOOL_BRIDGE.md", title: "Bidirectional Tool Bridge"},
+        {"README_PROCESS_MANAGEMENT.md", title: "Process Management"},
+        {"README_UNIFIED_GRPC_BRIDGE.md", title: "Unified gRPC Bridge"},
+        {"README_TESTING.md", title: "Testing Guide"},
+
+        # Reference documentation
+        {"docs/GRPC_QUICK_REFERENCE.md", title: "gRPC Quick Reference"},
+        {"docs/TEST_AND_EXAMPLE_STATUS.md", title: "Test & Example Status"},
+        {"docs/EXAMPLE_TEST_RESULTS.md", title: "Example Test Results"},
+        {"docs/ECOSYSTEM_ARCHITECTURE.md", title: "Ecosystem Architecture"},
+        {"docs/DSPEX_PRODUCTION_STRATEGY.md", title: "DSPex Production Strategy"},
+
+        # Advanced topics
+        {"docs/code-standards/test-architecture-supertester.md", title: "Test Architecture"},
+        {"docs/architecture/adr-001-worker-starter-supervision-pattern.md",
+         title: "ADR-001: Worker Starter Pattern"}
+      ],
+      groups_for_extras: [
+        "Getting Started": ~r/guides\//,
+        Architecture: ~r/(ARCHITECTURE|DIAGS)/,
+        Features: ~r/README_(GRPC|BIDIRECTIONAL|PROCESS|UNIFIED|TESTING)/,
+        Reference: ~r/docs\/(GRPC_QUICK|TEST_AND|EXAMPLE_TEST|ECOSYSTEM|DSPEX)/,
+        Advanced: ~r/docs\/(code-standards|architecture)/
       ],
       assets: %{"assets" => "assets"},
       logo: "assets/snakepit-logo.svg",
