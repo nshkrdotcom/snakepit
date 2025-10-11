@@ -8,6 +8,7 @@ defmodule Snakepit.Bridge.PythonSessionContextTest do
 
   use ExUnit.Case, async: false
   alias Snakepit.Bridge.{SessionStore, Session}
+  import TestHelpers
 
   setup do
     # Ensure SessionStore is running
@@ -67,17 +68,19 @@ defmodule Snakepit.Bridge.PythonSessionContextTest do
       # Session exists initially
       assert SessionStore.session_exists?(short_ttl_session_id)
 
-      # Wait for expiration
-      # Cleanup requires: last_accessed + ttl < current_time
-      # Since time is in seconds, we need to wait > 1 full second
-      # CI environments may have lower timer precision, so use 2000ms buffer
-      :timer.sleep(2000)
-
-      # Trigger cleanup
-      SessionStore.cleanup_expired_sessions()
-
-      # Session should be gone
-      refute SessionStore.session_exists?(short_ttl_session_id)
+      # Wait for expiration using OTP-correct polling (no sleep!)
+      # Cleanup runs every minute by default, so we trigger it manually
+      # Poll until the session is expired (deterministic, not time-based)
+      assert_eventually(
+        fn ->
+          # Trigger cleanup
+          SessionStore.cleanup_expired_sessions()
+          # Check if session is gone
+          not SessionStore.session_exists?(short_ttl_session_id)
+        end,
+        timeout: 5_000,
+        interval: 100
+      )
     end
 
     test "Python SessionContext cleanup is best-effort", %{session_id: session_id} do
