@@ -203,9 +203,10 @@ defmodule Snakepit.GRPCWorker do
             args
           end
 
-        # Add beam-run-id for safer process cleanup
-        beam_run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
-        args = args ++ ["--snakepit-run-id", beam_run_id]
+        # Add short run-id for safer process cleanup
+        # This short 7-char ID will be visible in ps output and used for cleanup
+        run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
+        args = args ++ ["--run-id", run_id]
 
         Logger.info("Starting gRPC server: #{executable} #{script} #{Enum.join(args, " ")}")
 
@@ -444,40 +445,42 @@ defmodule Snakepit.GRPCWorker do
   def terminate(reason, state) do
     Logger.debug("gRPC worker #{state.id} terminating: #{inspect(reason)}")
 
-    # Graceful shutdown logic should only apply to a normal :shutdown
-    # For crashes, we want to exit immediately and let the supervisor handle it.
-    if reason == :shutdown and state.process_pid do
-      Logger.debug(
-        "Starting graceful shutdown of external gRPC process PID: #{state.process_pid}..."
-      )
+    # ALWAYS kill the Python process, regardless of reason
+    # This is critical to prevent orphaned processes
+    if state.process_pid do
+      if reason == :shutdown do
+        # Graceful shutdown - use SIGTERM with escalation
+        Logger.debug(
+          "Starting graceful shutdown of external gRPC process PID: #{state.process_pid}..."
+        )
 
-      # Monitor the port to get a :DOWN message when the OS process *actually* dies
-      ref = Port.monitor(state.server_port)
+        case Snakepit.ProcessKiller.kill_with_escalation(
+               state.process_pid,
+               @graceful_shutdown_timeout
+             ) do
+          :ok ->
+            Logger.debug("✅ gRPC server PID #{state.process_pid} terminated gracefully")
 
-      # 1. Send SIGTERM FIRST. This is the signal for the Python script
-      #    to begin its graceful shutdown via its signal_handler.
-      System.cmd("kill", ["-TERM", to_string(state.process_pid)])
+          {:error, reason} ->
+            Logger.warning("Failed to gracefully kill #{state.process_pid}: #{inspect(reason)}")
+        end
+      else
+        # Non-graceful termination (crash, error, etc.) - immediate SIGKILL
+        Logger.warning(
+          "Non-graceful termination (#{inspect(reason)}), immediately killing PID #{state.process_pid}"
+        )
 
-      # 2. WAIT for the process to exit. The Python server's grace period is 1s,
-      #    so we wait for 2s. If the port dies, we get a :DOWN message.
-      receive do
-        {:DOWN, ^ref, :port, _port, _exit_reason} ->
-          Logger.debug("✅ gRPC server PID #{state.process_pid} confirmed graceful exit.")
-      after
-        @graceful_shutdown_timeout ->
-          # 3. ESCALATE to SIGKILL if it doesn't shut down in time.
-          Logger.warning(
-            "⏰ gRPC server PID #{state.process_pid} did not exit gracefully within #{@graceful_shutdown_timeout}ms. Forcing SIGKILL."
-          )
+        case Snakepit.ProcessKiller.kill_process(state.process_pid, :sigkill) do
+          :ok ->
+            Logger.debug("✅ Immediately killed gRPC server PID #{state.process_pid}")
 
-          System.cmd("kill", ["-KILL", to_string(state.process_pid)], stderr_to_stdout: true)
+          {:error, reason} ->
+            Logger.warning("Failed to kill #{state.process_pid}: #{inspect(reason)}")
+        end
       end
-
-      # Clean up the monitor message if it's still in the mailbox
-      Process.demonitor(ref, [:flush])
     end
 
-    # 4. Final resource cleanup (run regardless of shutdown reason)
+    # Final resource cleanup (run regardless of shutdown reason)
     if state.connection do
       GRPC.Stub.disconnect(state.connection.channel)
     end

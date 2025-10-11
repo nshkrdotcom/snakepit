@@ -63,46 +63,36 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     :ok
   end
 
-  defp find_orphaned_processes(beam_run_id) do
-    case System.cmd("pgrep", ["-f", "grpc_server.py.*--snakepit-run-id #{beam_run_id}"],
-           stderr_to_stdout: true
-         ) do
-      {"", 1} ->
-        # No processes found - good!
-        []
+  defp find_orphaned_processes(run_id) do
+    # Use ProcessKiller to find all Python processes
+    python_pids = Snakepit.ProcessKiller.find_python_processes()
 
-      {output, 0} ->
-        # Found processes - parse PIDs
-        output
-        |> String.split("\n", trim: true)
-        |> Enum.map(fn pid_str ->
-          case Integer.parse(pid_str) do
-            {pid, ""} -> pid
-            _ -> nil
-          end
-        end)
-        |> Enum.reject(&is_nil/1)
+    # Filter for grpc_server processes with our run_id
+    # Support both old format (--snakepit-run-id) and new format (--run-id)
+    python_pids
+    |> Enum.filter(fn pid ->
+      case Snakepit.ProcessKiller.get_process_command(pid) do
+        {:ok, cmd} ->
+          has_grpc_server = String.contains?(cmd, "grpc_server.py")
+          has_old_format = String.contains?(cmd, "--snakepit-run-id #{run_id}")
+          has_new_format = String.contains?(cmd, "--run-id #{run_id}")
 
-      {_error, _code} ->
-        # pgrep error - assume no processes
-        []
-    end
+          has_grpc_server and (has_old_format or has_new_format)
+
+        _ ->
+          false
+      end
+    end)
   end
 
-  defp emergency_kill_processes(beam_run_id) do
-    case System.cmd("pkill", ["-9", "-f", "grpc_server.py.*--snakepit-run-id #{beam_run_id}"],
-           stderr_to_stdout: true
-         ) do
-      {_output, 0} ->
-        # At least one process killed
-        1
+  defp emergency_kill_processes(run_id) do
+    # Use ProcessKiller with run_id-based cleanup
+    case Snakepit.ProcessKiller.kill_by_run_id(run_id) do
+      {:ok, killed_count} ->
+        killed_count
 
-      {_output, 1} ->
-        # No processes found
-        0
-
-      {_output, _code} ->
-        # Error occurred
+      {:error, reason} ->
+        Logger.error("Emergency cleanup failed: #{inspect(reason)}")
         0
     end
   end

@@ -1,0 +1,70 @@
+defmodule Snakepit.RunIDTest do
+  use ExUnit.Case
+  doctest Snakepit.RunID
+
+  describe "generate/0" do
+    test "creates 7-character run_id" do
+      run_id = Snakepit.RunID.generate()
+      assert String.length(run_id) == 7
+    end
+
+    test "creates unique run_ids" do
+      ids = for _ <- 1..1000, do: Snakepit.RunID.generate()
+      # Should have very high uniqueness
+      unique_ids = Enum.uniq(ids)
+      assert length(unique_ids) >= 990
+    end
+
+    test "generates only lowercase alphanumeric characters" do
+      run_id = Snakepit.RunID.generate()
+      assert String.match?(run_id, ~r/^[0-9a-z]{7}$/)
+    end
+  end
+
+  describe "valid?/1" do
+    test "accepts valid run_ids" do
+      assert Snakepit.RunID.valid?("k3x9a2p")
+      assert Snakepit.RunID.valid?("0000000")
+      assert Snakepit.RunID.valid?("zzzzzzz")
+      assert Snakepit.RunID.valid?("abc123d")
+    end
+
+    test "rejects invalid run_ids" do
+      refute Snakepit.RunID.valid?("toolong8")
+      refute Snakepit.RunID.valid?("short")
+      refute Snakepit.RunID.valid?("UPPER")
+      refute Snakepit.RunID.valid?("has-dash")
+      refute Snakepit.RunID.valid?("has_underscore")
+      refute Snakepit.RunID.valid?("")
+      refute Snakepit.RunID.valid?(nil)
+      refute Snakepit.RunID.valid?(123)
+    end
+  end
+
+  describe "extract_from_command/1" do
+    test "finds run_id from command line" do
+      cmd = "python3 grpc_server.py --run-id k3x9a2p --port 50051"
+      assert {:ok, "k3x9a2p"} = Snakepit.RunID.extract_from_command(cmd)
+    end
+
+    test "finds run_id with extra spaces" do
+      cmd = "python3 grpc_server.py --run-id   m7k2x1a --port 50051"
+      assert {:ok, "m7k2x1a"} = Snakepit.RunID.extract_from_command(cmd)
+    end
+
+    test "returns error when no run_id present" do
+      cmd = "python3 grpc_server.py --port 50051"
+      assert {:error, :not_found} = Snakepit.RunID.extract_from_command(cmd)
+    end
+
+    test "returns error for invalid format" do
+      cmd = "python3 grpc_server.py --run-id toolong8 --port 50051"
+      assert {:error, :not_found} = Snakepit.RunID.extract_from_command(cmd)
+    end
+
+    test "handles non-string input" do
+      assert {:error, :not_found} = Snakepit.RunID.extract_from_command(nil)
+      assert {:error, :not_found} = Snakepit.RunID.extract_from_command(123)
+    end
+  end
+end
