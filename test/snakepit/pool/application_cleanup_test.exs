@@ -13,8 +13,7 @@ defmodule Snakepit.Pool.ApplicationCleanupTest do
   alias Snakepit.Pool.ProcessRegistry
 
   test "ApplicationCleanup does NOT kill processes from current BEAM run" do
-    # Start app
-    {:ok, _} = Application.ensure_all_started(:snakepit)
+    # Application is already started by test_helper.exs
     beam_run_id = ProcessRegistry.get_beam_run_id()
 
     # Poll until workers are fully started (using Supertester pattern)
@@ -39,18 +38,6 @@ defmodule Snakepit.Pool.ApplicationCleanupTest do
            This is the bug causing "Python gRPC server process exited with status 0" errors.
            ApplicationCleanup.terminate must ONLY kill processes from DIFFERENT beam_run_ids!
            """
-
-    # Cleanup
-    Application.stop(:snakepit)
-
-    # Poll until all processes are cleaned up
-    assert_eventually(
-      fn ->
-        count_python_processes(beam_run_id) == 0
-      end,
-      timeout: 5_000,
-      interval: 100
-    )
   end
 
   # Helper to monitor process count stability

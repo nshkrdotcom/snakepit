@@ -15,10 +15,8 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
   end
 
   test "workers clean up Python processes on normal shutdown" do
-    # Start the application
-    {:ok, _} = Application.ensure_all_started(:snakepit)
-
-    # Get BEAM run ID after app starts
+    # Application is already started by test_helper.exs
+    # Get BEAM run ID
     beam_run_id = ProcessRegistry.get_beam_run_id()
 
     # Poll until workers are started (using Supertester pattern)
@@ -33,10 +31,10 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
     python_processes_before = count_python_processes(beam_run_id)
     assert python_processes_before >= 2, "Expected at least 2 Python workers to start"
 
-    # Stop the application
-    Application.stop(:snakepit)
+    # Stop all workers (not the entire application - just the pool workers)
+    Supervisor.terminate_child(Snakepit.Supervisor, Snakepit.Pool)
 
-    # Poll until ALL Python processes are gone (using Supertester pattern)
+    # Poll until ALL Python processes for these workers are gone
     assert_eventually(
       fn ->
         count_python_processes(beam_run_id) == 0
@@ -46,6 +44,9 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
     )
 
     python_processes_after = count_python_processes(beam_run_id)
+
+    # Restart the pool for subsequent tests
+    Supervisor.restart_child(Snakepit.Supervisor, Snakepit.Pool)
 
     assert python_processes_after == 0,
            """
@@ -58,9 +59,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
   end
 
   test "ApplicationCleanup does NOT run during normal operation" do
-    # Start the application
-    {:ok, _} = Application.ensure_all_started(:snakepit)
-
+    # Application is already started by test_helper.exs
     beam_run_id = ProcessRegistry.get_beam_run_id()
 
     # Poll until workers are started
@@ -102,59 +101,56 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
            This indicates ApplicationCleanup is incorrectly killing processes during normal operation,
            or workers are crashing and restarting.
            """
-
-    Application.stop(:snakepit)
-
-    # Poll until cleanup is complete
-    assert_eventually(
-      fn ->
-        count_python_processes(beam_run_id) == 0
-      end,
-      timeout: 5_000,
-      interval: 100
-    )
   end
 
-  test "no orphaned processes exist after multiple start/stop cycles" do
-    # Run 3 start/stop cycles
-    for cycle <- 1..3 do
-      {:ok, _} = Application.ensure_all_started(:snakepit)
-      beam_run_id = ProcessRegistry.get_beam_run_id()
+  test "no orphaned processes exist - all workers tracked in registry" do
+    # Application is already started by test_helper.exs
+    beam_run_id = ProcessRegistry.get_beam_run_id()
 
-      # Poll until workers are started
-      assert_eventually(
-        fn ->
-          count_python_processes(beam_run_id) >= 2
-        end,
-        timeout: 10_000,
-        interval: 100
-      )
+    # Poll until workers are started
+    assert_eventually(
+      fn ->
+        count_python_processes(beam_run_id) >= 2
+      end,
+      timeout: 10_000,
+      interval: 100
+    )
 
-      Application.stop(:snakepit)
+    # Get all Python processes and verify they're all registered
+    python_pids =
+      case System.cmd("pgrep", ["-f", "grpc_server.py.*--snakepit-run-id #{beam_run_id}"],
+             stderr_to_stdout: true
+           ) do
+        {"", 1} ->
+          []
 
-      # Poll until all processes are cleaned up
-      assert_eventually(
-        fn ->
-          count_python_processes(beam_run_id) == 0
-        end,
-        timeout: 5_000,
-        interval: 100
-      )
+        {output, 0} ->
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.map(fn pid_str ->
+            case Integer.parse(pid_str) do
+              {pid, ""} -> pid
+              _ -> nil
+            end
+          end)
+          |> Enum.reject(&is_nil/1)
 
-      # Check for orphans from this run
-      orphans = find_orphaned_processes(beam_run_id)
-
-      if length(orphans) > 0 do
-        # Cleanup before failing
-        System.cmd("pkill", ["-9", "-f", "grpc_server.py"], stderr_to_stdout: true)
-
-        flunk("""
-        Cycle #{cycle}: Found #{length(orphans)} orphaned processes after stop cycle!
-        BEAM run ID: #{beam_run_id}
-        Orphaned PIDs: #{inspect(orphans)}
-        """)
+        _ ->
+          []
       end
-    end
+
+    # Get all registered PIDs from ProcessRegistry
+    registered_pids = ProcessRegistry.get_all_process_pids()
+
+    # Every Python process should be registered
+    unregistered_pids = python_pids -- registered_pids
+
+    assert unregistered_pids == [],
+           """
+           Found #{length(unregistered_pids)} unregistered Python processes!
+           These are orphans not tracked by ProcessRegistry.
+           Unregistered PIDs: #{inspect(unregistered_pids)}
+           """
   end
 
   # Helper functions

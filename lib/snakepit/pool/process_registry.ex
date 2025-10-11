@@ -21,7 +21,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
   defstruct [
     :table,
     :dets_table,
-    :beam_run_id
+    :beam_run_id,
+    :beam_os_pid
   ]
 
   # Client API
@@ -178,6 +179,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # Keep as beam_run_id for backward compatibility
     beam_run_id = run_id
 
+    # CRITICAL: Get the BEAM OS PID for robust stale entry detection
+    # This allows us to verify if the BEAM that created an entry is still running
+    beam_os_pid = System.pid() |> String.to_integer()
+
     # Create a proper file path for DETS
     # Include node name to prevent conflicts between multiple BEAM instances
     priv_dir = :code.priv_dir(:snakepit) |> to_string()
@@ -229,10 +234,12 @@ defmodule Snakepit.Pool.ProcessRegistry do
         {:read_concurrency, true}
       ])
 
-    Logger.info("Snakepit Pool Process Registry started with BEAM run ID: #{beam_run_id}")
+    Logger.info(
+      "Snakepit Pool Process Registry started with BEAM run ID: #{beam_run_id}, BEAM OS PID: #{beam_os_pid}"
+    )
 
     # Perform startup cleanup of orphaned processes FIRST
-    cleanup_orphaned_processes(dets_table, beam_run_id)
+    cleanup_orphaned_processes(dets_table, beam_run_id, beam_os_pid)
 
     # Load current run's processes into ETS
     load_current_run_processes(dets_table, table, beam_run_id)
@@ -240,7 +247,13 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # Schedule periodic cleanup
     schedule_cleanup()
 
-    {:ok, %__MODULE__{table: table, dets_table: dets_table, beam_run_id: beam_run_id}}
+    {:ok,
+     %__MODULE__{
+       table: table,
+       dets_table: dets_table,
+       beam_run_id: beam_run_id,
+       beam_os_pid: beam_os_pid
+     }}
   end
 
   @impl true
@@ -251,7 +264,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
       fingerprint: fingerprint,
       registered_at: System.system_time(:second),
       beam_run_id: state.beam_run_id,
-      # Assuming PID = PGID when using setsid
+      beam_os_pid: state.beam_os_pid,
       pgid: process_pid
     }
 
@@ -278,6 +291,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
       fingerprint: fingerprint,
       registered_at: System.system_time(:second),
       beam_run_id: state.beam_run_id,
+      beam_os_pid: state.beam_os_pid,
       pgid: process_pid
     }
 
@@ -321,7 +335,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
     reservation_info = %{
       status: :reserved,
       reserved_at: System.system_time(:second),
-      beam_run_id: state.beam_run_id
+      beam_run_id: state.beam_run_id,
+      beam_os_pid: state.beam_os_pid
     }
 
     # CRITICAL: Persist to DETS immediately and sync
@@ -390,7 +405,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
   @impl true
   def handle_call(:manual_orphan_cleanup, _from, state) do
     Logger.info("Manual orphan cleanup triggered")
-    cleanup_orphaned_processes(state.dets_table, state.beam_run_id)
+    cleanup_orphaned_processes(state.dets_table, state.beam_run_id, state.beam_os_pid)
     {:reply, :ok, state}
   end
 
@@ -456,38 +471,51 @@ defmodule Snakepit.Pool.ProcessRegistry do
     Process.send_after(self(), :cleanup_dead_workers, @cleanup_interval)
   end
 
-  defp cleanup_orphaned_processes(dets_table, current_beam_run_id) do
-    Logger.warning("Starting orphan cleanup for BEAM run #{current_beam_run_id}")
+  defp cleanup_orphaned_processes(dets_table, current_beam_run_id, current_beam_os_pid) do
+    Logger.warning(
+      "Starting orphan cleanup for BEAM run #{current_beam_run_id}, BEAM OS PID #{current_beam_os_pid}"
+    )
 
     # Get all entries in DETS
     all_entries = :dets.match_object(dets_table, :_)
     Logger.info("Total entries in DETS: #{length(all_entries)}")
 
-    # Aggressive cleanup: Remove stale entries from DETS
-    # OPTIMIZATION: Only do expensive process checks for entries from different runs
-    # Current run entries are handled by normal cleanup
+    # ROBUST cleanup: Check if the BEAM that created each entry is still running
+    # If the BEAM is dead, the entry is stale regardless of run_id or status
 
     stale_entries =
       all_entries
       |> Enum.filter(fn {_worker_id, info} ->
         cond do
-          # Different run - assume stale (processes should be dead)
-          # Don't check if alive - too slow for 100s of entries
-          info.beam_run_id != current_beam_run_id ->
-            true
+          # Check if this entry has beam_os_pid (new format)
+          Map.has_key?(info, :beam_os_pid) ->
+            beam_dead = not Snakepit.ProcessKiller.process_alive?(info.beam_os_pid)
 
-          # Malformed entry (no process_pid or beam_run_id)
-          not Map.has_key?(info, :process_pid) or not Map.has_key?(info, :beam_run_id) ->
-            true
+            if beam_dead do
+              Logger.info(
+                "Entry #{inspect(_worker_id)} is stale: BEAM OS PID #{info.beam_os_pid} is dead"
+              )
 
-          # Old reservation (>5 min)
-          Map.get(info, :status) == :reserved &&
-              System.system_time(:second) - Map.get(info, :reserved_at, 0) > 300 ->
-            true
+              true
+            else
+              # BEAM still alive - check if it's from current BEAM or different BEAM
+              if info.beam_os_pid == current_beam_os_pid do
+                # Same BEAM, different run_id shouldn't happen but could indicate restart
+                # Keep if from current run, remove if from old run
+                info.beam_run_id != current_beam_run_id
+              else
+                # Different BEAM instance still running - don't kill their processes!
+                false
+              end
+            end
 
-          # Current run entries - keep (will be cleaned up normally)
+          # Legacy entry without beam_os_pid - use old logic (different run = stale)
+          Map.has_key?(info, :beam_run_id) ->
+            info.beam_run_id != current_beam_run_id
+
+          # Malformed entry (no beam_run_id at all)
           true ->
-            false
+            true
         end
       end)
 
@@ -597,15 +625,9 @@ defmodule Snakepit.Pool.ProcessRegistry do
         )
 
         # Use ProcessKiller to find and kill processes with this run_id
-        case Snakepit.ProcessKiller.kill_by_run_id(info.beam_run_id) do
-          {:ok, count} ->
-            Logger.info("Killed #{count} processes for run #{info.beam_run_id}")
-            count
-
-          {:error, reason} ->
-            Logger.warning("Failed to cleanup run #{info.beam_run_id}: #{inspect(reason)}")
-            0
-        end
+        {:ok, count} = Snakepit.ProcessKiller.kill_by_run_id(info.beam_run_id)
+        Logger.info("Killed #{count} processes for run #{info.beam_run_id}")
+        count
       end)
       |> Enum.sum()
 
@@ -622,12 +644,81 @@ defmodule Snakepit.Pool.ProcessRegistry do
       :dets.delete(dets_table, worker_id)
     end)
 
+    # PHASE 3: Scan for rogue Python processes not in DETS
+    # This catches processes that were created but never persisted to DETS
+    rogue_killed = cleanup_rogue_processes(current_beam_run_id)
+
     Logger.info(
       "Orphan cleanup complete. Killed #{killed_count} orphaned processes, " <>
         "killed #{abandoned_killed} from abandoned reservations, " <>
+        "killed #{rogue_killed} rogue processes, " <>
         "removed #{length(stale_entries)} stale entries, " <>
         "total removed: #{length(entries_to_remove)} entries."
     )
+  end
+
+  defp cleanup_rogue_processes(current_beam_run_id) do
+    # Find ALL Python grpc_server processes on the system
+    python_pids = Snakepit.ProcessKiller.find_python_processes()
+
+    # Filter for grpc_server.py processes
+    grpc_pids =
+      python_pids
+      |> Enum.filter(fn pid ->
+        case Snakepit.ProcessKiller.get_process_command(pid) do
+          {:ok, cmd} -> String.contains?(cmd, "grpc_server.py")
+          _ -> false
+        end
+      end)
+
+    Logger.info("Found #{length(grpc_pids)} total grpc_server processes on system")
+
+    # Kill any that DON'T have our current run_id
+    rogue_pids =
+      grpc_pids
+      |> Enum.filter(fn pid ->
+        case Snakepit.ProcessKiller.get_process_command(pid) do
+          {:ok, cmd} ->
+            # Check if it has OUR run_id
+            has_our_run_id = String.contains?(cmd, "--snakepit-run-id #{current_beam_run_id}")
+            # If it doesn't have our run_id, it's a rogue
+            not has_our_run_id
+
+          _ ->
+            false
+        end
+      end)
+
+    if length(rogue_pids) > 0 do
+      Logger.warning(
+        "Found #{length(rogue_pids)} rogue grpc_server processes not belonging to current run"
+      )
+
+      Logger.warning("Rogue PIDs: #{inspect(rogue_pids)}")
+    end
+
+    # Kill rogue processes
+    killed_count =
+      Enum.reduce(rogue_pids, 0, fn pid, acc ->
+        case Snakepit.ProcessKiller.get_process_command(pid) do
+          {:ok, cmd} ->
+            Logger.warning("Killing rogue process #{pid}: #{String.trim(cmd)}")
+
+            case Snakepit.ProcessKiller.kill_with_escalation(pid) do
+              :ok ->
+                acc + 1
+
+              {:error, reason} ->
+                Logger.error("Failed to kill rogue process #{pid}: #{inspect(reason)}")
+                acc
+            end
+
+          _ ->
+            acc
+        end
+      end)
+
+    killed_count
   end
 
   defp load_current_run_processes(dets_table, ets_table, beam_run_id) do

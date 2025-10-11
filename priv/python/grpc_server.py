@@ -123,18 +123,34 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     """
 
     def __init__(self, adapter_class, elixir_address: str):
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"BridgeServiceServicer.__init__ called\n")
+            f.flush()
+
         self.adapter_class = adapter_class
         self.elixir_address = elixir_address
         self.server: Optional[grpc.aio.Server] = None
-        
+
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"Creating async channel to {elixir_address}...\n")
+            f.flush()
+
         # Create async client channel for async operations (proxying)
         self.elixir_channel = grpc.aio.insecure_channel(elixir_address)
         self.elixir_stub = pb2_grpc.BridgeServiceStub(self.elixir_channel)
-        
+
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"Creating sync channel to {elixir_address}...\n")
+            f.flush()
+
         # Create sync client channel for SessionContext
         self.sync_elixir_channel = grpc.insecure_channel(elixir_address)
         self.sync_elixir_stub = pb2_grpc.BridgeServiceStub(self.sync_elixir_channel)
-        
+
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"Channels created successfully\n")
+            f.flush()
+
         logger.info(f"Python server initialized with Elixir backend at {elixir_address}")
     
     async def close(self):
@@ -523,8 +539,77 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         self.server = server
 
 
+async def wait_for_elixir_server(elixir_address: str, max_retries: int = 10, initial_delay: float = 0.05):
+    """
+    Wait for the Elixir gRPC server to become available with exponential backoff.
+
+    This handles the startup race condition where Python workers may spawn before
+    the Elixir gRPC Bridge Server has fully bound to its socket.
+
+    Args:
+        elixir_address: The address of the Elixir server (e.g., 'localhost:50051')
+        max_retries: Maximum number of connection attempts
+        initial_delay: Initial delay in seconds (doubles each retry)
+
+    Returns:
+        True if server is reachable, False otherwise
+    """
+    delay = initial_delay
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Attempt a simple connection test
+            channel = grpc.aio.insecure_channel(elixir_address)
+            stub = pb2_grpc.BridgeServiceStub(channel)
+
+            # Try a ping with short timeout
+            request = pb2.PingRequest(message="connection_test")
+            await asyncio.wait_for(stub.Ping(request), timeout=1.0)
+
+            # Success!
+            await channel.close()
+            logger.info(f"Successfully connected to Elixir server at {elixir_address} after {attempt} attempt(s)")
+            return True
+
+        except (grpc.aio.AioRpcError, asyncio.TimeoutError, Exception) as e:
+            if attempt < max_retries:
+                logger.debug(f"Elixir server at {elixir_address} not ready (attempt {attempt}/{max_retries}). "
+                           f"Retrying in {delay:.2f}s... Error: {type(e).__name__}")
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 2.0)  # Exponential backoff, max 2s
+            else:
+                logger.error(f"Failed to connect to Elixir server at {elixir_address} after {max_retries} attempts")
+                return False
+
+    return False
+
+
 async def serve_with_shutdown(port: int, adapter_module: str, elixir_address: str, shutdown_event: asyncio.Event):
     """Start the stateless gRPC server with proper shutdown handling."""
+    # DEBUG: Write to file to see execution flow
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"\n=== serve_with_shutdown called at {time.time()} ===\n")
+        f.write(f"port={port}, adapter={adapter_module}, elixir_address={elixir_address}\n")
+        f.flush()
+
+    # CRITICAL: Wait for Elixir server to be ready before proceeding
+    # This prevents the Python worker from exiting if the Elixir server is still starting up
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"Calling wait_for_elixir_server...\n")
+        f.flush()
+
+    result = await wait_for_elixir_server(elixir_address)
+
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"wait_for_elixir_server returned: {result}\n")
+        f.flush()
+
+    if not result:
+        logger.error(f"Cannot start Python worker: Elixir server at {elixir_address} is not available")
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"ERROR: Elixir server not available, calling sys.exit(1)\n")
+            f.flush()
+        sys.exit(1)
+
     # Import the adapter
     module_parts = adapter_module.split('.')
     module_name = '.'.join(module_parts[:-1])
@@ -538,6 +623,10 @@ async def serve_with_shutdown(port: int, adapter_module: str, elixir_address: st
         sys.exit(1)
 
     # Create server
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"Creating gRPC server...\n")
+        f.flush()
+
     server = grpc.aio.server(
         futures.ThreadPoolExecutor(max_workers=10),
         options=[
@@ -546,47 +635,104 @@ async def serve_with_shutdown(port: int, adapter_module: str, elixir_address: st
         ]
     )
 
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"Creating servicer...\n")
+        f.flush()
+
     servicer = BridgeServiceServicer(adapter_class, elixir_address)
     servicer.set_server(server)
 
     pb2_grpc.add_BridgeServiceServicer_to_server(servicer, server)
 
     # Listen on port
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"Binding to port {port}...\n")
+        f.flush()
+
     actual_port = server.add_insecure_port(f'[::]:{port}')
+
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"Bound to port {actual_port}\n")
+        f.flush()
 
     if actual_port == 0 and port != 0:
         logger.error(f"Failed to bind to port {port}")
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"ERROR: Failed to bind, calling sys.exit(1)\n")
+            f.flush()
         sys.exit(1)
 
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"Starting server...\n")
+        f.flush()
+
     await server.start()
+
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"Server started! Printing GRPC_READY:{actual_port}\n")
+        f.flush()
 
     # Signal that the server is ready
     # CRITICAL: Use logger instead of print() for reliable capture via :stderr_to_stdout
     logger.info(f"GRPC_READY:{actual_port}")
 
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"GRPC_READY printed to logger\n")
+        f.flush()
+
     logger.info(f"gRPC server started on port {actual_port}")
     logger.info(f"Connected to Elixir backend at {elixir_address}")
 
-    # Wait for either termination or shutdown signal
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"Entering main loop...\n")
+        f.flush()
+
+    # CRITICAL: A true daemon waits ONLY for the shutdown signal.
+    # Do not wait for server termination - that would cause premature exit.
     server_task = asyncio.create_task(server.wait_for_termination())
-    shutdown_task = asyncio.create_task(shutdown_event.wait())
 
     try:
-        done, pending = await asyncio.wait(
-            [server_task, shutdown_task],
-            return_when=asyncio.FIRST_COMPLETED
-        )
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"Waiting indefinitely for shutdown signal (SIGTERM/SIGINT)...\n")
+            f.flush()
 
-        # Cancel pending tasks
-        for task in pending:
-            task.cancel()
+        # Wait indefinitely until a shutdown signal is received
+        # This makes the worker a true daemon that will not exit on its own
+        await shutdown_event.wait()
 
-        # If shutdown was triggered, stop the server gracefully
-        if shutdown_event.is_set():
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"Shutdown signal received. Proceeding with graceful shutdown.\n")
+            f.flush()
+
+    finally:
+        # This block executes regardless of how we exited the try block
+        # Clean up the server_task
+        server_task.cancel()
+
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"Closing servicer and stopping server...\n")
+            f.flush()
+
+        try:
             await servicer.close()
-            await server.stop(grace_period=0.5)
-    except Exception as e:
-        raise
+            # CRITICAL FIX: grpcio 1.75+ changed API - grace period is positional, not keyword
+            await server.stop(0.5)
+
+            with open("/tmp/python_worker_debug.log", "a") as f:
+                f.write(f"Server stopped gracefully.\n")
+                f.flush()
+        except asyncio.CancelledError:
+            # CRITICAL FIX: This is expected if the parent Elixir process closes the port
+            # while we are in the middle of a graceful shutdown.
+            # We can safely ignore it and allow the process to exit.
+            logger.info("Shutdown cancelled by parent (this is normal).")
+            with open("/tmp/python_worker_debug.log", "a") as f:
+                f.write(f"Shutdown cancelled by parent (normal).\n")
+                f.flush()
+
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"serve_with_shutdown completing.\n")
+            f.flush()
 
 
 async def serve(port: int, adapter_module: str, elixir_address: str):
@@ -597,7 +743,8 @@ async def serve(port: int, adapter_module: str, elixir_address: str):
 
 async def shutdown(server):
     """Gracefully shutdown the server."""
-    await server.stop(grace_period=5)
+    # CRITICAL FIX: grpcio 1.75+ changed API - grace period is positional, not keyword
+    await server.stop(5)
 
 
 def main():
@@ -617,6 +764,10 @@ def main():
     shutdown_event = None
 
     def handle_signal(signum, frame):
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"\n!!! SIGNAL {signum} RECEIVED AT {time.time()} !!!\n")
+            f.write(f"Signal name: {signal.Signals(signum).name}\n")
+            f.flush()
         if shutdown_event and not shutdown_event.is_set():
             # Schedule the shutdown in the running loop
             asyncio.get_running_loop().call_soon_threadsafe(shutdown_event.set)
@@ -631,8 +782,29 @@ def main():
 
     try:
         loop.run_until_complete(serve_with_shutdown(args.port, args.adapter, args.elixir_address, shutdown_event))
+    except BaseException as e:
+        # CRITICAL: Capture the final, fatal exception before the process dies
+        # Catch ALL exceptions including SystemExit, KeyboardInterrupt, etc.
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write("\n\n!!! UNHANDLED EXCEPTION IN MAIN !!!\n")
+            f.write(f"Exception Type: {type(e).__name__}\n")
+            f.write(f"Exception Args: {e.args}\n")
+            f.write("--- TRACEBACK ---\n")
+            traceback.print_exc(file=f)
+            f.write("-----------------\n")
+            f.flush()
+        # Re-exit with error code so OS knows it failed
+        sys.exit(1)
     finally:
         loop.close()
+
+    # Tombstone: If we reach this point, the main() function completed normally
+    # which should NEVER happen for a daemon - it means we exited the event loop somehow
+    with open("/tmp/python_worker_debug.log", "a") as f:
+        f.write(f"\n!!! MAIN FUNCTION COMPLETED NORMALLY AT {time.time()} !!!\n")
+        f.write(f"This should NEVER happen for a daemon!\n")
+        f.flush()
+    logger.warning("!!! MAIN FUNCTION COMPLETED NORMALLY - THIS SHOULD NOT HAPPEN !!!")
 
 
 if __name__ == '__main__':
