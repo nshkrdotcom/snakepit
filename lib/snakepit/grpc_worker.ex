@@ -277,27 +277,46 @@ defmodule Snakepit.GRPCWorker do
       {:ok, actual_port} ->
         case state.adapter.init_grpc_connection(actual_port) do
           {:ok, connection} ->
-            # *** CRITICAL: Activate the reserved worker with actual process info ***
-            Snakepit.Pool.ProcessRegistry.activate_worker(
-              state.id,
-              self(),
-              state.process_pid,
-              "grpc_worker"
-            )
+            # *** SYNCHRONOUS REGISTRATION: Block until fully registered ***
+            # This ensures happens-before relationship: worker is not "ready" until
+            # all state registries have acknowledged and updated their state.
 
-            Logger.info(
-              "gRPC worker #{state.id} registered process PID #{state.process_pid} with ProcessRegistry."
-            )
+            # Step 1: Activate in ProcessRegistry (synchronous call blocks until complete)
+            case Snakepit.Pool.ProcessRegistry.activate_worker(
+                   state.id,
+                   self(),
+                   state.process_pid,
+                   "grpc_worker"
+                 ) do
+              :ok ->
+                Logger.info(
+                  "gRPC worker #{state.id} registered process PID #{state.process_pid} with ProcessRegistry."
+                )
 
-            # CRITICAL FIX: Notify the pool (using the name/PID passed from Pool) that worker is ready
-            # This ensures correct pool routing for both production and test environments
-            GenServer.cast(state.pool_name, {:worker_ready, state.id})
+                # Step 2: Notify the pool (synchronous call blocks until pool acknowledges)
+                # This creates a provable state guarantee: worker cannot proceed until pool has it
+                case GenServer.call(state.pool_name, {:worker_ready, state.id}, 5000) do
+                  :ok ->
+                    # Schedule health checks
+                    health_ref = schedule_health_check()
 
-            # Schedule health checks
-            health_ref = schedule_health_check()
+                    Logger.info(
+                      "✅ gRPC worker #{state.id} initialization complete and acknowledged."
+                    )
 
-            Logger.info("✅ gRPC worker #{state.id} initialization complete.")
-            {:noreply, %{state | connection: connection, health_check_ref: health_ref}}
+                    {:noreply, %{state | connection: connection, health_check_ref: health_ref}}
+
+                  {:error, reason} ->
+                    Logger.error("Pool rejected worker registration: #{inspect(reason)}")
+
+                    {:stop, {:pool_rejected_worker, reason}, state}
+                end
+
+              {:error, reason} ->
+                Logger.error("Failed to activate worker in ProcessRegistry: #{inspect(reason)}")
+
+                {:stop, {:registry_activation_failed, reason}, state}
+            end
 
           {:error, reason} ->
             Logger.error("Failed to connect to gRPC server: #{reason}")

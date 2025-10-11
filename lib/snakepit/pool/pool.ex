@@ -333,7 +333,7 @@ defmodule Snakepit.Pool do
   end
 
   @impl true
-  def handle_cast({:worker_ready, worker_id}, state) do
+  def handle_call({:worker_ready, worker_id}, _from, state) do
     Logger.info("Worker #{worker_id} reported ready. Processing queued work.")
 
     # Ensure worker is in workers list
@@ -349,9 +349,11 @@ defmodule Snakepit.Pool do
     # but never get processed when workers become :active.
     # The checkin_worker logic will either process a queued request or add the
     # worker to available if the queue is empty.
+    # Use cast to self to avoid blocking the worker registration
     GenServer.cast(self(), {:checkin_worker, worker_id})
 
-    {:noreply, %{state | workers: new_workers}}
+    # Reply :ok to unblock the worker - it's now registered with the pool
+    {:reply, :ok, %{state | workers: new_workers}}
   end
 
   def handle_cast({:checkin_worker, worker_id}, state) do

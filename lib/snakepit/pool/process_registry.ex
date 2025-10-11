@@ -41,11 +41,16 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @doc """
   Activates a reserved worker with its actual process information.
+
+  This is a synchronous call that blocks until the worker is registered.
+  This ensures the happens-before relationship: worker registration completes
+  before the worker is considered ready for work.
   """
   def activate_worker(worker_id, elixir_pid, process_pid, fingerprint) do
-    GenServer.cast(
+    GenServer.call(
       __MODULE__,
-      {:activate_worker, worker_id, elixir_pid, process_pid, fingerprint}
+      {:activate_worker, worker_id, elixir_pid, process_pid, fingerprint},
+      5000
     )
   end
 
@@ -283,7 +288,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @impl true
-  def handle_cast({:activate_worker, worker_id, elixir_pid, process_pid, fingerprint}, state) do
+  def handle_call(
+        {:activate_worker, worker_id, elixir_pid, process_pid, fingerprint},
+        _from,
+        state
+      ) do
     worker_info = %{
       status: :active,
       elixir_pid: elixir_pid,
@@ -295,7 +304,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
       pgid: process_pid
     }
 
-    # Update both ETS and DETS
+    # Update both ETS and DETS atomically
     :ets.insert(state.table, {worker_id, worker_info})
     :dets.insert(state.dets_table, {worker_id, worker_info})
     # Sync immediately for activation too
@@ -306,7 +315,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
         "BEAM run #{state.beam_run_id} | Elixir PID: #{inspect(elixir_pid)}"
     )
 
-    {:noreply, state}
+    # Reply :ok to unblock the caller - worker is now fully registered
+    {:reply, :ok, state}
   end
 
   @impl true
