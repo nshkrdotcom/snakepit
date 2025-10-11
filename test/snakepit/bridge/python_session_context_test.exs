@@ -60,7 +60,7 @@ defmodule Snakepit.Bridge.PythonSessionContextTest do
     end
 
     test "session expires after TTL", %{session_id: _session_id} do
-      # Create session with 1 second TTL (slightly faster than original 2s test)
+      # Create session with 1 second TTL
       short_ttl_session_id = "short_ttl_#{:erlang.unique_integer([:positive])}"
       {:ok, _session} = SessionStore.create_session(short_ttl_session_id, ttl: 1)
 
@@ -70,8 +70,8 @@ defmodule Snakepit.Bridge.PythonSessionContextTest do
       # Wait for expiration
       # Cleanup requires: last_accessed + ttl < current_time
       # Since time is in seconds, we need to wait > 1 full second
-      # 1500ms ensures we cross into the next second reliably
-      :timer.sleep(1500)
+      # CI environments may have lower timer precision, so use 2000ms buffer
+      :timer.sleep(2000)
 
       # Trigger cleanup
       SessionStore.cleanup_expired_sessions()
