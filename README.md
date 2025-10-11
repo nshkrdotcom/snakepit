@@ -1097,8 +1097,6 @@ Snakepit automatically optimizes large data transfers using binary serialization
    - Large data: Binary (Pickle on Python, ETF on Elixir)
 4. **Zero Configuration**: Works out of the box
 
-For detailed binary serialization documentation, see **[priv/python/BINARY_SERIALIZATION.md](priv/python/BINARY_SERIALIZATION.md)**.
-
 ## <img src="assets/target.svg" alt="target" width="24" height="24"/> Showcase Application
 
 Explore all Snakepit features with our comprehensive showcase application:
