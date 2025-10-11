@@ -1237,6 +1237,65 @@ Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericJavaScr
 {:ok, _} = Snakepit.execute("compute", %{operation: "sqrt", a: 16})
 ```
 
+### ShowcaseAdapter Tools Reference
+
+The default ShowcaseAdapter provides a comprehensive set of tools demonstrating Snakepit capabilities:
+
+#### Basic Operations
+
+| Tool | Description | Parameters | Example |
+|------|-------------|------------|---------|
+| `ping` | Health check / heartbeat | None | `Snakepit.execute("ping", %{})` |
+| `echo` | Echo back all arguments | Any key-value pairs | `Snakepit.execute("echo", %{message: "hello"})` |
+| `add` | Add two numbers | `a` (number), `b` (number) | `Snakepit.execute("add", %{a: 5, b: 3})` |
+| `adapter_info` | Get adapter capabilities | None | `Snakepit.execute("adapter_info", %{})` |
+| `process_text` | Text operations | `text` (string), `operation` (upper/lower/reverse/length) | `Snakepit.execute("process_text", %{text: "hello", operation: "upper"})` |
+| `get_stats` | System & adapter stats | None | `Snakepit.execute("get_stats", %{})` |
+
+#### ML & Data Processing
+
+| Tool | Description | Parameters | Example |
+|------|-------------|------------|---------|
+| `ml_analyze_text` | ML-based text analysis | `text` (string) | `Snakepit.execute("ml_analyze_text", %{text: "sample"})` |
+| `process_binary` | Binary data processing | `data` (bytes), `operation` (checksum/etc) | `Snakepit.execute("process_binary", %{data: binary, operation: "checksum"})` |
+
+#### Streaming Operations
+
+| Tool | Description | Parameters | Example |
+|------|-------------|------------|---------|
+| `stream_data` | Stream data in chunks | `count` (int), `delay` (float) | `Snakepit.execute_stream("stream_data", %{count: 5, delay: 1.0}, callback)` |
+| `ping_stream` | Streaming heartbeat | `count` (int) | `Snakepit.execute_stream("ping_stream", %{count: 10}, callback)` |
+
+#### Concurrency & Integration
+
+| Tool | Description | Parameters | Example |
+|------|-------------|------------|---------|
+| `concurrent_demo` | Concurrent task execution | `task_count` (int) | `Snakepit.execute("concurrent_demo", %{task_count: 3})` |
+| `call_elixir_demo` | Call Elixir tools from Python | `tool_name` (string), tool params | `Snakepit.execute("call_elixir_demo", %{tool_name: "parse_json", ...})` |
+
+#### Usage Example
+
+```elixir
+# Basic operations
+{:ok, %{"status" => "pong"}} = Snakepit.execute("ping", %{})
+{:ok, %{"result" => 8}} = Snakepit.execute("add", %{a: 5, b: 3})
+
+# Text processing
+{:ok, %{"result" => "HELLO", "success" => true}} =
+  Snakepit.execute("process_text", %{text: "hello", operation: "upper"})
+
+# System stats
+{:ok, stats} = Snakepit.execute("get_stats", %{})
+# Returns: %{"adapter" => %{"name" => "ShowcaseAdapter", ...}, "system" => %{...}}
+
+# Streaming
+Snakepit.execute_stream("stream_data", %{count: 5, delay: 0.5}, fn chunk ->
+  IO.puts("Received chunk: #{inspect(chunk)}")
+end)
+```
+
+For custom tools, see [Creating Custom Adapters](#creating-custom-adapters) below.
+
 ## 🛠️ Creating Custom Adapters
 
 ### Complete Custom Adapter Example

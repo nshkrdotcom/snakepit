@@ -84,6 +84,7 @@ defmodule Snakepit.Application do
     result
   end
 
+  @impl true
   def stop(_state) do
     IO.inspect(System.monotonic_time(:millisecond),
       label: "Snakepit.Application.stop/1 called at"

@@ -518,6 +518,310 @@ Application.put_env(:snakepit, :adapters, [
 4. **Phase 4**: Default to gRPC, keep MessagePack as fallback
 5. **Phase 5**: Full gRPC adoption
 
+## Creating Streaming Commands in Python
+
+This section shows how to implement custom streaming commands in your Python adapters.
+
+### Basic Streaming Command
+
+```python
+from snakepit_bridge.base_adapter import BaseAdapter, tool
+
+class MyAdapter(BaseAdapter):
+    @tool(description="Stream progress updates", supports_streaming=True)
+    def progress_stream(self, count: int = 10, delay: float = 0.5):
+        """
+        Stream progress updates to the client.
+
+        For streaming tools, return a generator that yields dictionaries.
+        Each yielded dict becomes a chunk sent to the Elixir callback.
+        """
+        import time
+
+        for i in range(count):
+            # Yield progress chunk
+            yield {
+                "progress": i + 1,
+                "total": count,
+                "percent": ((i + 1) / count) * 100,
+                "message": f"Processing item {i + 1} of {count}",
+                "is_final": False
+            }
+            time.sleep(delay)
+
+        # Final chunk
+        yield {
+            "is_final": True,
+            "total_processed": count,
+            "message": "Stream complete"
+        }
+```
+
+### ML Batch Inference Streaming
+
+```python
+from snakepit_bridge.base_adapter import BaseAdapter, tool
+import time
+
+class MLAdapter(BaseAdapter):
+    def __init__(self):
+        super().__init__()
+        # Load your model here
+        self.model = self._load_model()
+
+    @tool(description="Batch inference with streaming results", supports_streaming=True)
+    def batch_inference(self, items: list, model_path: str = None):
+        """
+        Process items in a batch, streaming each result as it completes.
+        """
+        total = len(items)
+
+        for idx, item in enumerate(items):
+            # Perform inference
+            prediction, confidence = self._predict(item)
+
+            # Yield result for this item
+            yield {
+                "item": item,
+                "index": idx,
+                "prediction": prediction,
+                "confidence": confidence,
+                "progress": idx + 1,
+                "total": total,
+                "is_final": False
+            }
+
+        # Final summary
+        yield {
+            "is_final": True,
+            "total_processed": total,
+            "message": f"Processed {total} items successfully"
+        }
+
+    def _predict(self, item):
+        # Your ML inference logic here
+        # This is a placeholder
+        time.sleep(0.1)
+        return "predicted_class", 0.95
+
+    def _load_model(self):
+        # Load your model
+        return None
+```
+
+### Large Dataset Processing
+
+```python
+from snakepit_bridge.base_adapter import BaseAdapter, tool
+import pandas as pd
+
+class DataAdapter(BaseAdapter):
+    @tool(description="Process large datasets with progress", supports_streaming=True)
+    def process_large_dataset(self, file_path: str, chunk_size: int = 10000):
+        """
+        Process a large CSV file in chunks, streaming progress.
+        """
+        # Get total rows (for progress calculation)
+        total_rows = sum(1 for _ in open(file_path)) - 1  # -1 for header
+
+        processed = 0
+        errors = 0
+
+        # Process in chunks
+        for chunk in pd.read_csv(file_path, chunksize=chunk_size):
+            # Process this chunk
+            try:
+                results = self._process_chunk(chunk)
+                processed += len(chunk)
+
+                # Yield progress
+                yield {
+                    "processed_rows": processed,
+                    "total_rows": total_rows,
+                    "progress_percent": (processed / total_rows) * 100,
+                    "memory_usage_mb": chunk.memory_usage(deep=True).sum() / 1024 / 1024,
+                    "is_final": False
+                }
+            except Exception as e:
+                errors += 1
+                yield {
+                    "error": str(e),
+                    "chunk_start": processed,
+                    "is_final": False
+                }
+
+        # Final statistics
+        yield {
+            "is_final": True,
+            "final_stats": {
+                "total_rows": total_rows,
+                "processed": processed,
+                "errors": errors,
+                "skipped": total_rows - processed
+            }
+        }
+
+    def _process_chunk(self, chunk):
+        # Your processing logic
+        return chunk.apply(lambda row: row, axis=1)
+```
+
+### Real-time Log Analysis
+
+```python
+from snakepit_bridge.base_adapter import BaseAdapter, tool
+import re
+import time
+
+class LogAdapter(BaseAdapter):
+    @tool(description="Tail and analyze logs in real-time", supports_streaming=True)
+    def tail_and_analyze(self, log_path: str, patterns: list, context_lines: int = 3):
+        """
+        Stream log analysis results in real-time.
+        """
+        pattern_regexes = [re.compile(p) for p in patterns]
+
+        # Simulate tailing (in production, use actual file watching)
+        with open(log_path, 'r') as f:
+            for line_num, line in enumerate(f):
+                for pattern_idx, regex in enumerate(pattern_regexes):
+                    if regex.search(line):
+                        # Found a match
+                        severity = self._determine_severity(line)
+
+                        yield {
+                            "line_number": line_num,
+                            "log_line": line.strip(),
+                            "pattern_matched": patterns[pattern_idx],
+                            "severity": severity,
+                            "timestamp": self._extract_timestamp(line),
+                            "is_final": False
+                        }
+
+                # Simulate real-time (remove for actual file watching)
+                time.sleep(0.01)
+
+        yield {
+            "is_final": True,
+            "message": "Log analysis complete"
+        }
+
+    def _determine_severity(self, line):
+        if "FATAL" in line or "CRITICAL" in line:
+            return "FATAL"
+        elif "ERROR" in line:
+            return "ERROR"
+        elif "WARN" in line:
+            return "WARN"
+        return "INFO"
+
+    def _extract_timestamp(self, line):
+        # Extract timestamp from log line
+        # This is a placeholder
+        return "2025-01-20T15:30:45"
+```
+
+### ML Training with Epoch Updates
+
+```python
+from snakepit_bridge.base_adapter import BaseAdapter, tool
+import time
+
+class TrainingAdapter(BaseAdapter):
+    @tool(description="Train model with streaming epoch updates", supports_streaming=True)
+    def distributed_training(self, model_config: dict, training_config: dict, dataset_path: str):
+        """
+        Train a model and stream updates for each epoch.
+        """
+        epochs = training_config.get("epochs", 100)
+        best_val_acc = 0.0
+
+        for epoch in range(1, epochs + 1):
+            # Simulate training epoch
+            train_loss, train_acc = self._train_epoch(epoch)
+            val_loss, val_acc = self._validate_epoch(epoch)
+
+            # Track best accuracy
+            if val_acc > best_val_acc:
+                best_val_acc = val_acc
+                model_path = f"/models/model_epoch_{epoch}.pkl"
+                self._save_checkpoint(model_path)
+
+            # Yield epoch results
+            yield {
+                "epoch": epoch,
+                "total_epochs": epochs,
+                "train_loss": train_loss,
+                "train_acc": train_acc,
+                "val_loss": val_loss,
+                "val_acc": val_acc,
+                "learning_rate": self._get_current_lr(epoch),
+                "is_final": False
+            }
+
+        # Final result
+        yield {
+            "is_final": True,
+            "final_model_path": model_path,
+            "best_val_accuracy": best_val_acc,
+            "total_epochs": epochs,
+            "message": "Training complete"
+        }
+
+    def _train_epoch(self, epoch):
+        # Training logic (placeholder)
+        time.sleep(0.1)
+        return 2.5 - (epoch * 0.02), 0.1 + (epoch * 0.008)
+
+    def _validate_epoch(self, epoch):
+        # Validation logic (placeholder)
+        time.sleep(0.05)
+        return 2.3 - (epoch * 0.018), 0.15 + (epoch * 0.007)
+
+    def _get_current_lr(self, epoch):
+        # Learning rate schedule
+        return 0.001 * (0.95 ** epoch)
+
+    def _save_checkpoint(self, path):
+        # Save model checkpoint
+        pass
+```
+
+### Key Patterns for Streaming Commands
+
+1. **Use Generator Functions**: Return a generator (using `yield`) instead of returning a value directly
+2. **Mark with supports_streaming**: Add `supports_streaming=True` to the `@tool` decorator
+3. **Include is_final**: Always include `"is_final": False` in intermediate chunks and `"is_final": True` in the final chunk
+4. **Yield Dictionaries**: Each yielded value should be a dictionary that will be sent to the Elixir callback
+5. **Progress Information**: Include progress indicators (`progress`, `total`, `percent`, etc.) to help users track completion
+6. **Error Handling**: Yield error information as chunks rather than raising exceptions
+
+### Calling Streaming Commands from Elixir
+
+```elixir
+# Call your custom streaming command
+Snakepit.execute_stream("progress_stream", %{count: 10, delay: 0.5}, fn chunk ->
+  if chunk["is_final"] do
+    IO.puts("✅ #{chunk["message"]}")
+  else
+    IO.puts("📊 Progress: #{chunk["percent"]}% - #{chunk["message"]}")
+  end
+end)
+
+# With session affinity
+Snakepit.execute_in_session_stream("ml_session", "distributed_training", %{
+  model_config: %{layers: 12},
+  training_config: %{epochs: 100},
+  dataset_path: "/data/train.csv"
+}, fn chunk ->
+  if chunk["is_final"] do
+    IO.puts("🎯 Training complete! Model: #{chunk["final_model_path"]}")
+  else
+    IO.puts("📈 Epoch #{chunk["epoch"]}: loss=#{chunk["train_loss"]}, acc=#{chunk["train_acc"]}")
+  end
+end)
+```
+
 ## Troubleshooting
 
 ### Common Issues

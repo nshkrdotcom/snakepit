@@ -26,12 +26,12 @@ graph TB
         STARTER[Worker.Starter<br/>Supervisor]
         WORKER[GRPCWorker<br/>GenServer]
         SS[SessionStore<br/>GenServer + ETS]
-        BS[BridgeServer<br/>gRPC Service]
+        BS[BridgeServer<br/>Elixir gRPC Endpoint]
     end
-    
-    subgraph "Python Worker Process"
-        GRPC[grpc_server.py<br/>gRPC Service]
-        CTX[SessionContext<br/>Cache + Client]
+
+    subgraph "Python Worker Process (Stateless)"
+        GRPC[grpc_server.py<br/>Stateless gRPC Proxy]
+        CTX[SessionContext<br/>gRPC Client to Elixir]
         ADAPTER[User Adapter]
         TOOLS[User Tools]
     end
@@ -60,7 +60,10 @@ graph TB
     style CTX fill:#fff59d
 ```
 
-This diagram shows the overall system components and their relationships. Key insight: Python workers are completely stateless - all state management happens in the Elixir SessionStore, enabling easy scaling and crash recovery.
+This diagram shows the overall system components and their relationships. Key insights:
+- **Python workers are completely stateless** - `grpc_server.py` acts as a pure proxy, forwarding all state operations (variables, sessions, programs) to the Elixir SessionStore
+- **All state management happens in Elixir SessionStore** with ETS backing, enabling easy scaling and crash recovery
+- **BridgeServer** is the Elixir gRPC endpoint (`Snakepit.GRPC.Endpoint`) that Python workers connect to for state operations
 
 ## 2. Request Flow Sequence
 
@@ -98,7 +101,10 @@ sequenceDiagram
     Pool-->>App: Result
 ```
 
-This sequence shows how variable access patterns work. Python workers call back to Elixir for variable operations, maintaining the stateless design while enabling session-based workflows.
+This sequence shows how variable access patterns work. Key points:
+- **Python workers are stateless proxies** - All GetVariable/SetVariable calls are forwarded to Elixir's SessionStore
+- **SessionContext** in Python (`session_context.py`) is a lightweight gRPC client that calls back to Elixir
+- **No local state** is maintained in Python between requests, enabling crash recovery and horizontal scaling
 
 ## 3. Supervision Tree
 
@@ -168,7 +174,13 @@ graph LR
     style ETS fill:#4fc3f7
 ```
 
-This diagram illustrates the key architectural principle: stateless Python workers with centralized Elixir state. The SessionContext provides local caching to reduce gRPC round-trips while maintaining consistency.
+This diagram illustrates the key architectural principle: **stateless Python workers with centralized Elixir state**.
+
+Implementation details:
+- **Python side**: `priv/python/grpc_server.py` (stateless proxy) and `session_context.py` (gRPC client)
+- **Elixir side**: `Snakepit.Bridge.SessionStore` (GenServer + ETS) and `Snakepit.GRPC.BridgeServer` (gRPC endpoint)
+- **SessionContext cache** is request-scoped only - no persistent state between requests
+- All state operations (get_variable, set_variable, register_variable) proxy to Elixir via gRPC
 
 ## 5. Worker Lifecycle
 
@@ -263,7 +275,13 @@ classDiagram
     SessionContext --> SessionStore : gRPC calls
 ```
 
-The variable system class diagram shows the relationship between Elixir-side storage (SessionStore) and Python-side caching (SessionContext). This design enables type-safe variable management across language boundaries.
+The variable system class diagram shows the relationship between Elixir-side storage (SessionStore) and Python-side access (SessionContext).
+
+Key architecture points:
+- **SessionStore** (`lib/snakepit/bridge/session_store.ex`) - Manages all persistent state in ETS
+- **SessionContext** (`priv/python/snakepit_bridge/session_context.py`) - Lightweight gRPC client for Python adapters
+- **CachedVariable** in SessionContext is request-scoped only - no persistent cache between requests
+- **Type-safe variable management** across language boundaries via protobuf serialization
 
 ## 7. Protocol Message Flow
 
@@ -307,7 +325,16 @@ graph TB
     style STORE fill:#81d4fa
 ```
 
-This message flow diagram shows how gRPC protobuf messages flow through the system. The protocol handles both tool execution and variable management through a unified interface.
+This message flow diagram shows how gRPC protobuf messages flow through the system.
+
+Implementation files:
+- **Protocol definitions**: `priv/proto/snakepit_bridge.proto`
+- **Python protobuf bindings**: `priv/python/snakepit_bridge_pb2.py` and `snakepit_bridge_pb2_grpc.py`
+- **Elixir protobuf bindings**: `lib/snakepit/grpc/snakepit_bridge.pb.ex`
+- **Elixir BridgeServer**: `lib/snakepit/grpc/bridge_server.ex`
+- **Python grpc_server**: `priv/python/grpc_server.py` (stateless proxy)
+
+The protocol handles both tool execution and variable management through a unified gRPC interface.
 
 ## 8. Error Handling & Recovery
 
