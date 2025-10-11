@@ -85,4 +85,58 @@ defmodule Snakepit.TestHelpers do
     # Process should be registered again
     assert Process.whereis(original_pid) != nil
   end
+
+  @doc """
+  Poll a condition until it's true or timeout occurs.
+
+  Replacement for Process.sleep when waiting for eventual consistency.
+  Uses receive timeouts instead of Process.sleep for deterministic synchronization.
+
+  ## Parameters
+  - `assertion_fn`: Function that returns true when condition is met
+  - `opts`: Options
+    - `:timeout` - Maximum time to wait in milliseconds (default: 5_000)
+    - `:interval` - Polling interval in milliseconds (default: 10)
+
+  ## Examples
+
+      # Wait for session to be deleted
+      assert_eventually(fn ->
+        match?({:error, :not_found}, get_session(session_id))
+      end)
+
+      # Wait for process count to stabilize
+      assert_eventually(fn ->
+        count_processes(beam_run_id) == 0
+      end, timeout: 10_000, interval: 100)
+  """
+  def assert_eventually(assertion_fn, opts \\ []) when is_function(assertion_fn, 0) do
+    timeout = Keyword.get(opts, :timeout, 5_000)
+    interval = Keyword.get(opts, :interval, 10)
+
+    deadline = System.monotonic_time(:millisecond) + timeout
+    poll_until_true(assertion_fn, deadline, interval)
+  end
+
+  # Private helper for assert_eventually
+  defp poll_until_true(assertion_fn, deadline, interval) do
+    current_time = System.monotonic_time(:millisecond)
+
+    if current_time >= deadline do
+      # One final attempt, let it fail with proper assertion
+      assert assertion_fn.(), "Condition did not become true within timeout"
+    else
+      if assertion_fn.() do
+        :ok
+      else
+        # Wait using receive timeout (NOT Process.sleep)
+        receive do
+        after
+          interval -> :ok
+        end
+
+        poll_until_true(assertion_fn, deadline, interval)
+      end
+    end
+  end
 end

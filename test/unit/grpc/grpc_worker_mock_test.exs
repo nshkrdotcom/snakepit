@@ -102,11 +102,13 @@ defmodule Snakepit.GRPCWorkerMockTest do
       # Stop worker
       GenServer.stop(worker)
 
-      # Give registry time to update
-      Process.sleep(10)
-
-      # Should be unregistered
-      assert Registry.lookup(Snakepit.Pool.Registry, worker_id) == []
+      # Poll until registry is updated (using Supertester pattern)
+      assert_eventually(
+        fn ->
+          Registry.lookup(Snakepit.Pool.Registry, worker_id) == []
+        end,
+        timeout: 1_000
+      )
     end
   end
 end

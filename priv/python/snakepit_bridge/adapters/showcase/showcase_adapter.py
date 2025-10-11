@@ -16,7 +16,6 @@ from .handlers import (
     BinaryOpsHandler,
     StreamingOpsHandler,
     ConcurrentOpsHandler,
-    VariableOpsHandler,
     MLWorkflowHandler
 )
 
@@ -34,7 +33,6 @@ class ShowcaseAdapter(BaseAdapter):
             'binary': BinaryOpsHandler(),
             'streaming': StreamingOpsHandler(),
             'concurrent': ConcurrentOpsHandler(),
-            'variable': VariableOpsHandler(),
             'ml': MLWorkflowHandler()
         }
         
@@ -144,15 +142,6 @@ class ShowcaseAdapter(BaseAdapter):
             self.session_context, 
             data=data, 
             operation=operation
-        )
-    
-    @tool(description="Demonstrate variable operations")
-    def variable_demo(self, name: str, value: Any) -> Dict[str, Any]:
-        """Demonstrate variable storage and retrieval."""
-        return self.handlers['variable'].get_tools()['variable_demo'].func(
-            self.session_context,
-            name=name,
-            value=value
         )
     
     @tool(description="Stream data in chunks", supports_streaming=True)

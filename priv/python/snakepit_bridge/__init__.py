@@ -9,14 +9,9 @@ __version__ = "2.0.0"
 __author__ = "Snakepit Team"
 
 # Import core components for easy access
-from .session_context import SessionContext, VariableProxy, VariableNotFoundError
-from .types import VariableType, TypeValidator
+from .session_context import SessionContext
 
 __all__ = [
     "SessionContext",
-    "VariableProxy",
-    "VariableNotFoundError",
-    "VariableType",
-    "TypeValidator",
     "__version__"
 ]

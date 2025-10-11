@@ -49,7 +49,6 @@ class BasicOpsHandler:
                 "binary_serialization",
                 "streaming",
                 "ml_workflows",
-                "variables",
                 "session_state_via_elixir"
             ],
             "handlers": [
@@ -58,7 +57,6 @@ class BasicOpsHandler:
                 "BinaryOpsHandler",
                 "StreamingOpsHandler",
                 "ConcurrentOpsHandler",
-                "VariableOpsHandler",
                 "MLWorkflowHandler"
             ]
         }
