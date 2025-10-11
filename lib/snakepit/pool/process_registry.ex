@@ -172,11 +172,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @impl true
   def init(_opts) do
-    # Generate unique ID for this BEAM run using timestamp + random component
-    # This ensures uniqueness even across BEAM restarts
-    timestamp = System.system_time(:microsecond)
-    random_component = :rand.uniform(999_999)
-    beam_run_id = "#{timestamp}_#{random_component}"
+    # Generate short 7-character run ID for this BEAM instance
+    # This will be embedded in Python CLI commands for reliable tracking
+    run_id = Snakepit.RunID.generate()
+    # Keep as beam_run_id for backward compatibility
+    beam_run_id = run_id
 
     # Create a proper file path for DETS
     # Include node name to prevent conflicts between multiple BEAM instances
@@ -525,95 +525,59 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
     Logger.info("Found #{length(abandoned_reservations)} abandoned reservations")
 
-    # Kill active processes with known PIDs
+    # Kill active processes with known PIDs using ProcessKiller
     killed_count =
       Enum.reduce(old_run_orphans, 0, fn {worker_id, info}, acc ->
-        if process_alive?(info.process_pid) do
+        if Snakepit.ProcessKiller.process_alive?(info.process_pid) do
           Logger.warning(
             "Found orphaned process #{info.process_pid} (worker: #{worker_id}) from previous " <>
               "BEAM run #{info.beam_run_id}. Terminating..."
           )
 
-          # Be very careful with process cleanup
-          pid_str = to_string(info.process_pid)
-          pgid = Map.get(info, :pgid, info.process_pid)
-          pgid_str = to_string(pgid)
-
           # CRITICAL: Verify this is actually a Python grpc_server process with the OLD beam_run_id
           # This prevents killing NEW workers if OS reused the PID
-          case System.cmd("ps", ["-p", pid_str, "-o", "cmd="], stderr_to_stdout: true) do
-            {output, 0} ->
+          case Snakepit.ProcessKiller.get_process_command(info.process_pid) do
+            {:ok, cmd} ->
               # Must match BOTH grpc_server.py AND the original beam_run_id
-              expected_run_id_pattern = "--snakepit-run-id #{info.beam_run_id}"
+              # Support both old format (--snakepit-run-id) and new format (--run-id)
+              has_grpc_server = String.contains?(cmd, "grpc_server.py")
+              has_old_run_id = String.contains?(cmd, "--snakepit-run-id #{info.beam_run_id}")
+              has_new_run_id = String.contains?(cmd, "--run-id #{info.beam_run_id}")
 
               Logger.warning(
-                "🔍 PID REUSE CHECK: PID #{pid_str} | Expected run_id: #{info.beam_run_id} | " <>
-                  "Current BEAM run_id: #{current_beam_run_id} | Process cmd: #{String.trim(output)}"
+                "🔍 PID REUSE CHECK: PID #{info.process_pid} | Expected run_id: #{info.beam_run_id} | " <>
+                  "Current BEAM run_id: #{current_beam_run_id} | Process cmd: #{String.trim(cmd)}"
               )
 
-              if String.contains?(output, "grpc_server.py") &&
-                   String.contains?(output, expected_run_id_pattern) do
+              if has_grpc_server and (has_old_run_id or has_new_run_id) do
                 Logger.info(
-                  "Confirmed PID #{pid_str} (PGID #{pgid_str}) is a grpc_server process"
+                  "Confirmed PID #{info.process_pid} is a grpc_server process with matching run_id"
                 )
 
-                # Try to kill the entire process group first
-                Logger.info("Sending SIGTERM to process group #{pgid_str}")
+                # Kill with escalation (SIGTERM -> wait -> SIGKILL)
+                case Snakepit.ProcessKiller.kill_with_escalation(info.process_pid) do
+                  :ok ->
+                    Logger.info("Process #{info.process_pid} successfully terminated")
 
-                case System.cmd("kill", ["-TERM", "-#{pgid_str}"], stderr_to_stdout: true) do
-                  {_output, 0} ->
-                    Logger.info("Successfully sent SIGTERM to process group #{pgid_str}")
-
-                  {error, _} ->
-                    Logger.debug(
-                      "Failed to kill process group #{pgid_str}: #{error}, trying individual process"
-                    )
-
-                    System.cmd("kill", ["-TERM", pid_str], stderr_to_stdout: true)
-                end
-
-                # Check if still alive and force kill if needed
-                if process_alive?(info.process_pid) do
-                  Logger.warning(
-                    "Process #{pid_str} still alive after SIGTERM, sending SIGKILL to process group"
-                  )
-
-                  case System.cmd("kill", ["-KILL", "-#{pgid_str}"], stderr_to_stdout: true) do
-                    {_output, 0} ->
-                      Logger.info("Successfully sent SIGKILL to process group #{pgid_str}")
-
-                    {error, _} ->
-                      Logger.debug(
-                        "Failed to SIGKILL process group #{pgid_str}: #{error}, trying individual process"
-                      )
-
-                      System.cmd("kill", ["-KILL", pid_str], stderr_to_stdout: true)
-                  end
-
-                  if process_alive?(info.process_pid) do
-                    Logger.error("Process #{pid_str} appears to be unkillable!")
-                  else
-                    Logger.info("Process #{pid_str} successfully terminated")
-                  end
-                else
-                  Logger.info("Process #{pid_str} successfully terminated with SIGTERM")
+                  {:error, reason} ->
+                    Logger.error("Failed to kill process #{info.process_pid}: #{inspect(reason)}")
                 end
               else
                 # PID was reused for a different process or different beam_run_id
-                if String.contains?(output, "grpc_server.py") do
+                if has_grpc_server do
                   Logger.warning(
-                    "PID #{pid_str} is a grpc_server process but with DIFFERENT beam_run_id. " <>
-                      "OS reused PID for new worker! Skipping kill. Command: #{String.trim(output)}"
+                    "PID #{info.process_pid} is a grpc_server process but with DIFFERENT beam_run_id. " <>
+                      "OS reused PID for new worker! Skipping kill. Command: #{String.trim(cmd)}"
                   )
                 else
                   Logger.debug(
-                    "PID #{pid_str} is not a grpc_server process, skipping: #{String.trim(output)}"
+                    "PID #{info.process_pid} is not a grpc_server process, skipping: #{String.trim(cmd)}"
                   )
                 end
               end
 
-            {_output, _} ->
-              Logger.debug("Process #{pid_str} not found, already dead")
+            {:error, _} ->
+              Logger.debug("Process #{info.process_pid} not found, already dead")
           end
 
           acc + 1
@@ -623,28 +587,27 @@ defmodule Snakepit.Pool.ProcessRegistry do
         end
       end)
 
-    # Kill processes spawned from abandoned reservations using beam_run_id
-    Enum.each(abandoned_reservations, fn {worker_id, info} ->
-      # Use the unique run ID for a safe pkill pattern
-      kill_pattern = "grpc_server.py.*--snakepit-run-id #{info.beam_run_id}"
+    # Kill processes from abandoned reservations using run_id-based cleanup
+    abandoned_killed =
+      abandoned_reservations
+      |> Enum.map(fn {worker_id, info} ->
+        Logger.warning(
+          "Found abandoned reservation #{worker_id} from run #{info.beam_run_id}. " <>
+            "Attempting cleanup..."
+        )
 
-      Logger.warning(
-        "Found abandoned reservation #{worker_id} from run #{info.beam_run_id}. " <>
-          "Attempting cleanup with pattern: #{kill_pattern}"
-      )
+        # Use ProcessKiller to find and kill processes with this run_id
+        case Snakepit.ProcessKiller.kill_by_run_id(info.beam_run_id) do
+          {:ok, count} ->
+            Logger.info("Killed #{count} processes for run #{info.beam_run_id}")
+            count
 
-      case System.cmd("pkill", ["-9", "-f", kill_pattern], stderr_to_stdout: true) do
-        {_output, 0} ->
-          Logger.info("Successfully killed processes matching pattern: #{kill_pattern}")
-
-        {_output, 1} ->
-          # Exit code 1 means no processes found, which is fine
-          Logger.debug("No processes found matching pattern: #{kill_pattern}")
-
-        {output, code} ->
-          Logger.warning("pkill returned unexpected code #{code}: #{output}")
-      end
-    end)
+          {:error, reason} ->
+            Logger.warning("Failed to cleanup run #{info.beam_run_id}: #{inspect(reason)}")
+            0
+        end
+      end)
+      |> Enum.sum()
 
     # Combine all entries to remove:
     # - Orphans from old runs (active processes to kill)
@@ -660,8 +623,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
     end)
 
     Logger.info(
-      "Orphan cleanup complete. Killed #{killed_count} processes, " <>
-        "cleaned #{length(abandoned_reservations)} abandoned reservations, " <>
+      "Orphan cleanup complete. Killed #{killed_count} orphaned processes, " <>
+        "killed #{abandoned_killed} from abandoned reservations, " <>
         "removed #{length(stale_entries)} stale entries, " <>
         "total removed: #{length(entries_to_remove)} entries."
     )
@@ -682,55 +645,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
     Logger.info("Loaded #{length(current_processes)} processes from current BEAM run")
   end
 
-  defp process_alive?(pid) when is_integer(pid) do
-    # First try kill -0 which is more reliable
-    case System.cmd("kill", ["-0", to_string(pid)], stderr_to_stdout: true) do
-      {_output, 0} ->
-        Logger.debug("Process #{pid} is alive (kill -0 succeeded)")
-        true
-
-      {output, exit_code} ->
-        Logger.debug("kill -0 for PID #{pid} failed with exit code #{exit_code}: #{output}")
-        # Double-check with ps to avoid false negatives
-        case System.cmd("ps", ["-p", to_string(pid), "-o", "pid,stat,cmd"],
-               stderr_to_stdout: true
-             ) do
-          {output, 0} ->
-            lines = String.split(output, "\n")
-            pid_str = to_string(pid)
-
-            # Look for the PID in the output, checking for zombie status
-            alive =
-              Enum.any?(lines, fn line ->
-                if String.contains?(line, pid_str) && !String.contains?(line, "PID") do
-                  # Check if it's a zombie (Z in STAT column)
-                  if String.contains?(line, "<defunct>") || String.contains?(line, " Z ") do
-                    Logger.debug("Process #{pid} is a zombie")
-                    false
-                  else
-                    true
-                  end
-                else
-                  false
-                end
-              end)
-
-            if alive do
-              Logger.debug("Process #{pid} is alive (found in ps)")
-            else
-              Logger.debug("Process #{pid} not found or is zombie")
-            end
-
-            alive
-
-          {output, exit_code} ->
-            Logger.debug("ps command failed with exit code #{exit_code}: #{output}")
-            false
-        end
-    end
-  end
-
-  defp process_alive?(_), do: false
+  # Delegate to ProcessKiller for process checking
+  defp process_alive?(pid), do: Snakepit.ProcessKiller.process_alive?(pid)
 
   # Helper function for cleanup that operates on the table
   defp do_cleanup_dead_workers(table) do
