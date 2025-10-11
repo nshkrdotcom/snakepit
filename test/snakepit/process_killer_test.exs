@@ -12,12 +12,18 @@ defmodule Snakepit.ProcessKillerTest do
     end
 
     test "detects dead process" do
-      # Start a process and let it die
-      port = Port.open({:spawn_executable, "/bin/sh"}, [:binary, args: ["-c", "exit 0"]])
+      # Spawn a process that will stay alive until we close the port
+      port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
       {:os_pid, pid} = Port.info(port, :os_pid)
 
-      # Wait for it to exit
-      Process.sleep(100)
+      # Verify it's alive
+      assert Snakepit.ProcessKiller.process_alive?(pid)
+
+      # Close the port, which kills the process
+      Port.close(port)
+
+      # Poll until process is actually dead
+      assert wait_for_death(pid, 2000), "Process should have died after Port.close"
 
       # Now it should be dead
       refute Snakepit.ProcessKiller.process_alive?(pid)
@@ -60,10 +66,18 @@ defmodule Snakepit.ProcessKillerTest do
     end
 
     test "returns ok for already-dead process" do
-      # Start and let a process die
-      port = Port.open({:spawn_executable, "/bin/sh"}, [:binary, args: ["-c", "exit 0"]])
+      # Spawn a process that will stay alive until we close the port
+      port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
       {:os_pid, pid} = Port.info(port, :os_pid)
-      Process.sleep(100)
+
+      # Verify it's alive
+      assert Snakepit.ProcessKiller.process_alive?(pid)
+
+      # Close the port, which kills the process
+      Port.close(port)
+
+      # Poll until process is actually dead
+      assert wait_for_death(pid, 2000), "Process should have died after Port.close"
 
       # Try to kill already-dead process
       assert :ok = Snakepit.ProcessKiller.kill_process(pid, :sigterm)
@@ -81,10 +95,33 @@ defmodule Snakepit.ProcessKillerTest do
       false
     else
       if Snakepit.ProcessKiller.process_alive?(pid) do
-        Process.sleep(50)
+        receive do
+        after
+          50 -> :ok
+        end
+
         wait_loop(pid, deadline)
       else
         true
+      end
+    end
+  end
+
+  defp wait_for_list_loop(run_id, deadline) do
+    if System.monotonic_time(:millisecond) >= deadline do
+      false
+    else
+      case System.cmd("pgrep", ["-f", run_id], stderr_to_stdout: true) do
+        {output, 0} when byte_size(output) > 0 ->
+          true
+
+        _ ->
+          receive do
+          after
+            50 -> :ok
+          end
+
+          wait_for_list_loop(run_id, deadline)
       end
     end
   end
@@ -154,8 +191,15 @@ defmodule Snakepit.ProcessKillerTest do
       # Verify it's running
       assert Snakepit.ProcessKiller.process_alive?(pid)
 
-      # Give it time to show up in process list
-      Process.sleep(200)
+      # Poll until process appears in process list with correct run_id
+      deadline = System.monotonic_time(:millisecond) + 5000
+
+      wait_for_process_in_list = fn ->
+        wait_for_list_loop(test_run_id, deadline)
+      end
+
+      assert wait_for_process_in_list.(),
+             "Process with run_id #{test_run_id} never appeared in process list"
 
       # Now kill by run_id
       assert {:ok, killed_count} = Snakepit.ProcessKiller.kill_by_run_id(test_run_id)
