@@ -1,0 +1,14 @@
+<svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="newGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4b8bbe; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#306998; stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="starGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffd43b; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ffe873; stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="35" fill="url(#newGrad)" stroke="#306998" stroke-width="3"/>
+  <polygon points="50,25 55,40 70,42 60,52 62,67 50,60 38,67 40,52 30,42 45,40" fill="url(#starGrad)"/>
+</svg>

@@ -1,0 +1,16 @@
+<svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="wave1Grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#4b8bbe; stop-opacity:0.8" />
+      <stop offset="50%" style="stop-color:#306998; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#4b8bbe; stop-opacity:0.8" />
+    </linearGradient>
+    <linearGradient id="wave2Grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6e4a7e; stop-opacity:0.7" />
+      <stop offset="50%" style="stop-color:#a279b5; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#6e4a7e; stop-opacity:0.7" />
+    </linearGradient>
+  </defs>
+  <path d="M 0,40 Q 25,25 50,40 T 100,40 L 100,60 Q 75,75 50,60 T 0,60 Z" fill="url(#wave1Grad)"/>
+  <path d="M 0,55 Q 25,40 50,55 T 100,55 L 100,75 Q 75,90 50,75 T 0,75 Z" fill="url(#wave2Grad)"/>
+</svg>

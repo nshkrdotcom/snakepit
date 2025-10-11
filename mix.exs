@@ -1,20 +1,25 @@
 defmodule Snakepit.MixProject do
   use Mix.Project
 
+  @version "0.5.0"
+  @source_url "https://github.com/nshkrdotcom/snakepit"
+
   def project do
     [
       app: :snakepit,
-      version: "0.5.0",
+      version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
-      description:
-        "High-performance pooler and session manager for external language integrations",
+      description: description(),
       package: package(),
       deps: deps(),
       dialyzer: dialyzer(),
       docs: docs(),
-      aliases: aliases()
+      aliases: aliases(),
+      name: "Snakepit",
+      source_url: @source_url,
+      homepage_url: @source_url
     ]
   end
 
@@ -39,13 +44,27 @@ defmodule Snakepit.MixProject do
     ]
   end
 
+  defp description do
+    """
+    High-performance pooler and session manager for external language integrations.
+    Supports Python, Node.js, Ruby, and more with gRPC streaming, session management,
+    and production-ready process cleanup.
+    """
+  end
+
   defp package do
     [
-      description:
-        "High-performance pooler and session manager for external language integrations",
+      name: "snakepit",
+      description: description(),
       licenses: ["MIT"],
-      maintainers: ["NSHkr <ZeroTrust@NSHkr.com>"],
-      links: %{"GitHub" => "https://github.com/nshkrdotcom/snakepit"},
+      maintainers: ["nshkrdotcom"],
+      links: %{
+        "GitHub" => @source_url,
+        "Online documentation" => "https://hexdocs.pm/snakepit",
+        "Architecture Guide" => "https://hexdocs.pm/snakepit/ARCHITECTURE.html",
+        "gRPC Streaming Guide" => "https://hexdocs.pm/snakepit/README_GRPC.html",
+        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
+      },
       files: [
         "lib",
         "priv/proto",
@@ -106,6 +125,12 @@ defmodule Snakepit.MixProject do
   defp docs do
     [
       main: "readme",
+      name: "Snakepit",
+      source_ref: "v#{@version}",
+      source_url: @source_url,
+      homepage_url: @source_url,
+      assets: %{"assets" => "assets"},
+      logo: "assets/snakepit-logo.svg",
       extras: [
         # Main documentation
         "README.md",
@@ -139,14 +164,83 @@ defmodule Snakepit.MixProject do
          title: "ADR-001: Worker Starter Pattern"}
       ],
       groups_for_extras: [
-        "Getting Started": ~r/guides\//,
-        Architecture: ~r/(ARCHITECTURE|DIAGS)/,
-        Features: ~r/README_(GRPC|BIDIRECTIONAL|PROCESS|UNIFIED|TESTING)/,
-        Reference: ~r/docs\/(GRPC_QUICK|TEST_AND|EXAMPLE_TEST|ECOSYSTEM|DSPEX)/,
-        Advanced: ~r/docs\/(code-standards|architecture)/
+        "Getting Started": [
+          "guides/INSTALLATION.md"
+        ],
+        Guides: [
+          "README.md"
+        ],
+        Features: [
+          "README_GRPC.md",
+          "README_BIDIRECTIONAL_TOOL_BRIDGE.md",
+          "README_PROCESS_MANAGEMENT.md",
+          "README_UNIFIED_GRPC_BRIDGE.md"
+        ],
+        Architecture: [
+          "ARCHITECTURE.md",
+          "DIAGS.md",
+          "DIAGS2.md"
+        ],
+        Testing: [
+          "README_TESTING.md",
+          "docs/TEST_AND_EXAMPLE_STATUS.md",
+          "docs/EXAMPLE_TEST_RESULTS.md",
+          "docs/code-standards/test-architecture-supertester.md"
+        ],
+        Reference: [
+          "docs/GRPC_QUICK_REFERENCE.md",
+          "docs/ECOSYSTEM_ARCHITECTURE.md",
+          "docs/DSPEX_PRODUCTION_STRATEGY.md"
+        ],
+        Advanced: [
+          "docs/architecture/adr-001-worker-starter-supervision-pattern.md"
+        ],
+        "Release Notes": [
+          "CHANGELOG.md"
+        ]
       ],
-      assets: %{"assets" => "assets"},
-      logo: "assets/snakepit-logo.svg",
+      groups_for_modules: [
+        "Core API": [
+          Snakepit,
+          Snakepit.Adapter,
+          Snakepit.SessionHelpers
+        ],
+        "Pool Management": [
+          Snakepit.Pool,
+          Snakepit.Pool.WorkerSupervisor,
+          Snakepit.Pool.Worker.Starter
+        ],
+        Workers: [
+          Snakepit.GRPCWorker
+        ],
+        "Session & State": [
+          Snakepit.Bridge.SessionStore,
+          Snakepit.Bridge.Session
+        ],
+        Adapters: [
+          Snakepit.Adapters.GRPCPython
+        ],
+        "Process Management": [
+          Snakepit.Pool.ProcessRegistry,
+          Snakepit.Pool.ApplicationCleanup,
+          Snakepit.ProcessKiller
+        ],
+        Registry: [
+          Snakepit.Pool.Registry,
+          Snakepit.Pool.Worker.StarterRegistry
+        ],
+        "gRPC & Bridge": [
+          Snakepit.GRPC.BridgeServer,
+          Snakepit.GRPC.Client,
+          Snakepit.GRPC.Endpoint,
+          Snakepit.Bridge.ToolRegistry
+        ],
+        Utilities: [
+          Snakepit.Telemetry,
+          Snakepit.Utils,
+          Snakepit.RunID
+        ]
+      ],
       before_closing_head_tag: &docs_before_closing_head_tag/1,
       before_closing_body_tag: &docs_before_closing_body_tag/1
     ]

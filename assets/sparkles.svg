@@ -1,0 +1,11 @@
+<svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sparkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffd43b; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ffe873; stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <polygon points="50,15 55,45 85,50 55,55 50,85 45,55 15,50 45,45" fill="url(#sparkGrad)"/>
+  <polygon points="75,20 77,30 87,32 77,34 75,44 73,34 63,32 73,30" fill="#a279b5"/>
+  <polygon points="25,60 27,70 37,72 27,74 25,84 23,74 13,72 23,70" fill="#4b8bbe"/>
+</svg>

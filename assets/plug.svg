@@ -1,0 +1,13 @@
+<svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="plugGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#a279b5; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#6e4a7e; stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <line x1="35" y1="15" x2="35" y2="35" stroke="url(#plugGrad)" stroke-width="6" stroke-linecap="round"/>
+  <line x1="65" y1="15" x2="65" y2="35" stroke="url(#plugGrad)" stroke-width="6" stroke-linecap="round"/>
+  <rect x="25" y="35" width="50" height="30" rx="5" fill="url(#plugGrad)" stroke="#4a3357" stroke-width="2"/>
+  <rect x="40" y="65" width="20" height="15" fill="#4a3357"/>
+  <circle cx="50" cy="50" r="6" fill="#ffd43b"/>
+</svg>
