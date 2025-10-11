@@ -110,16 +110,21 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
     # Application is already started by test_helper.exs
     beam_run_id = ProcessRegistry.get_beam_run_id()
 
-    # Poll until workers are started
+    # Poll until workers are BOTH started AND registered
+    # With synchronous registration, this ensures happens-before relationship
     assert_eventually(
       fn ->
-        count_python_processes(beam_run_id) >= 2
+        python_count = count_python_processes(beam_run_id)
+        registered_count = length(ProcessRegistry.get_all_process_pids())
+
+        # Both conditions must be true: processes exist AND are registered
+        python_count >= 2 and registered_count >= 2
       end,
       timeout: 10_000,
       interval: 100
     )
 
-    # Get all Python processes and verify they're all registered
+    # Now do the actual verification - get snapshot of both states
     python_pids =
       case System.cmd("pgrep", ["-f", "grpc_server.py.*--snakepit-run-id #{beam_run_id}"],
              stderr_to_stdout: true
@@ -153,6 +158,8 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
            Found #{length(unregistered_pids)} unregistered Python processes!
            These are orphans not tracked by ProcessRegistry.
            Unregistered PIDs: #{inspect(unregistered_pids)}
+           Python PIDs: #{inspect(python_pids)}
+           Registered PIDs: #{inspect(registered_pids)}
            """
   end
 
