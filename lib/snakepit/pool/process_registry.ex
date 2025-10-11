@@ -288,6 +288,27 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @impl true
+  def handle_cast({:unregister, worker_id}, state) do
+    case :ets.lookup(state.table, worker_id) do
+      [{^worker_id, %{process_pid: process_pid}}] ->
+        :ets.delete(state.table, worker_id)
+        :dets.delete(state.dets_table, worker_id)
+        Logger.info("🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}")
+
+      [] ->
+        # Also check DETS in case ETS was cleared
+        :dets.delete(state.dets_table, worker_id)
+        # Defensive check: Only log at debug level for unknown workers
+        # This is expected during certain race conditions and shouldn't be a warning
+        Logger.debug(
+          "Attempted to unregister unknown worker #{worker_id} - ignoring (worker may have failed to register)"
+        )
+    end
+
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_call(
         {:activate_worker, worker_id, elixir_pid, process_pid, fingerprint},
         _from,
@@ -317,27 +338,6 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
     # Reply :ok to unblock the caller - worker is now fully registered
     {:reply, :ok, state}
-  end
-
-  @impl true
-  def handle_cast({:unregister, worker_id}, state) do
-    case :ets.lookup(state.table, worker_id) do
-      [{^worker_id, %{process_pid: process_pid}}] ->
-        :ets.delete(state.table, worker_id)
-        :dets.delete(state.dets_table, worker_id)
-        Logger.info("🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}")
-
-      [] ->
-        # Also check DETS in case ETS was cleared
-        :dets.delete(state.dets_table, worker_id)
-        # Defensive check: Only log at debug level for unknown workers
-        # This is expected during certain race conditions and shouldn't be a warning
-        Logger.debug(
-          "Attempted to unregister unknown worker #{worker_id} - ignoring (worker may have failed to register)"
-        )
-    end
-
-    {:noreply, state}
   end
 
   @impl true
