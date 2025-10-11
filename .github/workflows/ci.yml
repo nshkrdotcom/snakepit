@@ -24,16 +24,29 @@ jobs:
       with:
         elixir-version: ${{ matrix.elixir }}
         otp-version: ${{ matrix.otp }}
-        
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
     - name: Restore dependencies cache
       uses: actions/cache@v4
       with:
-        path: deps
-        key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-        restore-keys: ${{ runner.os }}-mix-
+        path: |
+          deps
+          _build
+          ~/.cache/pip
+        key: ${{ runner.os }}-mix-pip-${{ hashFiles('**/mix.lock', 'priv/python/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-mix-pip-
+          ${{ runner.os }}-mix-
 
     - name: Install dependencies
       run: mix deps.get
+
+    - name: Install Python dependencies
+      run: pip install -r priv/python/requirements.txt
 
     - name: Check formatting
       run: mix format --check-formatted
