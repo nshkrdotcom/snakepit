@@ -10,7 +10,7 @@
 [![Hex Version](https://img.shields.io/hexpm/v/snakepit.svg)](https://hex.pm/packages/snakepit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-## <img src="assets/rocket.svg" alt="rocket" width="24" height="24" style="vertical-align: text-bottom;"/> What is Snakepit?
+## <img src="assets/rocket.svg" alt="rocket" width="24" height="24" style="vertical-align: middle;"/> What is Snakepit?
 
 Snakepit is a battle-tested Elixir library that provides a robust pooling system for managing external processes (Python, Node.js, Ruby, R, etc.). Born from the need for reliable ML/AI integrations, it offers:
 
