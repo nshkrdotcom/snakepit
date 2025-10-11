@@ -1,4 +1,4 @@
-# Snakepit <span><img src="assets/snakepit-icon.svg" alt="snakepit" width="48" height="48"></span>
+# Snakepit <div><img src="assets/snakepit-icon.svg" alt="snakepit" width="48" height="48"></div>
 
 <div align="center">
   <img src="assets/snakepit-logo.svg" alt="Snakepit Logo" width="200" height="200">
