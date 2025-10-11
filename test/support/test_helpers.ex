@@ -75,16 +75,8 @@ defmodule Snakepit.TestHelpers do
     assert_receive {:stream_end, ^stream_ref}, 1_000
   end
 
-  @doc """
-  Monitor a GenServer and assert it restarts within timeout.
-  """
-  def assert_process_restarted(monitor_ref, original_pid, timeout \\ 5_000) do
-    assert_receive {:DOWN, ^monitor_ref, :process, ^original_pid, _reason}, timeout
-    # Give supervisor time to restart
-    Process.sleep(100)
-    # Process should be registered again
-    assert Process.whereis(original_pid) != nil
-  end
+  # Note: Removed assert_process_restarted - was unused and had bugs
+  # Use Supertester.OTPHelpers.wait_for_process_restart/3 instead
 
   @doc """
   Poll a condition until it's true or timeout occurs.

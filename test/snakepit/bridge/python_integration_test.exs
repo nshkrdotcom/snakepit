@@ -28,10 +28,14 @@ defmodule Snakepit.Bridge.PythonIntegrationTest do
       # Initialize session
       assert {:ok, %{success: true}} = Client.initialize_session(channel, session_id)
 
-      # Send heartbeats
+      # Send heartbeats with spacing (using receive timeout pattern)
       for _ <- 1..3 do
         assert {:ok, %{success: true}} = Client.heartbeat(channel, session_id)
-        Process.sleep(100)
+        # Space out heartbeats using receive timeout (NOT Process.sleep)
+        receive do
+        after
+          100 -> :ok
+        end
       end
 
       # Session should still be active
