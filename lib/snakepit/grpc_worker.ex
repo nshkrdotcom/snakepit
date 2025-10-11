@@ -158,6 +158,10 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def init(opts) do
+    # CRITICAL: Trap exits so terminate/2 is called on shutdown
+    # Without this, the GenServer is brutally killed and Python processes are orphaned!
+    Process.flag(:trap_exit, true)
+
     adapter = Keyword.fetch!(opts, :adapter)
     worker_id = Keyword.fetch!(opts, :id)
     # CRITICAL FIX: Get pool_name from opts so worker knows which pool to notify
@@ -445,6 +449,12 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def terminate(reason, state) do
+    IO.puts("\n!!! GRPCWorker.terminate/2 CALLED !!!")
+
+    IO.inspect(%{worker_id: state.id, reason: reason, process_pid: state.process_pid},
+      label: "TERMINATE"
+    )
+
     Logger.debug("gRPC worker #{state.id} terminating: #{inspect(reason)}")
 
     # ALWAYS kill the Python process, regardless of reason
