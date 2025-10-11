@@ -56,13 +56,16 @@ class TestElixirToolsProperty(unittest.TestCase):
         session_id = "test_session"
 
         # Mock the RPC response
+        # Note: tools is now a repeated field (list), not a map
         tool_spec = ToolSpec(
             name="test_tool",
             description="A test tool",
-            parameters={"arg1": "string"}
+            parameters=[],  # Empty list of ParameterSpec, not dict
+            metadata={},
+            supports_streaming=False
         )
         response = GetExposedElixirToolsResponse()
-        response.tools["test_tool"].CopyFrom(tool_spec)
+        response.tools.append(tool_spec)  # Append to list, not dict access
 
         stub.GetExposedElixirTools.return_value = response
 
@@ -121,9 +124,15 @@ class TestCallElixirTool(unittest.TestCase):
         stub = Mock()
 
         # Mock tools response
-        tool_spec = ToolSpec(name="add", description="Add numbers")
+        tool_spec = ToolSpec(
+            name="add",
+            description="Add numbers",
+            parameters=[],
+            metadata={},
+            supports_streaming=False
+        )
         tools_response = GetExposedElixirToolsResponse()
-        tools_response.tools["add"].CopyFrom(tool_spec)
+        tools_response.tools.append(tool_spec)  # Append to list
         stub.GetExposedElixirTools.return_value = tools_response
 
         # Mock tool execution response
@@ -166,15 +175,21 @@ class TestCallElixirTool(unittest.TestCase):
         stub = Mock()
 
         # Mock tools
-        tool_spec = ToolSpec(name="failing_tool")
+        tool_spec = ToolSpec(
+            name="failing_tool",
+            description="",
+            parameters=[],
+            metadata={},
+            supports_streaming=False
+        )
         tools_response = GetExposedElixirToolsResponse()
-        tools_response.tools["failing_tool"].CopyFrom(tool_spec)
+        tools_response.tools.append(tool_spec)  # Append to list
         stub.GetExposedElixirTools.return_value = tools_response
 
         # Mock failed execution
         exec_response = ExecuteElixirToolResponse(
             success=False,
-            error="Tool execution failed"
+            error_message="Tool execution failed"  # Fixed field name
         )
         stub.ExecuteElixirTool.return_value = exec_response
 

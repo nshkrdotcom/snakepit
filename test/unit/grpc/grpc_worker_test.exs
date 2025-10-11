@@ -67,13 +67,19 @@ defmodule Snakepit.GRPCWorkerTest do
     end
 
     test "worker handles command timeout", %{worker: worker} do
-      # Execute slow operation with short timeout
-      # Note: The timeout is passed in the call, not as the 4th argument
-      result = GenServer.call(worker, {:execute, "slow_operation", %{"delay" => 500}, 100})
+      # Execute slow operation with short GenServer.call timeout
+      # The operation takes 200ms but we only wait 100ms for the GenServer call
+      assert catch_exit(
+               GenServer.call(worker, {:execute, "slow_operation", %{"delay" => 200}, 5_000}, 100)
+             ) ==
+               {:timeout,
+                {GenServer, :call,
+                 [worker, {:execute, "slow_operation", %{"delay" => 200}, 5_000}, 100]}}
 
-      # The mock adapter doesn't actually respect the timeout, it completes normally
-      # So we should expect success here with our mock
-      assert {:ok, _} = result
+      # Worker should still be alive and responsive after timeout
+      assert Process.alive?(worker)
+      {:ok, result} = GenServer.call(worker, {:execute, "ping", %{}, 5_000}, 5_000)
+      assert result["status"] == "pong"
     end
 
     test "worker survives adapter errors", %{worker: worker} do

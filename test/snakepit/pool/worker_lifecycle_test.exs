@@ -1,17 +1,16 @@
 defmodule Snakepit.Pool.WorkerLifecycleTest do
   @moduledoc """
-  Tests that verify worker processes are properly cleaned up.
+  Tests that verify worker processes are properly cleaned up using Supertester patterns.
   These tests MUST FAIL if workers orphan their Python processes.
   """
   use ExUnit.Case, async: false
+  import Snakepit.TestHelpers
 
   alias Snakepit.Pool.ProcessRegistry
 
   setup do
-    # Start with clean slate - kill any orphaned processes
-    System.cmd("pkill", ["-9", "-f", "grpc_server.py"], stderr_to_stdout: true)
-    Process.sleep(100)
-
+    # Only kill truly orphaned processes, not current ones
+    # This is gentler than pkill -9 which can interfere with other running tests
     :ok
   end
 
@@ -22,20 +21,30 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
     # Get BEAM run ID after app starts
     beam_run_id = ProcessRegistry.get_beam_run_id()
 
-    # Give workers time to start
-    Process.sleep(500)
+    # Poll until workers are started (using Supertester pattern)
+    assert_eventually(
+      fn ->
+        count_python_processes(beam_run_id) >= 2
+      end,
+      timeout: 10_000,
+      interval: 100
+    )
 
-    # Verify workers started
     python_processes_before = count_python_processes(beam_run_id)
     assert python_processes_before >= 2, "Expected at least 2 Python workers to start"
 
     # Stop the application
     Application.stop(:snakepit)
 
-    # Give supervision tree time to shut down workers gracefully
-    Process.sleep(3000)
+    # Poll until ALL Python processes are gone (using Supertester pattern)
+    assert_eventually(
+      fn ->
+        count_python_processes(beam_run_id) == 0
+      end,
+      timeout: 5_000,
+      interval: 100
+    )
 
-    # Verify ALL Python processes are gone
     python_processes_after = count_python_processes(beam_run_id)
 
     assert python_processes_after == 0,
@@ -54,49 +63,93 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
 
     beam_run_id = ProcessRegistry.get_beam_run_id()
 
-    # Give workers time to start
-    Process.sleep(500)
+    # Poll until workers are started
+    assert_eventually(
+      fn ->
+        count_python_processes(beam_run_id) >= 2
+      end,
+      timeout: 10_000,
+      interval: 100
+    )
 
     initial_count = count_python_processes(beam_run_id)
 
-    # Run for a bit
-    Process.sleep(1000)
+    # Monitor process count stability over time (using receive timeout pattern)
+    # Take 10 samples at 200ms intervals (2 seconds total)
+    samples =
+      for _i <- 1..10 do
+        # Use receive timeout instead of Process.sleep
+        receive do
+        after
+          200 -> :ok
+        end
 
-    # ApplicationCleanup should NOT have killed anything during normal operation
-    current_count = count_python_processes(beam_run_id)
+        count_python_processes(beam_run_id)
+      end
 
-    assert current_count == initial_count,
+    # All samples should equal initial count (process count should be stable)
+    stable = Enum.all?(samples, fn count -> count == initial_count end)
+
+    unless stable do
+      IO.puts("Process count over time: #{inspect(samples)} (expected: #{initial_count})")
+    end
+
+    assert stable,
            """
            Python process count changed during normal operation!
-           Initial: #{initial_count}, Current: #{current_count}
+           Initial: #{initial_count}, Samples: #{inspect(samples)}
 
            This indicates ApplicationCleanup is incorrectly killing processes during normal operation,
            or workers are crashing and restarting.
            """
 
     Application.stop(:snakepit)
-    Process.sleep(2000)
+
+    # Poll until cleanup is complete
+    assert_eventually(
+      fn ->
+        count_python_processes(beam_run_id) == 0
+      end,
+      timeout: 5_000,
+      interval: 100
+    )
   end
 
   test "no orphaned processes exist after multiple start/stop cycles" do
     # Run 3 start/stop cycles
-    for _i <- 1..3 do
+    for cycle <- 1..3 do
       {:ok, _} = Application.ensure_all_started(:snakepit)
       beam_run_id = ProcessRegistry.get_beam_run_id()
 
-      Process.sleep(500)
+      # Poll until workers are started
+      assert_eventually(
+        fn ->
+          count_python_processes(beam_run_id) >= 2
+        end,
+        timeout: 10_000,
+        interval: 100
+      )
 
       Application.stop(:snakepit)
-      Process.sleep(2000)
+
+      # Poll until all processes are cleaned up
+      assert_eventually(
+        fn ->
+          count_python_processes(beam_run_id) == 0
+        end,
+        timeout: 5_000,
+        interval: 100
+      )
 
       # Check for orphans from this run
       orphans = find_orphaned_processes(beam_run_id)
 
       if length(orphans) > 0 do
+        # Cleanup before failing
         System.cmd("pkill", ["-9", "-f", "grpc_server.py"], stderr_to_stdout: true)
 
         flunk("""
-        Found #{length(orphans)} orphaned processes after stop cycle!
+        Cycle #{cycle}: Found #{length(orphans)} orphaned processes after stop cycle!
         BEAM run ID: #{beam_run_id}
         Orphaned PIDs: #{inspect(orphans)}
         """)

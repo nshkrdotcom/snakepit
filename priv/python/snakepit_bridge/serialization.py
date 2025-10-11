@@ -59,13 +59,25 @@ class TypeSerializer:
             return TypeSerializer._decode_with_binary(any_msg, binary_data)
         else:
             # Standard JSON decoding
-            # Extract type from URL
-            var_type = any_msg.type_url.split('.')[-1]
-            
+            # Extract type from URL - handle various formats:
+            # - "type.googleapis.com/snakepit.float" -> "float"
+            # - "dspex.variables/float" -> "float"
+            # - "type.googleapis.com/google.protobuf.StringValue" -> "StringValue"
+            type_url = any_msg.type_url
+
+            # First split by / to get the type part
+            if '/' in type_url:
+                type_part = type_url.split('/')[-1]  # e.g., "snakepit.float" or "float"
+            else:
+                type_part = type_url  # No slash, use as-is
+
+            # Then split by . to get the final type
+            var_type = type_part.split('.')[-1]  # e.g., "float"
+
             # Decode JSON
             json_str = any_msg.value.decode('utf-8')
             value = json.loads(json_str)
-            
+
             # Convert to appropriate Python type
             return TypeSerializer._deserialize_value(value, var_type)
     
