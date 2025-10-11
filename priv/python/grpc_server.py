@@ -286,16 +286,25 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                 logger.warning(f"Tool '{request.tool_name}' returned a generator but was called via non-streaming ExecuteTool. Returning empty result.")
                 result_data = {"error": "Streaming tool called on non-streaming endpoint."}
             
-            # CORRECT: Use the robust TypeValidator and TypeSerializer for ALL types.
-            # This removes the need for custom `snakepit.map` logic.
+            # Use TypeSerializer to encode the result
             response = pb2.ExecuteToolResponse(success=True)
-            from snakepit_bridge.types import TypeValidator
-            
-            # Infer the type of the result
-            result_type = TypeValidator.infer_type(result_data)
-            
+
+            # Infer the type of the result (simple type inference for now)
+            if isinstance(result_data, dict):
+                result_type = "map"
+            elif isinstance(result_data, str):
+                result_type = "string"
+            elif isinstance(result_data, (int, float)):
+                result_type = "float"
+            elif isinstance(result_data, bool):
+                result_type = "boolean"
+            elif isinstance(result_data, list):
+                result_type = "list"
+            else:
+                result_type = "string"  # Default fallback
+
             # Use the centralized serializer to encode the result correctly
-            any_msg, binary_data = TypeSerializer.encode_any(result_data, result_type.value)
+            any_msg, binary_data = TypeSerializer.encode_any(result_data, result_type)
             
             # The result from encode_any is already a protobuf Any message, so we just assign it
             response.result.CopyFrom(any_msg)

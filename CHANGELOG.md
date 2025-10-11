@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-10-10
+
+### Added
+- **Test Infrastructure Improvements**
+  - Added comprehensive Supertester refactoring plan (SUPERTESTER_REFACTOR_PLAN.md)
+  - Phase 1 foundation updates complete with TestableGenServer support
+  - New `assert_eventually` helper for polling conditions without Process.sleep
+  - Enhanced test documentation and baseline establishment
+
+- **Python Cleanup & Testing**
+  - Created Python test infrastructure with `test_python.sh` script
+  - Added comprehensive SessionContext test suite (15 tests)
+  - Created Elixir integration tests for Python SessionContext (9 tests)
+  - Python cleanup summary documentation (PYTHON_CLEANUP_SUMMARY.md)
+
+- **Documentation**
+  - Phase 1 completion report with detailed test results
+  - Python cleanup and testing infrastructure summary
+  - Enhanced test planning and refactoring documentation
+
+### Changed
+- **Code Cleanup**
+  - Removed ~1,500 LOC of dead Python code
+  - Deleted obsolete backup files and unused modules
+  - Streamlined Python SessionContext from 845 to 169 lines
+  - Cleaned up test infrastructure and removed duplicate code
+
+- **Test Coverage**
+  - Increased total test coverage from 27 to 51 tests (+89%)
+  - 37 Elixir tests passing (27 + 9 new integration tests + 1 new helper test)
+  - 15 Python SessionContext tests passing
+
+### Removed
+- **DSPy Integration** (as announced in v0.4.3)
+  - Removed deprecated `dspy_integration.py` module (469 lines)
+  - Removed deprecated `types.py` with VariableType enum (227 lines)
+  - Removed `session_context.py.backup` (845 lines)
+  - Removed obsolete `test_server.py` (70 lines)
+  - Removed unused CLI directory referencing non-existent modules
+  - All `__pycache__/` directories cleaned up
+
+### Fixed
+- Isolation level configuration documented (staying with :basic until test refactoring)
+- Test infrastructure conflicts between manual cleanup and Supertester automatic cleanup resolved
+- Enhanced debugging capabilities for test failures
+
+### Notes
+- **Breaking Changes**: DSPy integration fully removed (deprecated in v0.4.3)
+- Users must migrate to DSPex for DSPy functionality (see v0.4.3 migration guide)
+- Test suite reliability improved with better synchronization patterns
+- Foundation laid for full Supertester conformance in future releases
+
+---
+
 ## [0.4.3] - 2025-10-07
 
 ### Deprecated
@@ -274,6 +328,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
+[0.5.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.5.0
+[0.4.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.3
 [0.4.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.2
 [0.4.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.1
 [0.4.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.0

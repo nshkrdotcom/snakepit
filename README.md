@@ -43,11 +43,11 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 
-## ⚠️ Deprecation Notice (v0.4.3)
+## ⚠️ Breaking Changes (v0.5.0)
 
-### DSPy Integration Deprecated
+### DSPy Integration Removed
 
-The DSPy-specific integration (`snakepit_bridge.dspy_integration`) is **deprecated** as of v0.4.3 and will be removed in v0.5.0.
+The DSPy-specific integration (`snakepit_bridge.dspy_integration`) has been **removed** in v0.5.0 (deprecated in v0.4.3).
 
 **Why?** Following clean architecture principles:
 - Snakepit is a **generic** Python bridge (like JDBC for databases)
@@ -85,7 +85,7 @@ For **non-DSPex users**, if you're using these classes directly:
 
 **Timeline**
 - **v0.4.3** (Oct 2025): Deprecation warnings added, code still works
-- **v0.5.0** (Q1 2026): DSPy integration removed from Snakepit
+- **v0.5.0** (Oct 2025): DSPy integration removed from Snakepit ✅
 
 **Documentation**
 - [Migration Guide](https://github.com/nshkrdotcom/dspex/blob/main/docs/architecture_review_20251007/04_DECOUPLING_PLAN.md)
@@ -95,24 +95,33 @@ For **non-DSPex users**, if you're using these classes directly:
 
 ---
 
-## 🆕 What's New in v0.4.3
+## 🆕 What's New in v0.5.0
 
-### Deprecated
-- **DSPy Integration** (`snakepit_bridge.dspy_integration`)
-  - Deprecated in favor of DSPex-native integration
-  - Will be removed in v0.5.0
-  - See deprecation notice above for migration path
+### Breaking Changes
+- **DSPy Integration Removed** - As announced in v0.4.3
+  - Removed deprecated `dspy_integration.py` module (469 lines)
+  - Removed deprecated `types.py` with VariableType enum (227 lines)
+  - Users must migrate to DSPex for DSPy functionality
+  - See migration guide in deprecation notice above
+
+### Test Infrastructure & Quality
+- **Comprehensive test improvements**
+  - Added Supertester refactoring plan and Phase 1 foundation
+  - New `assert_eventually` helper for deterministic async testing
+  - Increased test coverage from 27 to 51 tests (+89%)
+  - 37 Elixir tests + 15 Python tests passing
+
+### Code Cleanup
+- **Removed ~1,500 LOC of dead code**
+  - Streamlined Python SessionContext from 845 to 169 lines
+  - Deleted obsolete backup files and unused modules
+  - Cleaned up test infrastructure
+  - Created Python test infrastructure with `test_python.sh`
 
 ### Documentation
-- Added comprehensive deprecation warnings
-- Updated `VariableAwareMixin` to emphasize generic applicability
-- Added migration guide for DSPex users
-- Clarified architectural boundaries (Snakepit = infrastructure, DSPex = domain)
-
-### Notes
-- **No breaking changes** - existing code continues to work with warnings
-- Core Snakepit functionality unaffected
-- Non-DSPy users unaffected
+- Phase 1 completion report with detailed test results
+- Python cleanup and testing infrastructure summary
+- Enhanced test planning documentation
 
 ---
 
@@ -222,7 +231,7 @@ For **non-DSPex users**, if you're using these classes directly:
 # In your mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.4.1"}
+    {:snakepit, "~> 0.5.0"}
   ]
 end
 
@@ -257,7 +266,7 @@ end)
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.4.1"}
+    {:snakepit, "~> 0.5.0"}
   ]
 end
 ```
