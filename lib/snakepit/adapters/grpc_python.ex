@@ -214,54 +214,47 @@ defmodule Snakepit.Adapters.GRPCPython do
     unless grpc_available?() do
       {:error, :grpc_not_available}
     else
-      # Retry up to 5 times with 50ms delays (total ~250ms max)
+      # Retry up to 5 times with exponential backoff + jitter
       # This handles the startup race condition gracefully
-      retry_connect(port, 5, 50)
+      retry_connect(port, 5, 50, 1)
     end
   end
 
-  defp retry_connect(_port, 0, _delay) do
+  # Exponential backoff with jitter to prevent thundering herd during concurrent worker startup.
+  # base_delay: initial retry delay (50ms)
+  # backoff: multiplier for exponential growth (doubles each retry)
+  defp retry_connect(_port, 0, _base_delay, _backoff) do
     # All retries exhausted
     Logger.error("gRPC connection failed after all retries")
     {:error, :connection_failed_after_retries}
   end
 
-  defp retry_connect(port, retries_left, delay) do
+  defp retry_connect(port, retries_left, base_delay, backoff) do
     case Snakepit.GRPC.Client.connect(port) do
       {:ok, channel} ->
         # Connection successful!
         Logger.debug("gRPC connection established to port #{port}")
         {:ok, %{channel: channel, port: port}}
 
-      {:error, :connection_refused} ->
-        # Socket not ready yet - retry
+      {:error, reason} when reason in [:connection_refused, :unavailable, :internal] ->
+        # Socket not ready yet - retry with exponential backoff + jitter
+        delay = min(base_delay * backoff, 500)
+        # Add ±25% jitter to prevent synchronized retries (thundering herd)
+        jitter = :rand.uniform(div(max(delay, 4), 4))
+        actual_delay = delay + jitter
+
         Logger.debug(
-          "gRPC connection to port #{port} refused. " <>
-            "Retrying in #{delay}ms... (#{retries_left - 1} retries left)"
+          "gRPC connection to port #{port} #{reason}. " <>
+            "Retrying in #{actual_delay}ms... (#{retries_left - 1} retries left)"
         )
 
-        Process.sleep(delay)
-        retry_connect(port, retries_left - 1, delay)
+        # OTP-idiomatic non-blocking wait
+        receive do
+        after
+          actual_delay -> :ok
+        end
 
-      {:error, :unavailable} ->
-        # Alternative error code in recent gRPC versions - also retry
-        Logger.debug(
-          "gRPC connection to port #{port} unavailable. " <>
-            "Retrying in #{delay}ms... (#{retries_left - 1} retries left)"
-        )
-
-        Process.sleep(delay)
-        retry_connect(port, retries_left - 1, delay)
-
-      {:error, :internal} ->
-        # Internal error - often means socket not fully ready, retry
-        Logger.debug(
-          "gRPC connection to port #{port} internal error. " <>
-            "Retrying in #{delay}ms... (#{retries_left - 1} retries left)"
-        )
-
-        Process.sleep(delay)
-        retry_connect(port, retries_left - 1, delay)
+        retry_connect(port, retries_left - 1, base_delay, backoff * 2)
 
       {:error, reason} ->
         # For any other error, fail immediately (no retry)

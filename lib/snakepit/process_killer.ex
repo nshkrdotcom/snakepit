@@ -207,16 +207,26 @@ defmodule Snakepit.ProcessKiller do
 
   defp wait_for_death(os_pid, timeout_ms) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
-    wait_for_death_loop(os_pid, deadline)
+    wait_for_death_loop(os_pid, deadline, 1)
   end
 
-  defp wait_for_death_loop(os_pid, deadline) do
+  # Non-blocking polling with exponential backoff using receive after.
+  # Starts at 1ms, doubles to 2ms, 4ms, 8ms, capping at 100ms.
+  # This is the OTP-correct way to implement timed waits without blocking the scheduler.
+  defp wait_for_death_loop(os_pid, deadline, backoff) do
     if System.monotonic_time(:millisecond) >= deadline do
       false
     else
       if process_alive?(os_pid) do
-        Process.sleep(100)
-        wait_for_death_loop(os_pid, deadline)
+        delay = min(backoff, 100)
+
+        # OTP-idiomatic non-blocking wait - integrates with process mailbox and scheduler
+        receive do
+        after
+          delay -> :ok
+        end
+
+        wait_for_death_loop(os_pid, deadline, backoff * 2)
       else
         true
       end

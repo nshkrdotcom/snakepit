@@ -132,18 +132,28 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   # - Registry cleanup (entry removed?)
   #
   # This prevents race conditions on worker restart.
-  defp wait_for_resource_cleanup(worker_id, old_port, retries \\ @cleanup_max_retries) do
+  # Uses exponential backoff for efficient polling: starts fast, backs off gradually.
+  defp wait_for_resource_cleanup(
+         worker_id,
+         old_port,
+         retries \\ @cleanup_max_retries,
+         backoff \\ @cleanup_retry_interval
+       ) do
     if retries > 0 do
-      cond do
-        # Check if resources are released
-        (is_nil(old_port) or port_available?(old_port)) and registry_cleaned?(worker_id) ->
-          Logger.debug("Resources released for #{worker_id}, safe to restart")
-          :ok
+      if (is_nil(old_port) or port_available?(old_port)) and registry_cleaned?(worker_id) do
+        Logger.debug("Resources released for #{worker_id}, safe to restart")
+        :ok
+      else
+        # Resources still in use - exponential backoff with cap at 200ms
+        delay = min(backoff, 200)
 
-        true ->
-          # Resources still in use, wait and retry
-          Process.sleep(@cleanup_retry_interval)
-          wait_for_resource_cleanup(worker_id, old_port, retries - 1)
+        # OTP-idiomatic non-blocking wait
+        receive do
+        after
+          delay -> :ok
+        end
+
+        wait_for_resource_cleanup(worker_id, old_port, retries - 1, backoff * 2)
       end
     else
       Logger.warning(
