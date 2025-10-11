@@ -37,6 +37,12 @@ defmodule Snakepit.Pool.ApplicationCleanup do
   def terminate(reason, _state) do
     Logger.info("🔍 Emergency cleanup check (shutdown reason: #{inspect(reason)})")
 
+    IO.inspect(System.monotonic_time(:millisecond),
+      label: "ApplicationCleanup.terminate/2 called at"
+    )
+
+    IO.inspect(Process.info(self()), label: "ApplicationCleanup process info")
+
     beam_run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
     orphaned_pids = find_orphaned_processes(beam_run_id)
 
@@ -64,37 +70,67 @@ defmodule Snakepit.Pool.ApplicationCleanup do
   end
 
   defp find_orphaned_processes(run_id) do
-    # Use ProcessKiller to find all Python processes
+    # CRITICAL: Get all registered workers from ProcessRegistry
+    # A process is only "orphaned" if its Python process is alive BUT
+    # its Elixir GenServer is dead (supervision tree failed to clean it up)
+    registered_workers = Snakepit.Pool.ProcessRegistry.list_all_workers()
+
+    # Find Python processes for this run_id
     python_pids = Snakepit.ProcessKiller.find_python_processes()
 
-    # Filter for grpc_server processes with our run_id
-    # Support both old format (--snakepit-run-id) and new format (--run-id)
-    python_pids
-    |> Enum.filter(fn pid ->
-      case Snakepit.ProcessKiller.get_process_command(pid) do
-        {:ok, cmd} ->
-          has_grpc_server = String.contains?(cmd, "grpc_server.py")
-          has_old_format = String.contains?(cmd, "--snakepit-run-id #{run_id}")
-          has_new_format = String.contains?(cmd, "--run-id #{run_id}")
+    grpc_pids_for_run =
+      python_pids
+      |> Enum.filter(fn pid ->
+        case Snakepit.ProcessKiller.get_process_command(pid) do
+          {:ok, cmd} ->
+            has_grpc_server = String.contains?(cmd, "grpc_server.py")
+            has_old_format = String.contains?(cmd, "--snakepit-run-id #{run_id}")
+            has_new_format = String.contains?(cmd, "--run-id #{run_id}")
 
-          has_grpc_server and (has_old_format or has_new_format)
+            has_grpc_server and (has_old_format or has_new_format)
 
-        _ ->
-          false
+          _ ->
+            false
+        end
+      end)
+
+    # Filter out processes whose Elixir GenServer is still alive
+    # Those are NOT orphans - the supervision tree will clean them up
+    grpc_pids_for_run
+    |> Enum.filter(fn os_pid ->
+      # Find the worker entry for this OS PID
+      worker_entry =
+        Enum.find(registered_workers, fn {_worker_id, info} ->
+          Map.get(info, :process_pid) == os_pid
+        end)
+
+      case worker_entry do
+        {_worker_id, %{elixir_pid: elixir_pid}} ->
+          # If the Elixir GenServer is still alive, this is NOT an orphan
+          # The supervision tree will clean it up - don't interfere!
+          is_orphan = not Process.alive?(elixir_pid)
+
+          if not is_orphan do
+            Logger.debug(
+              "Skipping PID #{os_pid} - Elixir GenServer #{inspect(elixir_pid)} still alive, " <>
+                "supervision tree will handle cleanup"
+            )
+          end
+
+          is_orphan
+
+        nil ->
+          # Not in registry at all - this IS an orphan
+          Logger.warning("PID #{os_pid} not in ProcessRegistry - true orphan")
+          true
       end
     end)
   end
 
   defp emergency_kill_processes(run_id) do
     # Use ProcessKiller with run_id-based cleanup
-    case Snakepit.ProcessKiller.kill_by_run_id(run_id) do
-      {:ok, killed_count} ->
-        killed_count
-
-      {:error, reason} ->
-        Logger.error("Emergency cleanup failed: #{inspect(reason)}")
-        0
-    end
+    {:ok, killed_count} = Snakepit.ProcessKiller.kill_by_run_id(run_id)
+    killed_count
   end
 
   defp emit_telemetry(event, count) do

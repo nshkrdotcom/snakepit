@@ -205,24 +205,26 @@ defmodule Snakepit.GRPCWorker do
 
         # Add short run-id for safer process cleanup
         # This short 7-char ID will be visible in ps output and used for cleanup
+        # Use --snakepit-run-id to maintain compatibility with Python script
         run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
-        args = args ++ ["--run-id", run_id]
+        args = args ++ ["--snakepit-run-id", run_id]
 
         Logger.info("Starting gRPC server: #{executable} #{script} #{Enum.join(args, " ")}")
 
-        # Use setsid to create a new process group for easier cleanup
-        setsid_path = System.find_executable("setsid") || "/usr/bin/setsid"
-
+        # Spawn the Python executable directly. Cleanup is handled by ProcessKiller via run_id.
+        # CRITICAL: Do NOT use setsid wrapper - it exits immediately with status 0 while the
+        # actual Python process becomes an orphaned grandchild, causing the Port to think
+        # the process died when it's actually still running.
         port_opts = [
           :binary,
           :exit_status,
           :use_stdio,
           :stderr_to_stdout,
-          {:args, [executable, script | args]},
+          {:args, [script | args]},
           {:cd, Path.dirname(script)}
         ]
 
-        server_port = Port.open({:spawn_executable, setsid_path}, port_opts)
+        server_port = Port.open({:spawn_executable, executable}, port_opts)
         Port.monitor(server_port)
 
         # Extract external process PID for cleanup registry

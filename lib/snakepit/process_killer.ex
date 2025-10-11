@@ -24,6 +24,11 @@ defmodule Snakepit.ProcessKiller do
   def kill_process(os_pid, signal \\ :sigterm) when is_integer(os_pid) do
     signal_num = signal_to_number(signal)
 
+    # DEBUG: Log all kills to find who's killing workers during startup
+    IO.inspect(%{pid: os_pid, signal: signal, caller: Process.info(self(), :registered_name)},
+      label: "ProcessKiller.kill_process"
+    )
+
     try do
       # Use Erlang's :os.cmd for POSIX-compliant kill
       # This avoids shelling out and uses direct syscalls
@@ -53,9 +58,13 @@ defmodule Snakepit.ProcessKiller do
   Uses kill -0 (signal 0) which doesn't kill but checks existence.
   """
   def process_alive?(os_pid) when is_integer(os_pid) do
-    case :os.cmd(~c"kill -0 #{os_pid} 2>/dev/null") do
-      [] -> true
-      _ -> false
+    # kill -0 returns exit code 0 (success) if process exists
+    # :os.cmd returns the output as charlist, empty if command succeeded
+    case System.cmd("kill", ["-0", to_string(os_pid)], stderr_to_stdout: true) do
+      # Exit code 0 = process exists
+      {_, 0} -> true
+      # Non-zero = process doesn't exist
+      {_, _} -> false
     end
   end
 
@@ -104,18 +113,27 @@ defmodule Snakepit.ProcessKiller do
   """
   def kill_by_run_id(run_id) when is_binary(run_id) do
     Logger.warning("🔪 Killing all processes with run_id: #{run_id}")
+    IO.inspect(System.monotonic_time(:millisecond), label: "kill_by_run_id called at")
+
+    IO.inspect(Process.info(self(), [:registered_name, :current_stacktrace]),
+      label: "Called from"
+    )
 
     # Get all Python processes
     python_pids = find_python_processes()
 
     # Filter by run_id in command line
+    # Support both --snakepit-run-id (current) and --run-id (future)
     matching_pids =
       python_pids
       |> Enum.filter(fn pid ->
         case get_process_command(pid) do
           {:ok, cmd} ->
-            String.contains?(cmd, "grpc_server.py") and
-              String.contains?(cmd, "--run-id #{run_id}")
+            has_grpc_server = String.contains?(cmd, "grpc_server.py")
+            has_old_format = String.contains?(cmd, "--snakepit-run-id #{run_id}")
+            has_new_format = String.contains?(cmd, "--run-id #{run_id}")
+
+            has_grpc_server and (has_old_format or has_new_format)
 
           _ ->
             false

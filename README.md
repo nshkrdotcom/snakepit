@@ -296,18 +296,34 @@ end
 For Python/gRPC integration (recommended):
 
 ```bash
-# Install Python dependencies
+# Using uv (recommended - faster and more reliable)
+uv pip install grpcio grpcio-tools protobuf numpy
+
+# Or use pip as fallback
 pip install grpcio grpcio-tools protobuf numpy
 
-# Or use the provided requirements file
+# Using requirements file with uv
 cd deps/snakepit/priv/python
+uv pip install -r requirements.txt
+
+# Or with pip
 pip install -r requirements.txt
 ```
 
-**Virtual Environment (Recommended)**:
+**Automated Setup (Recommended)**:
 ```bash
+# Use the setup script (detects uv/pip automatically)
+./scripts/setup_python.sh
+```
+
+**Manual Setup**:
+```bash
+# Create venv and install with uv (fastest)
 python3 -m venv .venv
 source .venv/bin/activate
+uv pip install -r deps/snakepit/priv/python/requirements.txt
+
+# Or with pip
 pip install -r deps/snakepit/priv/python/requirements.txt
 ```
 
@@ -999,10 +1015,16 @@ end
 
 **Python:**
 ```bash
-# Install with gRPC support
+# Using uv (recommended)
+uv pip install grpcio protobuf grpcio-tools
+
+# Or with pip
 pip install 'snakepit-bridge[grpc]'
 
-# Or manually
+# Or manually with uv
+uv pip install grpcio protobuf grpcio-tools
+
+# Or manually with pip
 pip install grpcio protobuf grpcio-tools
 ```
 

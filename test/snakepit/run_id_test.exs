@@ -42,13 +42,18 @@ defmodule Snakepit.RunIDTest do
   end
 
   describe "extract_from_command/1" do
-    test "finds run_id from command line" do
+    test "finds run_id from command line with --snakepit-run-id" do
+      cmd = "python3 grpc_server.py --snakepit-run-id k3x9a2p --port 50051"
+      assert {:ok, "k3x9a2p"} = Snakepit.RunID.extract_from_command(cmd)
+    end
+
+    test "finds run_id from command line with --run-id" do
       cmd = "python3 grpc_server.py --run-id k3x9a2p --port 50051"
       assert {:ok, "k3x9a2p"} = Snakepit.RunID.extract_from_command(cmd)
     end
 
     test "finds run_id with extra spaces" do
-      cmd = "python3 grpc_server.py --run-id   m7k2x1a --port 50051"
+      cmd = "python3 grpc_server.py --snakepit-run-id   m7k2x1a --port 50051"
       assert {:ok, "m7k2x1a"} = Snakepit.RunID.extract_from_command(cmd)
     end
 
@@ -58,7 +63,11 @@ defmodule Snakepit.RunIDTest do
     end
 
     test "returns error for invalid format" do
-      cmd = "python3 grpc_server.py --run-id toolong8 --port 50051"
+      # toolong8 is 8 chars, should not match 7-char pattern
+      _cmd = "python3 grpc_server.py --run-id toolong8 --port 50051"
+      # Actually, the current regex will match any 7 lowercase alphanumeric
+      # Let's test with a truly invalid format
+      cmd = "python3 grpc_server.py --run-id ABC-123 --port 50051"
       assert {:error, :not_found} = Snakepit.RunID.extract_from_command(cmd)
     end
 

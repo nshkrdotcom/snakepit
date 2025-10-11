@@ -19,6 +19,12 @@ defmodule Snakepit.Application do
     # Check if pooling is enabled (default: false to prevent auto-start issues)
     pooling_enabled = Application.get_env(:snakepit, :pooling_enabled, false)
 
+    IO.inspect(
+      pooling_enabled: pooling_enabled,
+      env: Mix.env(),
+      label: "Snakepit.Application.start/2"
+    )
+
     # Get gRPC config for the Elixir server
     grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
 
@@ -38,7 +44,10 @@ defmodule Snakepit.Application do
         [
           # Start the central gRPC server that manages state
           {GRPC.Server.Supervisor,
-           endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true},
+           endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true}
+          |> tap(fn spec ->
+            IO.inspect(spec, label: "Adding GRPC.Server.Supervisor to children")
+          end),
 
           # Task supervisor for async pool operations
           {Task.Supervisor, name: Snakepit.TaskSupervisor},
@@ -70,6 +79,16 @@ defmodule Snakepit.Application do
     children = base_children ++ pool_children
 
     opts = [strategy: :one_for_one, name: Snakepit.Supervisor]
-    Supervisor.start_link(children, opts)
+    result = Supervisor.start_link(children, opts)
+    IO.inspect(System.monotonic_time(:millisecond), label: "Snakepit.Application started at")
+    result
+  end
+
+  def stop(_state) do
+    IO.inspect(System.monotonic_time(:millisecond),
+      label: "Snakepit.Application.stop/1 called at"
+    )
+
+    :ok
   end
 end

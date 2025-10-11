@@ -34,9 +34,19 @@ defmodule TestHelperShutdown do
   end
 end
 
+# Start ExUnit with performance tests excluded by default
+ExUnit.start(exclude: [:performance])
+
+# CRITICAL: Start the application ONCE for all tests
+# This prevents test contamination and port conflicts from async start/stop
+IO.puts("\n=== Starting Snakepit application for test suite ===")
+{:ok, apps} = Application.ensure_all_started(:snakepit)
+IO.puts("Started applications: #{inspect(apps)}")
+
 # Ensure proper application shutdown after all tests complete
-# This allows workers to gracefully terminate Python processes
 ExUnit.after_suite(fn _results ->
+  IO.puts("\n=== Shutting down Snakepit application after test suite ===")
+
   # Get beam_run_id BEFORE stopping application
   beam_run_id =
     try do
@@ -48,7 +58,7 @@ ExUnit.after_suite(fn _results ->
   # Stop the Snakepit application to trigger supervision tree shutdown
   Application.stop(:snakepit)
 
-  # Poll until workers shut down gracefully (using receive timeout pattern)
+  # Poll until workers shut down gracefully
   if beam_run_id do
     deadline = System.monotonic_time(:millisecond) + 5_000
     TestHelperShutdown.wait_for_worker_shutdown(beam_run_id, deadline)
@@ -56,6 +66,3 @@ ExUnit.after_suite(fn _results ->
 
   :ok
 end)
-
-# Start ExUnit with performance tests excluded by default
-ExUnit.start(exclude: [:performance])

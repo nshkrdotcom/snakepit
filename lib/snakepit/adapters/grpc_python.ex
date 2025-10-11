@@ -253,6 +253,16 @@ defmodule Snakepit.Adapters.GRPCPython do
         Process.sleep(delay)
         retry_connect(port, retries_left - 1, delay)
 
+      {:error, :internal} ->
+        # Internal error - often means socket not fully ready, retry
+        Logger.debug(
+          "gRPC connection to port #{port} internal error. " <>
+            "Retrying in #{delay}ms... (#{retries_left - 1} retries left)"
+        )
+
+        Process.sleep(delay)
+        retry_connect(port, retries_left - 1, delay)
+
       {:error, reason} ->
         # For any other error, fail immediately (no retry)
         Logger.error(

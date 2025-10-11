@@ -15,11 +15,13 @@ defmodule Snakepit.RunID do
 
   ## Examples
 
-      iex> RunID.generate()
-      "k3x9a2p"
+      iex> run_id = Snakepit.RunID.generate()
+      iex> String.length(run_id)
+      7
 
-      iex> RunID.generate()
-      "k3x9a2q"  # Different each time
+      iex> run_id = Snakepit.RunID.generate()
+      iex> Snakepit.RunID.valid?(run_id)
+      true
   """
   def generate do
     # Use last 5 digits of microsecond timestamp (base36)
@@ -46,10 +48,10 @@ defmodule Snakepit.RunID do
       iex> Snakepit.RunID.valid?("k3x9a2p")
       true
 
-      iex> Snakepit.RunID.valid?("toolong")
+      iex> Snakepit.RunID.valid?("short")
       false
 
-      iex> Snakepit.RunID.valid?("HAS-UP")
+      iex> Snakepit.RunID.valid?("HAS-UPX")
       false
   """
   def valid?(run_id) when is_binary(run_id) do
@@ -60,10 +62,11 @@ defmodule Snakepit.RunID do
 
   @doc """
   Extracts run ID from a process command line.
+  Supports both --snakepit-run-id and --run-id formats.
 
   ## Examples
 
-      iex> cmd = "python3 grpc_server.py --run-id k3x9a2p --port 50051"
+      iex> cmd = "python3 grpc_server.py --snakepit-run-id k3x9a2p --port 50051"
       iex> Snakepit.RunID.extract_from_command(cmd)
       {:ok, "k3x9a2p"}
 
@@ -71,9 +74,17 @@ defmodule Snakepit.RunID do
       {:error, :not_found}
   """
   def extract_from_command(command) when is_binary(command) do
+    # Try new format first (--run-id)
     case Regex.run(~r/--run-id\s+([0-9a-z]{7})/, command) do
-      [_, run_id] -> {:ok, run_id}
-      nil -> {:error, :not_found}
+      [_, run_id] ->
+        {:ok, run_id}
+
+      nil ->
+        # Try old format (--snakepit-run-id) with 7-char short IDs
+        case Regex.run(~r/--snakepit-run-id\s+([0-9a-z]{7})/, command) do
+          [_, run_id] -> {:ok, run_id}
+          nil -> {:error, :not_found}
+        end
     end
   end
 
