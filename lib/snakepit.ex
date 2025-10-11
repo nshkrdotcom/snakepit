@@ -175,15 +175,29 @@ defmodule Snakepit do
           fun.()
         after
           IO.puts("\n[Snakepit] Script execution finished. Shutting down gracefully...")
-          # This is the crucial step: ensure the application is stopped,
-          # which will trigger all terminate/2 cleanup callbacks.
-          Application.stop(:snakepit)
 
-          # Give the cleanup callbacks a moment to execute
-          # This is still needed because Application.stop is async
-          Process.sleep(500)
+          # Monitor the supervisor to wait for actual shutdown signal
+          case Process.whereis(Snakepit.Supervisor) do
+            nil ->
+              # Already shut down
+              IO.puts("[Snakepit] Shutdown complete (supervisor already terminated).")
 
-          IO.puts("[Snakepit] Shutdown complete.")
+            supervisor_pid ->
+              ref = Process.monitor(supervisor_pid)
+              Application.stop(:snakepit)
+
+              # Wait for :DOWN signal from BEAM - no guessing with sleep
+              receive do
+                {:DOWN, ^ref, :process, ^supervisor_pid, _reason} ->
+                  IO.puts("[Snakepit] Shutdown complete (confirmed via :DOWN signal).")
+              after
+                5_000 ->
+                  IO.puts(
+                    "[Snakepit] Warning: Shutdown confirmation timeout after 5s. " <>
+                      "Proceeding anyway."
+                  )
+              end
+          end
         end
 
       {:error, :timeout} ->
