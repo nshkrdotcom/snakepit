@@ -356,6 +356,7 @@ defmodule Snakepit.Pool do
     {:reply, :ok, %{state | workers: new_workers}}
   end
 
+  @impl true
   def handle_cast({:checkin_worker, worker_id}, state) do
     # Check for queued requests first
     case :queue.out(state.request_queue) do
