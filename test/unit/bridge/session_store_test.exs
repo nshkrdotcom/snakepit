@@ -1,5 +1,6 @@
 defmodule SessionStoreTest do
   use ExUnit.Case, async: true
+  import Snakepit.TestHelpers
 
   @moduledoc """
   Test SessionStore functionality independently of gRPC/pool infrastructure.
@@ -39,13 +40,15 @@ defmodule SessionStoreTest do
     # Session should exist initially
     assert {:ok, _} = Snakepit.Bridge.SessionStore.get_session(session_id)
 
-    # Wait at least 1 second to ensure time has passed (monotonic time is in seconds)
-    Process.sleep(1100)
-
-    # Manually trigger cleanup
-    Snakepit.Bridge.SessionStore.cleanup_expired_sessions()
-
-    # Session should now be expired
-    assert {:error, :not_found} = Snakepit.Bridge.SessionStore.get_session(session_id)
+    # Poll until session expires (using Supertester pattern)
+    # Run cleanup and check if session is gone
+    assert_eventually(
+      fn ->
+        Snakepit.Bridge.SessionStore.cleanup_expired_sessions()
+        match?({:error, :not_found}, Snakepit.Bridge.SessionStore.get_session(session_id))
+      end,
+      timeout: 2_000,
+      interval: 50
+    )
   end
 end
