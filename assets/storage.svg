@@ -1,0 +1,15 @@
+<svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="storageGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6e4a7e; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a279b5; stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <ellipse cx="50" cy="25" rx="35" ry="12" fill="url(#storageGrad)" stroke="#4a3357" stroke-width="2"/>
+  <path d="M 15,25 L 15,50 C 15,57 30,62 50,62 C 70,62 85,57 85,50 L 85,25"
+        fill="url(#storageGrad)" stroke="#4a3357" stroke-width="2"/>
+  <ellipse cx="50" cy="50" rx="35" ry="12" fill="none" stroke="#4a3357" stroke-width="2"/>
+  <path d="M 15,50 L 15,75 C 15,82 30,87 50,87 C 70,87 85,82 85,75 L 85,50"
+        fill="url(#storageGrad)" stroke="#4a3357" stroke-width="2"/>
+  <ellipse cx="50" cy="75" rx="35" ry="12" fill="none" stroke="#4a3357" stroke-width="2"/>
+</svg>

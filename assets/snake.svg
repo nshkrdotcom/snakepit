@@ -1,0 +1,12 @@
+<svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="snakeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#306998; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#4b8bbe; stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <path d="M 50,80 C 20,85 15,50 35,40 C 55,30 60,50 50,60 C 40,70 30,75 50,80 Z"
+        fill="none" stroke="url(#snakeGrad)" stroke-width="10" stroke-linecap="round"/>
+  <path d="M 35,40 L 28,35 L 38,35 C 45,35 45,40 35,40 Z" fill="url(#snakeGrad)"/>
+  <circle cx="33" cy="37" r="2" fill="#ffd43b"/>
+</svg>

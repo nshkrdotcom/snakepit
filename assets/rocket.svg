@@ -1,0 +1,17 @@
+<svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="rocketGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6e4a7e; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a279b5; stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="flameGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffd43b; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ff6b35; stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <ellipse cx="50" cy="70" rx="15" ry="8" fill="url(#flameGrad)" opacity="0.8"/>
+  <path d="M 50,10 L 35,60 L 50,55 L 65,60 Z" fill="url(#rocketGrad)" stroke="#4a3357" stroke-width="2"/>
+  <circle cx="50" cy="30" r="6" fill="#4b8bbe" opacity="0.7"/>
+  <path d="M 35,60 L 30,75 L 35,65 Z" fill="#5a3a6a"/>
+  <path d="M 65,60 L 70,75 L 65,65 Z" fill="#5a3a6a"/>
+</svg>

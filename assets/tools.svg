@@ -1,0 +1,14 @@
+<svg width="24" height="24" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="toolGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6e4a7e; stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#a279b5; stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <path d="M 30,70 L 50,50 L 40,40 L 25,25 L 15,25 L 15,35 L 28,48"
+        fill="url(#toolGrad)" stroke="#4a3357" stroke-width="2"/>
+  <rect x="45" y="45" width="40" height="15" rx="2"
+        fill="url(#toolGrad)" stroke="#4a3357" stroke-width="2"
+        transform="rotate(45 65 52.5)"/>
+  <circle cx="72" cy="72" r="4" fill="#ffd43b"/>
+</svg>
