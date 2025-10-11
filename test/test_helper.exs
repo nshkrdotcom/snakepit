@@ -4,6 +4,44 @@ Code.ensure_loaded?(Supertester.UnifiedTestFoundation) ||
 
 # Test support files are automatically compiled by Mix
 
+# Generic polling helper for OTP-correct assertions (no sleeps!)
+defmodule TestHelpers do
+  @doc """
+  Poll until a condition is met, or timeout.
+  This is OTP-correct: we poll for actual state, not guess based on time.
+
+  ## Examples
+      assert_eventually(fn -> ProcessRegistry.worker_count() == 2 end)
+      assert_eventually(fn -> not SessionStore.session_exists?(id) end, timeout: 5_000)
+  """
+  def assert_eventually(condition_fn, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, 5_000)
+    interval = Keyword.get(opts, :interval, 50)
+    deadline = System.monotonic_time(:millisecond) + timeout
+
+    poll_until(condition_fn, deadline, interval)
+  end
+
+  defp poll_until(condition_fn, deadline, interval) do
+    current = System.monotonic_time(:millisecond)
+
+    if current >= deadline do
+      raise "Timeout waiting for condition to become true"
+    end
+
+    if condition_fn.() do
+      :ok
+    else
+      receive do
+      after
+        interval -> :ok
+      end
+
+      poll_until(condition_fn, deadline, interval)
+    end
+  end
+end
+
 # Helper for polling worker shutdown
 defmodule TestHelperShutdown do
   def wait_for_worker_shutdown(beam_run_id, deadline) do
