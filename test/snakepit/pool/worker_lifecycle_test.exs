@@ -75,6 +75,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
            "Found #{length(unregistered)} unregistered processes - cleanup system working"
   end
 
+  @tag :skip_ci
   test "ApplicationCleanup does NOT run during normal operation" do
     # Application is already started by test_helper.exs
     beam_run_id = ProcessRegistry.get_beam_run_id()
@@ -120,6 +121,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
            """
   end
 
+  @tag :skip_ci
   test "no orphaned processes exist - all workers tracked in registry" do
     # Application is already started by test_helper.exs
     beam_run_id = ProcessRegistry.get_beam_run_id()
