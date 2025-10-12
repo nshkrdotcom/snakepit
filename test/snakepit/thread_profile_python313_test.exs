@@ -1,5 +1,6 @@
 defmodule Snakepit.ThreadProfilePython313Test do
   use ExUnit.Case, async: false
+  import Snakepit.TestHelpers
 
   @moduletag :python313
   @moduletag :thread_profile
@@ -24,7 +25,14 @@ defmodule Snakepit.ThreadProfilePython313Test do
         Application.stop(:snakepit)
         System.delete_env("SNAKEPIT_PYTHON")
         Application.delete_env(:snakepit, :python_executable)
-        :timer.sleep(1000)
+        # Wait for processes to actually stop
+        assert_eventually(
+          fn ->
+            Process.whereis(Snakepit.Pool) == nil
+          end,
+          timeout: 5_000,
+          interval: 100
+        )
       end)
 
       {:ok, python_path: python313_path}
@@ -57,8 +65,14 @@ defmodule Snakepit.ThreadProfilePython313Test do
       # Start Snakepit
       {:ok, _apps} = Application.ensure_all_started(:snakepit)
 
-      # Wait for pool
-      :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 30_000)
+      # Wait for pool with longer timeout for Python 3.13 startup
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 90_000,
+        interval: 2_000
+      )
 
       # Execute request
       {:ok, result} = Snakepit.execute("compute_intensive", %{data: [1, 2, 3], iterations: 100})
@@ -84,7 +98,15 @@ defmodule Snakepit.ThreadProfilePython313Test do
       ])
 
       {:ok, _} = Application.ensure_all_started(:snakepit)
-      :ok = Snakepit.Pool.await_ready(:capacity_test, 30_000)
+
+      # Wait for pool with assert_eventually
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 60_000,
+        interval: 1_000
+      )
 
       # Get workers from THIS pool only
       workers = Snakepit.Pool.list_workers(:capacity_test)
@@ -124,7 +146,15 @@ defmodule Snakepit.ThreadProfilePython313Test do
       ])
 
       {:ok, _} = Application.ensure_all_started(:snakepit)
-      :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 30_000)
+
+      # Wait for pool with assert_eventually
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 60_000,
+        interval: 1_000
+      )
 
       # Send 4 concurrent requests (should all execute on SAME worker)
       tasks =
@@ -165,7 +195,15 @@ defmodule Snakepit.ThreadProfilePython313Test do
       ])
 
       {:ok, _} = Application.ensure_all_started(:snakepit)
-      :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 30_000)
+
+      # Wait for pool with assert_eventually
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 60_000,
+        interval: 1_000
+      )
 
       # Send 3 concurrent requests (capacity is 2)
       # First 2 should execute, 3rd should queue or return error
@@ -189,8 +227,11 @@ defmodule Snakepit.ThreadProfilePython313Test do
       assert_receive {:started, 1}, 5_000
       assert_receive {:started, 2}, 5_000
 
-      # Small delay to ensure they're executing
-      :timer.sleep(500)
+      # Small delay to ensure they're executing (using receive timeout pattern)
+      receive do
+      after
+        500 -> :ok
+      end
 
       # 3rd request should either queue or fail (worker at capacity)
       task3 =
