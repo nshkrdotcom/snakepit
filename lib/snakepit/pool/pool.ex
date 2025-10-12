@@ -130,9 +130,22 @@ defmodule Snakepit.Pool do
 
   @doc """
   Lists all worker IDs in the pool.
+
+  Can be called with pool process or pool name:
+  - `list_workers()` - all workers from all pools
+  - `list_workers(Snakepit.Pool)` - all workers from all pools
+  - `list_workers(Snakepit.Pool, :pool_name)` - workers from specific pool
   """
-  def list_workers(pool \\ __MODULE__) do
+  def list_workers(pool \\ __MODULE__)
+
+  def list_workers(pool) when is_pid(pool) or is_atom(pool) do
+    # Call with just pool process (backward compat)
     GenServer.call(pool, :list_workers)
+  end
+
+  def list_workers(pool, pool_name) when is_atom(pool_name) do
+    # Call with pool process and pool name
+    GenServer.call(pool, {:list_workers, pool_name})
   end
 
   @doc """

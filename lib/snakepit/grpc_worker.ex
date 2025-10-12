@@ -183,10 +183,29 @@ defmodule Snakepit.GRPCWorker do
         elixir_grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
         elixir_address = "#{elixir_grpc_host}:#{elixir_grpc_port}"
 
+        # CRITICAL: Get worker_config FIRST to use per-worker adapter settings
+        worker_config = Keyword.get(opts, :worker_config, %{})
+
         # Start the gRPC server process non-blocking
         executable = adapter.executable_path()
-        script = adapter.script_path()
-        adapter_args = adapter.script_args() || []
+
+        # Use worker-specific adapter_args if provided, else fall back to adapter defaults
+        adapter_args = Map.get(worker_config, :adapter_args) || adapter.script_args() || []
+        adapter_env = Map.get(worker_config, :adapter_env, [])
+
+        # Determine which script to use based on adapter_args (threaded vs process mode)
+        # If --max-workers is specified, use the threaded server
+        script =
+          if Enum.any?(adapter_args, fn arg ->
+               is_binary(arg) and String.contains?(arg, "--max-workers")
+             end) do
+            # Threaded mode
+            app_dir = Application.app_dir(:snakepit)
+            Path.join([app_dir, "priv", "python", "grpc_server_threaded.py"])
+          else
+            # Process mode (default)
+            adapter.script_path()
+          end
 
         # Build args ensuring both port and elixir-address are included
         args = adapter_args
@@ -228,6 +247,21 @@ defmodule Snakepit.GRPCWorker do
           {:cd, Path.dirname(script)}
         ]
 
+        # Apply adapter_env to the spawned process if provided
+        port_opts =
+          if adapter_env != [] do
+            # Convert adapter_env to the format expected by Port.open
+            # Each entry should be a charlist tuple {~c"KEY", ~c"VALUE"}
+            env_tuples =
+              Enum.map(adapter_env, fn {key, value} ->
+                {String.to_charlist(key), String.to_charlist(value)}
+              end)
+
+            port_opts ++ [{:env, env_tuples}]
+          else
+            port_opts
+          end
+
         server_port = Port.open({:spawn_executable, executable}, port_opts)
         Port.monitor(server_port)
 
@@ -242,8 +276,6 @@ defmodule Snakepit.GRPCWorker do
               Logger.error("Failed to get gRPC server process PID: #{inspect(error)}")
               nil
           end
-
-        worker_config = Keyword.get(opts, :worker_config, %{})
 
         state = %{
           id: worker_id,

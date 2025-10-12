@@ -415,3 +415,27 @@ class ThreadedShowcaseAdapter(ThreadSafeAdapter):
     def initialize(self):
         """Initialize adapter (called by framework)"""
         logger.info(f"Initializing {self.__class__.__name__} in thread {threading.current_thread().name}")
+
+    @thread_safe_method
+    def execute_tool(self, tool_name: str, arguments: dict, context) -> Any:
+        """
+        Execute a tool by name with given arguments.
+
+        This method provides the interface expected by the gRPC bridge server.
+        It dispatches to the appropriate tool method using the base adapter's
+        call_tool infrastructure.
+
+        Args:
+            tool_name: Name of the tool to execute
+            arguments: Dictionary of tool arguments
+            context: Session context
+
+        Returns:
+            Tool execution result
+        """
+        # Set session context if provided
+        if context and not self._session_context:
+            self._session_context = context
+
+        # Use the base adapter's call_tool which handles @tool decorated methods
+        return self.call_tool(tool_name, **arguments)

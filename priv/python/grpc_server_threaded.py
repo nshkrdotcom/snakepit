@@ -480,7 +480,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         self.server = server
 
 
-async def wait_for_elixir_server(elixir_address: str, max_retries: int = 10, initial_delay: float = 0.05):
+async def wait_for_elixir_server(elixir_address: str, max_retries: int = 30, initial_delay: float = 0.05):
     """Wait for Elixir gRPC server to become available"""
     delay = initial_delay
     for attempt in range(1, max_retries + 1):
