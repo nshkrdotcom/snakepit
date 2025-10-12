@@ -286,6 +286,29 @@ defmodule Snakepit.GRPCWorker do
               nil
           end
 
+        # CRITICAL FIX: Register the Python PID immediately after spawning
+        # This prevents ApplicationCleanup from seeing it as an "orphan" during rapid shutdown
+        # Before this fix, the PID was only registered after wait_for_server_ready succeeded,
+        # causing a race condition where ApplicationCleanup would find "orphaned" processes
+        if process_pid do
+          case Snakepit.Pool.ProcessRegistry.activate_worker(
+                 worker_id,
+                 self(),
+                 process_pid,
+                 "grpc_worker"
+               ) do
+            :ok ->
+              Logger.debug(
+                "Registered Python PID #{process_pid} for worker #{worker_id} in ProcessRegistry"
+              )
+
+            {:error, reason} ->
+              Logger.error(
+                "Failed to register Python PID #{process_pid} for worker #{worker_id}: #{inspect(reason)}"
+              )
+          end
+        end
+
         state = %{
           id: worker_id,
           pool_name: pool_name,
@@ -321,73 +344,49 @@ defmodule Snakepit.GRPCWorker do
       {:ok, actual_port} ->
         case state.adapter.init_grpc_connection(actual_port) do
           {:ok, connection} ->
-            # *** SYNCHRONOUS REGISTRATION: Block until fully registered ***
-            # This ensures happens-before relationship: worker is not "ready" until
-            # all state registries have acknowledged and updated their state.
+            # Python PID already registered in init/1, so just notify the pool
+            # and register with lifecycle manager
 
-            # Step 1: Activate in ProcessRegistry (synchronous call blocks until complete)
-            case Snakepit.Pool.ProcessRegistry.activate_worker(
-                   state.id,
-                   self(),
-                   state.process_pid,
-                   "grpc_worker"
-                 ) do
-              :ok ->
-                Logger.info(
-                  "gRPC worker #{state.id} registered process PID #{state.process_pid} with ProcessRegistry."
-                )
+            # CRITICAL: Check if Pool is alive first (test shutdown race condition)
+            pool_pid =
+              if is_atom(state.pool_name),
+                do: Process.whereis(state.pool_name),
+                else: state.pool_name
 
-                # Step 2: Notify the pool (synchronous call blocks until pool acknowledges)
-                # This creates a provable state guarantee: worker cannot proceed until pool has it
-                # CRITICAL: Use 30s timeout to handle large pools (250 workers × 10-20ms = 2.5-5s queue time)
-                # With 5s timeout, workers at the end of the queue would timeout
+            pool_alive = pool_pid != nil and Process.alive?(pool_pid)
 
-                # CRITICAL: Check if Pool is alive first (test shutdown race condition)
-                pool_pid =
-                  if is_atom(state.pool_name),
-                    do: Process.whereis(state.pool_name),
-                    else: state.pool_name
+            if not pool_alive do
+              # Pool already dead - gracefully stop without crashing
+              Logger.debug(
+                "Worker #{state.id} finished starting but Pool is shut down. Stopping gracefully."
+              )
 
-                pool_alive = pool_pid != nil and Process.alive?(pool_pid)
+              {:stop, :normal, state}
+            else
+              case GenServer.call(state.pool_name, {:worker_ready, state.id}, 30_000) do
+                :ok ->
+                  # Schedule health checks
+                  health_ref = schedule_health_check()
 
-                if not pool_alive do
-                  # Pool already dead - gracefully stop without crashing
-                  Logger.debug(
-                    "Worker #{state.id} finished starting but Pool is shut down. Stopping gracefully."
+                  # Register with lifecycle manager for automatic recycling
+                  Snakepit.Worker.LifecycleManager.track_worker(
+                    state.pool_name,
+                    state.id,
+                    self(),
+                    state.worker_config
                   )
 
-                  {:stop, :normal, state}
-                else
-                  case GenServer.call(state.pool_name, {:worker_ready, state.id}, 30_000) do
-                    :ok ->
-                      # Schedule health checks
-                      health_ref = schedule_health_check()
+                  Logger.info(
+                    "✅ gRPC worker #{state.id} initialization complete and acknowledged."
+                  )
 
-                      # Register with lifecycle manager for automatic recycling
-                      Snakepit.Worker.LifecycleManager.track_worker(
-                        state.pool_name,
-                        state.id,
-                        self(),
-                        state.worker_config
-                      )
+                  {:noreply, %{state | connection: connection, health_check_ref: health_ref}}
 
-                      Logger.info(
-                        "✅ gRPC worker #{state.id} initialization complete and acknowledged."
-                      )
+                {:error, reason} ->
+                  Logger.error("Pool rejected worker registration: #{inspect(reason)}")
 
-                      {:noreply, %{state | connection: connection, health_check_ref: health_ref}}
-
-                    {:error, reason} ->
-                      Logger.error("Pool rejected worker registration: #{inspect(reason)}")
-
-                      {:stop, {:pool_rejected_worker, reason}, state}
-                  end
-                end
-
-              {:error, reason} ->
-                Logger.error("Failed to activate worker in ProcessRegistry: #{inspect(reason)}")
-
-                {:stop, {:registry_activation_failed, reason}, state}
+                  {:stop, {:pool_rejected_worker, reason}, state}
+              end
             end
 
           {:error, reason} ->
@@ -396,7 +395,15 @@ defmodule Snakepit.GRPCWorker do
         end
 
       {:error, reason} ->
-        Logger.error("Failed to start gRPC server: #{inspect(reason)}")
+        # Suppress error logs for expected shutdown signals (143=SIGTERM, 137=SIGKILL, 0=graceful)
+        case reason do
+          {:exit_status, status} when status in [0, 137, 143] ->
+            Logger.debug("gRPC server exited during startup with status #{status} (shutdown)")
+
+          _ ->
+            Logger.error("Failed to start gRPC server: #{inspect(reason)}")
+        end
+
         {:stop, {:grpc_server_failed, reason}, state}
     end
   end
@@ -712,7 +719,17 @@ defmodule Snakepit.GRPCWorker do
         end
 
       {^port, {:exit_status, status}} ->
-        Logger.error("Python gRPC server process exited with status #{status} during startup")
+        # Exit status 143 is SIGTERM (128 + 15) - normal during shutdown, don't alarm
+        # Exit status 137 is SIGKILL (128 + 9) - cleanup, don't alarm
+        # Exit status 0 is graceful exit
+        if status in [0, 137, 143] do
+          Logger.debug(
+            "Python gRPC server process exited with status #{status} during startup (shutdown)"
+          )
+        else
+          Logger.error("Python gRPC server process exited with status #{status} during startup")
+        end
+
         {:error, {:exit_status, status}}
 
       {:DOWN, _ref, :port, ^port, reason} ->
