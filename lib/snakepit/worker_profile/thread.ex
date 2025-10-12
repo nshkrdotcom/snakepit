@@ -69,18 +69,26 @@ defmodule Snakepit.WorkerProfile.Thread do
     # Ensure capacity tracking table exists
     ensure_capacity_table()
 
-    # Build adapter args for threaded mode
-    _adapter_args = build_adapter_args(config)
-    _adapter_env = build_adapter_env(config)
+    # Build adapter args and env for threaded mode
+    adapter_args = build_adapter_args(config)
+    adapter_env = build_adapter_env(config)
 
     Logger.info("Starting threaded worker #{worker_id} with #{threads_per_worker} threads")
+    Logger.debug("Thread worker adapter_args: #{inspect(adapter_args)}")
 
-    # Start the worker via WorkerSupervisor
+    # Create enhanced worker config with thread profile settings
+    worker_config =
+      config
+      |> Map.put(:adapter_args, adapter_args)
+      |> Map.put(:adapter_env, adapter_env)
+
+    # Start the worker via WorkerSupervisor with full config
     case Snakepit.Pool.WorkerSupervisor.start_worker(
            worker_id,
            worker_module,
            adapter_module,
-           pool_name
+           pool_name,
+           worker_config
          ) do
       {:ok, pid} ->
         # Track capacity in ETS
