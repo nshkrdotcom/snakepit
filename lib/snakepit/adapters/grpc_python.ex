@@ -161,37 +161,18 @@ defmodule Snakepit.Adapters.GRPCPython do
   @doc """
   Get the gRPC port for this adapter instance.
 
-  CRITICAL FIX: Uses atomic counter instead of random allocation to prevent
-  port collisions during concurrent worker startup (birthday paradox issue).
-  With 48 concurrent workers and 100 random ports, collision probability ≈ 90%.
+  ROBUST FIX: Use port 0 to let the OS dynamically assign an available port.
+  This completely eliminates:
+  - Port collision races
+  - TIME_WAIT conflicts
+  - Manual port range management
+  - Port leak tracking
+
+  Python will bind to an OS-assigned port and report it back via GRPC_READY.
   """
   def get_port do
-    config = Application.get_env(:snakepit, :grpc_config, %{})
-    # Start at 50052 to avoid Elixir server
-    base_port = Map.get(config, :base_port, 50052)
-    port_range = Map.get(config, :port_range, 100)
-
-    # Atomic counter ensures sequential port assignment with zero collisions
-    counter = :atomics.add_get(get_port_counter(), 1, 1)
-    # Wrap around to reuse ports after workers terminate
-    offset = rem(counter, port_range)
-    base_port + offset
-  end
-
-  defp get_port_counter do
-    # Lazy initialization of atomic counter (shared across all adapter instances)
-    # Using persistent_term for process-independent storage
-    case :persistent_term.get({__MODULE__, :port_counter}, nil) do
-      nil ->
-        # Create new atomic counter
-        counter = :atomics.new(1, signed: false)
-        :atomics.put(counter, 1, 0)
-        :persistent_term.put({__MODULE__, :port_counter}, counter)
-        counter
-
-      counter ->
-        counter
-    end
+    # Port 0 = "OS, please assign me any available port"
+    0
   end
 
   @doc """

@@ -8,7 +8,21 @@ config :snakepit,
 
   # Pool configuration
   pool_config: %{
-    pool_size: System.schedulers_online() * 2
+    pool_size: System.schedulers_online() * 2,
+    # SAFETY LIMIT: Maximum workers to prevent system resource exhaustion
+    # 200+ workers need careful tuning of batch size and delays
+    # Safe limit is around 150-200 depending on system resources
+    max_workers: 1000,
+    # Concurrent worker startup batch size (prevents fork bomb)
+    # Spawning too many workers simultaneously causes {:eagain} errors
+    # CRITICAL: Batch size must be small enough to avoid resource exhaustion
+    # Each Python process consumes ~50MB RAM + file descriptors + kernel overhead
+    # For 200+ workers, use smaller batches (5-8) to prevent connection queue saturation
+    startup_batch_size: 8,
+    # Delay between batches in milliseconds
+    # CRITICAL: Longer delays prevent system overload during startup
+    # For 200+ workers, use 750ms+ to let the Elixir gRPC server catch up
+    startup_batch_delay_ms: 750
   },
 
   # Worker configuration
@@ -28,7 +42,25 @@ config :snakepit,
   # gRPC worker configuration
   grpc_config: %{
     base_port: 50052,
-    port_range: 175
+    port_range: 1000
+  },
+
+  # Python scientific library threading limits
+  # These are applied in Application.start/2 to prevent fork bombs during concurrent worker startup
+  # When spawning many workers simultaneously, each tries to create threads from multiple libraries
+  # (default: 24 threads per worker × 250 workers = 6,000 threads → "Cannot fork" errors)
+  # Setting to 1 is optimal since parallelism happens at the worker pool level, not per-worker
+  python_thread_limits: %{
+    # OpenBLAS (numpy/scipy)
+    openblas: 1,
+    # OpenMP
+    omp: 1,
+    # Intel MKL
+    mkl: 1,
+    # NumExpr
+    numexpr: 1,
+    # gRPC polling threads (default: number of CPU cores)
+    grpc_poll_threads: 1
   }
 
 # Import environment specific config. This must remain at the bottom

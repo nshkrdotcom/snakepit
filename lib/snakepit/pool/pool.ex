@@ -193,6 +193,10 @@ defmodule Snakepit.Pool do
     Logger.info("🚀 Starting concurrent initialization of #{state.size} workers...")
     start_time = System.monotonic_time(:millisecond)
 
+    # DIAGNOSTIC: Capture baseline system resource usage
+    baseline_resources = capture_resource_metrics()
+    Logger.info("📊 Baseline resources: #{inspect(baseline_resources)}")
+
     # Start all workers concurrently
     workers =
       start_workers_concurrently(
@@ -203,7 +207,13 @@ defmodule Snakepit.Pool do
       )
 
     elapsed = System.monotonic_time(:millisecond) - start_time
+
+    # DIAGNOSTIC: Capture peak system resource usage after startup
+    peak_resources = capture_resource_metrics()
+    resource_delta = calculate_resource_delta(baseline_resources, peak_resources)
+
     Logger.info("✅ Initialized #{length(workers)}/#{state.size} workers in #{elapsed}ms")
+    Logger.info("📊 Resource usage delta: #{inspect(resource_delta)}")
 
     if length(workers) == 0 do
       {:stop, :no_workers_started, state}
@@ -488,7 +498,23 @@ defmodule Snakepit.Pool do
   # Private Functions
 
   defp start_workers_concurrently(count, startup_timeout, worker_module, adapter_module) do
-    Logger.info("🚀 Starting concurrent initialization of #{count} workers...")
+    # SAFETY CHECK: Enforce maximum worker limit to prevent resource exhaustion
+    pool_config = Application.get_env(:snakepit, :pool_config, %{})
+    max_workers = Map.get(pool_config, :max_workers, 150)
+
+    actual_count = min(count, max_workers)
+
+    if actual_count < count do
+      Logger.warning(
+        "⚠️  Requested #{count} workers but limiting to #{actual_count} (max_workers=#{max_workers})"
+      )
+
+      Logger.warning(
+        "⚠️  To increase this limit, set :pool_config.max_workers in config/config.exs"
+      )
+    end
+
+    Logger.info("🚀 Starting concurrent initialization of #{actual_count} workers...")
     Logger.info("📦 Using worker type: #{inspect(worker_module)}")
 
     # CRITICAL FIX: Get pool's registered name or PID for worker notifications
@@ -499,39 +525,63 @@ defmodule Snakepit.Pool do
         nil -> self()
       end
 
-    1..count
-    |> Task.async_stream(
-      fn i ->
-        worker_id = "pool_worker_#{i}_#{:erlang.unique_integer([:positive])}"
+    # CRITICAL FIX: Batch worker startup to prevent {:eagain} fork bomb
+    # Get batch configuration
+    batch_size = Map.get(pool_config, :startup_batch_size, 10)
+    batch_delay = Map.get(pool_config, :startup_batch_delay_ms, 500)
 
-        case Snakepit.Pool.WorkerSupervisor.start_worker(
-               worker_id,
-               worker_module,
-               adapter_module,
-               pool_name
-             ) do
-          {:ok, _pid} ->
-            Logger.info("✅ Worker #{i}/#{count} ready: #{worker_id}")
+    # Split workers into batches
+    1..actual_count
+    |> Enum.chunk_every(batch_size)
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {batch, batch_num} ->
+      batch_start = batch_num * batch_size + 1
+      batch_end = min(batch_start + length(batch) - 1, actual_count)
+      Logger.info("Starting batch #{batch_num + 1}: workers #{batch_start}-#{batch_end}")
+
+      # Start this batch concurrently
+      workers =
+        batch
+        |> Task.async_stream(
+          fn i ->
+            worker_id = "pool_worker_#{i}_#{:erlang.unique_integer([:positive])}"
+
+            case Snakepit.Pool.WorkerSupervisor.start_worker(
+                   worker_id,
+                   worker_module,
+                   adapter_module,
+                   pool_name
+                 ) do
+              {:ok, _pid} ->
+                Logger.info("✅ Worker #{i}/#{actual_count} ready: #{worker_id}")
+                worker_id
+
+              {:error, reason} ->
+                Logger.error("❌ Worker #{i}/#{actual_count} failed: #{inspect(reason)}")
+                nil
+            end
+          end,
+          timeout: startup_timeout,
+          max_concurrency: batch_size,
+          on_timeout: :kill_task
+        )
+        |> Enum.map(fn
+          {:ok, worker_id} ->
             worker_id
 
-          {:error, reason} ->
-            Logger.error("❌ Worker #{i}/#{count} failed: #{inspect(reason)}")
+          {:exit, reason} ->
+            Logger.error("Worker startup task failed: #{inspect(reason)}")
             nil
-        end
-      end,
-      timeout: startup_timeout,
-      max_concurrency: count,
-      on_timeout: :kill_task
-    )
-    |> Enum.map(fn
-      {:ok, worker_id} ->
-        worker_id
+        end)
+        |> Enum.filter(&(&1 != nil))
 
-      {:exit, reason} ->
-        Logger.error("Worker startup task failed: #{inspect(reason)}")
-        nil
+      # Delay between batches (unless this is the last batch)
+      unless batch_num == div(actual_count - 1, batch_size) do
+        :timer.sleep(batch_delay)
+      end
+
+      workers
     end)
-    |> Enum.filter(&(&1 != nil))
   end
 
   defp checkout_worker(state, session_id) do
@@ -685,5 +735,28 @@ defmodule Snakepit.Pool do
           nil
         end
     end
+  end
+
+  # DIAGNOSTIC: Resource monitoring helpers
+  defp capture_resource_metrics do
+    %{
+      beam_processes: length(:erlang.processes()),
+      beam_ports: length(:erlang.ports()),
+      memory_total_mb: div(:erlang.memory(:total), 1_024 * 1_024),
+      memory_processes_mb: div(:erlang.memory(:processes), 1_024 * 1_024),
+      ets_tables: length(:ets.all()),
+      timestamp: System.monotonic_time(:millisecond)
+    }
+  end
+
+  defp calculate_resource_delta(baseline, peak) do
+    %{
+      processes_delta: peak.beam_processes - baseline.beam_processes,
+      ports_delta: peak.beam_ports - baseline.beam_ports,
+      memory_delta_mb: peak.memory_total_mb - baseline.memory_total_mb,
+      memory_processes_delta_mb: peak.memory_processes_mb - baseline.memory_processes_mb,
+      ets_tables_delta: peak.ets_tables - baseline.ets_tables,
+      time_elapsed_ms: peak.timestamp - baseline.timestamp
+    }
   end
 end
