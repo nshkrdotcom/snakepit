@@ -649,16 +649,39 @@ async def serve_with_shutdown(port: int, adapter_module: str, elixir_address: st
         f.write(f"Binding to port {port}...\n")
         f.flush()
 
-    actual_port = server.add_insecure_port(f'[::]:{port}')
+    try:
+        actual_port = server.add_insecure_port(f'[::]:{port}')
 
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"Bound to port {actual_port}\n")
-        f.flush()
-
-    if actual_port == 0 and port != 0:
-        logger.error(f"Failed to bind to port {port}")
         with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"ERROR: Failed to bind, calling sys.exit(1)\n")
+            f.write(f"Bound to port {actual_port}\n")
+            f.flush()
+
+        if actual_port == 0 and port != 0:
+            error_msg = f"Failed to bind to port {port} - port may already be in use"
+            logger.error(error_msg)
+            with open(f"/tmp/grpc_worker_port_{port}_error.log", "w") as f:
+                f.write(f"{error_msg}\n")
+                f.write(f"Timestamp: {datetime.now()}\n")
+                f.write(f"Requested port: {port}\n")
+                f.write(f"Actual port returned: {actual_port}\n")
+                f.flush()
+            with open("/tmp/python_worker_debug.log", "a") as f:
+                f.write(f"ERROR: {error_msg}, calling sys.exit(1)\n")
+                f.flush()
+            sys.exit(1)
+    except Exception as e:
+        error_msg = f"Exception binding to port {port}: {type(e).__name__}: {e}"
+        logger.error(error_msg)
+        with open(f"/tmp/grpc_worker_port_{port}_error.log", "w") as f:
+            f.write(f"{error_msg}\n")
+            f.write(f"Timestamp: {datetime.now()}\n")
+            f.write("--- TRACEBACK ---\n")
+            traceback.print_exc(file=f)
+            f.write("-----------------\n")
+            f.flush()
+        with open("/tmp/python_worker_debug.log", "a") as f:
+            f.write(f"EXCEPTION binding to port: {error_msg}\n")
+            traceback.print_exc(file=f)
             f.flush()
         sys.exit(1)
 

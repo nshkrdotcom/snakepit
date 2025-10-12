@@ -16,6 +16,42 @@ defmodule Snakepit.Application do
 
   @impl true
   def start(_type, _args) do
+    # Configure threading limits for Python scientific libraries and gRPC
+    # This prevents fork bombs when spawning many workers concurrently
+    # Each Python worker tries to spawn threads from multiple sources:
+    # - OpenBLAS: 24 threads (numpy/scipy)
+    # - gRPC: CPU cores threads (grpcio polling)
+    # - Other libraries (absl, protobuf, etc.)
+    # With 250 workers, this can create 6,000+ threads causing "Cannot fork" errors
+    thread_limits =
+      Application.get_env(:snakepit, :python_thread_limits, %{
+        openblas: 1,
+        omp: 1,
+        mkl: 1,
+        numexpr: 1,
+        grpc_poll_threads: 1
+      })
+
+    # Scientific computing libraries
+    System.put_env("OPENBLAS_NUM_THREADS", to_string(thread_limits.openblas))
+    System.put_env("OMP_NUM_THREADS", to_string(thread_limits.omp))
+    System.put_env("MKL_NUM_THREADS", to_string(thread_limits.mkl))
+    System.put_env("NUMEXPR_NUM_THREADS", to_string(thread_limits.numexpr))
+
+    # gRPC library threading
+    # Use single-threaded polling
+    System.put_env("GRPC_POLL_STRATEGY", "poll")
+    # Reduce logging overhead
+    System.put_env("GRPC_VERBOSITY", "ERROR")
+
+    # Python threading behavior
+    # Unbuffered output for better logging
+    System.put_env("PYTHONUNBUFFERED", "1")
+
+    Logger.info(
+      "🧵 Set Python thread limits: OPENBLAS=#{thread_limits.openblas}, OMP=#{thread_limits.omp}, MKL=#{thread_limits.mkl}, NUMEXPR=#{thread_limits.numexpr}, GRPC=single-threaded"
+    )
+
     # Check if pooling is enabled (default: false to prevent auto-start issues)
     pooling_enabled = Application.get_env(:snakepit, :pooling_enabled, false)
 
@@ -43,8 +79,17 @@ defmodule Snakepit.Application do
 
         [
           # Start the central gRPC server that manages state
+          # DIAGNOSTIC: Increase backlog to handle high concurrent connection load (200+ workers)
+          # Default Cowboy backlog is ~128, which causes connection refusals during startup
           {GRPC.Server.Supervisor,
-           endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true}
+           endpoint: Snakepit.GRPC.Endpoint,
+           port: grpc_port,
+           start_server: true,
+           adapter_opts: [
+             num_acceptors: 20,
+             max_connections: 1000,
+             socket_opts: [backlog: 512]
+           ]}
           |> tap(fn spec ->
             IO.inspect(spec, label: "Adding GRPC.Server.Supervisor to children")
           end),

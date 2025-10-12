@@ -295,7 +295,9 @@ defmodule Snakepit.GRPCWorker do
 
                 # Step 2: Notify the pool (synchronous call blocks until pool acknowledges)
                 # This creates a provable state guarantee: worker cannot proceed until pool has it
-                case GenServer.call(state.pool_name, {:worker_ready, state.id}, 5000) do
+                # CRITICAL: Use 30s timeout to handle large pools (250 workers × 10-20ms = 2.5-5s queue time)
+                # With 5s timeout, workers at the end of the queue would timeout
+                case GenServer.call(state.pool_name, {:worker_ready, state.id}, 30_000) do
                   :ok ->
                     # Schedule health checks
                     health_ref = schedule_health_check()
@@ -452,7 +454,17 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_info({port, {:exit_status, status}}, %{server_port: port} = state) do
-    Logger.error("gRPC server exited with status: #{status}")
+    # DIAGNOSTIC: Drain any remaining error output from the port buffer
+    remaining_output = drain_port_buffer(port, 200)
+
+    Logger.error("""
+    🔴 Python gRPC server exited with status #{status}
+    Worker: #{state.id}
+    Port: #{state.port}
+    PID: #{state.process_pid}
+    Last output: #{remaining_output}
+    """)
+
     {:stop, {:grpc_server_exited, status}, state}
   end
 
@@ -576,6 +588,26 @@ defmodule Snakepit.GRPCWorker do
   #       {:error, "gRPC server failed to start within #{timeout}ms"}
   #   end
   # end
+
+  # Drain remaining output from port buffer to capture error messages
+  defp drain_port_buffer(port, timeout) do
+    drain_port_buffer(port, timeout, [])
+  end
+
+  defp drain_port_buffer(port, timeout, acc) do
+    receive do
+      {^port, {:data, data}} ->
+        output = to_string(data)
+        drain_port_buffer(port, timeout, [output | acc])
+    after
+      timeout ->
+        # No more data, return accumulated output
+        acc
+        |> Enum.reverse()
+        |> Enum.join("")
+        |> String.trim()
+    end
+  end
 
   defp wait_for_server_ready(port, timeout) do
     receive do
