@@ -23,7 +23,13 @@ config :snakepit,
   # Host for the central Elixir gRPC server
   # This is used by Python workers to callback to Elixir
   # Can be overridden for distributed deployments (Docker, K8s, etc.)
-  grpc_host: "localhost"
+  grpc_host: "localhost",
+
+  # gRPC worker configuration
+  grpc_config: %{
+    base_port: 50052,
+    port_range: 175
+  }
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
