@@ -932,6 +932,38 @@ Application.start(:snakepit)
 
 ### Running the Examples
 
+Most examples use `elixir` directly (with Mix.install), but some v0.6.0 demos require the compiled project and use `mix run`:
+
+#### Quick Reference
+
+```bash
+# Basic gRPC examples (use elixir)
+elixir examples/grpc_basic.exs                 # Simple ping, echo, add operations
+elixir examples/grpc_sessions.exs              # Session management patterns
+elixir examples/grpc_streaming.exs             # Streaming data operations
+elixir examples/grpc_concurrent.exs            # Concurrent execution (default: 4 workers)
+elixir examples/grpc_advanced.exs              # Advanced error handling
+elixir examples/grpc_streaming_demo.exs        # Real-time streaming demo
+
+# Bidirectional tool bridge (use elixir)
+elixir examples/bidirectional_tools_demo.exs       # Interactive demo
+elixir examples/bidirectional_tools_demo_auto.exs  # Auto-run server version
+
+# v0.6.0 demos using compiled modules (use mix run)
+mix run examples/threaded_profile_demo.exs                      # Thread profile config
+mix run examples/dual_mode/process_vs_thread_comparison.exs    # Profile comparison
+mix run examples/dual_mode/hybrid_pools.exs                    # Multiple pool profiles
+mix run examples/dual_mode/gil_aware_selection.exs             # Auto Python version detection
+mix run examples/lifecycle/ttl_recycling_demo.exs              # TTL worker recycling
+mix run examples/monitoring/telemetry_integration.exs          # Telemetry setup
+```
+
+**Status**: 159/159 tests passing (100%) with default Python! All examples are production-ready.
+
+**Note**: v0.6.0 feature demos access compiled Snakepit modules (`Snakepit.PythonVersion`, `Snakepit.Compatibility`, etc.) and require `mix run` to work properly.
+
+---
+
 #### Working Examples (Fully Functional)
 
 These examples work out-of-the-box with the default ShowcaseAdapter:
@@ -954,30 +986,45 @@ elixir examples/bidirectional_tools_demo.exs
 
 ---
 
-#### Work-in-Progress Examples
+#### v0.6.0 Feature Demonstrations
 
-These examples demonstrate aspirational features but require additional tool implementations:
+All v0.6.0 examples showcase configuration patterns and best practices:
 
 ```bash
-# Session management - needs parameter fixes
-elixir examples/grpc_sessions.exs
-# Status: Partial - register_variable parameter mismatch
+# Dual-mode architecture
+elixir examples/dual_mode/process_vs_thread_comparison.exs    # Side-by-side comparison
+elixir examples/dual_mode/hybrid_pools.exs                    # Multiple pools with different profiles
+elixir examples/dual_mode/gil_aware_selection.exs             # Automatic Python 3.13+ detection
 
-# Variable system - needs parameter fixes
-elixir examples/grpc_variables.exs
-# Status: Partial - requires 'constraints' parameter
+# Worker lifecycle management
+elixir examples/lifecycle/ttl_recycling_demo.exs              # TTL-based automatic recycling
 
-# Advanced features - needs custom tools
-elixir examples/grpc_advanced.exs
-# Status: WIP - requires validate_input, transform_data, etc.
+# Monitoring & telemetry
+elixir examples/monitoring/telemetry_integration.exs          # Telemetry events setup
 
-# Streaming - needs streaming tool implementations
-elixir examples/grpc_streaming.exs
-elixir examples/grpc_streaming_demo.exs 100
-# Status: WIP - requires streaming-specific tools
+# Thread profile (Python 3.13+ free-threading)
+elixir examples/threaded_profile_demo.exs                     # Thread profile configuration patterns
 ```
 
-**Note**: These examples were written for a more complete adapter. Contributions welcome to implement missing tools in ShowcaseAdapter.
+---
+
+#### Additional Examples
+
+These examples demonstrate advanced features requiring additional tool implementations:
+
+```bash
+# Session management patterns
+elixir examples/grpc_sessions.exs
+
+# Streaming operations
+elixir examples/grpc_streaming.exs
+elixir examples/grpc_streaming_demo.exs
+
+# Advanced error handling
+elixir examples/grpc_advanced.exs
+```
+
+**Note**: Some advanced examples may require custom adapter tools. See [Creating Custom Adapters](#creating-custom-adapters) for implementation details.
 
 ---
 

@@ -25,10 +25,16 @@ jobs:
         elixir-version: ${{ matrix.elixir }}
         otp-version: ${{ matrix.otp }}
 
-    - name: Set up Python
+    - name: Set up Python 3.10
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
+
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+        allow-prereleases: true
 
     - name: Restore dependencies cache
       uses: actions/cache@v4
@@ -37,16 +43,19 @@ jobs:
           deps
           _build
           ~/.cache/pip
-        key: ${{ runner.os }}-mix-pip-${{ hashFiles('**/mix.lock', 'priv/python/requirements.txt') }}
+          .venv
+          .venv-py313
+        key: ${{ runner.os }}-mix-pip-py313-${{ hashFiles('**/mix.lock', 'priv/python/requirements.txt') }}
         restore-keys: |
+          ${{ runner.os }}-mix-pip-py313-
           ${{ runner.os }}-mix-pip-
           ${{ runner.os }}-mix-
 
     - name: Install dependencies
       run: mix deps.get
 
-    - name: Install Python dependencies
-      run: pip install -r priv/python/requirements.txt
+    - name: Setup Python test environments
+      run: ./scripts/setup_test_pythons.sh
 
     - name: Check formatting
       run: mix format --check-formatted
