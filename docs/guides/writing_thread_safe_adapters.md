@@ -1096,7 +1096,7 @@ See `/priv/python/snakepit_bridge/adapters/threaded_showcase.py` for a comprehen
 1. **Read**: [README_THREADING.md](/priv/python/README_THREADING.md)
 2. **Study**: [threaded_showcase.py](/priv/python/snakepit_bridge/adapters/threaded_showcase.py)
 3. **Test**: [test_thread_safety.py](/tests/test_thread_safety.py)
-4. **Deploy**: [Production Deployment Guide](/docs/guides/production_deployment.md)
+4. **Deploy**: Production deployment guide (coming soon)
 
 ---
 

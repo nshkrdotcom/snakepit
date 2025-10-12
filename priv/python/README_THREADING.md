@@ -548,7 +548,7 @@ python grpc_server_threaded.py \
 
 - [PEP 703: Making the GIL Optional](https://peps.python.org/pep-0703/)
 - [Python 3.13 Free-Threading Docs](https://docs.python.org/3.13/howto/free-threading-python.html)
-- [Snakepit v0.6.0 Technical Plan](../../docs/20251011_gil_planning/05_v0.6.0_technical_plan.md)
+- Snakepit v0.6.0 Technical Plan (see project documentation)
 - [Thread Safety Compatibility Matrix](../../lib/snakepit/compatibility.ex)
 
 ---

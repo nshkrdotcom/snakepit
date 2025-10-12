@@ -841,19 +841,14 @@ config :snakepit,
 
 - [Performance Benchmarks](/docs/performance_benchmarks.md)
 - [Writing Thread-Safe Adapters](/docs/guides/writing_thread_safe_adapters.md)
-- [Production Deployment Guide](/docs/guides/production_deployment.md)
 - [Telemetry Events Reference](/docs/telemetry_events.md)
+- Production Deployment Guide (coming soon)
 
 ### Examples
 
 - [Process vs Thread Comparison](/examples/process_vs_thread_comparison.exs)
 - [Lifecycle Demo](/examples/lifecycle_demo.exs)
 - [Monitoring Demo](/examples/monitoring_demo.exs)
-
-### Technical Plans
-
-- [v0.6.0 Technical Plan](/docs/20251011_gil_planning/05_v0.6.0_technical_plan.md)
-- [Phase Completion Summaries](/docs/20251011_gil_planning/)
 
 ---
 

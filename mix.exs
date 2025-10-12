@@ -158,6 +158,13 @@ defmodule Snakepit.MixProject do
         {"docs/ECOSYSTEM_ARCHITECTURE.md", title: "Ecosystem Architecture"},
         {"docs/DSPEX_PRODUCTION_STRATEGY.md", title: "DSPex Production Strategy"},
 
+        # v0.6.0 Documentation
+        {"docs/migration_v0.5_to_v0.6.md", title: "Migration Guide (v0.5 to v0.6)"},
+        {"docs/performance_benchmarks.md", title: "Performance Benchmarks"},
+        {"docs/telemetry_events.md", title: "Telemetry Events Reference"},
+        {"docs/guides/writing_thread_safe_adapters.md", title: "Writing Thread-Safe Adapters"},
+        {"priv/python/README_THREADING.md", title: "Python Threading Guide"},
+
         # Advanced topics
         {"docs/code-standards/test-architecture-supertester.md", title: "Test Architecture"},
         {"docs/architecture/adr-001-worker-starter-supervision-pattern.md",
@@ -165,10 +172,13 @@ defmodule Snakepit.MixProject do
       ],
       groups_for_extras: [
         "Getting Started": [
-          "guides/INSTALLATION.md"
+          "guides/INSTALLATION.md",
+          "docs/migration_v0.5_to_v0.6.md"
         ],
         Guides: [
-          "README.md"
+          "README.md",
+          "docs/guides/writing_thread_safe_adapters.md",
+          "priv/python/README_THREADING.md"
         ],
         Features: [
           "README_GRPC.md",
@@ -189,6 +199,8 @@ defmodule Snakepit.MixProject do
         ],
         Reference: [
           "docs/GRPC_QUICK_REFERENCE.md",
+          "docs/telemetry_events.md",
+          "docs/performance_benchmarks.md",
           "docs/ECOSYSTEM_ARCHITECTURE.md",
           "docs/DSPEX_PRODUCTION_STRATEGY.md"
         ],

@@ -735,7 +735,7 @@ CustomBenchmark.run()
 
 1. **Read**: [Migration Guide](/docs/migration_v0.5_to_v0.6.md)
 2. **Try**: [Process vs Thread Example](/examples/process_vs_thread_comparison.exs)
-3. **Deploy**: [Production Deployment Guide](/docs/guides/production_deployment.md)
+3. **Deploy**: Production deployment guide (coming soon)
 
 ---
 
