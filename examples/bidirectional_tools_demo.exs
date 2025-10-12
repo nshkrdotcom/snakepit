@@ -1,3 +1,5 @@
+#!/usr/bin/env elixir
+
 # Bidirectional Tool Bridge Demonstration
 #
 # This example showcases the bidirectional tool execution between Elixir and Python:
@@ -11,10 +13,10 @@ defmodule ElixirTools do
   @moduledoc """
   Example Elixir tools that can be called from Python.
   """
-  
+
   def parse_json(params) do
     json_string = Map.get(params, "json_string", "{}")
-    
+
     case Jason.decode(json_string) do
       {:ok, parsed} ->
         %{
@@ -23,6 +25,7 @@ defmodule ElixirTools do
           keys: Map.keys(parsed),
           size: map_size(parsed)
         }
+
       {:error, reason} ->
         %{
           success: false,
@@ -30,42 +33,44 @@ defmodule ElixirTools do
         }
     end
   end
-  
+
   def calculate_fibonacci(params) do
     n = Map.get(params, "n", 10)
-    
+
     result = fibonacci_sequence(n)
-    
+
     %{
       n: n,
       sequence: result,
       sum: Enum.sum(result)
     }
   end
-  
+
   defp fibonacci_sequence(n) when n <= 0, do: []
   defp fibonacci_sequence(1), do: [0]
   defp fibonacci_sequence(2), do: [0, 1]
+
   defp fibonacci_sequence(n) do
     Enum.reduce(3..n, [1, 0], fn _, [prev1, prev2 | _] = acc ->
       [prev1 + prev2 | acc]
     end)
     |> Enum.reverse()
   end
-  
+
   def process_list(params) do
     list = Map.get(params, "list", [])
     operation = Map.get(params, "operation", "sum")
-    
-    result = case operation do
-      "sum" -> Enum.sum(list)
-      "max" -> Enum.max(list, fn -> nil end)
-      "min" -> Enum.min(list, fn -> nil end)
-      "mean" -> if list == [], do: nil, else: Enum.sum(list) / length(list)
-      "reverse" -> Enum.reverse(list)
-      _ -> {:error, "Unknown operation: #{operation}"}
-    end
-    
+
+    result =
+      case operation do
+        "sum" -> Enum.sum(list)
+        "max" -> Enum.max(list, fn -> nil end)
+        "min" -> Enum.min(list, fn -> nil end)
+        "mean" -> if list == [], do: nil, else: Enum.sum(list) / length(list)
+        "reverse" -> Enum.reverse(list)
+        _ -> {:error, "Unknown operation: #{operation}"}
+      end
+
     %{
       list: list,
       operation: operation,
@@ -91,16 +96,22 @@ Application.put_env(:snakepit, :pooling_enabled, false)
 {:ok, _} = Application.ensure_all_started(:snakepit)
 
 # Start the gRPC server supervisor
-{:ok, _} = Supervisor.start_link([
-  {GRPC.Server.Supervisor, endpoint: Snakepit.GRPC.Endpoint, port: 50051, start_server: true}
-], strategy: :one_for_one)
+{:ok, _} =
+  Supervisor.start_link(
+    [
+      {GRPC.Server.Supervisor, endpoint: Snakepit.GRPC.Endpoint, port: 50051, start_server: true}
+    ],
+    strategy: :one_for_one
+  )
 
 # Wait for services to start
 Process.sleep(500)
 
 # Create a session
 session_id = "bidirectional-demo-#{:os.system_time(:millisecond)}"
-{:ok, _session} = SessionStore.create_session(session_id, metadata: %{"demo" => "bidirectional_tools"})
+
+{:ok, _session} =
+  SessionStore.create_session(session_id, metadata: %{"demo" => "bidirectional_tools"})
 
 IO.puts("\n=== Bidirectional Tool Bridge Demo ===")
 IO.puts("Session ID: #{session_id}\n")
@@ -109,7 +120,7 @@ IO.puts("Session ID: #{session_id}\n")
 IO.puts("1. Registering Elixir tools...")
 
 ToolRegistry.register_elixir_tool(
-  session_id, 
+  session_id,
   "parse_json",
   &ElixirTools.parse_json/1,
   %{
@@ -123,7 +134,7 @@ ToolRegistry.register_elixir_tool(
 
 ToolRegistry.register_elixir_tool(
   session_id,
-  "calculate_fibonacci", 
+  "calculate_fibonacci",
   &ElixirTools.calculate_fibonacci/1,
   %{
     description: "Calculate Fibonacci sequence up to n numbers",
@@ -151,6 +162,7 @@ ToolRegistry.register_elixir_tool(
 # List registered Elixir tools
 elixir_tools = ToolRegistry.list_exposed_elixir_tools(session_id)
 IO.puts("Registered #{length(elixir_tools)} Elixir tools:")
+
 for tool <- elixir_tools do
   IO.puts("  - #{tool.name}: #{tool.description}")
 end
@@ -158,16 +170,19 @@ end
 IO.puts("\n2. Testing direct Elixir tool execution...")
 
 # Test direct execution
-{:ok, result} = ToolRegistry.execute_local_tool(
-  session_id, 
-  "parse_json",
-  %{"json_string" => ~s({"name": "test", "value": 42})}
-)
+{:ok, result} =
+  ToolRegistry.execute_local_tool(
+    session_id,
+    "parse_json",
+    %{"json_string" => ~s({"name": "test", "value": 42})}
+  )
+
 IO.puts("Direct execution result: #{inspect(result)}")
 
 IO.puts("\n3. Python Integration Demo")
 IO.puts("Now Python can discover and call these Elixir tools!")
 IO.puts("\nTo test from Python:")
+
 IO.puts(~S"""
 # In Python with a SessionContext:
 ctx = SessionContext(stub, "#{session_id}")
@@ -201,6 +216,7 @@ for tool <- python_tools do
 end
 
 IO.puts("\n5. Complete Workflow Example")
+
 IO.puts(~S"""
 A complete bidirectional workflow might look like:
 
