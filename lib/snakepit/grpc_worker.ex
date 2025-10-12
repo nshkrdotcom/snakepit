@@ -568,7 +568,9 @@ defmodule Snakepit.GRPCWorker do
     # ALWAYS kill the Python process, regardless of reason
     # This is critical to prevent orphaned processes
     if state.process_pid do
-      if reason == :shutdown do
+      # Treat :shutdown and :normal as graceful shutdowns
+      # :normal occurs when pool dies during worker startup - we should still be graceful
+      if reason in [:shutdown, :normal] do
         # Graceful shutdown - use SIGTERM with escalation
         Logger.debug(
           "Starting graceful shutdown of external gRPC process PID: #{state.process_pid}..."
