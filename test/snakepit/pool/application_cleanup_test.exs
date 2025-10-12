@@ -12,8 +12,28 @@ defmodule Snakepit.Pool.ApplicationCleanupTest do
 
   alias Snakepit.Pool.ProcessRegistry
 
+  setup do
+    # Ensure application is running (in case a previous test stopped it)
+    case Application.ensure_all_started(:snakepit) do
+      {:ok, _apps} ->
+        # Wait for pool to be ready
+        assert_eventually(
+          fn ->
+            Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+          end,
+          timeout: 30_000,
+          interval: 1_000
+        )
+
+      {:error, {:already_started, :snakepit}} ->
+        :ok
+    end
+
+    :ok
+  end
+
   test "ApplicationCleanup does NOT kill processes from current BEAM run" do
-    # Application is already started by test_helper.exs
+    # Application is already started by setup
     beam_run_id = ProcessRegistry.get_beam_run_id()
 
     # Poll until workers are fully started (using Supertester pattern)

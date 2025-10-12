@@ -9,8 +9,22 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
   alias Snakepit.Pool.ProcessRegistry
 
   setup do
-    # Only kill truly orphaned processes, not current ones
-    # This is gentler than pkill -9 which can interfere with other running tests
+    # Ensure application is running (in case a previous test stopped it)
+    case Application.ensure_all_started(:snakepit) do
+      {:ok, _apps} ->
+        # Wait for pool to be ready
+        assert_eventually(
+          fn ->
+            Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+          end,
+          timeout: 30_000,
+          interval: 1_000
+        )
+
+      {:error, {:already_started, :snakepit}} ->
+        :ok
+    end
+
     :ok
   end
 

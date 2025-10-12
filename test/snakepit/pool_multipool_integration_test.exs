@@ -1,5 +1,6 @@
 defmodule Snakepit.PoolMultiPoolIntegrationTest do
   use ExUnit.Case, async: false
+  import Snakepit.TestHelpers
 
   @moduletag :integration
   @moduletag timeout: 60_000
@@ -11,6 +12,14 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
 
     on_exit(fn ->
       Application.stop(:snakepit)
+      # Wait for processes to actually stop
+      assert_eventually(
+        fn ->
+          Process.whereis(Snakepit.Pool) == nil
+        end,
+        timeout: 5_000,
+        interval: 100
+      )
     end)
 
     :ok
@@ -68,7 +77,14 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
       # Doesn't support pool selection
 
       # For now, test that default still works
-      :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 15_000)
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 60_000,
+        interval: 1_000
+      )
+
       {:ok, _result} = Snakepit.execute("ping", %{})
     end
   end
@@ -95,7 +111,15 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
       Application.put_env(:snakepit, :pooling_enabled, true)
 
       {:ok, _} = Application.ensure_all_started(:snakepit)
-      :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 15_000)
+
+      # Wait for pool with assert_eventually
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 60_000,
+        interval: 1_000
+      )
 
       # If WorkerProfile is being used, it would pass adapter_env to worker
       # If not, it's ignored

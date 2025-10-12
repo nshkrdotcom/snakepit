@@ -1,5 +1,6 @@
 defmodule Snakepit.MultiPoolExecutionTest do
   use ExUnit.Case, async: false
+  import Snakepit.TestHelpers
 
   @moduletag :multi_pool
   @moduletag timeout: 120_000
@@ -11,8 +12,14 @@ defmodule Snakepit.MultiPoolExecutionTest do
 
     on_exit(fn ->
       Application.stop(:snakepit)
-      # Let cleanup finish
-      :timer.sleep(1000)
+      # Wait for processes to actually stop
+      assert_eventually(
+        fn ->
+          Process.whereis(Snakepit.Pool) == nil
+        end,
+        timeout: 5_000,
+        interval: 100
+      )
     end)
 
     :ok
@@ -43,13 +50,19 @@ defmodule Snakepit.MultiPoolExecutionTest do
       # Start Snakepit
       {:ok, _apps} = Application.ensure_all_started(:snakepit)
 
-      # Wait for pools to initialize
+      # Wait for pools to initialize - use assert_eventually to avoid race conditions
       # TODO: This will fail - await_ready doesn't support named pools
       # :ok = Snakepit.Pool.await_ready(:pool_a, 15_000)
       # :ok = Snakepit.Pool.await_ready(:pool_b, 15_000)
 
-      # For now, wait for default pool
-      :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 15_000)
+      # For now, wait for default pool with longer timeout for Python server startup
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 60_000,
+        interval: 1_000
+      )
 
       # Execute on pool_a
       # TODO: This will fail - execute doesn't route to named pools yet
@@ -81,7 +94,15 @@ defmodule Snakepit.MultiPoolExecutionTest do
       ])
 
       {:ok, _} = Application.ensure_all_started(:snakepit)
-      :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 15_000)
+
+      # Wait for pool with assert_eventually
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 60_000,
+        interval: 1_000
+      )
 
       # Get workers from pool_a
       # TODO: This will fail - list_workers doesn't support named pools
@@ -113,7 +134,15 @@ defmodule Snakepit.MultiPoolExecutionTest do
       ])
 
       {:ok, _} = Application.ensure_all_started(:snakepit)
-      :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 15_000)
+
+      # Wait for pool with assert_eventually
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 60_000,
+        interval: 1_000
+      )
 
       # TODO: This signature doesn't exist
       # Current: execute(command, args, opts)

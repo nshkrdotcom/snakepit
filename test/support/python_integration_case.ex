@@ -7,10 +7,12 @@ defmodule Snakepit.PythonIntegrationCase do
   """
 
   use ExUnit.CaseTemplate
+  import Snakepit.TestHelpers
 
   using do
     quote do
       use ExUnit.Case, async: false
+      import Snakepit.TestHelpers
 
       @moduletag :python_integration
 
@@ -60,28 +62,51 @@ defmodule Snakepit.PythonIntegrationCase do
 
       # Restore original configuration
       Application.stop(:snakepit)
+
+      # Wait for processes to actually stop
+      assert_eventually(
+        fn ->
+          Process.whereis(Snakepit.Pool) == nil
+        end,
+        timeout: 5_000,
+        interval: 100
+      )
+
       Application.put_env(:snakepit, :pooling_enabled, original_pooling)
       Application.put_env(:snakepit, :adapter_module, original_adapter)
 
       # Restart the application with original config for subsequent tests
       {:ok, _} = Application.ensure_all_started(:snakepit)
+
+      # Wait for new pool to be ready
+      if original_pooling do
+        assert_eventually(
+          fn ->
+            Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+          end,
+          timeout: 30_000,
+          interval: 1_000
+        )
+      end
     end)
 
     {:ok, %{}}
   end
 
-  defp wait_for_grpc_server(retries \\ 50) do
-    case GRPC.Stub.connect("localhost:50051") do
-      {:ok, channel} ->
-        GRPC.Stub.disconnect(channel)
-        :ok
+  defp wait_for_grpc_server do
+    assert_eventually(
+      fn ->
+        case GRPC.Stub.connect("localhost:50051") do
+          {:ok, channel} ->
+            GRPC.Stub.disconnect(channel)
+            true
 
-      {:error, _} when retries > 0 ->
-        Process.sleep(100)
-        wait_for_grpc_server(retries - 1)
-
-      {:error, reason} ->
-        raise "gRPC server failed to start: #{inspect(reason)}"
-    end
+          {:error, _} ->
+            false
+        end
+      end,
+      timeout: 10_000,
+      interval: 100
+    )
   end
 end
