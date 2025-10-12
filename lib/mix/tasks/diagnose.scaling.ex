@@ -20,6 +20,7 @@ defmodule Mix.Tasks.Diagnose.Scaling do
     IO.puts(String.duplicate("=", 80) <> "\n")
 
     # Run all diagnostics
+    check_pool_profiles()
     check_erlang_limits()
     check_erlang_process_limits()
     check_dets_contention()
@@ -30,6 +31,124 @@ defmodule Mix.Tasks.Diagnose.Scaling do
     IO.puts("\n" <> String.duplicate("=", 80))
     IO.puts("✅ DIAGNOSTICS COMPLETE")
     IO.puts(String.duplicate("=", 80) <> "\n")
+  end
+
+  defp check_pool_profiles do
+    IO.puts("📊 TEST 0: POOL PROFILE ANALYSIS")
+    IO.puts(String.duplicate("-", 80))
+
+    case Snakepit.Config.get_pool_configs() do
+      {:ok, configs} ->
+        IO.puts("Configured pools: #{length(configs)}\n")
+
+        Enum.each(configs, fn config ->
+          pool_name = Map.fetch!(config, :name)
+          profile = Map.get(config, :worker_profile, :process)
+          pool_size = Map.get(config, :pool_size, 0)
+
+          IO.puts("Pool: #{pool_name}")
+          IO.puts("  Profile:    #{profile}")
+          IO.puts("  Pool Size:  #{pool_size}")
+
+          case profile do
+            :thread ->
+              threads = Map.get(config, :threads_per_worker, 10)
+              total_capacity = pool_size * threads
+              IO.puts("  Threads/Worker: #{threads}")
+              IO.puts("  Total Capacity: #{total_capacity}")
+
+              # Check if thread profile is appropriate
+              if pool_size > 100 do
+                IO.puts(
+                  "\n⚠️  WARNING: Large pool size (#{pool_size}) with thread profile may not be optimal"
+                )
+
+                IO.puts("    Consider: Fewer workers with more threads per worker")
+                IO.puts("    Example: 16 workers x 64 threads = 1024 capacity")
+              end
+
+            :process ->
+              IO.puts("  Capacity:   #{pool_size} (1:1 with workers)")
+
+              if pool_size > 250 do
+                IO.puts(
+                  "\n⚠️  WARNING: Very large process pool (#{pool_size}). Consider thread profile for better efficiency."
+                )
+
+                IO.puts("    Thread profile benefits:")
+                IO.puts("      - Lower memory usage (shared interpreter)")
+                IO.puts("      - Faster startup (fewer processes)")
+                IO.puts("      - Better CPU utilization (Python 3.13+)")
+              end
+          end
+
+          # Get current pool statistics if available
+          case Snakepit.Diagnostics.ProfileInspector.get_pool_stats(pool_name) do
+            {:ok, stats} ->
+              IO.puts("\nCurrent Status:")
+              IO.puts("  Active Workers:  #{stats.worker_count}")
+              IO.puts("  Utilization:     #{stats.utilization_percent}%")
+
+              if stats.capacity_available > 0 do
+                IO.puts("  Available:       #{stats.capacity_available}")
+              end
+
+              # Profile-specific recommendations
+              case profile do
+                :thread ->
+                  if stats.utilization_percent > 80 do
+                    IO.puts("\n💡 RECOMMENDATION: High utilization on thread pool")
+                    IO.puts("    - Consider increasing threads_per_worker")
+                    IO.puts("    - Or add more worker processes")
+                  end
+
+                :process ->
+                  if stats.utilization_percent > 80 do
+                    IO.puts("\n💡 RECOMMENDATION: High utilization on process pool")
+                    IO.puts("    - Add more workers (current: #{stats.worker_count})")
+
+                    if stats.worker_count > 100 do
+                      IO.puts("    - Or consider switching to thread profile")
+                    end
+                  end
+              end
+
+            {:error, :pool_not_running} ->
+              IO.puts("\n⚠️  Pool is not currently running")
+
+            {:error, _} ->
+              :ok
+          end
+
+          IO.puts("")
+        end)
+
+        # Overall system recommendations
+        process_pools = Enum.count(configs, fn c -> Map.get(c, :worker_profile) == :process end)
+        thread_pools = Enum.count(configs, fn c -> Map.get(c, :worker_profile) == :thread end)
+        total_workers = Enum.sum(Enum.map(configs, fn c -> Map.get(c, :pool_size, 0) end))
+
+        IO.puts("System Overview:")
+        IO.puts("  Process Pools: #{process_pools}")
+        IO.puts("  Thread Pools:  #{thread_pools}")
+        IO.puts("  Total Workers: #{total_workers}")
+
+        if total_workers > 300 and thread_pools == 0 do
+          IO.puts("\n💡 OPTIMIZATION OPPORTUNITY:")
+          IO.puts("    With #{total_workers} workers, consider using thread profile")
+
+          IO.puts(
+            "    Example: Replace 300 process workers with 10 thread workers (30 threads each)"
+          )
+
+          IO.puts("    Benefits: ~70% memory reduction, faster startup, same throughput")
+        end
+
+      {:error, reason} ->
+        IO.puts("⚠️  Could not load pool configurations: #{inspect(reason)}")
+    end
+
+    IO.puts("\n")
   end
 
   defp check_erlang_limits do

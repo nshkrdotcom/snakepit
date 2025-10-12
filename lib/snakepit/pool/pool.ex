@@ -18,23 +18,37 @@ defmodule Snakepit.Pool do
   @default_queue_timeout 5_000
   @default_max_queue_size 1000
 
+  # Per-pool state structure
+  defmodule PoolState do
+    @moduledoc false
+    defstruct [
+      :name,
+      :size,
+      :workers,
+      :available,
+      :busy,
+      :request_queue,
+      :cancelled_requests,
+      :stats,
+      :initialized,
+      :startup_timeout,
+      :queue_timeout,
+      :max_queue_size,
+      :worker_module,
+      :adapter_module,
+      :pool_config,
+      initialization_waiters: []
+    ]
+  end
+
+  # Top-level state structure
   defstruct [
-    :size,
-    :workers,
-    :available,
-    :busy,
-    :request_queue,
-    :cancelled_requests,
+    :pools,
+    # Map of pool_name => PoolState
     :affinity_cache,
-    :stats,
-    :initialized,
-    :startup_timeout,
-    :queue_timeout,
-    :max_queue_size,
-    :worker_module,
-    :adapter_module,
-    # Note: process_pids removed - ProcessRegistry is the single source of truth
-    initialization_waiters: []
+    # Shared across all pools
+    :default_pool
+    # Default pool name for backward compatibility
   ]
 
   # Client API
@@ -141,19 +155,25 @@ defmodule Snakepit.Pool do
     # CRITICAL: Trap exits to ensure terminate/2 is called
     Process.flag(:trap_exit, true)
 
-    size = opts[:size] || @default_size
+    # v0.6.0: Get ALL pool configurations from Config system
+    pool_configs =
+      case Snakepit.Config.get_pool_configs() do
+        {:ok, configs} when is_list(configs) and length(configs) > 0 ->
+          Logger.info("Initializing #{length(configs)} pool(s)")
+          configs
 
-    startup_timeout =
-      Application.get_env(:snakepit, :pool_startup_timeout, @default_startup_timeout)
+        {:ok, []} ->
+          Logger.warning("No pool configs found, using legacy defaults")
+          [%{name: :default}]
 
-    queue_timeout = Application.get_env(:snakepit, :pool_queue_timeout, @default_queue_timeout)
-    max_queue_size = Application.get_env(:snakepit, :pool_max_queue_size, @default_max_queue_size)
-
-    worker_module = opts[:worker_module] || Snakepit.GRPCWorker
-    adapter_module = opts[:adapter_module] || Application.get_env(:snakepit, :adapter_module)
+        {:error, reason} ->
+          Logger.warning("Config system error (#{inspect(reason)}), using legacy defaults")
+          [%{name: :default}]
+      end
 
     # PERFORMANCE FIX: Create ETS cache for session affinity to eliminate
     # GenServer bottleneck on SessionStore. This provides ~100x faster lookups.
+    # Shared across ALL pools
     affinity_cache =
       :ets.new(:worker_affinity_cache, [
         :set,
@@ -161,50 +181,123 @@ defmodule Snakepit.Pool do
         {:read_concurrency, true}
       ])
 
+    # Create initial pool states (not yet initialized with workers)
+    pools =
+      Enum.reduce(pool_configs, %{}, fn pool_config, acc ->
+        pool_name = Map.get(pool_config, :name, :default)
+
+        # Extract pool settings with backward-compatible fallbacks
+        size = opts[:size] || Map.get(pool_config, :pool_size, @default_size)
+
+        startup_timeout =
+          Application.get_env(:snakepit, :pool_startup_timeout, @default_startup_timeout)
+
+        queue_timeout =
+          Application.get_env(:snakepit, :pool_queue_timeout, @default_queue_timeout)
+
+        max_queue_size =
+          Application.get_env(:snakepit, :pool_max_queue_size, @default_max_queue_size)
+
+        worker_module = opts[:worker_module] || Snakepit.GRPCWorker
+
+        adapter_module =
+          opts[:adapter_module] ||
+            Map.get(pool_config, :adapter_module) ||
+            Application.get_env(:snakepit, :adapter_module)
+
+        pool_state = %PoolState{
+          name: pool_name,
+          size: size,
+          workers: [],
+          available: MapSet.new(),
+          busy: %{},
+          request_queue: :queue.new(),
+          cancelled_requests: MapSet.new(),
+          stats: %{
+            requests: 0,
+            queued: 0,
+            errors: 0,
+            queue_timeouts: 0,
+            pool_saturated: 0
+          },
+          initialized: false,
+          startup_timeout: startup_timeout,
+          queue_timeout: queue_timeout,
+          max_queue_size: max_queue_size,
+          worker_module: worker_module,
+          adapter_module: adapter_module,
+          pool_config: pool_config
+        }
+
+        Map.put(acc, pool_name, pool_state)
+      end)
+
+    # Determine default pool (first pool or :default)
+    default_pool =
+      case pool_configs do
+        [first | _] -> Map.get(first, :name, :default)
+        [] -> :default
+      end
+
     state = %__MODULE__{
-      size: size,
-      workers: [],
-      available: MapSet.new(),
-      busy: %{},
-      request_queue: :queue.new(),
-      cancelled_requests: MapSet.new(),
+      pools: pools,
       affinity_cache: affinity_cache,
-      stats: %{
-        requests: 0,
-        queued: 0,
-        errors: 0,
-        queue_timeouts: 0,
-        pool_saturated: 0
-      },
-      initialized: false,
-      startup_timeout: startup_timeout,
-      queue_timeout: queue_timeout,
-      max_queue_size: max_queue_size,
-      worker_module: worker_module,
-      adapter_module: adapter_module
+      default_pool: default_pool
     }
 
-    # Start concurrent worker initialization
+    # Start concurrent worker initialization for ALL pools
     {:ok, state, {:continue, :initialize_workers}}
   end
 
   @impl true
   def handle_continue(:initialize_workers, state) do
-    Logger.info("🚀 Starting concurrent initialization of #{state.size} workers...")
+    total_workers = Enum.reduce(state.pools, 0, fn {_name, pool}, acc -> acc + pool.size end)
+
+    Logger.info(
+      "🚀 Starting concurrent initialization of #{total_workers} workers across #{map_size(state.pools)} pool(s)..."
+    )
+
     start_time = System.monotonic_time(:millisecond)
 
     # DIAGNOSTIC: Capture baseline system resource usage
     baseline_resources = capture_resource_metrics()
     Logger.info("📊 Baseline resources: #{inspect(baseline_resources)}")
 
-    # Start all workers concurrently
-    workers =
-      start_workers_concurrently(
-        state.size,
-        state.startup_timeout,
-        state.worker_module,
-        state.adapter_module
-      )
+    # Initialize ALL pools concurrently
+    updated_pools =
+      Enum.map(state.pools, fn {pool_name, pool_state} ->
+        Logger.info("Initializing pool #{pool_name} with #{pool_state.size} workers...")
+
+        # Start workers for this pool
+        workers =
+          start_workers_concurrently(
+            pool_name,
+            pool_state.size,
+            pool_state.startup_timeout,
+            pool_state.worker_module,
+            pool_state.adapter_module,
+            pool_state.pool_config
+          )
+
+        Logger.info(
+          "✅ Pool #{pool_name}: Initialized #{length(workers)}/#{pool_state.size} workers"
+        )
+
+        # Update pool state with workers
+        updated_pool_state =
+          if length(workers) > 0 do
+            available = MapSet.new(workers)
+
+            %{pool_state | workers: workers, available: available, initialized: true}
+          else
+            # Pool failed to start any workers
+            Logger.error("❌ Pool #{pool_name} failed to start any workers!")
+            pool_state
+          end
+
+        {pool_name, updated_pool_state}
+      end)
+      |> Enum.into(%{})
 
     elapsed = System.monotonic_time(:millisecond) - start_time
 
@@ -212,133 +305,185 @@ defmodule Snakepit.Pool do
     peak_resources = capture_resource_metrics()
     resource_delta = calculate_resource_delta(baseline_resources, peak_resources)
 
-    Logger.info("✅ Initialized #{length(workers)}/#{state.size} workers in #{elapsed}ms")
+    Logger.info("✅ All pools initialized in #{elapsed}ms")
     Logger.info("📊 Resource usage delta: #{inspect(resource_delta)}")
 
-    if length(workers) == 0 do
+    # Check if any pool successfully started
+    any_workers_started? =
+      Enum.any?(updated_pools, fn {_name, pool} -> length(pool.workers) > 0 end)
+
+    if not any_workers_started? do
       {:stop, :no_workers_started, state}
     else
-      # Add workers to available set
-      # Note: Workers may still be in :reserved state, but is_worker_active() check
-      # in checkout_worker() ensures only active workers are used. If all workers
-      # are still initializing, requests will queue briefly (~100-500ms) until ready.
-      available = MapSet.new(workers)
-      new_state = %{state | workers: workers, available: available, initialized: true}
+      new_state = %{state | pools: updated_pools}
 
-      # PERFORMANCE FIX: Stagger replies to prevent thundering herd
-      # Spread waiters over time to avoid overwhelming the pool with simultaneous requests
-      state.initialization_waiters
+      # PERFORMANCE FIX: Stagger replies to waiters from ALL pools
+      all_waiters =
+        Enum.flat_map(updated_pools, fn {_name, pool} ->
+          pool.initialization_waiters
+        end)
+
+      all_waiters
       |> Enum.with_index()
       |> Enum.each(fn {from, index} ->
         # Stagger each reply by 2ms to spread the load
         Process.send_after(self(), {:reply_to_waiter, from}, index * 2)
       end)
 
-      {:noreply, %{new_state | initialization_waiters: []}}
+      # Clear all initialization_waiters
+      updated_pools_no_waiters =
+        Enum.map(updated_pools, fn {name, pool} ->
+          {name, %{pool | initialization_waiters: []}}
+        end)
+        |> Enum.into(%{})
+
+      {:noreply, %{new_state | pools: updated_pools_no_waiters}}
     end
   end
 
   @impl true
   def handle_call({:execute, command, args, opts}, from, state) do
-    if not state.initialized do
-      {:reply, {:error, :pool_not_initialized}, state}
-    else
-      session_id = opts[:session_id]
+    # Backward compatibility: route to default pool
+    pool_name = opts[:pool_name] || state.default_pool
+    handle_execute_for_pool(pool_name, command, args, opts, from, state)
+  end
 
-      case checkout_worker(state, session_id) do
-        {:ok, worker_id, new_state} ->
-          # Execute in a supervised, unlinked task
-          Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
-            # Extract the actual PID from the from tuple for monitoring
-            {client_pid, _tag} = from
-            ref = Process.monitor(client_pid)
-            result = execute_on_worker(worker_id, command, args, opts)
-
-            # Check if the client is still alive
-            receive do
-              {:DOWN, ^ref, :process, ^client_pid, _reason} ->
-                # Client is dead, don't try to reply. Just check in the worker.
-                Logger.warning(
-                  "Client #{inspect(client_pid)} died before receiving reply. Checking in worker #{worker_id}."
-                )
-
-                GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
-            after
-              0 ->
-                # Client is alive. Clean up the monitor and proceed.
-                Process.demonitor(ref, [:flush])
-                GenServer.reply(from, result)
-                GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
-            end
-          end)
-
-          # Update stats
-          stats = Map.update!(state.stats, :requests, &(&1 + 1))
-          # We reply :noreply immediately, the task will reply to the caller later
-          {:noreply, %{new_state | stats: stats}}
-
-        {:error, :no_workers} ->
-          # Check if queue is at max capacity
-          current_queue_size = :queue.len(state.request_queue)
-
-          if current_queue_size >= state.max_queue_size do
-            # Pool is saturated, reject request immediately
-            stats = Map.update!(state.stats, :pool_saturated, &(&1 + 1))
-            {:reply, {:error, :pool_saturated}, %{state | stats: stats}}
-          else
-            # Queue the request
-            request = {from, command, args, opts, System.monotonic_time()}
-            new_queue = :queue.in(request, state.request_queue)
-
-            # Update stats
-            stats =
-              state.stats
-              |> Map.update!(:requests, &(&1 + 1))
-              |> Map.update!(:queued, &(&1 + 1))
-
-            # Set queue timeout
-            Process.send_after(self(), {:queue_timeout, from}, state.queue_timeout)
-
-            {:noreply, %{state | request_queue: new_queue, stats: stats}}
-          end
-      end
-    end
+  def handle_call({:execute, pool_name, command, args, opts}, from, state) do
+    handle_execute_for_pool(pool_name, command, args, opts, from, state)
   end
 
   def handle_call({:checkout_worker, session_id}, _from, state) do
-    case checkout_worker(state, session_id) do
-      {:ok, worker_id, new_state} ->
-        {:reply, {:ok, worker_id}, new_state}
+    # Backward compat: use default pool
+    pool_name = state.default_pool
 
-      {:error, :no_workers} ->
-        {:reply, {:error, :no_workers_available}, state}
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        {:reply, {:error, :pool_not_found}, state}
+
+      pool_state ->
+        case checkout_worker(pool_state, session_id) do
+          {:ok, worker_id, new_pool_state} ->
+            updated_pools = Map.put(state.pools, pool_name, new_pool_state)
+            {:reply, {:ok, worker_id}, %{state | pools: updated_pools}}
+
+          {:error, :no_workers} ->
+            {:reply, {:error, :no_workers_available}, state}
+        end
     end
   end
 
   def handle_call(:get_stats, _from, state) do
-    stats =
-      Map.merge(state.stats, %{
-        workers: length(state.workers),
-        available: MapSet.size(state.available),
-        busy: map_size(state.busy),
-        queued: :queue.len(state.request_queue)
-      })
+    # Backward compat: aggregate stats from all pools
+    aggregate_stats =
+      Enum.reduce(
+        state.pools,
+        %{
+          requests: 0,
+          queued: 0,
+          errors: 0,
+          queue_timeouts: 0,
+          pool_saturated: 0,
+          workers: 0,
+          available: 0,
+          busy: 0
+        },
+        fn {_name, pool}, acc ->
+          %{
+            requests: acc.requests + Map.get(pool.stats, :requests, 0),
+            queued: acc.queued + Map.get(pool.stats, :queued, 0) + :queue.len(pool.request_queue),
+            errors: acc.errors + Map.get(pool.stats, :errors, 0),
+            queue_timeouts: acc.queue_timeouts + Map.get(pool.stats, :queue_timeouts, 0),
+            pool_saturated: acc.pool_saturated + Map.get(pool.stats, :pool_saturated, 0),
+            workers: acc.workers + length(pool.workers),
+            available: acc.available + MapSet.size(pool.available),
+            busy: acc.busy + map_size(pool.busy)
+          }
+        end
+      )
 
-    {:reply, stats, state}
+    {:reply, aggregate_stats, state}
+  end
+
+  def handle_call({:get_stats, pool_name}, _from, state) do
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        {:reply, {:error, :pool_not_found}, state}
+
+      pool_state ->
+        stats =
+          Map.merge(pool_state.stats, %{
+            workers: length(pool_state.workers),
+            available: MapSet.size(pool_state.available),
+            busy: map_size(pool_state.busy),
+            queued: :queue.len(pool_state.request_queue)
+          })
+
+        {:reply, stats, state}
+    end
   end
 
   def handle_call(:list_workers, _from, state) do
-    {:reply, state.workers, state}
+    # Backward compat: return workers from ALL pools
+    all_workers =
+      Enum.flat_map(state.pools, fn {_name, pool} ->
+        pool.workers
+      end)
+
+    {:reply, all_workers, state}
+  end
+
+  def handle_call({:list_workers, pool_name}, _from, state) do
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        {:reply, {:error, :pool_not_found}, state}
+
+      pool_state ->
+        {:reply, pool_state.workers, state}
+    end
   end
 
   @impl true
   def handle_call(:await_ready, from, state) do
-    if state.initialized do
+    # Backward compat: wait for ALL pools to be initialized
+    all_initialized? =
+      Enum.all?(state.pools, fn {_name, pool} -> pool.initialized end)
+
+    if all_initialized? do
       {:reply, :ok, state}
     else
-      # Pool is not ready yet, queue the caller to be replied to later
-      new_waiters = [from | state.initialization_waiters]
-      {:noreply, %{state | initialization_waiters: new_waiters}}
+      # Add waiter to ALL uninitialized pools
+      updated_pools =
+        Enum.map(state.pools, fn {name, pool} ->
+          if pool.initialized do
+            {name, pool}
+          else
+            {name, %{pool | initialization_waiters: [from | pool.initialization_waiters]}}
+          end
+        end)
+        |> Enum.into(%{})
+
+      {:noreply, %{state | pools: updated_pools}}
+    end
+  end
+
+  def handle_call({:await_ready, pool_name}, from, state) do
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        {:reply, {:error, :pool_not_found}, state}
+
+      pool_state ->
+        if pool_state.initialized do
+          {:reply, :ok, state}
+        else
+          # Add waiter to this pool
+          updated_pool = %{
+            pool_state
+            | initialization_waiters: [from | pool_state.initialization_waiters]
+          }
+
+          updated_pools = Map.put(state.pools, pool_name, updated_pool)
+          {:noreply, %{state | pools: updated_pools}}
+        end
     end
   end
 
@@ -346,123 +491,290 @@ defmodule Snakepit.Pool do
   def handle_call({:worker_ready, worker_id}, _from, state) do
     Logger.info("Worker #{worker_id} reported ready. Processing queued work.")
 
-    # Ensure worker is in workers list
-    new_workers =
-      if Enum.member?(state.workers, worker_id) do
-        state.workers
-      else
-        [worker_id | state.workers]
-      end
+    # Find which pool this worker belongs to by worker_id prefix
+    pool_name = extract_pool_name_from_worker_id(worker_id)
 
-    # CRITICAL FIX: Immediately drive the queue by treating this as a checkin.
-    # This resolves the deadlock where requests queue while workers are :reserved,
-    # but never get processed when workers become :active.
-    # The checkin_worker logic will either process a queued request or add the
-    # worker to available if the queue is empty.
-    # Use cast to self to avoid blocking the worker registration
-    GenServer.cast(self(), {:checkin_worker, worker_id})
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        Logger.error("Worker #{worker_id} reported ready but pool #{pool_name} not found!")
+        {:reply, {:error, :pool_not_found}, state}
 
-    # Reply :ok to unblock the worker - it's now registered with the pool
-    {:reply, :ok, %{state | workers: new_workers}}
-  end
-
-  @impl true
-  def handle_cast({:checkin_worker, worker_id}, state) do
-    # Check for queued requests first
-    case :queue.out(state.request_queue) do
-      {{:value, {queued_from, command, args, opts, _queued_at}}, new_queue} ->
-        # CRITICAL FIX: Check if request was cancelled (O(log n) MapSet lookup)
-        if MapSet.member?(state.cancelled_requests, queued_from) do
-          # Request timed out - skip it and remove from cancelled set
-          Logger.debug("Skipping cancelled request from #{inspect(queued_from)}")
-          new_cancelled = MapSet.delete(state.cancelled_requests, queued_from)
-
-          # Try to process the next queued request
-          GenServer.cast(self(), {:checkin_worker, worker_id})
-          {:noreply, %{state | request_queue: new_queue, cancelled_requests: new_cancelled}}
-        else
-          # Request not cancelled - check if client is still alive
-          {client_pid, _tag} = queued_from
-
-          if Process.alive?(client_pid) do
-            # Client is alive, process the request normally
-            Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
-              ref = Process.monitor(client_pid)
-              result = execute_on_worker(worker_id, command, args, opts)
-
-              # Check if the client is still alive after execution
-              receive do
-                {:DOWN, ^ref, :process, ^client_pid, _reason} ->
-                  # Client died during execution, don't try to reply
-                  Logger.warning(
-                    "Queued client #{inspect(client_pid)} died during execution. Checking in worker #{worker_id}."
-                  )
-
-                  GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
-              after
-                0 ->
-                  # Client is alive, clean up monitor and reply
-                  Process.demonitor(ref, [:flush])
-                  GenServer.reply(queued_from, result)
-                  GenServer.cast(__MODULE__, {:checkin_worker, worker_id})
-              end
-            end)
-
-            {:noreply, %{state | request_queue: new_queue}}
+      pool_state ->
+        # Ensure worker is in workers list
+        new_workers =
+          if Enum.member?(pool_state.workers, worker_id) do
+            pool_state.workers
           else
-            # Client is dead, discard request and check for the next one
-            Logger.debug("Discarding request from dead client #{inspect(client_pid)}")
-            GenServer.cast(self(), {:checkin_worker, worker_id})
-            {:noreply, %{state | request_queue: new_queue}}
+            [worker_id | pool_state.workers]
           end
-        end
 
-      {:empty, _} ->
-        # No requests waiting, return worker to available set
-        new_available = MapSet.put(state.available, worker_id)
-        new_busy = Map.delete(state.busy, worker_id)
-        {:noreply, %{state | available: new_available, busy: new_busy}}
+        updated_pool_state = %{pool_state | workers: new_workers}
+
+        # CRITICAL FIX: Immediately drive the queue by treating this as a checkin
+        GenServer.cast(self(), {:checkin_worker, pool_name, worker_id})
+
+        updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+        {:reply, :ok, %{state | pools: updated_pools}}
     end
   end
 
-  @impl true
-  def handle_info({:queue_timeout, from}, state) do
-    # CRITICAL FIX: Mark request as cancelled using O(log n) MapSet operation
-    # instead of O(n) queue filtering. Cancelled requests will be skipped
-    # during dequeue in handle_cast({:checkin_worker, ...}).
-    GenServer.reply(from, {:error, :queue_timeout})
+  defp handle_execute_for_pool(pool_name, command, args, opts, from, state) do
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        {:reply, {:error, {:pool_not_found, pool_name}}, state}
 
-    new_cancelled = MapSet.put(state.cancelled_requests, from)
-    stats = Map.update!(state.stats, :queue_timeouts, &(&1 + 1))
-    {:noreply, %{state | cancelled_requests: new_cancelled, stats: stats}}
+      pool_state ->
+        if not pool_state.initialized do
+          {:reply, {:error, :pool_not_initialized}, state}
+        else
+          session_id = opts[:session_id]
+
+          case checkout_worker(pool_state, session_id) do
+            {:ok, worker_id, new_pool_state} ->
+              # Execute in a supervised, unlinked task
+              Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+                # Extract the actual PID from the from tuple for monitoring
+                {client_pid, _tag} = from
+                ref = Process.monitor(client_pid)
+
+                # Track execution time
+                start_time = System.monotonic_time(:microsecond)
+                result = execute_on_worker(worker_id, command, args, opts)
+                duration_us = System.monotonic_time(:microsecond) - start_time
+
+                # Emit telemetry for request execution
+                :telemetry.execute(
+                  [:snakepit, :request, :executed],
+                  %{duration_us: duration_us},
+                  %{
+                    pool: pool_name,
+                    worker_id: worker_id,
+                    command: command,
+                    success: match?({:ok, _}, result)
+                  }
+                )
+
+                # Check if the client is still alive
+                receive do
+                  {:DOWN, ^ref, :process, ^client_pid, _reason} ->
+                    # Client is dead, don't try to reply. Just check in the worker.
+                    Logger.warning(
+                      "Client #{inspect(client_pid)} died before receiving reply. Checking in worker #{worker_id}."
+                    )
+
+                    GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
+                after
+                  0 ->
+                    # Client is alive. Clean up the monitor and proceed.
+                    Process.demonitor(ref, [:flush])
+                    GenServer.reply(from, result)
+                    GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
+                end
+              end)
+
+              # Update pool state and stats
+              updated_pool_state = %{
+                new_pool_state
+                | stats: Map.update!(new_pool_state.stats, :requests, &(&1 + 1))
+              }
+
+              updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+              # We reply :noreply immediately, the task will reply to the caller later
+              {:noreply, %{state | pools: updated_pools}}
+
+            {:error, :no_workers} ->
+              # Check if queue is at max capacity
+              current_queue_size = :queue.len(pool_state.request_queue)
+
+              if current_queue_size >= pool_state.max_queue_size do
+                # Pool is saturated, reject request immediately
+                updated_pool_state = %{
+                  pool_state
+                  | stats: Map.update!(pool_state.stats, :pool_saturated, &(&1 + 1))
+                }
+
+                # Emit telemetry for saturation
+                :telemetry.execute(
+                  [:snakepit, :pool, :saturated],
+                  %{queue_size: current_queue_size, max_queue_size: pool_state.max_queue_size},
+                  %{
+                    pool: pool_name,
+                    available_workers: MapSet.size(pool_state.available),
+                    busy_workers: map_size(pool_state.busy)
+                  }
+                )
+
+                updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+                {:reply, {:error, :pool_saturated}, %{state | pools: updated_pools}}
+              else
+                # Queue the request
+                request = {from, command, args, opts, System.monotonic_time()}
+                new_queue = :queue.in(request, pool_state.request_queue)
+
+                # Update stats
+                updated_stats =
+                  pool_state.stats
+                  |> Map.update!(:requests, &(&1 + 1))
+                  |> Map.update!(:queued, &(&1 + 1))
+
+                updated_pool_state = %{
+                  pool_state
+                  | request_queue: new_queue,
+                    stats: updated_stats
+                }
+
+                # Set queue timeout
+                Process.send_after(
+                  self(),
+                  {:queue_timeout, pool_name, from},
+                  pool_state.queue_timeout
+                )
+
+                updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+                {:noreply, %{state | pools: updated_pools}}
+              end
+          end
+        end
+    end
   end
 
+  # checkin_worker - WITH pool_name parameter
+  @impl true
+  def handle_cast({:checkin_worker, pool_name, worker_id}, state) when is_atom(pool_name) do
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        Logger.error("checkin_worker: pool #{pool_name} not found!")
+        {:noreply, state}
+
+      pool_state ->
+        case :queue.out(pool_state.request_queue) do
+          {{:value, {queued_from, command, args, opts, _queued_at}}, new_queue} ->
+            if MapSet.member?(pool_state.cancelled_requests, queued_from) do
+              Logger.debug("Skipping cancelled request from #{inspect(queued_from)}")
+              new_cancelled = MapSet.delete(pool_state.cancelled_requests, queued_from)
+
+              updated_pool_state = %{
+                pool_state
+                | request_queue: new_queue,
+                  cancelled_requests: new_cancelled
+              }
+
+              GenServer.cast(self(), {:checkin_worker, pool_name, worker_id})
+              updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+              {:noreply, %{state | pools: updated_pools}}
+            else
+              {client_pid, _tag} = queued_from
+
+              if Process.alive?(client_pid) do
+                Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+                  ref = Process.monitor(client_pid)
+                  result = execute_on_worker(worker_id, command, args, opts)
+
+                  receive do
+                    {:DOWN, ^ref, :process, ^client_pid, _reason} ->
+                      Logger.warning(
+                        "Queued client #{inspect(client_pid)} died during execution."
+                      )
+
+                      GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
+                  after
+                    0 ->
+                      Process.demonitor(ref, [:flush])
+                      GenServer.reply(queued_from, result)
+                      GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
+                  end
+                end)
+
+                updated_pool_state = %{pool_state | request_queue: new_queue}
+                updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+                {:noreply, %{state | pools: updated_pools}}
+              else
+                Logger.debug("Discarding request from dead client #{inspect(client_pid)}")
+                GenServer.cast(self(), {:checkin_worker, pool_name, worker_id})
+                updated_pool_state = %{pool_state | request_queue: new_queue}
+                updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+                {:noreply, %{state | pools: updated_pools}}
+              end
+            end
+
+          {:empty, _} ->
+            new_available = MapSet.put(pool_state.available, worker_id)
+            new_busy = Map.delete(pool_state.busy, worker_id)
+            updated_pool_state = %{pool_state | available: new_available, busy: new_busy}
+            updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+            {:noreply, %{state | pools: updated_pools}}
+        end
+    end
+  end
+
+  # Legacy checkin_worker WITHOUT pool_name (infer from worker_id)
+  def handle_cast({:checkin_worker, worker_id}, state) do
+    pool_name = extract_pool_name_from_worker_id(worker_id)
+    handle_cast({:checkin_worker, pool_name, worker_id}, state)
+  end
+
+  # queue_timeout - WITH pool_name
+  @impl true
+  def handle_info({:queue_timeout, pool_name, from}, state) do
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        {:noreply, state}
+
+      pool_state ->
+        GenServer.reply(from, {:error, :queue_timeout})
+        new_cancelled = MapSet.put(pool_state.cancelled_requests, from)
+        updated_stats = Map.update!(pool_state.stats, :queue_timeouts, &(&1 + 1))
+
+        updated_pool_state = %{
+          pool_state
+          | cancelled_requests: new_cancelled,
+            stats: updated_stats
+        }
+
+        updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+        {:noreply, %{state | pools: updated_pools}}
+    end
+  end
+
+  # Legacy queue_timeout WITHOUT pool_name
+  def handle_info({:queue_timeout, from}, state) do
+    handle_info({:queue_timeout, state.default_pool, from}, state)
+  end
+
+  # Worker death - find which pool it belongs to
   def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
-    # O(1) lookup of worker_id by PID using Registry
     case Snakepit.Pool.Registry.get_worker_id_by_pid(pid) do
       {:error, :not_found} ->
-        # Not a worker we are tracking, ignore
         {:noreply, state}
 
       {:ok, worker_id} ->
         Logger.error("Worker #{worker_id} (pid: #{inspect(pid)}) died: #{inspect(reason)}")
-
-        # PERFORMANCE FIX: Clear affinity cache entries pointing to dead worker
-        # This prevents routing requests to a dead worker for up to 60 seconds
         :ets.match_delete(state.affinity_cache, {:_, worker_id, :_})
 
-        # Just remove the dead worker from the pool's state
-        # The Worker.Starter will automatically restart it via supervisor tree
-        # The new worker will re-register itself when ready
-        new_workers = List.delete(state.workers, worker_id)
-        new_available = :queue.filter(&(&1 != worker_id), state.available)
-        new_busy = Map.delete(state.busy, worker_id)
+        pool_name = extract_pool_name_from_worker_id(worker_id)
 
-        Logger.debug(
-          "Pool updated state after worker death. Worker.Starter will handle restart automatically."
-        )
+        case Map.get(state.pools, pool_name) do
+          nil ->
+            Logger.warning("Dead worker #{worker_id} belongs to unknown pool #{pool_name}")
+            {:noreply, state}
 
-        {:noreply, %{state | workers: new_workers, available: new_available, busy: new_busy}}
+          pool_state ->
+            new_workers = List.delete(pool_state.workers, worker_id)
+            new_available = MapSet.delete(pool_state.available, worker_id)
+            new_busy = Map.delete(pool_state.busy, worker_id)
+
+            updated_pool_state = %{
+              pool_state
+              | workers: new_workers,
+                available: new_available,
+                busy: new_busy
+            }
+
+            updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+
+            Logger.debug("Removed dead worker #{worker_id} from pool #{pool_name}")
+            {:noreply, %{state | pools: updated_pools}}
+        end
     end
   end
 
@@ -497,10 +809,19 @@ defmodule Snakepit.Pool do
 
   # Private Functions
 
-  defp start_workers_concurrently(count, startup_timeout, worker_module, adapter_module) do
+  defp start_workers_concurrently(
+         pool_name,
+         count,
+         startup_timeout,
+         worker_module,
+         adapter_module,
+         pool_config
+       ) do
     # SAFETY CHECK: Enforce maximum worker limit to prevent resource exhaustion
-    pool_config = Application.get_env(:snakepit, :pool_config, %{})
-    max_workers = Map.get(pool_config, :max_workers, 150)
+    legacy_pool_config = Application.get_env(:snakepit, :pool_config, %{})
+
+    max_workers =
+      Map.get(pool_config, :max_workers) || Map.get(legacy_pool_config, :max_workers, 150)
 
     actual_count = min(count, max_workers)
 
@@ -519,16 +840,21 @@ defmodule Snakepit.Pool do
 
     # CRITICAL FIX: Get pool's registered name or PID for worker notifications
     # This ensures workers notify the correct pool instance (important for test isolation)
-    pool_name =
+    pool_genserver_name =
       case Process.info(self(), :registered_name) do
         {:registered_name, name} -> name
         nil -> self()
       end
 
     # CRITICAL FIX: Batch worker startup to prevent {:eagain} fork bomb
-    # Get batch configuration
-    batch_size = Map.get(pool_config, :startup_batch_size, 10)
-    batch_delay = Map.get(pool_config, :startup_batch_delay_ms, 500)
+    # Get batch configuration (check pool_config first, then legacy)
+    batch_size =
+      Map.get(pool_config, :startup_batch_size) ||
+        Map.get(legacy_pool_config, :startup_batch_size, 10)
+
+    batch_delay =
+      Map.get(pool_config, :startup_batch_delay_ms) ||
+        Map.get(legacy_pool_config, :startup_batch_delay_ms, 500)
 
     # Split workers into batches
     1..actual_count
@@ -544,14 +870,35 @@ defmodule Snakepit.Pool do
         batch
         |> Task.async_stream(
           fn i ->
-            worker_id = "pool_worker_#{i}_#{:erlang.unique_integer([:positive])}"
+            worker_id = "#{pool_name}_worker_#{i}_#{:erlang.unique_integer([:positive])}"
 
-            case Snakepit.Pool.WorkerSupervisor.start_worker(
-                   worker_id,
-                   worker_module,
-                   adapter_module,
-                   pool_name
-                 ) do
+            # v0.6.0: Use WorkerProfile if pool_config has worker_profile, else legacy
+            result =
+              if Map.has_key?(pool_config, :worker_profile) do
+                # NEW v0.6.0 path: Use WorkerProfile system
+                profile_module = Snakepit.Config.get_profile_module(pool_config)
+
+                # Build worker_config with all necessary fields
+                worker_config =
+                  pool_config
+                  |> Map.put(:worker_id, worker_id)
+                  |> Map.put(:worker_module, worker_module)
+                  |> Map.put(:adapter_module, adapter_module)
+                  |> Map.put(:pool_name, pool_genserver_name)
+
+                # Call profile's start_worker
+                profile_module.start_worker(worker_config)
+              else
+                # LEGACY v0.5.x path: Direct WorkerSupervisor call
+                Snakepit.Pool.WorkerSupervisor.start_worker(
+                  worker_id,
+                  worker_module,
+                  adapter_module,
+                  pool_genserver_name
+                )
+              end
+
+            case result do
               {:ok, _pid} ->
                 Logger.info("✅ Worker #{i}/#{actual_count} ready: #{worker_id}")
                 worker_id
@@ -681,7 +1028,18 @@ defmodule Snakepit.Pool do
     worker_module = get_worker_module(worker_id)
 
     try do
-      worker_module.execute(worker_id, command, args, timeout)
+      result = worker_module.execute(worker_id, command, args, timeout)
+
+      # Increment request count for lifecycle management (on success only)
+      case result do
+        {:ok, _} ->
+          Snakepit.Worker.LifecycleManager.increment_request_count(worker_id)
+
+        _ ->
+          :ok
+      end
+
+      result
     catch
       :exit, {:timeout, _} ->
         {:error, :worker_timeout}
@@ -758,5 +1116,19 @@ defmodule Snakepit.Pool do
       ets_tables_delta: peak.ets_tables - baseline.ets_tables,
       time_elapsed_ms: peak.timestamp - baseline.timestamp
     }
+  end
+
+  # Helper to extract pool_name from worker_id
+  defp extract_pool_name_from_worker_id(worker_id) do
+    # Worker IDs are formatted as: "pool_name_worker_N_unique"
+    case String.split(worker_id, "_worker_", parts: 2) do
+      [pool_name_str, _rest] ->
+        String.to_existing_atom(pool_name_str)
+
+      _ ->
+        :default
+    end
+  catch
+    _, _ -> :default
   end
 end

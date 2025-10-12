@@ -81,7 +81,16 @@ defmodule Snakepit.Pool.Worker.Starter do
 
   def start_link({worker_id, worker_module, adapter_module, pool_name})
       when is_binary(worker_id) do
-    Supervisor.start_link(__MODULE__, {worker_id, worker_module, adapter_module, pool_name},
+    Supervisor.start_link(__MODULE__, {worker_id, worker_module, adapter_module, pool_name, %{}},
+      name: via_name(worker_id)
+    )
+  end
+
+  def start_link({worker_id, worker_module, adapter_module, pool_name, worker_config})
+      when is_binary(worker_id) do
+    Supervisor.start_link(
+      __MODULE__,
+      {worker_id, worker_module, adapter_module, pool_name, worker_config},
       name: via_name(worker_id)
     )
   end
@@ -95,14 +104,18 @@ defmodule Snakepit.Pool.Worker.Starter do
 
   @impl true
   def init({worker_id, worker_module}) do
-    init({worker_id, worker_module, nil, nil})
+    init({worker_id, worker_module, nil, nil, %{}})
   end
 
   def init({worker_id, worker_module, adapter_module}) do
-    init({worker_id, worker_module, adapter_module, nil})
+    init({worker_id, worker_module, adapter_module, nil, %{}})
   end
 
   def init({worker_id, worker_module, adapter_module, pool_name}) do
+    init({worker_id, worker_module, adapter_module, pool_name, %{}})
+  end
+
+  def init({worker_id, worker_module, adapter_module, pool_name, worker_config}) do
     # Check if the Pool is already terminating
     # For dynamic pools, we can't check a specific name, so skip this check if pool_name is a PID
     should_check_global_pool = pool_name == nil || pool_name == Snakepit.Pool
@@ -115,22 +128,28 @@ defmodule Snakepit.Pool.Worker.Starter do
           :ignore
 
         _pid ->
-          do_init_worker(worker_id, worker_module, adapter_module, pool_name)
+          do_init_worker(worker_id, worker_module, adapter_module, pool_name, worker_config)
       end
     else
       # Using a custom pool (like in tests), always proceed
-      do_init_worker(worker_id, worker_module, adapter_module, pool_name)
+      do_init_worker(worker_id, worker_module, adapter_module, pool_name, worker_config)
     end
   end
 
-  defp do_init_worker(worker_id, worker_module, adapter_module, pool_name) do
+  defp do_init_worker(worker_id, worker_module, adapter_module, pool_name, worker_config) do
     Logger.debug("Starting worker starter for #{worker_id} with module #{inspect(worker_module)}")
 
     adapter = adapter_module || Application.get_env(:snakepit, :adapter_module)
 
     # CRITICAL FIX: Pass pool_name to worker so it knows which pool to notify when ready
     # Default to Snakepit.Pool for backward compatibility (production use)
-    worker_opts = [id: worker_id, adapter: adapter, pool_name: pool_name || Snakepit.Pool]
+    # v0.6.0: Pass worker_config for lifecycle management
+    worker_opts = [
+      id: worker_id,
+      adapter: adapter,
+      pool_name: pool_name || Snakepit.Pool,
+      worker_config: worker_config
+    ]
 
     children = [
       %{
