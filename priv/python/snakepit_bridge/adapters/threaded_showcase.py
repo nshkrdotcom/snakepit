@@ -116,6 +116,24 @@ class ThreadedShowcaseAdapter(ThreadSafeAdapter):
     # Tool Methods - All demonstrate thread-safe patterns
 
     @thread_safe_method
+    @tool(description="Simple ping operation for connectivity testing")
+    def ping(self, message: str = "pong") -> dict:
+        """
+        Simple ping operation for testing connectivity and session affinity.
+
+        Demonstrates:
+        - Basic request/response pattern
+        - Thread identification
+        - Minimal latency operation
+        """
+        thread_name = threading.current_thread().name
+        return {
+            "message": message,
+            "timestamp": time.time(),
+            "thread": thread_name
+        }
+
+    @thread_safe_method
     @tool(description="CPU-intensive computation demonstrating concurrent execution")
     def compute_intensive(self, data: List[float], iterations: int = 1000) -> dict:
         """
