@@ -190,7 +190,16 @@ defmodule Snakepit.GRPCWorker do
         executable = adapter.executable_path()
 
         # Use worker-specific adapter_args if provided, else fall back to adapter defaults
-        adapter_args = Map.get(worker_config, :adapter_args) || adapter.script_args() || []
+        # CRITICAL: Empty list [] is truthy, so check explicitly
+        worker_adapter_args = Map.get(worker_config, :adapter_args, [])
+
+        adapter_args =
+          if worker_adapter_args == [] do
+            adapter.script_args() || []
+          else
+            worker_adapter_args
+          end
+
         adapter_env = Map.get(worker_config, :adapter_env, [])
 
         # Determine which script to use based on adapter_args (threaded vs process mode)
@@ -332,29 +341,47 @@ defmodule Snakepit.GRPCWorker do
                 # This creates a provable state guarantee: worker cannot proceed until pool has it
                 # CRITICAL: Use 30s timeout to handle large pools (250 workers × 10-20ms = 2.5-5s queue time)
                 # With 5s timeout, workers at the end of the queue would timeout
-                case GenServer.call(state.pool_name, {:worker_ready, state.id}, 30_000) do
-                  :ok ->
-                    # Schedule health checks
-                    health_ref = schedule_health_check()
 
-                    # Register with lifecycle manager for automatic recycling
-                    Snakepit.Worker.LifecycleManager.track_worker(
-                      state.pool_name,
-                      state.id,
-                      self(),
-                      state.worker_config
-                    )
+                # CRITICAL: Check if Pool is alive first (test shutdown race condition)
+                pool_pid =
+                  if is_atom(state.pool_name),
+                    do: Process.whereis(state.pool_name),
+                    else: state.pool_name
 
-                    Logger.info(
-                      "✅ gRPC worker #{state.id} initialization complete and acknowledged."
-                    )
+                pool_alive = pool_pid != nil and Process.alive?(pool_pid)
 
-                    {:noreply, %{state | connection: connection, health_check_ref: health_ref}}
+                if not pool_alive do
+                  # Pool already dead - gracefully stop without crashing
+                  Logger.debug(
+                    "Worker #{state.id} finished starting but Pool is shut down. Stopping gracefully."
+                  )
 
-                  {:error, reason} ->
-                    Logger.error("Pool rejected worker registration: #{inspect(reason)}")
+                  {:stop, :normal, state}
+                else
+                  case GenServer.call(state.pool_name, {:worker_ready, state.id}, 30_000) do
+                    :ok ->
+                      # Schedule health checks
+                      health_ref = schedule_health_check()
 
-                    {:stop, {:pool_rejected_worker, reason}, state}
+                      # Register with lifecycle manager for automatic recycling
+                      Snakepit.Worker.LifecycleManager.track_worker(
+                        state.pool_name,
+                        state.id,
+                        self(),
+                        state.worker_config
+                      )
+
+                      Logger.info(
+                        "✅ gRPC worker #{state.id} initialization complete and acknowledged."
+                      )
+
+                      {:noreply, %{state | connection: connection, health_check_ref: health_ref}}
+
+                    {:error, reason} ->
+                      Logger.error("Pool rejected worker registration: #{inspect(reason)}")
+
+                      {:stop, {:pool_rejected_worker, reason}, state}
+                  end
                 end
 
               {:error, reason} ->
