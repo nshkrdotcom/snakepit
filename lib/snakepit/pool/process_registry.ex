@@ -687,8 +687,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
       |> Enum.filter(fn pid ->
         case Snakepit.ProcessKiller.get_process_command(pid) do
           {:ok, cmd} ->
-            # Check if it has OUR run_id
-            has_our_run_id = String.contains?(cmd, "--snakepit-run-id #{current_beam_run_id}")
+            # Check if it has OUR run_id (support both old and new format)
+            has_old_format = String.contains?(cmd, "--snakepit-run-id #{current_beam_run_id}")
+            has_new_format = String.contains?(cmd, "--run-id #{current_beam_run_id}")
+            has_our_run_id = has_old_format or has_new_format
             # If it doesn't have our run_id, it's a rogue
             not has_our_run_id
 
