@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2025-10-11
+
+### Added
+- **Diagnostic Tools**
+  - New `mix diagnose.scaling` task (613 lines) for comprehensive bottleneck analysis
+  - Captures resource metrics (ports, processes, TCP connections, memory usage)
+  - Enhanced error logging with port buffer drainage
+
+- **Configuration Enhancements**
+  - Explicit gRPC port range constraint documentation and validation
+  - Batched worker startup configuration (`startup_batch_size: 8`, `startup_batch_delay_ms: 750`)
+  - Resource limit safeguards with `max_workers: 1000` hard limit
+
+### Changed
+- **Worker Pool Scaling Improvements**
+  - Pool now reliably scales to 250+ workers (previously limited to ~105)
+  - Resolved thread explosion during concurrent startup (fixed "fork bomb" issue)
+  - Dynamic port allocation using OS-assigned ports (port=0) eliminates port collision races
+  - Batched worker startup prevents system resource exhaustion during concurrent initialization
+
+- **Performance Optimizations**
+  - Aggressive thread limiting via environment variables for optimal pool-level parallelism:
+    - `OPENBLAS_NUM_THREADS=1` (numpy/scipy)
+    - `OMP_NUM_THREADS=1` (OpenMP)
+    - `MKL_NUM_THREADS=1` (Intel MKL)
+    - `NUMEXPR_NUM_THREADS=1` (NumExpr)
+    - `GRPC_POLL_STRATEGY=poll` (single-threaded)
+  - Increased GRPC server connection backlog to 512
+  - Extended worker ready timeout to 30s for large pools
+
+- **Configuration Updates**
+  - Increased `port_range` to 1000 (accommodates `max_workers`)
+  - Enhanced configuration comments explaining each tuning parameter
+  - Resource usage tracking during pool initialization
+
+### Fixed
+- **Concurrent Startup Issues**
+  - Fixed "Cannot fork" / EAGAIN errors from thread explosion during worker spawn
+  - Eliminated port collision races with dynamic port allocation
+  - Resolved fork bomb caused by Python scientific libraries spawning excessive threads (6,000+ threads from OpenBLAS, gRPC, MKL)
+
+- **Resource Management**
+  - Better port binding error handling in Python gRPC server
+  - Improved error diagnostics during pool initialization
+  - Enhanced connection management in GRPC server
+
+### Performance
+- Successfully tested with 250 workers (2.5x previous limit)
+- Startup time increases with pool size (~60s for 250 workers vs ~10s for 100 workers)
+- Eliminated port collision races and fork resource exhaustion
+- Dynamic port allocation provides reliable scaling
+
+### Notes
+- Thread limiting optimizes for high concurrency with many small tasks
+- CPU-intensive workloads that perform heavy numerical computation within a single task may need different threading configuration
+- For computationally intensive per-task workloads, consider:
+  - Workload-specific environment variables passed per task
+  - Separate worker pools with different threading profiles
+  - Dynamic thread limit adjustment based on task type
+  - Allowing higher OpenBLAS threads but reducing max_workers accordingly
+- See commit dc67572 for detailed technical analysis and future considerations
+
+---
+
 ## [0.5.0] - 2025-10-10
 
 ### Added
@@ -401,6 +465,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
+[0.5.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.5.1
 [0.5.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.5.0
 [0.4.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.3
 [0.4.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.2

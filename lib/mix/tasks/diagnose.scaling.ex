@@ -572,10 +572,7 @@ defmodule Mix.Tasks.Diagnose.Scaling do
           0
 
         _pid ->
-          case Registry.count(Snakepit.Pool.Registry) do
-            count when is_integer(count) -> count
-            _ -> 0
-          end
+          Registry.count(Snakepit.Pool.Registry)
       end
     rescue
       _ -> 0
