@@ -243,6 +243,8 @@ defmodule Snakepit.GRPCWorker do
               nil
           end
 
+        worker_config = Keyword.get(opts, :worker_config, %{})
+
         state = %{
           id: worker_id,
           pool_name: pool_name,
@@ -251,6 +253,7 @@ defmodule Snakepit.GRPCWorker do
           server_port: server_port,
           process_pid: process_pid,
           session_id: session_id,
+          worker_config: worker_config,
           # Will be established in handle_continue
           connection: nil,
           health_check_ref: nil,
@@ -301,6 +304,14 @@ defmodule Snakepit.GRPCWorker do
                   :ok ->
                     # Schedule health checks
                     health_ref = schedule_health_check()
+
+                    # Register with lifecycle manager for automatic recycling
+                    Snakepit.Worker.LifecycleManager.track_worker(
+                      state.pool_name,
+                      state.id,
+                      self(),
+                      state.worker_config
+                    )
 
                     Logger.info(
                       "✅ gRPC worker #{state.id} initialization complete and acknowledged."

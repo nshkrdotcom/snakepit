@@ -76,7 +76,37 @@ defmodule Snakepit.Adapters.GRPCPython do
   def script_path do
     # Get the application directory
     app_dir = Application.app_dir(:snakepit)
-    Path.join([app_dir, "priv", "python", "grpc_server.py"])
+
+    # Check if we should use threaded server based on adapter args
+    # Check both old pool_config format and new pools format
+    pool_config = Application.get_env(:snakepit, :pool_config, %{})
+    pools_config = Application.get_env(:snakepit, :pools, [])
+
+    # Get adapter args from either source
+    adapter_args = Map.get(pool_config, :adapter_args, [])
+
+    # Also check if any pool is configured with --max-workers in pools config
+    has_max_workers =
+      Enum.any?(adapter_args, fn arg ->
+        is_binary(arg) and String.contains?(arg, "--max-workers")
+      end) or
+        Enum.any?(pools_config, fn pool_cfg ->
+          pool_adapter_args = Map.get(pool_cfg, :adapter_args, [])
+
+          Enum.any?(pool_adapter_args, fn arg ->
+            is_binary(arg) and String.contains?(arg, "--max-workers")
+          end)
+        end)
+
+    # Use threaded server if --max-workers is specified (indicates threaded mode)
+    script_name =
+      if has_max_workers do
+        "grpc_server_threaded.py"
+      else
+        "grpc_server.py"
+      end
+
+    Path.join([app_dir, "priv", "python", script_name])
   end
 
   @impl true

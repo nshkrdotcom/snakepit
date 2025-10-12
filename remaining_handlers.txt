@@ -1,0 +1,132 @@
+# These handlers need to be added to Pool.ex at the end of the file (before the final "end")
+
+  # checkin_worker - WITH pool_name parameter
+  def handle_cast({:checkin_worker, pool_name, worker_id}, state) when is_atom(pool_name) do
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        Logger.error("checkin_worker: pool #{pool_name} not found!")
+        {:noreply, state}
+
+      pool_state ->
+        case :queue.out(pool_state.request_queue) do
+          {{:value, {queued_from, command, args, opts, _queued_at}}, new_queue} ->
+            if MapSet.member?(pool_state.cancelled_requests, queued_from) do
+              Logger.debug("Skipping cancelled request from #{inspect(queued_from)}")
+              new_cancelled = MapSet.delete(pool_state.cancelled_requests, queued_from)
+              updated_pool_state = %{pool_state | request_queue: new_queue, cancelled_requests: new_cancelled}
+              GenServer.cast(self(), {:checkin_worker, pool_name, worker_id})
+              updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+              {:noreply, %{state | pools: updated_pools}}
+            else
+              {client_pid, _tag} = queued_from
+
+              if Process.alive?(client_pid) do
+                Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+                  ref = Process.monitor(client_pid)
+                  result = execute_on_worker(worker_id, command, args, opts)
+
+                  receive do
+                    {:DOWN, ^ref, :process, ^client_pid, _reason} ->
+                      Logger.warning("Queued client #{inspect(client_pid)} died during execution.")
+                      GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
+                  after
+                    0 ->
+                      Process.demonitor(ref, [:flush])
+                      GenServer.reply(queued_from, result)
+                      GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
+                  end
+                end)
+
+                updated_pool_state = %{pool_state | request_queue: new_queue}
+                updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+                {:noreply, %{state | pools: updated_pools}}
+              else
+                Logger.debug("Discarding request from dead client #{inspect(client_pid)}")
+                GenServer.cast(self(), {:checkin_worker, pool_name, worker_id})
+                updated_pool_state = %{pool_state | request_queue: new_queue}
+                updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+                {:noreply, %{state | pools: updated_pools}}
+              end
+            end
+
+          {:empty, _} ->
+            new_available = MapSet.put(pool_state.available, worker_id)
+            new_busy = Map.delete(pool_state.busy, worker_id)
+            updated_pool_state = %{pool_state | available: new_available, busy: new_busy}
+            updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+            {:noreply, %{state | pools: updated_pools}}
+        end
+    end
+  end
+
+  # Legacy checkin_worker WITHOUT pool_name (infer from worker_id)
+  def handle_cast({:checkin_worker, worker_id}, state) do
+    pool_name = extract_pool_name_from_worker_id(worker_id)
+    handle_cast({:checkin_worker, pool_name, worker_id}, state)
+  end
+
+  # queue_timeout - WITH pool_name
+  def handle_info({:queue_timeout, pool_name, from}, state) do
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        {:noreply, state}
+
+      pool_state ->
+        GenServer.reply(from, {:error, :queue_timeout})
+        new_cancelled = MapSet.put(pool_state.cancelled_requests, from)
+        updated_stats = Map.update!(pool_state.stats, :queue_timeouts, &(&1 + 1))
+        updated_pool_state = %{pool_state | cancelled_requests: new_cancelled, stats: updated_stats}
+        updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+        {:noreply, %{state | pools: updated_pools}}
+    end
+  end
+
+  # Legacy queue_timeout WITHOUT pool_name
+  def handle_info({:queue_timeout, from}, state) do
+    handle_info({:queue_timeout, state.default_pool, from}, state)
+  end
+
+  # Worker death - find which pool it belongs to
+  def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
+    case Snakepit.Pool.Registry.get_worker_id_by_pid(pid) do
+      {:error, :not_found} ->
+        {:noreply, state}
+
+      {:ok, worker_id} ->
+        Logger.error("Worker #{worker_id} (pid: #{inspect(pid)}) died: #{inspect(reason)}")
+        :ets.match_delete(state.affinity_cache, {:_, worker_id, :_})
+
+        pool_name = extract_pool_name_from_worker_id(worker_id)
+
+        case Map.get(state.pools, pool_name) do
+          nil ->
+            Logger.warning("Dead worker #{worker_id} belongs to unknown pool #{pool_name}")
+            {:noreply, state}
+
+          pool_state ->
+            new_workers = List.delete(pool_state.workers, worker_id)
+            new_available = MapSet.delete(pool_state.available, worker_id)
+            new_busy = Map.delete(pool_state.busy, worker_id)
+
+            updated_pool_state = %{pool_state | workers: new_workers, available: new_available, busy: new_busy}
+            updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+
+            Logger.debug("Removed dead worker #{worker_id} from pool #{pool_name}")
+            {:noreply, %{state | pools: updated_pools}}
+        end
+    end
+  end
+
+  # Helper to extract pool_name from worker_id
+  defp extract_pool_name_from_worker_id(worker_id) do
+    # Worker IDs are formatted as: "pool_name_worker_N_unique"
+    case String.split(worker_id, "_worker_", parts: 2) do
+      [pool_name_str, _rest] ->
+        String.to_existing_atom(pool_name_str)
+
+      _ ->
+        :default
+    end
+  catch
+    _,_ -> :default
+  end

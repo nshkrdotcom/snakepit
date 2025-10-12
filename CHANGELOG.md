@@ -7,6 +7,259 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2025-10-11
+
+### Added - Phase 1: Dual-Mode Architecture Foundation
+
+- **Worker Profile System**
+  - New `Snakepit.WorkerProfile` behaviour for pluggable parallelism strategies
+  - `Snakepit.WorkerProfile.Process` - Multi-process profile (default, backward compatible)
+  - `Snakepit.WorkerProfile.Thread` - Multi-threaded profile stub (Phase 2-3 implementation)
+  - Profile abstraction enables switching between process and thread execution modes
+
+- **Python Environment Detection**
+  - New `Snakepit.PythonVersion` module for Python version detection
+  - Automatic detection of Python 3.13+ free-threading support (PEP 703)
+  - Profile recommendation based on Python capabilities
+  - Version validation and compatibility warnings
+
+- **Library Compatibility Matrix**
+  - New `Snakepit.Compatibility` module with thread-safety database
+  - Compatibility tracking for 20+ popular Python libraries (NumPy, PyTorch, Pandas, etc.)
+  - Per-library thread safety status, recommendations, and workarounds
+  - Automatic compatibility checking for thread profile configurations
+
+- **Configuration System Enhancements**
+  - New `Snakepit.Config` module for multi-pool configuration management
+  - Support for named pools with different worker profiles
+  - Backward-compatible legacy configuration conversion
+  - Comprehensive configuration validation and normalization
+  - Profile-specific defaults (process vs thread)
+
+- **Documentation**
+  - Comprehensive v0.6.0 technical plan (8,000+ words)
+  - GIL removal research and dual-mode architecture design
+  - Phase-by-phase implementation roadmap (10 weeks)
+  - Performance benchmarks and migration strategies
+
+### Changed
+
+- **Architecture Evolution**
+  - Foundation laid for Python 3.13+ free-threading support
+  - Worker management abstracted to support multiple parallelism models
+  - Configuration system generalized for multi-pool scenarios
+
+### Added - Phase 2: Multi-Threaded Python Worker
+
+- **Threaded gRPC Server**
+  - New `grpc_server_threaded.py` (600+ lines) - Multi-threaded server with ThreadPoolExecutor
+  - Concurrent request handling via HTTP/2 multiplexing
+  - Thread safety monitoring with `ThreadSafetyMonitor` class
+  - Request tracking per thread with performance metrics
+  - Automatic adapter thread safety validation on startup
+  - Configurable thread pool size (--max-workers parameter)
+
+- **Thread-Safe Adapter Infrastructure**
+  - New `base_adapter_threaded.py` (400+ lines) - Base class for thread-safe adapters
+  - `ThreadSafeAdapter` with built-in locking primitives
+  - `ThreadLocalStorage` manager for per-thread state
+  - `RequestTracker` for monitoring concurrent requests
+  - `@thread_safe_method` decorator for automatic tracking
+  - Context managers for safe lock acquisition
+  - Built-in statistics and performance monitoring
+
+- **Example Implementations**
+  - `threaded_showcase.py` (400+ lines) - Comprehensive thread-safe adapter example
+  - Pattern 1: Shared read-only resources (models, configurations)
+  - Pattern 2: Thread-local storage (caches, buffers)
+  - Pattern 3: Locked shared mutable state (counters, logs)
+  - CPU-intensive workloads with NumPy integration
+  - Stress testing and performance monitoring tools
+  - Example tools: compute_intensive, matrix_multiply, batch_process, stress_test
+
+- **Thread Safety Validation**
+  - New `thread_safety_checker.py` (475+ lines) - Runtime validation toolkit
+  - Concurrent access detection with detailed warnings
+  - Known unsafe library detection (Pandas, Matplotlib, SQLite3)
+  - Thread contention monitoring and analysis
+  - Performance profiling per thread
+  - Automatic recommendations for detected issues
+  - Global checker with strict mode option
+
+- **Documentation**
+  - New `README_THREADING.md` (500+ lines) - Comprehensive threading guide
+  - Thread safety patterns and best practices
+  - Writing thread-safe adapters tutorial
+  - Testing strategies for concurrent code
+  - Performance optimization techniques
+  - Library compatibility matrix (20+ libraries)
+  - Common pitfalls and solutions
+  - Advanced topics: worker recycling, monitoring, debugging
+
+### Added - Phase 3: Elixir Thread Profile Integration
+
+- **Complete ThreadProfile Implementation**
+  - Full implementation of `Snakepit.WorkerProfile.Thread` (400+ lines)
+  - Worker capacity tracking via ETS table (`:snakepit_worker_capacity`)
+  - Atomic load increment/decrement for thread-safe capacity management
+  - Support for concurrent requests to same worker (HTTP/2 multiplexing)
+  - Automatic script selection (threaded vs standard gRPC server)
+
+- **Worker Capacity Management**
+  - ETS-based capacity tracking: `{worker_pid, capacity, current_load}`
+  - Atomic operations for thread-safe load updates
+  - Capacity checking before request execution
+  - Automatic load decrement after request completion (even on error)
+  - Real-time capacity monitoring via `get_capacity/1` and `get_load/1`
+
+- **Adapter Configuration Enhancement**
+  - Updated `GRPCPython.script_path/0` to select correct server variant
+  - Automatic detection of threaded mode from adapter args
+  - Seamless switching between process and thread servers
+  - Enhanced argument merging for user customization
+
+- **Load Balancing**
+  - Capacity-aware worker selection
+  - Prevents over-subscription of workers
+  - Returns `:worker_at_capacity` when no slots available
+  - Automatic queueing handled by pool layer
+
+- **Example Demonstration**
+  - New `examples/threaded_profile_demo.exs` - Interactive demo script
+  - Shows configuration patterns for threaded mode
+  - Explains concurrent request handling
+  - Demonstrates capacity management
+  - Performance monitoring examples
+
+### Added - Phase 4: Worker Lifecycle Management
+
+- **LifecycleManager GenServer**
+  - New `Snakepit.Worker.LifecycleManager` (300+ lines) - Automatic worker recycling
+  - TTL-based recycling (configurable: seconds/minutes/hours/days)
+  - Request-count based recycling (recycle after N requests)
+  - Memory threshold recycling (optional, requires worker support)
+  - Periodic health checks (every 5 minutes)
+  - Graceful worker replacement with zero downtime
+
+- **Worker Tracking Infrastructure**
+  - Automatic worker registration on startup
+  - Per-worker metadata tracking (start time, request count, config)
+  - Process monitoring for crash detection
+  - Lifecycle statistics and reporting
+
+- **Recycling Logic**
+  - Configurable TTL: `{3600, :seconds}`, `{1, :hours}`, etc.
+  - Max requests: `worker_max_requests: 1000`
+  - Memory threshold: `memory_threshold_mb: 2048` (optional)
+  - Manual recycling: `LifecycleManager.recycle_worker(pool, worker_id)`
+  - Automatic replacement after recycling
+
+- **Request Counting**
+  - Automatic increment after successful request
+  - Per-worker request tracking
+  - Triggers recycling at configured threshold
+  - Integrated with Pool's execute path
+
+- **Telemetry Events**
+  - `[:snakepit, :worker, :recycled]` - Worker recycled with reason
+  - `[:snakepit, :worker, :health_check_failed]` - Health check failure
+  - Rich metadata (worker_id, pool, reason, uptime, request_count)
+  - Integration with Prometheus, LiveDashboard, custom monitors
+
+- **Documentation**
+  - New `docs/telemetry_events.md` - Complete telemetry reference
+  - Event schemas and metadata descriptions
+  - Usage examples for monitoring systems
+  - Prometheus and LiveDashboard integration patterns
+  - Best practices and debugging tips
+
+- **Supervisor Integration**
+  - LifecycleManager added to application supervision tree
+  - Positioned after WorkerSupervisor, before Pool
+  - Automatic startup with pooling enabled
+  - Clean shutdown handling
+
+### Changed - Phase 4
+
+- **GRPCWorker Enhanced**
+  - Workers now register with LifecycleManager on startup
+  - Lifecycle config passed during initialization
+  - Untracking on worker shutdown
+
+- **Pool Enhanced**
+  - Request counting integrated into execute path
+  - Automatic notification to LifecycleManager on success
+  - Supports lifecycle management without modifications to existing flow
+
+### Added - Phase 5: Enhanced Diagnostics and Monitoring
+
+- **ProfileInspector Module**
+  - New `Snakepit.Diagnostics.ProfileInspector` (400+ lines) - Programmatic pool inspection
+  - Functions for pool statistics, capacity analysis, and memory usage
+  - Profile-aware metrics for both process and thread pools
+  - `get_pool_stats/1` - Comprehensive pool statistics
+  - `get_capacity_stats/1` - Capacity utilization and thread info
+  - `get_memory_stats/1` - Memory usage breakdown per worker
+  - `get_comprehensive_report/0` - All pools analysis
+  - `check_saturation/2` - Capacity warning system
+  - `get_recommendations/1` - Intelligent optimization suggestions
+
+- **Mix Task: Profile Inspector**
+  - New `mix snakepit.profile_inspector` (350+ lines) - Interactive pool inspection tool
+  - Text and JSON output formats
+  - Detailed per-worker statistics with `--detailed` flag
+  - Pool-specific inspection with `--pool` option
+  - Optimization recommendations with `--recommendations` flag
+  - Color-coded utilization indicators (🔴🟡🟢⚪)
+  - Profile-specific insights (process vs thread)
+
+- **Enhanced Scaling Diagnostics**
+  - Extended `mix diagnose.scaling` with profile-aware analysis
+  - New TEST 0: Pool Profile Analysis (120+ lines)
+  - Thread pool vs process pool comparison
+  - Capacity utilization monitoring
+  - Profile-specific recommendations
+  - System-wide optimization opportunities
+  - Real-time pool statistics integration
+
+- **Telemetry Events**
+  - `[:snakepit, :pool, :saturated]` - Pool queue at max capacity
+    - Measurements: `queue_size`, `max_queue_size`
+    - Metadata: `pool`, `available_workers`, `busy_workers`
+  - `[:snakepit, :pool, :capacity_reached]` - Worker reached capacity (thread profile)
+    - Measurements: `capacity`, `load`
+    - Metadata: `worker_pid`, `profile`, `rejected` (optional)
+  - `[:snakepit, :request, :executed]` - Request completed with duration
+    - Measurements: `duration_us` (microseconds)
+    - Metadata: `pool`, `worker_id`, `command`, `success`
+
+- **Diagnostic Features**
+  - Worker memory usage tracking per process
+  - Thread pool utilization analysis
+  - Capacity saturation warnings
+  - Profile-appropriate recommendations
+  - Performance duration tracking
+  - Queue depth monitoring
+
+### Status
+
+- **Phase 1** ✅ Complete - Foundation modules and behaviors defined
+- **Phase 2** ✅ Complete - Multi-threaded Python worker implementation
+- **Phase 3** ✅ Complete - Elixir thread profile integration
+- **Phase 4** ✅ Complete - Worker lifecycle management and recycling
+- **Phase 5** ✅ Complete - Enhanced diagnostics and monitoring
+- **Phase 6** 🔄 Pending - Documentation and examples
+
+### Notes
+
+- **No Breaking Changes**: All v0.5.1 configurations remain fully compatible
+- **Thread Profile**: Stub implementation (returns `:not_implemented`) until Phase 2-3
+- **Default Behavior**: Process profile remains default for maximum stability
+- **Python 3.13+**: Free-threading support enables true multi-threaded workers
+- **Migration**: Existing code requires zero changes to continue working
+
+---
+
 ## [0.5.1] - 2025-10-11
 
 ### Added
