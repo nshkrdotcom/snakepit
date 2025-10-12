@@ -8,7 +8,13 @@
 
 [![CI](https://github.com/nshkrdotcom/snakepit/actions/workflows/ci.yml/badge.svg)](https://github.com/nshkrdotcom/snakepit/actions/workflows/ci.yml)
 [![Hex Version](https://img.shields.io/hexpm/v/snakepit.svg)](https://hex.pm/packages/snakepit)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-lightgreen.svg)](https://hexdocs.pm/snakepit)
+[![Downloads](https://img.shields.io/hexpm/dt/snakepit.svg)](https://hex.pm/packages/snakepit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Erlang/OTP](https://img.shields.io/badge/Erlang%2FOTP-27%2B-red.svg)](https://www.erlang.org)
+[![Elixir](https://img.shields.io/badge/Elixir-1.18%2B-purple.svg)](https://elixir-lang.org)
+[![Last Commit](https://img.shields.io/github/last-commit/nshkrdotcom/snakepit)](https://github.com/nshkrdotcom/snakepit/commits/main)
+[![GitHub Stars](https://img.shields.io/github/stars/nshkrdotcom/snakepit?style=social)](https://github.com/nshkrdotcom/snakepit)
 
 ## 🚀 What is Snakepit?
 
