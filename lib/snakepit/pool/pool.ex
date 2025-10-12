@@ -374,7 +374,8 @@ defmodule Snakepit.Pool do
         {:reply, {:error, :pool_not_found}, state}
 
       pool_state ->
-        case checkout_worker(pool_state, session_id) do
+        # Pass affinity_cache from top-level state
+        case checkout_worker(pool_state, session_id, state.affinity_cache) do
           {:ok, worker_id, new_pool_state} ->
             updated_pools = Map.put(state.pools, pool_name, new_pool_state)
             {:reply, {:ok, worker_id}, %{state | pools: updated_pools}}
@@ -542,7 +543,8 @@ defmodule Snakepit.Pool do
         else
           session_id = opts[:session_id]
 
-          case checkout_worker(pool_state, session_id) do
+          # Pass affinity_cache from top-level state
+          case checkout_worker(pool_state, session_id, state.affinity_cache) do
             {:ok, worker_id, new_pool_state} ->
               # Execute in a supervised, unlinked task
               Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
@@ -812,8 +814,28 @@ defmodule Snakepit.Pool do
   end
 
   @impl true
-  def terminate(reason, _state) do
+  def terminate(reason, state) do
     Logger.info("🛑 Pool manager terminating with reason: #{inspect(reason)}.")
+
+    # DEBUG: Log state of pools during shutdown
+    Enum.each(state.pools, fn {pool_name, pool_state} ->
+      IO.puts("\n═══ SHUTDOWN DEBUG: Pool #{pool_name} ═══")
+      IO.puts("  Initialized: #{pool_state.initialized}")
+      IO.puts("  Workers: #{length(pool_state.workers)}")
+      IO.puts("  Available: #{MapSet.size(pool_state.available)}")
+      IO.puts("  Busy: #{map_size(pool_state.busy)}")
+      IO.puts("  Queued: #{:queue.len(pool_state.request_queue)}")
+      IO.puts("  Waiters: #{length(pool_state.initialization_waiters)}")
+
+      if length(pool_state.initialization_waiters) > 0 do
+        IO.puts(
+          "  ⚠️  WARNING: #{length(pool_state.initialization_waiters)} processes still waiting for pool init!"
+        )
+      end
+    end)
+
+    IO.puts("═══ END SHUTDOWN DEBUG ═══\n")
+
     # Supervision tree will handle worker shutdown via WorkerSupervisor
     :ok
   end
@@ -944,26 +966,26 @@ defmodule Snakepit.Pool do
     end)
   end
 
-  defp checkout_worker(state, session_id) do
-    case try_checkout_preferred_worker(state, session_id) do
+  defp checkout_worker(pool_state, session_id, affinity_cache) do
+    case try_checkout_preferred_worker(pool_state, session_id, affinity_cache) do
       {:ok, worker_id, new_state} ->
         {:ok, worker_id, new_state}
 
       :no_preferred_worker ->
         # Simple checkout from available set
         # Workers only enter this set after {:worker_ready} event, ensuring they're ready
-        case Enum.take(state.available, 1) do
+        case Enum.take(pool_state.available, 1) do
           [worker_id] ->
-            new_available = MapSet.delete(state.available, worker_id)
-            new_busy = Map.put(state.busy, worker_id, true)
-            new_state = %{state | available: new_available, busy: new_busy}
+            new_available = MapSet.delete(pool_state.available, worker_id)
+            new_busy = Map.put(pool_state.busy, worker_id, true)
+            new_pool_state = %{pool_state | available: new_available, busy: new_busy}
 
             # Store session affinity if we have a session_id
             if session_id do
               store_session_affinity(session_id, worker_id)
             end
 
-            {:ok, worker_id, new_state}
+            {:ok, worker_id, new_pool_state}
 
           [] ->
             {:error, :no_workers}
@@ -971,21 +993,21 @@ defmodule Snakepit.Pool do
     end
   end
 
-  defp try_checkout_preferred_worker(_state, nil), do: :no_preferred_worker
+  defp try_checkout_preferred_worker(_pool_state, nil, _affinity_cache), do: :no_preferred_worker
 
-  defp try_checkout_preferred_worker(state, session_id) do
-    # PERFORMANCE FIX: Pass cache to avoid GenServer bottleneck
-    case get_preferred_worker(session_id, state.affinity_cache) do
+  defp try_checkout_preferred_worker(pool_state, session_id, affinity_cache) do
+    # PERFORMANCE FIX: Use shared affinity_cache from top-level state
+    case get_preferred_worker(session_id, affinity_cache) do
       {:ok, preferred_worker_id} ->
         # Check if preferred worker is available
-        if MapSet.member?(state.available, preferred_worker_id) do
+        if MapSet.member?(pool_state.available, preferred_worker_id) do
           # Remove the preferred worker from available set
-          new_available = MapSet.delete(state.available, preferred_worker_id)
-          new_busy = Map.put(state.busy, preferred_worker_id, true)
-          new_state = %{state | available: new_available, busy: new_busy}
+          new_available = MapSet.delete(pool_state.available, preferred_worker_id)
+          new_busy = Map.put(pool_state.busy, preferred_worker_id, true)
+          new_pool_state = %{pool_state | available: new_available, busy: new_busy}
 
           Logger.debug("Using preferred worker #{preferred_worker_id} for session #{session_id}")
-          {:ok, preferred_worker_id, new_state}
+          {:ok, preferred_worker_id, new_pool_state}
         else
           :no_preferred_worker
         end

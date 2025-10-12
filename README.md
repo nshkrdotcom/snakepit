@@ -261,30 +261,30 @@ config :snakepit,
 
 ### 🔧 Key Modules Added
 
-**Elixir (3,694+ lines):**
+**Elixir:**
 - `Snakepit.WorkerProfile` - Behavior for pluggable parallelism strategies
-- `Snakepit.WorkerProfile.Process` - Multi-process profile (219 lines)
-- `Snakepit.WorkerProfile.Thread` - Multi-threaded profile (429 lines)
-- `Snakepit.Worker.LifecycleManager` - Automatic worker recycling (531 lines)
-- `Snakepit.Diagnostics.ProfileInspector` - Pool inspection (480 lines)
-- `Snakepit.Config` - Multi-pool configuration (371 lines)
-- `Snakepit.Compatibility` - Thread-safety database (360 lines)
-- `Snakepit.PythonVersion` - Python 3.13+ detection (239 lines)
-- `mix snakepit.profile_inspector` - Pool inspection Mix task (366 lines)
-- Enhanced `mix diagnose.scaling` - Profile-aware scaling analysis (119+ lines added)
+- `Snakepit.WorkerProfile.Process` - Multi-process profile
+- `Snakepit.WorkerProfile.Thread` - Multi-threaded profile
+- `Snakepit.Worker.LifecycleManager` - Automatic worker recycling
+- `Snakepit.Diagnostics.ProfileInspector` - Pool inspection
+- `Snakepit.Config` - Multi-pool configuration
+- `Snakepit.Compatibility` - Thread-safety database
+- `Snakepit.PythonVersion` - Python 3.13+ detection
+- `mix snakepit.profile_inspector` - Pool inspection Mix task
+- Enhanced `mix diagnose.scaling` - Profile-aware scaling analysis
 
-**Python (4,000+ lines):**
-- `grpc_server_threaded.py` - Multi-threaded gRPC server (628 lines)
-- `base_adapter_threaded.py` - Thread-safe adapter base (433 lines)
-- `thread_safety_checker.py` - Runtime validation toolkit (476 lines)
-- `threaded_showcase.py` - Thread-safe patterns showcase (417 lines)
+**Python:**
+- `grpc_server_threaded.py` - Multi-threaded gRPC server
+- `base_adapter_threaded.py` - Thread-safe adapter base
+- `thread_safety_checker.py` - Runtime validation toolkit
+- `threaded_showcase.py` - Thread-safe patterns showcase
 
-**Documentation (16,420+ lines):**
-- `README_THREADING.md` - Comprehensive threading guide (560 lines)
-- `docs/migration_v0.5_to_v0.6.md` - Migration guide (860 lines)
-- `docs/performance_benchmarks.md` - Quantified improvements (742 lines)
-- `docs/guides/writing_thread_safe_adapters.md` - Complete tutorial (1,103 lines)
-- `docs/telemetry_events.md` - Telemetry reference (327 lines)
+**Documentation:**
+- `README_THREADING.md` - Comprehensive threading guide
+- `docs/migration_v0.5_to_v0.6.md` - Migration guide
+- `docs/performance_benchmarks.md` - Quantified improvements
+- `docs/guides/writing_thread_safe_adapters.md` - Complete tutorial
+- `docs/telemetry_events.md` - Telemetry reference
 
 ### 📈 Performance Improvements
 
@@ -329,13 +329,13 @@ config :snakepit,
 
 ### 📚 Comprehensive Documentation
 
-Over **16,420 lines** of new documentation:
+Extensive new documentation covering all features:
 
-- **[Migration Guide](docs/migration_v0.5_to_v0.6.md)** (860 lines) - Zero-friction upgrade path
-- **[Performance Benchmarks](docs/performance_benchmarks.md)** (742 lines) - Quantified improvements
-- **[Thread Safety Guide](docs/guides/writing_thread_safe_adapters.md)** (1,103 lines) - Complete tutorial
-- **[Telemetry Reference](docs/telemetry_events.md)** (250+ lines) - Monitoring integration
-- **[Python Threading Guide](priv/python/README_THREADING.md)** (500+ lines) - Python developer tutorial
+- **[Migration Guide](docs/migration_v0.5_to_v0.6.md)** - Zero-friction upgrade path
+- **[Performance Benchmarks](docs/performance_benchmarks.md)** - Quantified improvements
+- **[Thread Safety Guide](docs/guides/writing_thread_safe_adapters.md)** - Complete tutorial
+- **[Telemetry Reference](docs/telemetry_events.md)** - Monitoring integration
+- **[Python Threading Guide](priv/python/README_THREADING.md)** - Python developer tutorial
 
 ### 🎓 When to Use Which Profile
 
@@ -394,26 +394,24 @@ config :snakepit,
 ### 📚 New Examples
 
 **Dual-Mode (3 examples):**
-- `examples/dual_mode/process_vs_thread_comparison.exs` - Side-by-side performance comparison (220 lines)
-- `examples/dual_mode/hybrid_pools.exs` - Multiple pools with different profiles (294 lines)
-- `examples/dual_mode/gil_aware_selection.exs` - Automatic Python version detection (276 lines)
+- `examples/dual_mode/process_vs_thread_comparison.exs` - Side-by-side performance comparison
+- `examples/dual_mode/hybrid_pools.exs` - Multiple pools with different profiles
+- `examples/dual_mode/gil_aware_selection.exs` - Automatic Python version detection
 
 **Lifecycle (1 example):**
-- `examples/lifecycle/ttl_recycling_demo.exs` - TTL-based worker recycling demonstration (215 lines)
+- `examples/lifecycle/ttl_recycling_demo.exs` - TTL-based worker recycling demonstration
 
 **Monitoring (1 example):**
-- `examples/monitoring/telemetry_integration.exs` - Telemetry setup and integration examples (385 lines)
+- `examples/monitoring/telemetry_integration.exs` - Telemetry setup and integration examples
 
 **Threading (1 example):**
-- `examples/threaded_profile_demo.exs` - Thread profile configuration patterns (201 lines)
+- `examples/threaded_profile_demo.exs` - Thread profile configuration patterns
 
 **Utility:**
-- `examples/run_examples.exs` - Automated example runner with status reporting (416 lines)
+- `examples/run_examples.exs` - Automated example runner with status reporting
 
 ### 🔍 Implementation Details
 
-- **Total Code**: 7,694+ lines (Elixir + Python)
-- **Total Docs**: 16,420+ lines
 - **New Modules**: 14 Elixir files, 5 Python files
 - **Test Coverage**: 43 unit tests (93% pass rate) + 9 new test files
 - **Example Scripts**: 7 new working demos
@@ -433,15 +431,15 @@ config :snakepit,
 
 - **43 unit tests** with 93% pass rate
 - **9 new test files** for v0.6.0 features:
-  - `test/snakepit/compatibility_test.exs` - Library compatibility matrix (142 lines)
-  - `test/snakepit/config_test.exs` - Multi-pool configuration (138 lines)
-  - `test/snakepit/integration_test.exs` - End-to-end integration (103 lines)
-  - `test/snakepit/multi_pool_execution_test.exs` - Multi-pool execution (209 lines)
-  - `test/snakepit/pool_multipool_integration_test.exs` - Pool integration (108 lines)
-  - `test/snakepit/python_version_test.exs` - Python detection (105 lines)
-  - `test/snakepit/thread_profile_python313_test.exs` - Python 3.13 threading (232 lines)
-  - `test/snakepit/worker_profile/process_test.exs` - Process profile (138 lines)
-  - `test/snakepit/worker_profile/thread_test.exs` - Thread profile (133 lines)
+  - `test/snakepit/compatibility_test.exs` - Library compatibility matrix
+  - `test/snakepit/config_test.exs` - Multi-pool configuration
+  - `test/snakepit/integration_test.exs` - End-to-end integration
+  - `test/snakepit/multi_pool_execution_test.exs` - Multi-pool execution
+  - `test/snakepit/pool_multipool_integration_test.exs` - Pool integration
+  - `test/snakepit/python_version_test.exs` - Python detection
+  - `test/snakepit/thread_profile_python313_test.exs` - Python 3.13 threading
+  - `test/snakepit/worker_profile/process_test.exs` - Process profile
+  - `test/snakepit/worker_profile/thread_test.exs` - Thread profile
 - Comprehensive integration tests for multi-pool execution
 - Python 3.13 free-threading compatibility tests
 - Thread profile capacity management tests
@@ -481,8 +479,8 @@ config :snakepit,
 
 ### Breaking Changes
 - **DSPy Integration Removed** - As announced in v0.4.3
-  - Removed deprecated `dspy_integration.py` module (469 lines)
-  - Removed deprecated `types.py` with VariableType enum (227 lines)
+  - Removed deprecated `dspy_integration.py` module
+  - Removed deprecated `types.py` with VariableType enum
   - Users must migrate to DSPex for DSPy functionality
   - See migration guide in deprecation notice above
 
@@ -494,8 +492,8 @@ config :snakepit,
   - 37 Elixir tests + 15 Python tests passing
 
 ### Code Cleanup
-- **Removed ~1,500 LOC of dead code**
-  - Streamlined Python SessionContext from 845 to 169 lines
+- **Removed dead code and obsolete modules**
+  - Streamlined Python SessionContext
   - Deleted obsolete backup files and unused modules
   - Cleaned up test infrastructure
   - Created Python test infrastructure with `test_python.sh`
@@ -510,7 +508,7 @@ config :snakepit,
 ## 🆕 What's New in v0.4.2
 
 ### ✨ **Systematic Cleanup & Quality Improvements**
-- **Removed ~1,000 LOC dead code** - Deleted unused modules and aspirational APIs
+- **Removed dead code** - Deleted unused modules and aspirational APIs
 - **Fixed adapter defaults** - ShowcaseAdapter now default (fully functional)
 - **DETS cleanup optimization** - Prevents indefinite growth, fast startup
 - **Atomic session creation** - Eliminates race condition error logs
@@ -2459,8 +2457,8 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 **v0.5.0**
 - **DSPy integration removed** - Clean architecture separation achieved
 - **Test infrastructure enhanced** - 89% increase in test coverage (27→51 tests)
-- **Code cleanup complete** - ~1,500 LOC of dead code removed
-- **Python SessionContext streamlined** - 169 lines (down from 845)
+- **Code cleanup complete** - Significant dead code removed
+- **Python SessionContext streamlined** - Simplified implementation
 - **Supertester foundation** - Phase 1 complete with deterministic testing
 - **gRPC streaming bridge** - Full implementation with HTTP/2 multiplexing
 - **Comprehensive documentation** - All features well-documented
