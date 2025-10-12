@@ -25,6 +25,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 ## 📋 Table of Contents
 
 - [Breaking Changes (v0.5.0)](#️-breaking-changes-v050)
+- [What's New in v0.5.1](#whats-new-in-v051)
 - [What's New in v0.5](#whats-new-in-v05)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
@@ -92,6 +93,35 @@ For **non-DSPex users**, if you're using these classes directly:
 - [Architecture Decision](https://github.com/nshkrdotcom/dspex/blob/main/docs/architecture_review_20251007/09_ARCHITECTURE_DECISION_RECORD.md)
 
 **Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
+
+---
+
+## 🆕 What's New in v0.5.1
+
+### Worker Pool Scaling Enhancements
+- **Fixed worker pool scaling limits** - Pool now reliably scales to 250+ workers (previously limited to ~105)
+- **Resolved thread explosion during concurrent startup** - Fixed "fork bomb" caused by Python scientific libraries spawning excessive threads
+- **Dynamic port allocation** - Workers now use OS-assigned ports (port=0) eliminating port collision races
+- **Batched worker startup** - Configurable batch size and delay prevents system resource exhaustion
+- **Enhanced resource limits** - Added max_workers safeguard (1000) with comprehensive warnings
+- **New diagnostic tools** - Added `mix diagnose.scaling` task for bottleneck analysis
+
+### Configuration Improvements
+- **Aggressive thread limiting** - Set `OPENBLAS_NUM_THREADS=1`, `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1` for optimal pool-level parallelism
+- **Batched startup configuration** - `startup_batch_size: 8`, `startup_batch_delay_ms: 750`
+- **Increased resource limits** - Extended `port_range: 1000`, GRPC backlog: 512, worker timeout: 30s
+- **Explicit port range constraints** - Added configuration documentation and validation
+
+### Performance & Reliability
+- **Successfully tested with 250 workers** - Validated reliable operation at 2.5x previous limit
+- **Eliminated port collision races** - Dynamic port allocation prevents startup failures
+- **Improved error diagnostics** - Better logging and resource tracking during pool initialization
+- **Enhanced GRPC server** - Better port binding error handling and connection management
+
+### Notes
+- Startup time increases with large pools (~60s for 250 workers vs ~10s for 100 workers)
+- Thread limiting optimizes for high concurrency; CPU-intensive tasks per worker may need adjustment
+- See commit dc67572 for detailed technical analysis and future considerations
 
 ---
 
@@ -231,7 +261,7 @@ For **non-DSPex users**, if you're using these classes directly:
 # In your mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.5.0"}
+    {:snakepit, "~> 0.5.1"}
   ]
 end
 
@@ -266,7 +296,7 @@ end)
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.5.0"}
+    {:snakepit, "~> 0.5.1"}
   ]
 end
 ```
@@ -2066,7 +2096,15 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 
 ## 📊 Development Status
 
-**v0.5.0 (Current Release)**
+**v0.5.1 (Current Release)**
+- **Worker pool scaling fixed** - Reliably scales to 250+ workers (previously ~105 limit)
+- **Thread explosion resolved** - Fixed fork bomb from Python scientific libraries
+- **Dynamic port allocation** - OS-assigned ports eliminate collision races
+- **Batched startup** - Configurable batching prevents resource exhaustion
+- **New diagnostic tools** - Added `mix diagnose.scaling` for bottleneck analysis
+- **Enhanced configuration** - Thread limiting and resource management improvements
+
+**v0.5.0**
 - **DSPy integration removed** - Clean architecture separation achieved
 - **Test infrastructure enhanced** - 89% increase in test coverage (27→51 tests)
 - **Code cleanup complete** - ~1,500 LOC of dead code removed
