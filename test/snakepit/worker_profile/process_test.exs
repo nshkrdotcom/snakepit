@@ -66,7 +66,7 @@ defmodule Snakepit.WorkerProfile.ProcessTest do
 
       # These vars are set in ProcessProfile.build_process_env/1
       # Each should default to "1" unless user overrides
-      config = %{adapter_env: []}
+      _config = %{adapter_env: []}
 
       # All should be present in the profile's default env
       for _var <- expected_vars do
@@ -131,7 +131,8 @@ defmodule Snakepit.WorkerProfile.ProcessTest do
       assert thread_meta.capacity >= 1
 
       # Different types
-      assert process_meta.profile != thread_meta.profile
+      assert process_meta.profile == :process
+      assert thread_meta.profile == :thread
       assert process_meta.threading != thread_meta.threading
     end
   end

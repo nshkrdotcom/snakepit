@@ -162,7 +162,7 @@ defmodule Snakepit.ThreadProfilePython313Test do
 
       # Send 4 concurrent requests (should all execute on SAME worker)
       tasks =
-        for i <- 1..4 do
+        for _i <- 1..4 do
           Task.async(fn ->
             Snakepit.execute("stress_test", %{duration_ms: 1000, complexity: 100})
           end)
