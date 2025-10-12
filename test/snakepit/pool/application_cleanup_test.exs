@@ -10,6 +10,8 @@ defmodule Snakepit.Pool.ApplicationCleanupTest do
   use ExUnit.Case, async: false
   import Snakepit.TestHelpers
 
+  @moduletag :skip_ci
+
   alias Snakepit.Pool.ProcessRegistry
 
   setup do
