@@ -30,6 +30,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
+- [What's New in v0.6.1](#whats-new-in-v061)
 - [What's New in v0.6.0](#whats-new-in-v060)
 - [Breaking Changes (v0.5.0)](#️-breaking-changes-v050)
 - [What's New in v0.5.1](#whats-new-in-v051)
@@ -100,6 +101,82 @@ For **non-DSPex users**, if you're using these classes directly:
 - [Architecture Decision](https://github.com/nshkrdotcom/dspex/blob/main/docs/architecture_review_20251007/09_ARCHITECTURE_DECISION_RECORD.md)
 
 **Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
+
+---
+
+## 🆕 What's New in v0.6.1
+
+### 🔇 Configurable Logging System
+
+Snakepit v0.6.1 introduces fine-grained control over internal logging for cleaner output in production and demo environments.
+
+#### Key Features
+
+- **Centralized Log Control**: New `Snakepit.Logger` module provides consistent logging across all internal modules
+- **Application-Level Configuration**: Simple `:log_level` setting controls all Snakepit logs
+- **Five Log Levels**: `:debug`, `:info`, `:warning`, `:error`, `:none`
+- **No Breaking Changes**: Defaults to `:info` level for backward compatibility
+
+#### Configuration Examples
+
+**Clean Output (Recommended for Production/Demos)**:
+```elixir
+# config/config.exs
+config :snakepit,
+  log_level: :warning,  # Only warnings and errors
+  adapter_module: Snakepit.Adapters.GRPCPython,
+  pool_config: %{pool_size: 8}
+
+# Also suppress gRPC logs
+config :logger,
+  level: :warning,
+  compile_time_purge_matching: [
+    [application: :grpc, level_lower_than: :error]
+  ]
+```
+
+**Verbose Logging (Development/Debugging)**:
+```elixir
+# config/dev.exs
+config :snakepit,
+  log_level: :debug  # See everything
+
+config :logger, level: :debug
+```
+
+**Complete Silence**:
+```elixir
+config :snakepit,
+  log_level: :none  # No Snakepit logs at all
+```
+
+#### What Gets Suppressed
+
+With `log_level: :warning`:
+- ✅ Worker initialization messages
+- ✅ Pool startup progress
+- ✅ Session creation logs
+- ✅ gRPC connection details
+- ✅ Tool registration confirmations
+- ❌ Warnings and errors (still shown)
+
+#### Module Coverage
+
+Updated 25+ internal modules to use `Snakepit.Logger`:
+- `Snakepit.Config` - Configuration validation
+- `Snakepit.Pool.*` - Pool management, worker lifecycle
+- `Snakepit.Bridge.*` - Session and tool management
+- `Snakepit.GRPC.*` - gRPC communication
+- `Snakepit.Adapters.*` - Adapter implementations
+- `Snakepit.Worker.*` - Worker lifecycle
+- `Snakepit.Telemetry` - Monitoring and metrics
+
+#### Benefits
+
+- **Cleaner Demos**: Show only your application output, not infrastructure logs
+- **Production Ready**: Reduce log volume in production environments
+- **Flexible Debugging**: Turn on verbose logs when troubleshooting
+- **Selective Visibility**: Keep important warnings/errors while hiding noise
 
 ---
 
@@ -868,10 +945,10 @@ config :snakepit,
   pooling_enabled: true,
   adapter_module: Snakepit.Adapters.GRPCPython,  # gRPC-based communication
 
-  # Control Snakepit's internal logging (optional)
+  # Control Snakepit's internal logging
   # Options: :debug, :info, :warning, :error, :none
-  # Set to :warning for clean output in production/demos
-  log_level: :info,  # Default
+  # Set to :warning or :none for clean output in production/demos
+  log_level: :info,  # Default (balanced verbosity)
 
   grpc_config: %{
     base_port: 50051,    # Starting port for gRPC servers
@@ -880,6 +957,13 @@ config :snakepit,
   pool_config: %{
     pool_size: 8  # Default: System.schedulers_online() * 2
   }
+
+# Optional: Also suppress gRPC library logs
+config :logger,
+  level: :warning,
+  compile_time_purge_matching: [
+    [application: :grpc, level_lower_than: :error]
+  ]
 ```
 
 ### gRPC Configuration
