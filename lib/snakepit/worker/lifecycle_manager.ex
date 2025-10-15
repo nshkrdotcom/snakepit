@@ -392,9 +392,7 @@ defmodule Snakepit.Worker.LifecycleManager do
         # Start a replacement
         case start_replacement_worker(pool_name, worker_state.config) do
           {:ok, new_pid} ->
-            SLog.info(
-              "Worker #{worker_id} recycled successfully (new PID: #{inspect(new_pid)})"
-            )
+            SLog.info("Worker #{worker_id} recycled successfully (new PID: #{inspect(new_pid)})")
 
             :ok
 

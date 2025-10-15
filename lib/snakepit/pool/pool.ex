@@ -688,9 +688,7 @@ defmodule Snakepit.Pool do
 
                   receive do
                     {:DOWN, ^ref, :process, ^client_pid, _reason} ->
-                      SLog.warning(
-                        "Queued client #{inspect(client_pid)} died during execution."
-                      )
+                      SLog.warning("Queued client #{inspect(client_pid)} died during execution.")
 
                       GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
                   after
@@ -866,9 +864,7 @@ defmodule Snakepit.Pool do
         "⚠️  Requested #{count} workers but limiting to #{actual_count} (max_workers=#{max_workers})"
       )
 
-      SLog.warning(
-        "⚠️  To increase this limit, set :pool_config.max_workers in config/config.exs"
-      )
+      SLog.warning("⚠️  To increase this limit, set :pool_config.max_workers in config/config.exs")
     end
 
     SLog.info("🚀 Starting concurrent initialization of #{actual_count} workers...")
