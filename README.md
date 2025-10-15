@@ -867,6 +867,12 @@ Sessions provide:
 config :snakepit,
   pooling_enabled: true,
   adapter_module: Snakepit.Adapters.GRPCPython,  # gRPC-based communication
+
+  # Control Snakepit's internal logging (optional)
+  # Options: :debug, :info, :warning, :error, :none
+  # Set to :warning for clean output in production/demos
+  log_level: :info,  # Default
+
   grpc_config: %{
     base_port: 50051,    # Starting port for gRPC servers
     port_range: 100      # Port range for worker allocation

@@ -52,6 +52,7 @@ defmodule Snakepit.Worker.LifecycleManager do
 
   use GenServer
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   # Check every 60 seconds
   @check_interval 60_000
@@ -126,7 +127,7 @@ defmodule Snakepit.Worker.LifecycleManager do
       health_ref: health_ref
     }
 
-    Logger.info("Worker LifecycleManager started")
+    SLog.info("Worker LifecycleManager started")
     {:ok, state}
   end
 
@@ -154,7 +155,7 @@ defmodule Snakepit.Worker.LifecycleManager do
 
     new_workers = Map.put(state.workers, worker_id, worker_state)
 
-    Logger.debug(
+    SLog.debug(
       "Tracking worker #{worker_id} (TTL: #{inspect(ttl)}, max_requests: #{inspect(max_requests)})"
     )
 
@@ -164,7 +165,7 @@ defmodule Snakepit.Worker.LifecycleManager do
   @impl true
   def handle_cast({:untrack, worker_id}, state) do
     new_workers = Map.delete(state.workers, worker_id)
-    Logger.debug("Untracked worker #{worker_id}")
+    SLog.debug("Untracked worker #{worker_id}")
     {:noreply, %{state | workers: new_workers}}
   end
 
@@ -181,7 +182,7 @@ defmodule Snakepit.Worker.LifecycleManager do
 
         # Check if we hit max requests
         if should_recycle_requests?(updated_state) do
-          Logger.info(
+          SLog.info(
             "Worker #{worker_id} reached max requests (#{updated_state.request_count}), scheduling recycle"
           )
 
@@ -197,11 +198,11 @@ defmodule Snakepit.Worker.LifecycleManager do
   def handle_cast({:recycle_worker, worker_id, reason}, state) do
     case Map.get(state.workers, worker_id) do
       nil ->
-        Logger.debug("Worker #{worker_id} already recycled")
+        SLog.debug("Worker #{worker_id} already recycled")
         {:noreply, state}
 
       worker_state ->
-        Logger.info("Recycling worker #{worker_id} (reason: #{reason})")
+        SLog.info("Recycling worker #{worker_id} (reason: #{reason})")
 
         # Emit telemetry
         emit_recycle_telemetry(worker_state, reason)
@@ -223,7 +224,7 @@ defmodule Snakepit.Worker.LifecycleManager do
 
       worker_state ->
         if worker_state.pool == pool_name do
-          Logger.info("Manual recycle requested for worker #{worker_id}")
+          SLog.info("Manual recycle requested for worker #{worker_id}")
 
           # Emit telemetry
           emit_recycle_telemetry(worker_state, :manual)
@@ -268,19 +269,19 @@ defmodule Snakepit.Worker.LifecycleManager do
       Enum.reduce(state.workers, [], fn {worker_id, worker_state}, acc ->
         cond do
           should_recycle_ttl?(worker_state, now) ->
-            Logger.info("Worker #{worker_id} TTL expired, recycling...")
+            SLog.info("Worker #{worker_id} TTL expired, recycling...")
             emit_recycle_telemetry(worker_state, :ttl_expired)
             do_recycle_worker(worker_state)
             [worker_id | acc]
 
           should_recycle_requests?(worker_state) ->
-            Logger.info("Worker #{worker_id} reached max requests, recycling...")
+            SLog.info("Worker #{worker_id} reached max requests, recycling...")
             emit_recycle_telemetry(worker_state, :max_requests)
             do_recycle_worker(worker_state)
             [worker_id | acc]
 
           should_recycle_memory?(worker_state) ->
-            Logger.info("Worker #{worker_id} exceeded memory threshold, recycling...")
+            SLog.info("Worker #{worker_id} exceeded memory threshold, recycling...")
             emit_recycle_telemetry(worker_state, :memory_threshold)
             do_recycle_worker(worker_state)
             [worker_id | acc]
@@ -324,7 +325,7 @@ defmodule Snakepit.Worker.LifecycleManager do
         {:noreply, state}
 
       {worker_id, worker_state} ->
-        Logger.warning("Worker #{worker_id} (#{inspect(pid)}) died: #{inspect(reason)}")
+        SLog.warning("Worker #{worker_id} (#{inspect(pid)}) died: #{inspect(reason)}")
 
         # Emit telemetry
         emit_recycle_telemetry(worker_state, :worker_died)
@@ -378,7 +379,7 @@ defmodule Snakepit.Worker.LifecycleManager do
     worker_id = worker_state.worker_id
 
     # Stop the old worker
-    Logger.debug("Stopping worker #{worker_id} for recycling...")
+    SLog.debug("Stopping worker #{worker_id} for recycling...")
 
     # Get the profile module for this worker
     profile_module = get_profile_module(worker_state.config)
@@ -386,24 +387,24 @@ defmodule Snakepit.Worker.LifecycleManager do
     # Stop via profile
     case profile_module.stop_worker(worker_state.pid) do
       :ok ->
-        Logger.debug("Worker #{worker_id} stopped successfully")
+        SLog.debug("Worker #{worker_id} stopped successfully")
 
         # Start a replacement
         case start_replacement_worker(pool_name, worker_state.config) do
           {:ok, new_pid} ->
-            Logger.info(
+            SLog.info(
               "Worker #{worker_id} recycled successfully (new PID: #{inspect(new_pid)})"
             )
 
             :ok
 
           {:error, reason} ->
-            Logger.error("Failed to start replacement for #{worker_id}: #{inspect(reason)}")
+            SLog.error("Failed to start replacement for #{worker_id}: #{inspect(reason)}")
             {:error, reason}
         end
 
       error ->
-        Logger.error("Failed to stop worker #{worker_id}: #{inspect(error)}")
+        SLog.error("Failed to stop worker #{worker_id}: #{inspect(error)}")
         error
     end
   end
@@ -445,10 +446,10 @@ defmodule Snakepit.Worker.LifecycleManager do
 
     case profile_module.health_check(worker_state.pid) do
       :ok ->
-        Logger.debug("Worker #{worker_id} health check passed")
+        SLog.debug("Worker #{worker_id} health check passed")
 
       {:error, reason} ->
-        Logger.warning("Worker #{worker_id} health check failed: #{inspect(reason)}")
+        SLog.warning("Worker #{worker_id} health check failed: #{inspect(reason)}")
 
         # Emit telemetry
         :telemetry.execute(

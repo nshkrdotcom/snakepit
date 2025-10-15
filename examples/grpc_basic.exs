@@ -9,6 +9,9 @@ Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
 Application.put_env(:snakepit, :grpc_port, 50051)
 
+# Suppress Snakepit internal logs (options: :debug, :info, :warning, :error, :none)
+Application.put_env(:snakepit, :log_level, :warning)
+
 Mix.install([
   {:snakepit, path: "."},
   {:grpc, "~> 0.10.2"},

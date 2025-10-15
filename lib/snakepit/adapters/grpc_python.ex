@@ -42,6 +42,7 @@ defmodule Snakepit.Adapters.GRPCPython do
   @behaviour Snakepit.Adapter
 
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   @impl true
   def executable_path do
@@ -236,7 +237,7 @@ defmodule Snakepit.Adapters.GRPCPython do
   # backoff: multiplier for exponential growth (doubles each retry)
   defp retry_connect(_port, 0, _base_delay, _backoff) do
     # All retries exhausted
-    Logger.error("gRPC connection failed after all retries")
+    SLog.error("gRPC connection failed after all retries")
     {:error, :connection_failed_after_retries}
   end
 
@@ -244,7 +245,7 @@ defmodule Snakepit.Adapters.GRPCPython do
     case Snakepit.GRPC.Client.connect(port) do
       {:ok, channel} ->
         # Connection successful!
-        Logger.debug("gRPC connection established to port #{port}")
+        SLog.debug("gRPC connection established to port #{port}")
         {:ok, %{channel: channel, port: port}}
 
       {:error, reason} when reason in [:connection_refused, :unavailable, :internal] ->
@@ -254,7 +255,7 @@ defmodule Snakepit.Adapters.GRPCPython do
         jitter = :rand.uniform(div(max(delay, 4), 4))
         actual_delay = delay + jitter
 
-        Logger.debug(
+        SLog.debug(
           "gRPC connection to port #{port} #{reason}. " <>
             "Retrying in #{actual_delay}ms... (#{retries_left - 1} retries left)"
         )
@@ -269,7 +270,7 @@ defmodule Snakepit.Adapters.GRPCPython do
 
       {:error, reason} ->
         # For any other error, fail immediately (no retry)
-        Logger.error(
+        SLog.error(
           "gRPC connection to port #{port} failed with unexpected reason: #{inspect(reason)}"
         )
 
@@ -298,17 +299,17 @@ defmodule Snakepit.Adapters.GRPCPython do
   Execute a streaming command via gRPC with callback.
   """
   def grpc_execute_stream(connection, command, args, callback_fn, timeout \\ 300_000) do
-    Logger.info(
+    SLog.info(
       "[GRPCPython] grpc_execute_stream - command: #{command}, args: #{inspect(args)}, timeout: #{timeout}"
     )
 
     unless grpc_available?() do
-      Logger.error("[GRPCPython] gRPC not available")
+      SLog.error("[GRPCPython] gRPC not available")
       {:error, :grpc_not_available}
     else
       # Use the streaming endpoint
-      Logger.info("[GRPCPython] Using streaming endpoint")
-      Logger.info("[GRPCPython] Channel info: #{inspect(connection.channel)}")
+      SLog.info("[GRPCPython] Using streaming endpoint")
+      SLog.info("[GRPCPython] Channel info: #{inspect(connection.channel)}")
 
       result =
         Snakepit.GRPC.Client.execute_streaming_tool(
@@ -319,14 +320,14 @@ defmodule Snakepit.Adapters.GRPCPython do
           timeout: timeout
         )
 
-      Logger.info("[GRPCPython] execute_streaming_tool returned: #{inspect(result)}")
+      SLog.info("[GRPCPython] execute_streaming_tool returned: #{inspect(result)}")
 
       case result do
         {:ok, stream} ->
-          Logger.info("[GRPCPython] Starting to consume stream...")
+          SLog.info("[GRPCPython] Starting to consume stream...")
           # Consume the stream directly without Task.async to avoid deadlock
           try do
-            Logger.info("[GRPCPython] Starting Enum.each on stream")
+            SLog.info("[GRPCPython] Starting Enum.each on stream")
 
             Enum.each(stream, fn chunk ->
               case chunk do
@@ -334,32 +335,32 @@ defmodule Snakepit.Adapters.GRPCPython do
                 when is_binary(data_bytes) ->
                   # Decode the JSON payload from the chunk
                   decoded_chunk = Jason.decode!(data_bytes)
-                  Logger.info("[GRPCPython] Decoded chunk: #{inspect(decoded_chunk)}")
+                  SLog.info("[GRPCPython] Decoded chunk: #{inspect(decoded_chunk)}")
                   callback_fn.(decoded_chunk)
 
                 {:ok, %Snakepit.Bridge.ToolChunk{is_final: true}} ->
                   # Final empty chunk, ignore
-                  Logger.info("[GRPCPython] Received final chunk")
+                  SLog.info("[GRPCPython] Received final chunk")
 
                 {:error, reason} ->
-                  Logger.error("[GRPCPython] Stream error: #{inspect(reason)}")
+                  SLog.error("[GRPCPython] Stream error: #{inspect(reason)}")
                   callback_fn.({:error, reason})
 
                 other ->
-                  Logger.warning("[GRPCPython] Unexpected chunk format: #{inspect(other)}")
+                  SLog.warning("[GRPCPython] Unexpected chunk format: #{inspect(other)}")
               end
             end)
 
-            Logger.info("[GRPCPython] Stream consumption complete")
+            SLog.info("[GRPCPython] Stream consumption complete")
             :ok
           rescue
             e ->
-              Logger.error("[GRPCPython] Error consuming stream: #{inspect(e)}")
+              SLog.error("[GRPCPython] Error consuming stream: #{inspect(e)}")
               {:error, e}
           end
 
         {:error, reason} ->
-          Logger.error("[GRPCPython] Failed to initiate stream: #{inspect(reason)}")
+          SLog.error("[GRPCPython] Failed to initiate stream: #{inspect(reason)}")
           {:error, reason}
       end
     end

@@ -5,9 +5,16 @@ import Config
 config :snakepit_showcase,
   debug: true
 
-# Set a higher stacktrace during development. Avoid configuring such
-# in production as building large stacktraces may be expensive.
+# Suppress all logs by default for clean demo output
+# Change to :debug for detailed troubleshooting
+config :logger,
+  level: :warning,
+  # Suppress gRPC interceptor logs
+  compile_time_purge_matching: [
+    [application: :grpc, level_lower_than: :error]
+  ]
+
 config :logger, :default_handler,
-  level: :debug,
+  level: :warning,
   format: "$time $metadata[$level] $message\n",
   metadata: [:request_id]

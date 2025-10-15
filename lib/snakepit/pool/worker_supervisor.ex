@@ -10,6 +10,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
 
   use DynamicSupervisor
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   @doc """
   Starts the worker supervisor.
@@ -52,18 +53,18 @@ defmodule Snakepit.Pool.WorkerSupervisor do
 
     case DynamicSupervisor.start_child(__MODULE__, child_spec) do
       {:ok, starter_pid} ->
-        Logger.info("Started worker starter for #{worker_id} with PID #{inspect(starter_pid)}")
+        SLog.info("Started worker starter for #{worker_id} with PID #{inspect(starter_pid)}")
         {:ok, starter_pid}
 
       {:error, {:already_started, starter_pid}} ->
-        Logger.debug(
+        SLog.debug(
           "Worker starter for #{worker_id} already running with PID #{inspect(starter_pid)}"
         )
 
         {:ok, starter_pid}
 
       {:error, reason} = error ->
-        Logger.error("Failed to start worker starter for #{worker_id}: #{inspect(reason)}")
+        SLog.error("Failed to start worker starter for #{worker_id}: #{inspect(reason)}")
         error
     end
   end
@@ -144,7 +145,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
        ) do
     if retries > 0 do
       if (is_nil(old_port) or port_available?(old_port)) and registry_cleaned?(worker_id) do
-        Logger.debug("Resources released for #{worker_id}, safe to restart")
+        SLog.debug("Resources released for #{worker_id}, safe to restart")
         :ok
       else
         # Resources still in use - exponential backoff with cap at 200ms
@@ -159,7 +160,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
         wait_for_resource_cleanup(worker_id, old_port, retries - 1, backoff * 2)
       end
     else
-      Logger.warning(
+      SLog.warning(
         "Resource cleanup timeout for #{worker_id} after #{@cleanup_max_retries} retries, " <>
           "proceeding with restart anyway"
       )

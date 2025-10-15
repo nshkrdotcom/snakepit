@@ -3,6 +3,10 @@ import Config
 
 # Default configuration for Snakepit
 config :snakepit,
+  # Logging level for Snakepit internal logs
+  # Options: :debug, :info, :warning, :error, :none
+  # Set to :warning or :none for clean output in production
+  log_level: :info,
   # Enable pooling by default
   pooling_enabled: true,
 
