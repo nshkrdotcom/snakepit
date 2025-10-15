@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2025-10-14
+
+### Added
+- **Configurable Logging System**
+  - New `Snakepit.Logger` module for centralized logging with configurable verbosity
+  - Application-level log control via `:snakepit, :log_level` configuration
+  - Supported levels: `:debug`, `:info`, `:warning`, `:error`, `:none`
+  - All internal Snakepit modules now use `Snakepit.Logger` for consistent log control
+  - Default log level set to `:info` for balanced verbosity
+
+### Changed
+- **Log Suppression for Clean Output**
+  - Default configuration now suppresses verbose logs for cleaner demo/production output
+  - Development environment (`config/dev.exs`) defaults to `:warning` level
+  - gRPC interceptor logs can be suppressed via `compile_time_purge_matching` in config
+  - Updated 25+ modules to use `Snakepit.Logger` instead of direct `Logger` calls
+  - Examples and showcase applications benefit from reduced noise
+
+### Configuration
+- **New Configuration Option**: `log_level` in `:snakepit` application config
+  ```elixir
+  # config/config.exs
+  config :snakepit,
+    log_level: :warning  # Options: :debug, :info, :warning, :error, :none
+  ```
+
+### Documentation
+- Added log configuration section to README with usage examples
+- Documented how to suppress gRPC logs and Snakepit internal logs
+- Updated configuration examples throughout documentation
+
+### Notes
+- **No Breaking Changes**: Existing configurations continue to work with default `:info` level
+- Log suppression is optional - users can keep verbose logs by setting `log_level: :debug`
+- Provides cleaner output for production deployments and demos
+- Internal logging remains fully accessible for debugging when needed
+
+---
+
 ## [0.6.0] - 2025-10-11
 
 ### Added - Phase 1: Dual-Mode Architecture Foundation
