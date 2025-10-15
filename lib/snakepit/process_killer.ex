@@ -27,7 +27,10 @@ defmodule Snakepit.ProcessKiller do
 
     # DEBUG: Log all kills to find who's killing workers during startup
     caller = Process.info(self(), :registered_name)
-    SLog.debug("ProcessKiller.kill_process: PID=#{os_pid}, signal=#{signal}, caller=#{inspect(caller)}")
+
+    SLog.debug(
+      "ProcessKiller.kill_process: PID=#{os_pid}, signal=#{signal}, caller=#{inspect(caller)}"
+    )
 
     try do
       # Use Erlang's :os.cmd for POSIX-compliant kill

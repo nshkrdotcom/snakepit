@@ -56,7 +56,9 @@ defmodule Snakepit.Application do
     # Check if pooling is enabled (default: false to prevent auto-start issues)
     pooling_enabled = Application.get_env(:snakepit, :pooling_enabled, false)
 
-    SLog.debug("Snakepit.Application.start/2: pooling_enabled=#{pooling_enabled}, env=#{Mix.env()}")
+    SLog.debug(
+      "Snakepit.Application.start/2: pooling_enabled=#{pooling_enabled}, env=#{Mix.env()}"
+    )
 
     # Get gRPC config for the Elixir server
     grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)

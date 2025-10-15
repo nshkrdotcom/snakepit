@@ -377,9 +377,7 @@ defmodule Snakepit.GRPCWorker do
                     state.worker_config
                   )
 
-                  SLog.info(
-                    "✅ gRPC worker #{state.id} initialization complete and acknowledged."
-                  )
+                  SLog.info("✅ gRPC worker #{state.id} initialization complete and acknowledged.")
 
                   {:noreply, %{state | connection: connection, health_check_ref: health_ref}}
 
@@ -558,7 +556,10 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def terminate(reason, state) do
-    SLog.debug("GRPCWorker.terminate/2 called for #{state.id}, reason: #{inspect(reason)}, PID: #{state.process_pid}")
+    SLog.debug(
+      "GRPCWorker.terminate/2 called for #{state.id}, reason: #{inspect(reason)}, PID: #{state.process_pid}"
+    )
+
     SLog.debug("gRPC worker #{state.id} terminating: #{inspect(reason)}")
 
     # ALWAYS kill the Python process, regardless of reason

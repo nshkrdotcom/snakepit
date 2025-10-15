@@ -60,7 +60,8 @@ defmodule Snakepit.Logger do
       :warning -> level in [:error, :warning]
       :info -> level in [:error, :warning, :info]
       :debug -> true
-      _ -> level in [:error, :warning, :info]  # Default to :info
+      # Default to :info
+      _ -> level in [:error, :warning, :info]
     end
   end
 end
