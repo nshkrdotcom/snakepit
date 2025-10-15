@@ -5,6 +5,8 @@ config :snakepit_showcase,
 
 # Snakepit configuration
 config :snakepit,
+  # Suppress Snakepit internal logs for clean demo output
+  log_level: :warning,
   adapter_module: Snakepit.Adapters.GRPCPython,
   pooling_enabled: true,
   pool_config: %{

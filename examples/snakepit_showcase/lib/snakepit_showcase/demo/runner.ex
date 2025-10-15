@@ -35,31 +35,31 @@ defmodule SnakepitShowcase.Demo.Runner do
     
     try do
       unless silent do
-        Logger.info("Starting demo: #{demo_module.description()}")
-        Logger.info("")
+        IO.puts("Starting demo: #{demo_module.description()}")
+        IO.puts("")
       end
-      
+
       # Execute each step
-      results = 
+      results =
         demo_module.steps()
         |> Enum.reduce_while([], fn {step_name, description}, acc ->
           unless silent do
-            Logger.info("  → #{description}")
+            IO.puts("  → #{description}")
           end
-          
+
           case execute_step(demo_module, step_name, context) do
             {:ok, result} ->
               unless silent do
-                Logger.info("    ✓ Completed")
+                IO.puts("    ✓ Completed")
               end
-              
+
               # Update context with step result
               _updated_context = put_in(context.step_results[step_name], result)
               {:cont, [{:ok, {step_name, result}} | acc]}
-              
+
             {:error, reason} = error ->
               unless silent do
-                Logger.error("    ✗ Failed: #{inspect(reason)}")
+                IO.puts("    ✗ Failed: #{inspect(reason)}")
               end
               
               if stop_on_error do
@@ -74,19 +74,19 @@ defmodule SnakepitShowcase.Demo.Runner do
       # Determine overall result
       if Enum.all?(results, &match?({:ok, _}, &1)) do
         unless silent do
-          Logger.info("")
-          Logger.info("Demo completed successfully!")
+          IO.puts("")
+          IO.puts("Demo completed successfully!")
         end
         :ok
       else
         errors = Enum.filter(results, &match?({:error, _}, &1))
         {:error, {:demo_failed, errors}}
       end
-      
+
     rescue
       error ->
-        Logger.error("Demo crashed: #{inspect(error)}")
-        Logger.error(Exception.format_stacktrace())
+        IO.puts(:stderr, "Demo crashed: #{inspect(error)}")
+        IO.puts(:stderr, Exception.format_stacktrace())
         {:error, {:demo_crashed, error}}
         
     after
@@ -106,35 +106,43 @@ defmodule SnakepitShowcase.Demo.Runner do
   end
   
   defp cleanup_demo(demo_module, context, tracker) do
-    Logger.info("")
-    Logger.info("Cleaning up demo resources...")
-    
+    unless context.silent do
+      IO.puts("")
+      IO.puts("Cleaning up demo resources...")
+    end
+
     # Call demo's custom cleanup if defined
     if function_exported?(demo_module, :cleanup, 1) do
       try do
         demo_module.cleanup(context)
       rescue
         error ->
-          Logger.error("Demo cleanup failed: #{inspect(error)}")
+          IO.puts(:stderr, "Demo cleanup failed: #{inspect(error)}")
       end
     end
-    
+
     # Get tracked resources
     resources = ResourceTracker.get_all(tracker)
-    
+
     # Clean up sessions
     if resources.sessions != [] do
-      Logger.info("  Cleaning up #{length(resources.sessions)} sessions...")
+      unless context.silent do
+        IO.puts("  Cleaning up #{length(resources.sessions)} sessions...")
+      end
       Enum.each(resources.sessions, &cleanup_session/1)
     end
-    
+
     # Clean up other resources
     Enum.each(resources.resources, fn {type, id} ->
-      Logger.info("  Cleaning up #{type}: #{inspect(id)}")
+      unless context.silent do
+        IO.puts("  Cleaning up #{type}: #{inspect(id)}")
+      end
       cleanup_resource(type, id)
     end)
-    
-    Logger.info("  ✓ Cleanup completed")
+
+    unless context.silent do
+      IO.puts("  ✓ Cleanup completed")
+    end
   end
   
   defp cleanup_session(session_id) do
@@ -164,6 +172,7 @@ defmodule SnakepitShowcase.Demo.Runner do
   end
   
   defp cleanup_resource(type, id) do
+    # This will only show if logger level is :warning or lower
     Logger.warning("Unknown resource type for cleanup: #{type} - #{inspect(id)}")
   end
 end

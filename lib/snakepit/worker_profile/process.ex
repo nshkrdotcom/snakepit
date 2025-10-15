@@ -37,6 +37,7 @@ defmodule Snakepit.WorkerProfile.Process do
   @behaviour Snakepit.WorkerProfile
 
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   @impl true
   def start_worker(config) do
@@ -57,7 +58,7 @@ defmodule Snakepit.WorkerProfile.Process do
            config
          ) do
       {:ok, pid} ->
-        Logger.debug("Process profile started worker #{worker_id}: #{inspect(pid)}")
+        SLog.debug("Process profile started worker #{worker_id}: #{inspect(pid)}")
         {:ok, pid}
 
       error ->

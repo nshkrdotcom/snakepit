@@ -38,6 +38,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
 
   use GenServer
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   alias Snakepit.Bridge.InternalToolSpec
 
@@ -136,7 +137,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
     # Create ETS table for fast lookups
     :ets.new(@table_name, [:named_table, :set, :public, read_concurrency: true])
 
-    Logger.info("ToolRegistry started with ETS table: #{@table_name}")
+    SLog.info("ToolRegistry started with ETS table: #{@table_name}")
 
     {:ok, %{}}
   end
@@ -155,7 +156,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
 
     :ets.insert(@table_name, {{session_id, tool_name}, tool_spec})
 
-    Logger.debug("Registered Elixir tool: #{tool_name} for session: #{session_id}")
+    SLog.debug("Registered Elixir tool: #{tool_name} for session: #{session_id}")
 
     {:reply, :ok, state}
   end
@@ -177,7 +178,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
 
     :ets.insert(@table_name, {{session_id, tool_name}, tool_spec})
 
-    Logger.debug("Registered Python tool: #{tool_name} for session: #{session_id}")
+    SLog.debug("Registered Python tool: #{tool_name} for session: #{session_id}")
 
     {:reply, :ok, state}
   end
@@ -200,7 +201,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
         spec.name
       end)
 
-    Logger.info("Registered #{length(results)} tools for session: #{session_id}")
+    SLog.info("Registered #{length(results)} tools for session: #{session_id}")
 
     {:reply, {:ok, results}, state}
   end
@@ -210,7 +211,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
     pattern = {{session_id, :_}, :_}
     num_deleted = :ets.match_delete(@table_name, pattern)
 
-    Logger.debug("Cleaned up #{num_deleted} tools for session: #{session_id}")
+    SLog.debug("Cleaned up #{num_deleted} tools for session: #{session_id}")
 
     {:reply, :ok, state}
   end

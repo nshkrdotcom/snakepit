@@ -8,6 +8,9 @@ defmodule Snakepit.SessionHelpers do
   For generic session management, use `Snakepit.execute_in_session/4` directly.
   """
 
+  require Logger
+  alias Snakepit.Logger, as: SLog
+
   @doc """
   Executes a command in session context with ML program management.
 
@@ -42,8 +45,7 @@ defmodule Snakepit.SessionHelpers do
         # Store program data in SessionStore after creation
         case store_program_data_after_creation(session_id, args, response) do
           {:error, reason} ->
-            require Logger
-            Logger.warning("Program created but failed to store metadata: #{inspect(reason)}")
+            SLog.warning("Program created but failed to store metadata: #{inspect(reason)}")
 
           :ok ->
             :ok

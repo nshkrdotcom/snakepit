@@ -9,6 +9,7 @@ defmodule Snakepit.ProcessKiller do
   """
 
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   @doc """
   Kills a process by PID using proper Erlang signals.
@@ -25,9 +26,8 @@ defmodule Snakepit.ProcessKiller do
     signal_num = signal_to_number(signal)
 
     # DEBUG: Log all kills to find who's killing workers during startup
-    IO.inspect(%{pid: os_pid, signal: signal, caller: Process.info(self(), :registered_name)},
-      label: "ProcessKiller.kill_process"
-    )
+    caller = Process.info(self(), :registered_name)
+    SLog.debug("ProcessKiller.kill_process: PID=#{os_pid}, signal=#{signal}, caller=#{inspect(caller)}")
 
     try do
       # Use Erlang's :os.cmd for POSIX-compliant kill
@@ -112,12 +112,10 @@ defmodule Snakepit.ProcessKiller do
   Pure Erlang implementation, no pkill.
   """
   def kill_by_run_id(run_id) when is_binary(run_id) do
-    Logger.warning("🔪 Killing all processes with run_id: #{run_id}")
-    IO.inspect(System.monotonic_time(:millisecond), label: "kill_by_run_id called at")
-
-    IO.inspect(Process.info(self(), [:registered_name, :current_stacktrace]),
-      label: "Called from"
-    )
+    SLog.warning("🔪 Killing all processes with run_id: #{run_id}")
+    SLog.debug("kill_by_run_id called at: #{System.monotonic_time(:millisecond)}")
+    caller_info = Process.info(self(), [:registered_name, :current_stacktrace])
+    SLog.debug("Called from: #{inspect(caller_info)}")
 
     # Get all Python processes
     python_pids = find_python_processes()
@@ -140,7 +138,7 @@ defmodule Snakepit.ProcessKiller do
         end
       end)
 
-    Logger.info("Found #{length(matching_pids)} processes to kill")
+    SLog.info("Found #{length(matching_pids)} processes to kill")
 
     # Kill with escalation
     killed_count =
@@ -150,7 +148,7 @@ defmodule Snakepit.ProcessKiller do
             acc + 1
 
           {:error, reason} ->
-            Logger.warning("Failed to kill #{pid}: #{inspect(reason)}")
+            SLog.warning("Failed to kill #{pid}: #{inspect(reason)}")
             acc
         end
       end)
@@ -192,11 +190,11 @@ defmodule Snakepit.ProcessKiller do
       :ok ->
         # Wait for process to die
         if wait_for_death(os_pid, timeout_ms) do
-          Logger.debug("✅ Process #{os_pid} terminated gracefully")
+          SLog.debug("✅ Process #{os_pid} terminated gracefully")
           :ok
         else
           # Escalate to SIGKILL
-          Logger.warning("⏰ Process #{os_pid} didn't die, escalating to SIGKILL")
+          SLog.warning("⏰ Process #{os_pid} didn't die, escalating to SIGKILL")
           kill_process(os_pid, :sigkill)
         end
 

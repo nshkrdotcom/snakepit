@@ -12,6 +12,7 @@ defmodule Snakepit.Pool do
 
   use GenServer
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   @default_size System.schedulers_online() * 2
   @default_startup_timeout 10_000
@@ -76,23 +77,23 @@ defmodule Snakepit.Pool do
   def execute_stream(command, args, callback_fn, opts \\ []) do
     pool = opts[:pool] || __MODULE__
     timeout = opts[:timeout] || 300_000
-    Logger.info("[Pool] execute_stream called for command: #{command}, args: #{inspect(args)}")
+    SLog.info("[Pool] execute_stream called for command: #{command}, args: #{inspect(args)}")
 
     case checkout_worker_for_stream(pool, opts) do
       {:ok, worker_id} ->
-        Logger.info("[Pool] Checked out worker: #{worker_id}")
+        SLog.info("[Pool] Checked out worker: #{worker_id}")
 
         # CRITICAL FIX: Use try/after to guarantee worker checkin even if execution crashes
         try do
           execute_on_worker_stream(worker_id, command, args, callback_fn, timeout)
         after
           # This block ALWAYS executes, preventing worker leaks on crashes
-          Logger.info("[Pool] Checking in worker #{worker_id} after stream execution")
+          SLog.info("[Pool] Checking in worker #{worker_id} after stream execution")
           checkin_worker(pool, worker_id)
         end
 
       {:error, reason} ->
-        Logger.error("[Pool] Failed to checkout worker: #{inspect(reason)}")
+        SLog.error("[Pool] Failed to checkout worker: #{inspect(reason)}")
         {:error, reason}
     end
   end
@@ -108,15 +109,15 @@ defmodule Snakepit.Pool do
 
   defp execute_on_worker_stream(worker_id, command, args, callback_fn, timeout) do
     worker_module = get_worker_module(worker_id)
-    Logger.info("[Pool] execute_on_worker_stream - worker_module: #{inspect(worker_module)}")
+    SLog.info("[Pool] execute_on_worker_stream - worker_module: #{inspect(worker_module)}")
 
     if function_exported?(worker_module, :execute_stream, 5) do
-      Logger.info("[Pool] Calling #{worker_module}.execute_stream with timeout: #{timeout}")
+      SLog.info("[Pool] Calling #{worker_module}.execute_stream with timeout: #{timeout}")
       result = worker_module.execute_stream(worker_id, command, args, callback_fn, timeout)
-      Logger.info("[Pool] execute_stream returned: #{inspect(result)}")
+      SLog.info("[Pool] execute_stream returned: #{inspect(result)}")
       result
     else
-      Logger.error("[Pool] Worker module #{worker_module} does not export execute_stream/5")
+      SLog.error("[Pool] Worker module #{worker_module} does not export execute_stream/5")
       {:error, :streaming_not_supported_by_worker}
     end
   end
@@ -172,15 +173,15 @@ defmodule Snakepit.Pool do
     pool_configs =
       case Snakepit.Config.get_pool_configs() do
         {:ok, configs} when is_list(configs) and length(configs) > 0 ->
-          Logger.info("Initializing #{length(configs)} pool(s)")
+          SLog.info("Initializing #{length(configs)} pool(s)")
           configs
 
         {:ok, []} ->
-          Logger.warning("No pool configs found, using legacy defaults")
+          SLog.warning("No pool configs found, using legacy defaults")
           [%{name: :default}]
 
         {:error, reason} ->
-          Logger.warning("Config system error (#{inspect(reason)}), using legacy defaults")
+          SLog.warning("Config system error (#{inspect(reason)}), using legacy defaults")
           [%{name: :default}]
       end
 
@@ -266,7 +267,7 @@ defmodule Snakepit.Pool do
   def handle_continue(:initialize_workers, state) do
     total_workers = Enum.reduce(state.pools, 0, fn {_name, pool}, acc -> acc + pool.size end)
 
-    Logger.info(
+    SLog.info(
       "🚀 Starting concurrent initialization of #{total_workers} workers across #{map_size(state.pools)} pool(s)..."
     )
 
@@ -274,12 +275,12 @@ defmodule Snakepit.Pool do
 
     # DIAGNOSTIC: Capture baseline system resource usage
     baseline_resources = capture_resource_metrics()
-    Logger.info("📊 Baseline resources: #{inspect(baseline_resources)}")
+    SLog.info("📊 Baseline resources: #{inspect(baseline_resources)}")
 
     # Initialize ALL pools concurrently
     updated_pools =
       Enum.map(state.pools, fn {pool_name, pool_state} ->
-        Logger.info("Initializing pool #{pool_name} with #{pool_state.size} workers...")
+        SLog.info("Initializing pool #{pool_name} with #{pool_state.size} workers...")
 
         # Start workers for this pool
         workers =
@@ -292,7 +293,7 @@ defmodule Snakepit.Pool do
             pool_state.pool_config
           )
 
-        Logger.info(
+        SLog.info(
           "✅ Pool #{pool_name}: Initialized #{length(workers)}/#{pool_state.size} workers"
         )
 
@@ -304,7 +305,7 @@ defmodule Snakepit.Pool do
             %{pool_state | workers: workers, available: available, initialized: true}
           else
             # Pool failed to start any workers
-            Logger.error("❌ Pool #{pool_name} failed to start any workers!")
+            SLog.error("❌ Pool #{pool_name} failed to start any workers!")
             pool_state
           end
 
@@ -318,8 +319,8 @@ defmodule Snakepit.Pool do
     peak_resources = capture_resource_metrics()
     resource_delta = calculate_resource_delta(baseline_resources, peak_resources)
 
-    Logger.info("✅ All pools initialized in #{elapsed}ms")
-    Logger.info("📊 Resource usage delta: #{inspect(resource_delta)}")
+    SLog.info("✅ All pools initialized in #{elapsed}ms")
+    SLog.info("📊 Resource usage delta: #{inspect(resource_delta)}")
 
     # Check if any pool successfully started
     any_workers_started? =
@@ -503,14 +504,14 @@ defmodule Snakepit.Pool do
 
   @impl true
   def handle_call({:worker_ready, worker_id}, _from, state) do
-    Logger.info("Worker #{worker_id} reported ready. Processing queued work.")
+    SLog.info("Worker #{worker_id} reported ready. Processing queued work.")
 
     # Find which pool this worker belongs to by worker_id prefix
     pool_name = extract_pool_name_from_worker_id(worker_id)
 
     case Map.get(state.pools, pool_name) do
       nil ->
-        Logger.error("Worker #{worker_id} reported ready but pool #{pool_name} not found!")
+        SLog.error("Worker #{worker_id} reported ready but pool #{pool_name} not found!")
         {:reply, {:error, :pool_not_found}, state}
 
       pool_state ->
@@ -573,7 +574,7 @@ defmodule Snakepit.Pool do
                 receive do
                   {:DOWN, ^ref, :process, ^client_pid, _reason} ->
                     # Client is dead, don't try to reply. Just check in the worker.
-                    Logger.warning(
+                    SLog.warning(
                       "Client #{inspect(client_pid)} died before receiving reply. Checking in worker #{worker_id}."
                     )
 
@@ -658,14 +659,14 @@ defmodule Snakepit.Pool do
   def handle_cast({:checkin_worker, pool_name, worker_id}, state) when is_atom(pool_name) do
     case Map.get(state.pools, pool_name) do
       nil ->
-        Logger.error("checkin_worker: pool #{pool_name} not found!")
+        SLog.error("checkin_worker: pool #{pool_name} not found!")
         {:noreply, state}
 
       pool_state ->
         case :queue.out(pool_state.request_queue) do
           {{:value, {queued_from, command, args, opts, _queued_at}}, new_queue} ->
             if MapSet.member?(pool_state.cancelled_requests, queued_from) do
-              Logger.debug("Skipping cancelled request from #{inspect(queued_from)}")
+              SLog.debug("Skipping cancelled request from #{inspect(queued_from)}")
               new_cancelled = MapSet.delete(pool_state.cancelled_requests, queued_from)
 
               updated_pool_state = %{
@@ -687,7 +688,7 @@ defmodule Snakepit.Pool do
 
                   receive do
                     {:DOWN, ^ref, :process, ^client_pid, _reason} ->
-                      Logger.warning(
+                      SLog.warning(
                         "Queued client #{inspect(client_pid)} died during execution."
                       )
 
@@ -704,7 +705,7 @@ defmodule Snakepit.Pool do
                 updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
                 {:noreply, %{state | pools: updated_pools}}
               else
-                Logger.debug("Discarding request from dead client #{inspect(client_pid)}")
+                SLog.debug("Discarding request from dead client #{inspect(client_pid)}")
                 GenServer.cast(self(), {:checkin_worker, pool_name, worker_id})
                 updated_pool_state = %{pool_state | request_queue: new_queue}
                 updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
@@ -763,14 +764,14 @@ defmodule Snakepit.Pool do
         {:noreply, state}
 
       {:ok, worker_id} ->
-        Logger.error("Worker #{worker_id} (pid: #{inspect(pid)}) died: #{inspect(reason)}")
+        SLog.error("Worker #{worker_id} (pid: #{inspect(pid)}) died: #{inspect(reason)}")
         :ets.match_delete(state.affinity_cache, {:_, worker_id, :_})
 
         pool_name = extract_pool_name_from_worker_id(worker_id)
 
         case Map.get(state.pools, pool_name) do
           nil ->
-            Logger.warning("Dead worker #{worker_id} belongs to unknown pool #{pool_name}")
+            SLog.warning("Dead worker #{worker_id} belongs to unknown pool #{pool_name}")
             {:noreply, state}
 
           pool_state ->
@@ -787,7 +788,7 @@ defmodule Snakepit.Pool do
 
             updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
 
-            Logger.debug("Removed dead worker #{worker_id} from pool #{pool_name}")
+            SLog.debug("Removed dead worker #{worker_id} from pool #{pool_name}")
             {:noreply, %{state | pools: updated_pools}}
         end
     end
@@ -809,32 +810,32 @@ defmodule Snakepit.Pool do
   end
 
   def handle_info(msg, state) do
-    Logger.debug("Pool received unexpected message: #{inspect(msg)}")
+    SLog.debug("Pool received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
   @impl true
   def terminate(reason, state) do
-    Logger.info("🛑 Pool manager terminating with reason: #{inspect(reason)}.")
+    SLog.info("🛑 Pool manager terminating with reason: #{inspect(reason)}.")
 
-    # DEBUG: Log state of pools during shutdown
+    # Log state of pools during shutdown (debug level)
     Enum.each(state.pools, fn {pool_name, pool_state} ->
-      IO.puts("\n═══ SHUTDOWN DEBUG: Pool #{pool_name} ═══")
-      IO.puts("  Initialized: #{pool_state.initialized}")
-      IO.puts("  Workers: #{length(pool_state.workers)}")
-      IO.puts("  Available: #{MapSet.size(pool_state.available)}")
-      IO.puts("  Busy: #{map_size(pool_state.busy)}")
-      IO.puts("  Queued: #{:queue.len(pool_state.request_queue)}")
-      IO.puts("  Waiters: #{length(pool_state.initialization_waiters)}")
+      SLog.debug("""
+      Pool #{pool_name} shutdown state:
+        Initialized: #{pool_state.initialized}
+        Workers: #{length(pool_state.workers)}
+        Available: #{MapSet.size(pool_state.available)}
+        Busy: #{map_size(pool_state.busy)}
+        Queued: #{:queue.len(pool_state.request_queue)}
+        Waiters: #{length(pool_state.initialization_waiters)}
+      """)
 
       if length(pool_state.initialization_waiters) > 0 do
-        IO.puts(
-          "  ⚠️  WARNING: #{length(pool_state.initialization_waiters)} processes still waiting for pool init!"
+        SLog.warning(
+          "Pool #{pool_name}: #{length(pool_state.initialization_waiters)} processes still waiting for pool init!"
         )
       end
     end)
-
-    IO.puts("═══ END SHUTDOWN DEBUG ═══\n")
 
     # Supervision tree will handle worker shutdown via WorkerSupervisor
     :ok
@@ -861,17 +862,17 @@ defmodule Snakepit.Pool do
     actual_count = min(count, max_workers)
 
     if actual_count < count do
-      Logger.warning(
+      SLog.warning(
         "⚠️  Requested #{count} workers but limiting to #{actual_count} (max_workers=#{max_workers})"
       )
 
-      Logger.warning(
+      SLog.warning(
         "⚠️  To increase this limit, set :pool_config.max_workers in config/config.exs"
       )
     end
 
-    Logger.info("🚀 Starting concurrent initialization of #{actual_count} workers...")
-    Logger.info("📦 Using worker type: #{inspect(worker_module)}")
+    SLog.info("🚀 Starting concurrent initialization of #{actual_count} workers...")
+    SLog.info("📦 Using worker type: #{inspect(worker_module)}")
 
     # CRITICAL FIX: Get pool's registered name or PID for worker notifications
     # This ensures workers notify the correct pool instance (important for test isolation)
@@ -898,7 +899,7 @@ defmodule Snakepit.Pool do
     |> Enum.flat_map(fn {batch, batch_num} ->
       batch_start = batch_num * batch_size + 1
       batch_end = min(batch_start + length(batch) - 1, actual_count)
-      Logger.info("Starting batch #{batch_num + 1}: workers #{batch_start}-#{batch_end}")
+      SLog.info("Starting batch #{batch_num + 1}: workers #{batch_start}-#{batch_end}")
 
       # Start this batch concurrently
       workers =
@@ -935,11 +936,11 @@ defmodule Snakepit.Pool do
 
             case result do
               {:ok, _pid} ->
-                Logger.info("✅ Worker #{i}/#{actual_count} ready: #{worker_id}")
+                SLog.info("✅ Worker #{i}/#{actual_count} ready: #{worker_id}")
                 worker_id
 
               {:error, reason} ->
-                Logger.error("❌ Worker #{i}/#{actual_count} failed: #{inspect(reason)}")
+                SLog.error("❌ Worker #{i}/#{actual_count} failed: #{inspect(reason)}")
                 nil
             end
           end,
@@ -952,7 +953,7 @@ defmodule Snakepit.Pool do
             worker_id
 
           {:exit, reason} ->
-            Logger.error("Worker startup task failed: #{inspect(reason)}")
+            SLog.error("Worker startup task failed: #{inspect(reason)}")
             nil
         end)
         |> Enum.filter(&(&1 != nil))
@@ -1006,7 +1007,7 @@ defmodule Snakepit.Pool do
           new_busy = Map.put(pool_state.busy, preferred_worker_id, true)
           new_pool_state = %{pool_state | available: new_available, busy: new_busy}
 
-          Logger.debug("Using preferred worker #{preferred_worker_id} for session #{session_id}")
+          SLog.debug("Using preferred worker #{preferred_worker_id} for session #{session_id}")
           {:ok, preferred_worker_id, new_pool_state}
         else
           :no_preferred_worker
@@ -1053,7 +1054,7 @@ defmodule Snakepit.Pool do
     # Store the worker affinity in a supervised task for better error logging
     Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
       :ok = Snakepit.Bridge.SessionStore.store_worker_session(session_id, worker_id)
-      Logger.debug("Stored session affinity: #{session_id} -> #{worker_id}")
+      SLog.debug("Stored session affinity: #{session_id} -> #{worker_id}")
       :ok
     end)
   end
