@@ -22,6 +22,18 @@ config :snakepit,
   grpc_timeout: 5_000,
   test_mode: true
 
+# Enable in-process OpenTelemetry spans (exporters stay disabled)
+config :snakepit, :opentelemetry,
+  enabled: true,
+  exporters: %{
+    otlp: %{enabled: false},
+    console: %{enabled: false}
+  }
+
+config :opentelemetry, :tracer, :otel_tracer_default
+config :opentelemetry, :meter, :otel_meter_default
+config :opentelemetry, :processors, [{:otel_simple_processor, %{}}]
+
 # Configure Logger for tests
 # Set to :warning to hide debug and info logs during tests
 # You can set to :debug if you need to see all logs while debugging

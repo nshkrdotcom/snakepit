@@ -23,6 +23,13 @@ fi
 cd priv/python
 source ../../.venv/bin/activate
 
+# Ensure bridge package is importable without installation
+if [ -n "${PYTHONPATH:-}" ]; then
+    export PYTHONPATH="$(pwd):$PYTHONPATH"
+else
+    export PYTHONPATH="$(pwd)"
+fi
+
 # Check if pytest is installed
 if ! python -c "import pytest" 2>/dev/null; then
     echo -e "${RED}Error: pytest not installed${NC}"

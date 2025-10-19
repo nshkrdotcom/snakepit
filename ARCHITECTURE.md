@@ -1,212 +1,153 @@
-# Snakepit Architecture
+# Snakepit Architecture  
+_Captured for v0.6.0 (worker profiles & heartbeat workstream)_  
 
 ## Overview
 
-Snakepit is a high-performance Python bridge for Elixir that enables seamless execution of Python code from Elixir applications. It uses a pure gRPC-based architecture with stateless Python workers and centralized session management in Elixir.
+Snakepit is an OTP application that brokers Python execution over gRPC. The BEAM side owns lifecycle, state, and health; Python workers stay stateless, disposable, and protocol-focused. Version 0.6.0 introduces dual worker profiles (process vs. thread), proactive recycling, and heartbeat-driven supervision, so the documentation below reflects the current tree.
 
-## High-Level Architecture
+## Top-Level Layout
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          Elixir Application                         │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌──────────────┐     ┌──────────────────┐    ┌────────────────┐  │
-│  │    Pool      │────▶│ WorkerSupervisor │───▶│ Worker.Starter │  │
-│  │  (GenServer) │     │ (DynamicSupervisor)   │  (Supervisor)  │  │
-│  └──────────────┘     └──────────────────┘    └────────────────┘  │
-│         │                                               │           │
-│         │                                               ▼           │
-│         │              ┌────────────────┐       ┌──────────────┐  │
-│         │              │  SessionStore  │       │  GRPCWorker  │  │
-│         └─────────────▶│  (GenServer)   │       │ (GenServer)  │  │
-│                        │  + ETS Table   │       └──────────────┘  │
-│                        └────────────────┘              │           │
-│                                                         │ gRPC      │
-└─────────────────────────────────────────────────────────┼───────────┘
-                                                          │
-┌─────────────────────────────────────────────────────────┼───────────┐
-│                        Python Worker                    │           │
-│                                                         ▼           │
-│  ┌──────────────────┐    ┌──────────────────┐  ┌──────────────┐  │
-│  │  grpc_server.py  │────│ SessionContext   │──│    Types &    │  │
-│  │ (gRPC Service)   │    │ (Cache + Client) │  │ Serialization │  │
-│  └──────────────────┘    └──────────────────┘  └──────────────┘  │
-│           │                                                         │
-│           ▼                                                         │
-│  ┌──────────────────┐    ┌──────────────────┐                    │
-│  │  User Adapter    │────│   User Tools     │                    │
-│  │  (BaseAdapter)   │    │  (Custom Code)   │                    │
-│  └──────────────────┘    └──────────────────┘                    │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                             Snakepit.Supervisor                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Base services (always on)                                                   │
+│   - Snakepit.Bridge.SessionStore      - GenServer + ETS backing             │
+│   - Snakepit.Bridge.ToolRegistry      - GenServer for adapter metadata      │
+│                                                                             │
+│ Pooling branch (when :pooling_enabled is true)                              │
+│   - GRPC.Server.Supervisor (Snakepit.GRPC.Endpoint / Cowboy)                │
+│   - Task.Supervisor (Snakepit.TaskSupervisor)                               │
+│   - Snakepit.Pool.Registry / Worker.StarterRegistry / ProcessRegistry       │
+│   - Snakepit.Pool.WorkerSupervisor (DynamicSupervisor)                      │
+│   - Snakepit.Worker.LifecycleManager (GenServer)                            │
+│   - Snakepit.Pool (GenServer, request router)                               │
+│   - Snakepit.Pool.ApplicationCleanup (GenServer, last child)                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Worker capsule (dynamic child of WorkerSupervisor):
+┌────────────────────────────────────────────────────────────┐
+│ Snakepit.Pool.WorkerStarter (:permanent Supervisor)        │
+│   - Worker profile module (Snakepit.WorkerProfile.*)        │
+│   - Snakepit.GRPCWorker (:transient GenServer)              │
+│   - Snakepit.HeartbeatMonitor (GenServer, optional)         │
+└────────────────────────────────────────────────────────────┘
 ```
 
-## Key Components
+Python processes are launched by each GRPCWorker and connect back to the BEAM gRPC endpoint for stateful operations (sessions, variables, telemetry).
 
-### Elixir Side
+## Control Plane Components (Elixir)
 
-#### Pool (`lib/snakepit/pool/pool.ex`)
-- **Purpose**: Manages a pool of Python workers for concurrent execution
-- **Design**: GenServer that maintains available/busy worker sets and a request queue
-- **Features**:
-  - Concurrent worker startup
-  - Session affinity (routes session requests to same worker when possible)
-  - Automatic request queueing when all workers are busy
-  - Non-blocking async execution using `Task.Supervisor`
+### `Snakepit.Application`
+- Applies Python thread limits before the tree boots (prevents fork bombs with large pools).
+- Starts base services, optionally the pooling branch, and records start/stop timestamps for diagnostics.
 
-#### WorkerSupervisor (`lib/snakepit/pool/worker_supervisor.ex`)
-- **Purpose**: DynamicSupervisor for managing worker lifecycle
-- **Design**: Starts Worker.Starter processes which in turn manage actual workers
-- **Features**: Provides clean separation between supervision and worker logic
+### `Snakepit.Bridge.SessionStore` (`lib/snakepit/bridge/session_store.ex`)
+- GenServer + ETS pair that owns all stateful session data.
+- ETS tables (`:snakepit_sessions`, `:snakepit_sessions_global_programs`) are created with read/write concurrency and decentralized counters.
+- Provides TTL expiration, atomic operations, and selective cleanup for high churn pools.
 
-#### Worker.Starter (`lib/snakepit/pool/worker_starter.ex`)
-- **Purpose**: Implements the "Permanent Wrapper" pattern for automatic worker restarts
-- **Design**: A permanent supervisor that manages a transient worker
-- **Features**:
-  - Automatic restart of crashed workers without Pool intervention
-  - Clean shutdown during application termination
-  - Decouples Pool from worker replacement logic
+### `Snakepit.Bridge.ToolRegistry`
+- Tracks registered tools/adapters exposed to Python workers.
+- Keeps metadata so GRPCWorker can answer `Describe` calls without touching disk.
 
-#### GRPCWorker (`lib/snakepit/grpc_worker.ex`)
-- **Purpose**: Manages a single Python worker process
-- **Design**: GenServer that spawns and communicates with Python via gRPC
-- **Features**:
-  - Port-based process management
-  - Health checking
-  - Automatic reconnection
-  - Request timeout handling
-  - Statistics tracking
+### `Snakepit.GRPC.Endpoint`
+- Cowboy-based endpoint that Python workers call for session/variable RPCs.
+- Runs under `GRPC.Server.Supervisor` with tuned acceptor/backlog values to survive 200+ concurrent worker startups.
 
-#### SessionStore (`lib/snakepit/bridge/session_store.ex`)
-- **Purpose**: Centralized session and variable management
-- **Design**: GenServer backed by ETS table for high-performance concurrent access
-- **Features**:
-  - TTL-based session expiration
-  - Type-safe variable storage
-  - Atomic operations
-  - High-performance cleanup using ETS `select_delete`
-  - Read-concurrency optimization
+### Registries (`Snakepit.Pool.Registry`, `Snakepit.Pool.ProcessRegistry`, `Snakepit.Pool.Worker.StarterRegistry`)
+- Provide O(1) lookup for worker routing, track external OS PIDs/run IDs, and ensure cleanup routines can map resources back to the current BEAM instance.
+- `ProcessRegistry` uses ETS to store run IDs so `Snakepit.ProcessKiller` and `Snakepit.Pool.ApplicationCleanup` can reap orphans deterministically.
 
-### Python Side
+### `Snakepit.Pool`
+- GenServer request router with queueing, session affinity, and Task.Supervisor integration.
+- Starts workers concurrently on boot using async streams; runtime execution uses `Task.Supervisor.async_nolink/2` so the pool remains non-blocking.
+- Emits telemetry per request lifecycle; integrates with `Snakepit.Worker.LifecycleManager` for request-count tracking.
 
-#### grpc_server.py (`priv/python/grpc_server.py`)
-- **Purpose**: Main gRPC service implementation
-- **Design**: Stateless server that delegates to adapters and manages sessions
-- **Features**:
-  - Unified protocol supporting both simple execution and session-based operations
-  - Tool registration and execution
-  - Streaming support
-  - Comprehensive error handling
+### `Snakepit.Worker.LifecycleManager`
+- Tracks worker TTLs, request counts, and optional memory thresholds.
+- Monitors worker pids and triggers graceful recycling via the pool when budgets are exceeded.
+- Coordinates periodic health checks across the pool and emits telemetry (`[:snakepit, :worker, :recycled]`, etc.) for dashboards.
 
-#### SessionContext (`priv/python/snakepit_bridge/session_context.py`)
-- **Purpose**: Client-side session state with intelligent caching
-- **Design**: Thread-safe context manager with TTL-based cache
-- **Features**:
-  - Local variable cache to reduce gRPC round-trips
-  - Automatic cache invalidation on TTL expiry
-  - Lazy loading of variables
-  - Batch operations support
+### `Snakepit.Pool.ApplicationCleanup`
+- Last child in the pool branch; terminates first on shutdown.
+- Uses `Snakepit.ProcessKiller` to terminate lingering Python processes based on recorded run IDs.
+- Ensures the BEAM exits cleanly even if upstream supervisors crash.
 
-#### Types & Serialization
-- **Purpose**: Consistent type system across Elixir and Python
-- **Design**: Centralized modules for type conversion and validation
-- **Features**:
-  - Support for basic types (integer, float, string, boolean)
-  - Complex types (list, map, embedding, tensor)
-  - Special value handling (NaN, Infinity)
-  - Binary data optimization
+## Execution Capsule (Per Worker)
 
-## Design Principles
+### `Snakepit.Pool.WorkerStarter`
+- Permanent supervisor that owns a transient worker.
+- Provides a hook to extend the capsule with additional children (profilers, monitors, etc.).
+- Makes restarts local: killing the starter tears down the worker, heartbeat monitor, and any profile-specific state atomically.
 
-### 1. Stateless Python Workers
-Python workers are completely stateless. All persistent state is managed by the Elixir SessionStore. This enables:
-- Easy horizontal scaling
-- Crash resilience
-- Simple worker replacement
-- No state synchronization issues
+### Worker profiles (`Snakepit.WorkerProfile.*`)
+- Abstract the strategy for request capacity:
+  - `Process` profile: one request per Python process (`capacity = 1`).
+  - `Thread` profile: multi-request concurrency inside a single Python process.
+- Profiles decide how to spawn/stop workers and how to report health/capacity back to the pool.
 
-### 2. Centralized State Management
-The SessionStore in Elixir is the single source of truth for all session state:
-- Variables are stored with type information
-- Sessions have TTL-based expiration
-- All operations are atomic
-- High concurrency via ETS
+### `Snakepit.GRPCWorker`
+- GenServer that launches the Python gRPC server, manages the Port, and bridges execute/stream calls.
+- Maintains worker metadata (run ID, OS PID, adapter options) and cooperates with LifecycleManager/HeartbeatMonitor for health.
+- Interacts with registries for lookup and with `Snakepit.ProcessKiller` for escalation on shutdown.
 
-### 3. Performance Optimization
-- **ETS for Storage**: Read-concurrency optimized ETS tables for session data
-- **Client-side Caching**: Python SessionContext caches variables locally
-- **Batch Operations**: Support for bulk variable operations
-- **Binary Protocol**: gRPC with protobuf for efficient serialization
+### `Snakepit.HeartbeatMonitor`
+- Optional GenServer started per worker based on pool configuration.
+- Periodically invokes a ping callback (usually a gRPC health RPC) and tracks missed responses.
+- Signals the WorkerStarter (by exiting the worker) when thresholds are breached, allowing the supervisor to restart the capsule.
 
-### 4. Fault Tolerance
-- **Supervision Tree**: Proper OTP supervision at every level
-- **Process Monitoring**: Multiple layers of process monitoring
-- **Automatic Cleanup**: ApplicationCleanup prevents orphaned processes
-- **Health Checks**: Periodic health monitoring of workers
+### `Snakepit.ProcessKiller`
+- Utility module for POSIX-compliant termination of external processes.
+- Provides `kill_with_escalation/1` semantics (SIGTERM → SIGKILL) and discovery helpers (`kill_by_run_id/1`).
+- Used by ApplicationCleanup, LifecycleManager, and GRPCWorker terminate callbacks.
 
-## Protocol Specification
+## Python Bridge
 
-The system uses a unified gRPC protocol defined in `priv/proto/snakepit_bridge.proto`:
+- `priv/python/grpc_server.py`: Stateless gRPC service that exposes Snakepit functionality to user adapters. It forwards session operations to Elixir and defers telemetry to the BEAM.
+- `priv/python/snakepit_bridge/session_context.py`: Client helper that caches variables locally with TTL invalidation and knows how to signal heartbeats back to Elixir (in progress for the heartbeat workstream).
+- `priv/python/snakepit_bridge/adapters/*`: User-defined logic; receives a `SessionContext` and uses generated stubs from `snakepit_bridge.proto`.
+- Python code is bundled with the release; regeneration happens via `make proto-python` or `priv/python/generate_grpc.sh`.
 
-### Core Services
-- **Execute**: Simple command execution
-- **ExecuteStream**: Streaming command execution
-- **Tool Operations**: RegisterTool, ListTools, UnregisterTool
-- **Session Operations**: InitializeSession, CleanupSession
-- **Variable Operations**: RegisterVariable, GetVariable, SetVariable, etc.
-- **Health & Info**: Health checks and system information
+## Observability & Telemetry
 
-### Message Flow
-1. Client calls Pool with request
-2. Pool assigns available worker (preferring session affinity)
-3. Request forwarded to GRPCWorker
-4. GRPCWorker makes gRPC call to Python
-5. Python executes via adapter/tools
-6. For variables: Python may call back to Elixir SessionStore
-7. Response returned through the chain
+- `Snakepit.Telemetry` defines events for worker lifecycle, pool throughput, queue depth, and heartbeat outcomes. `Snakepit.TelemetryMetrics.metrics/0` feeds Prometheus via `TelemetryMetricsPrometheus.Core` once `config :snakepit, telemetry_metrics: %{prometheus: %{enabled: true}}` is set. By default metrics remain disabled so unit tests can run without a reporter.
+- `Snakepit.Telemetry.OpenTelemetry` boots spans when `config :snakepit, opentelemetry: %{enabled: true}`. Local developers typically enable the console exporter (`export SNAKEPIT_OTEL_CONSOLE=true`) while CI and production point `SNAKEPIT_OTEL_ENDPOINT` at an OTLP collector. The Elixir configuration honours exporter toggles (`:otlp`, `:console`) and resource attributes (`service.name`, etc.).
+- Correlation IDs flow through `lib/snakepit/telemetry/correlation.ex` and are injected into gRPC metadata. The Python bridge reads the `x-snakepit-correlation-id` header, sets the active span when `opentelemetry-sdk` is available, and mirrors the ID into structured logs so traces and logs line up across languages.
+- Python workers inherit the interpreter from `Snakepit.Adapters.GRPCPython.executable_path/0`. Set `SNAKEPIT_PYTHON=$PWD/.venv/bin/python3` (or add the path to `config/test.exs`) so CI/dev shells use the virtualenv that contains `grpcio`, `opentelemetry-*`, and `pytest`. `PYTHONPATH=priv/python` keeps the bridge packages importable for pytest and for the runtime shims.
+- Validation recipe:
+  1. `mix test --color --trace` – asserts Elixir spans/metrics handlers attach and that worker start-up succeeds with OTEL deps present.
+  2. `PYTHONPATH=priv/python .venv/bin/pytest priv/python/tests -q` – exercises span helpers, correlation filters, and the threaded bridge parity tests.
+  3. (Optional) `curl http://localhost:9568/metrics` – once Prometheus is enabled, confirms heartbeat counters and pool gauges surface to `/metrics`.
 
-## Architecture Evolution
+## Design Principles (Current)
 
-As of v0.4.0, Snakepit uses a unified gRPC-only architecture that provides:
-- **Stateless Python workers** with centralized SessionStore for state management
-- **Binary gRPC protocol** with protobuf for efficient communication
-- **Intelligent routing** with session affinity and multi-level caching
-- **Native streaming support** for real-time progress updates
-- **Bidirectional tool execution** between Elixir and Python
+1. **Stateless Python Workers** – All durable state lives in `Snakepit.Bridge.SessionStore`; Python can be restarted at will.
+2. **Layered Supervision** – Control-plane supervisors manage pools and registries, while WorkerStarter encapsulates per-worker processes.
+3. **Config-Driven Behaviour** – Pooling can be disabled (tests), heartbeat tuning lives in config maps, and worker profiles are pluggable.
+4. **Proactive Health Management** – Heartbeats, lifecycle recycling, and deterministic kill routines keep long-running clusters stable.
+5. **O(1) Routing & Concurrency** – Registries and ETS deliver constant-time lookup so the pool stays responsive at high request volume.
 
-## Binary Serialization
+## Worker Lifecycle (Happy Path)
 
-### Overview
+1. Pool boot requests `size` workers from `WorkerSupervisor`.
+2. `WorkerStarter` launches the configured profile and creates a GRPCWorker.
+3. GRPCWorker spawns the Python process, registers with registries, and (optionally) starts a HeartbeatMonitor.
+4. LifecycleManager begins tracking TTL/request budgets.
+5. Requests flow: `Snakepit.Pool` → `Task.Supervisor` → GRPCWorker → Python.
+6. Completion events increment lifecycle counters; heartbeats maintain health status.
+7. Recycling or heartbeat failures call back into the pool to spin up a fresh capsule.
 
-The architecture includes automatic binary serialization for efficient handling of large numerical data:
+## Protocol Overview
 
-- **Threshold-based**: Automatically switches to binary encoding for data > 10KB
-- **Type-aware**: Optimized for `tensor` and `embedding` types
-- **Transparent**: No API changes required - works automatically
-- **Protocol**: Uses Erlang Term Format (ETF) on Elixir side, Python pickle on Python side
+- gRPC definitions live in `priv/proto/snakepit_bridge.proto`.
+- Core RPCs: `Execute`, `ExecuteStream`, `RegisterTool`, `GetVariable`, `SetVariable`, `InitializeSession`, `CleanupSession`, `GetWorkerInfo`, `Heartbeat`.
+- Binary fields are used for large payloads; Elixir encodes via ETF and Python falls back to pickle.
+- Generated code is versioned in `lib/snakepit/grpc/generated/` (Elixir) and `priv/python/generated/` (Python).
 
-### Implementation Details
+## Operational Notes
 
-1. **Detection**: `Serialization.should_use_binary?/2` checks data size
-2. **Encoding**: 
-   - Small data: JSON via `encode_as_json/2`
-   - Large data: Binary via `encode_with_binary/2`
-3. **Transport**: Binary data travels in separate protobuf fields
-4. **Decoding**: Automatic detection of binary format via type URL suffix
-
-### Performance Impact
-
-- **10x faster** serialization for large tensors
-- **5x reduction** in message size
-- **Zero overhead** for small data (still uses JSON)
-
-## Future Enhancements
-
-The architecture is designed to support future features:
-- **Distributed Sessions**: SessionStore could be backed by distributed ETS/Mnesia
-- **Multi-node Support**: Workers could run on different nodes
-- **Advanced Caching**: Redis-backed caching for large datasets
-- **Metrics & Tracing**: OpenTelemetry integration end-to-end
-- **Tool Marketplace**: Dynamic tool loading from external sources
-- **Compression**: Optional compression for binary data
-- **Custom Serializers**: Pluggable serialization formats
+- Toggle `:pooling_enabled` for integration tests or single-worker scenarios.
+- Dialyzer PLTs live in `priv/plts`—run `mix dialyzer` after changing protocol or worker APIs.
+- When introducing new supervisor children, update `lib/snakepit/supervisor_tree.md` and corresponding docs in `docs/20251018/`.
+- Always regenerate gRPC stubs in lockstep (`mix grpc.gen`, `make proto-python`) before cutting a release.

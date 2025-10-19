@@ -12,6 +12,12 @@
 #   mix run examples/run_examples.exs --list
 #
 
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
+
 defmodule ExampleRunner do
   @moduledoc """
   Interactive runner for Snakepit examples and demonstrations.

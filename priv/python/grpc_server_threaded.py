@@ -21,6 +21,7 @@ Requirements:
 
 import argparse
 import asyncio
+import inspect
 import grpc
 import logging
 import signal
@@ -30,7 +31,7 @@ import threading
 import traceback
 from concurrent import futures
 from datetime import datetime
-from typing import Optional, Dict
+from typing import Dict, Optional, Sequence, Tuple
 from collections import defaultdict
 
 # Add the package to Python path
@@ -40,15 +41,21 @@ import snakepit_bridge_pb2 as pb2
 import snakepit_bridge_pb2_grpc as pb2_grpc
 from snakepit_bridge.session_context import SessionContext
 from snakepit_bridge.serialization import TypeSerializer
+from snakepit_bridge import telemetry
 from google.protobuf.timestamp_pb2 import Timestamp
 import json
 import pickle
 
 logging.basicConfig(
-    format='%(asctime)s - [%(threadName)s] - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - [%(threadName)s] - %(name)s - %(levelname)s - [corr=%(correlation_id)s] %(message)s',
     level=logging.INFO
 )
+
+telemetry.setup_tracing()
+_log_filter = telemetry.correlation_filter()
 logger = logging.getLogger(__name__)
+logger.addFilter(_log_filter)
+logging.getLogger().addFilter(_log_filter)
 
 
 class ThreadSafetyMonitor:
@@ -141,6 +148,25 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
         logger.info(f"✅ Threaded servicer initialized. Ready for concurrent requests.")
 
+    async def _proxy_to_elixir(
+        self,
+        method_name: str,
+        request,
+        *,
+        metadata: Optional[Sequence[Tuple[str, str]]] = None,
+    ):
+        """Proxy a request to the Elixir backend with correlation metadata."""
+
+        enriched_metadata = telemetry.outgoing_metadata(metadata)
+        stub_method = getattr(self.elixir_stub, method_name)
+        call = stub_method(request, metadata=enriched_metadata)
+
+        if inspect.isawaitable(call):
+            return await call
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: call)
+
     def _validate_adapter_thread_safety(self):
         """Validate that the adapter declares thread safety"""
         if not hasattr(self.adapter_class, '__thread_safe__'):
@@ -192,59 +218,136 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def Ping(self, request, context):
         """Health check endpoint"""
         self.safety_monitor.record_access("Ping")
+        metadata = context.invocation_metadata()
 
-        response = pb2.PingResponse()
-        response.message = f"Pong from threaded Python [{threading.current_thread().name}]: {request.message}"
+        with telemetry.span(
+            "BridgeService/Ping",
+            context_metadata=metadata,
+            attributes={"snakepit.thread": threading.current_thread().name},
+        ):
+            response = pb2.PingResponse()
+            response.message = (
+                f"Pong from threaded Python [{threading.current_thread().name}]: {request.message}"
+            )
 
-        timestamp = Timestamp()
-        timestamp.GetCurrentTime()
-        response.server_time.CopyFrom(timestamp)
+            timestamp = Timestamp()
+            timestamp.GetCurrentTime()
+            response.server_time.CopyFrom(timestamp)
 
-        return response
+            return response
 
     async def InitializeSession(self, request, context):
         """Initialize session - proxy to Elixir"""
         self.safety_monitor.record_access("InitializeSession")
+        metadata = context.invocation_metadata()
         logger.debug(f"[{threading.current_thread().name}] Proxying InitializeSession: {request.session_id}")
-        return await self.elixir_stub.InitializeSession(request)
+
+        with telemetry.span(
+            "BridgeService/InitializeSession",
+            context_metadata=metadata,
+            attributes={"snakepit.session_id": request.session_id},
+        ):
+            return await self._proxy_to_elixir("InitializeSession", request, metadata=metadata)
 
     async def CleanupSession(self, request, context):
         """Cleanup session - proxy to Elixir"""
         self.safety_monitor.record_access("CleanupSession")
+        metadata = context.invocation_metadata()
         logger.debug(f"[{threading.current_thread().name}] Proxying CleanupSession: {request.session_id}")
-        return await self.elixir_stub.CleanupSession(request)
+
+        with telemetry.span(
+            "BridgeService/CleanupSession",
+            context_metadata=metadata,
+            attributes={"snakepit.session_id": request.session_id},
+        ):
+            return await self._proxy_to_elixir("CleanupSession", request, metadata=metadata)
 
     async def GetSession(self, request, context):
         """Get session - proxy to Elixir"""
+        metadata = context.invocation_metadata()
         logger.debug(f"[{threading.current_thread().name}] Proxying GetSession: {request.session_id}")
-        return await self.elixir_stub.GetSession(request)
+
+        with telemetry.span(
+            "BridgeService/GetSession",
+            context_metadata=metadata,
+            attributes={"snakepit.session_id": request.session_id},
+        ):
+            return await self._proxy_to_elixir("GetSession", request, metadata=metadata)
 
     async def Heartbeat(self, request, context):
         """Heartbeat - proxy to Elixir"""
-        return await self.elixir_stub.Heartbeat(request)
+        metadata = context.invocation_metadata()
+        with telemetry.span(
+            "BridgeService/Heartbeat",
+            context_metadata=metadata,
+            attributes={"snakepit.session_id": request.session_id},
+        ):
+            return await self._proxy_to_elixir("Heartbeat", request, metadata=metadata)
 
     # Variable Operations - All proxied to Elixir
 
     async def RegisterVariable(self, request, context):
-        return await self.elixir_stub.RegisterVariable(request)
+        metadata = context.invocation_metadata()
+        with telemetry.span(
+            "BridgeService/RegisterVariable",
+            context_metadata=metadata,
+            attributes={"snakepit.variable": request.name},
+        ):
+            return await self._proxy_to_elixir("RegisterVariable", request, metadata=metadata)
 
     async def GetVariable(self, request, context):
-        return await self.elixir_stub.GetVariable(request)
+        metadata = context.invocation_metadata()
+        with telemetry.span(
+            "BridgeService/GetVariable",
+            context_metadata=metadata,
+            attributes={"snakepit.variable": request.variable_identifier},
+        ):
+            return await self._proxy_to_elixir("GetVariable", request, metadata=metadata)
 
     async def SetVariable(self, request, context):
-        return await self.elixir_stub.SetVariable(request)
+        metadata = context.invocation_metadata()
+        with telemetry.span(
+            "BridgeService/SetVariable",
+            context_metadata=metadata,
+            attributes={"snakepit.variable": request.variable_identifier},
+        ):
+            return await self._proxy_to_elixir("SetVariable", request, metadata=metadata)
 
     async def GetVariables(self, request, context):
-        return await self.elixir_stub.GetVariables(request)
+        metadata = context.invocation_metadata()
+        with telemetry.span(
+            "BridgeService/GetVariables",
+            context_metadata=metadata,
+            attributes={"snakepit.variable_count": len(request.variable_identifiers)},
+        ):
+            return await self._proxy_to_elixir("GetVariables", request, metadata=metadata)
 
     async def SetVariables(self, request, context):
-        return await self.elixir_stub.SetVariables(request)
+        metadata = context.invocation_metadata()
+        with telemetry.span(
+            "BridgeService/SetVariables",
+            context_metadata=metadata,
+            attributes={"snakepit.variable_count": len(request.updates)},
+        ):
+            return await self._proxy_to_elixir("SetVariables", request, metadata=metadata)
 
     async def ListVariables(self, request, context):
-        return await self.elixir_stub.ListVariables(request)
+        metadata = context.invocation_metadata()
+        with telemetry.span(
+            "BridgeService/ListVariables",
+            context_metadata=metadata,
+            attributes={"snakepit.pattern": request.pattern},
+        ):
+            return await self._proxy_to_elixir("ListVariables", request, metadata=metadata)
 
     async def DeleteVariable(self, request, context):
-        return await self.elixir_stub.DeleteVariable(request)
+        metadata = context.invocation_metadata()
+        with telemetry.span(
+            "BridgeService/DeleteVariable",
+            context_metadata=metadata,
+            attributes={"snakepit.variable": request.variable_identifier},
+        ):
+            return await self._proxy_to_elixir("DeleteVariable", request, metadata=metadata)
 
     # Tool Execution - Thread-safe concurrent execution
 
@@ -252,90 +355,108 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         """Execute tool with thread-safe handling"""
         request_id = self._record_request_start()
         thread_name = threading.current_thread().name
-
-        logger.info(f"[{thread_name}] ExecuteTool #{request_id}: {request.tool_name} (session: {request.session_id})")
         self.safety_monitor.record_access("ExecuteTool")
-
+        metadata = context.invocation_metadata()
         start_time = time.time()
 
         try:
-            # Ensure session exists
-            init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
-            try:
-                self.sync_elixir_stub.InitializeSession(init_request)
-            except grpc.RpcError as e:
-                if e.code() != grpc.StatusCode.ALREADY_EXISTS:
-                    logger.debug(f"InitializeSession: {e}")
+            with telemetry.span(
+                "BridgeService/ExecuteTool",
+                context_metadata=metadata,
+                attributes={
+                    "snakepit.session_id": request.session_id,
+                    "snakepit.tool": request.tool_name,
+                    "snakepit.thread": thread_name,
+                    "snakepit.request_id": request_id,
+                },
+            ):
+                logger.info(
+                    f"[{thread_name}] ExecuteTool #{request_id}: {request.tool_name} "
+                    f"(session: {request.session_id})"
+                )
 
-            # Create ephemeral context and adapter
-            session_context = SessionContext(self.sync_elixir_stub, request.session_id)
-            adapter = self.adapter_class()
-            adapter.set_session_context(session_context)
+                # Ensure session exists
+                init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
+                try:
+                    self.sync_elixir_stub.InitializeSession(
+                        init_request,
+                        metadata=telemetry.outgoing_metadata(metadata),
+                    )
+                except grpc.RpcError as e:
+                    if e.code() != grpc.StatusCode.ALREADY_EXISTS:
+                        logger.debug(f"InitializeSession: {e}")
 
-            # Register tools if needed
-            if hasattr(adapter, 'register_with_session'):
-                adapter.register_with_session(request.session_id, self.sync_elixir_stub)
+                # Create ephemeral context and adapter
+                session_context = SessionContext(self.sync_elixir_stub, request.session_id)
+                adapter = self.adapter_class()
+                adapter.set_session_context(session_context)
 
-            # Initialize adapter
-            if hasattr(adapter, 'initialize'):
-                if asyncio.iscoroutinefunction(adapter.initialize):
-                    await adapter.initialize()
+                # Register tools if needed
+                if hasattr(adapter, 'register_with_session'):
+                    adapter.register_with_session(request.session_id, self.sync_elixir_stub)
+
+                # Initialize adapter
+                if hasattr(adapter, 'initialize'):
+                    if asyncio.iscoroutinefunction(adapter.initialize):
+                        await adapter.initialize()
+                    else:
+                        adapter.initialize()
+
+                # Decode parameters
+                arguments = {
+                    key: TypeSerializer.decode_any(any_msg)
+                    for key, any_msg in request.parameters.items()
+                }
+                for key, binary_val in request.binary_parameters.items():
+                    arguments[key] = pickle.loads(binary_val)
+
+                # Execute tool
+                if not hasattr(adapter, 'execute_tool'):
+                    raise NotImplementedError("Adapter does not support execute_tool")
+
+                if inspect.iscoroutinefunction(adapter.execute_tool):
+                    result_data = await adapter.execute_tool(
+                        tool_name=request.tool_name,
+                        arguments=arguments,
+                        context=session_context
+                    )
                 else:
-                    adapter.initialize()
+                    result_data = adapter.execute_tool(
+                        tool_name=request.tool_name,
+                        arguments=arguments,
+                        context=session_context
+                    )
 
-            # Decode parameters
-            arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
-            for key, binary_val in request.binary_parameters.items():
-                arguments[key] = pickle.loads(binary_val)
+                # Encode response
+                response = pb2.ExecuteToolResponse(success=True)
 
-            # Execute tool
-            if not hasattr(adapter, 'execute_tool'):
-                raise NotImplementedError("Adapter does not support execute_tool")
+                # Type inference
+                if isinstance(result_data, dict):
+                    result_type = "map"
+                elif isinstance(result_data, str):
+                    result_type = "string"
+                elif isinstance(result_data, (int, float)):
+                    result_type = "float"
+                elif isinstance(result_data, bool):
+                    result_type = "boolean"
+                elif isinstance(result_data, list):
+                    result_type = "list"
+                else:
+                    result_type = "string"
 
-            import inspect
-            if inspect.iscoroutinefunction(adapter.execute_tool):
-                result_data = await adapter.execute_tool(
-                    tool_name=request.tool_name,
-                    arguments=arguments,
-                    context=session_context
+                any_msg, binary_data = TypeSerializer.encode_any(result_data, result_type)
+                response.result.CopyFrom(any_msg)
+                if binary_data:
+                    response.binary_result = binary_data
+
+                response.execution_time_ms = int((time.time() - start_time) * 1000)
+
+                logger.info(
+                    f"[{thread_name}] ExecuteTool #{request_id} completed in "
+                    f"{response.execution_time_ms}ms"
                 )
-            else:
-                result_data = adapter.execute_tool(
-                    tool_name=request.tool_name,
-                    arguments=arguments,
-                    context=session_context
-                )
 
-            # Encode response
-            response = pb2.ExecuteToolResponse(success=True)
-
-            # Type inference
-            if isinstance(result_data, dict):
-                result_type = "map"
-            elif isinstance(result_data, str):
-                result_type = "string"
-            elif isinstance(result_data, (int, float)):
-                result_type = "float"
-            elif isinstance(result_data, bool):
-                result_type = "boolean"
-            elif isinstance(result_data, list):
-                result_type = "list"
-            else:
-                result_type = "string"
-
-            any_msg, binary_data = TypeSerializer.encode_any(result_data, result_type)
-            response.result.CopyFrom(any_msg)
-            if binary_data:
-                response.binary_result = binary_data
-
-            response.execution_time_ms = int((time.time() - start_time) * 1000)
-
-            logger.info(
-                f"[{thread_name}] ExecuteTool #{request_id} completed in "
-                f"{response.execution_time_ms}ms"
-            )
-
-            return response
+                return response
 
         except Exception as e:
             logger.error(f"[{thread_name}] ExecuteTool #{request_id} failed: {e}", exc_info=True)
@@ -351,99 +472,120 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         """Execute streaming tool with thread-safe handling"""
         request_id = self._record_request_start()
         thread_name = threading.current_thread().name
-
-        logger.info(f"[{thread_name}] ExecuteStreamingTool #{request_id}: {request.tool_name}")
         self.safety_monitor.record_access("ExecuteStreamingTool")
+        metadata = context.invocation_metadata()
 
         try:
-            # Similar to ExecuteTool but yields chunks
-            init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
-            try:
-                self.sync_elixir_stub.InitializeSession(init_request)
-            except grpc.RpcError as e:
-                if e.code() != grpc.StatusCode.ALREADY_EXISTS:
-                    logger.debug(f"InitializeSession: {e}")
+            with telemetry.span(
+                "BridgeService/ExecuteStreamingTool",
+                context_metadata=metadata,
+                attributes={
+                    "snakepit.session_id": request.session_id,
+                    "snakepit.tool": request.tool_name,
+                    "snakepit.thread": thread_name,
+                    "snakepit.request_id": request_id,
+                },
+            ):
+                logger.info(
+                    f"[{thread_name}] ExecuteStreamingTool #{request_id}: {request.tool_name}"
+                )
 
-            session_context = SessionContext(self.sync_elixir_stub, request.session_id)
-            adapter = self.adapter_class()
-            adapter.set_session_context(session_context)
+                # Similar to ExecuteTool but yields chunks
+                init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
+                try:
+                    self.sync_elixir_stub.InitializeSession(
+                        init_request,
+                        metadata=telemetry.outgoing_metadata(metadata),
+                    )
+                except grpc.RpcError as e:
+                    if e.code() != grpc.StatusCode.ALREADY_EXISTS:
+                        logger.debug(f"InitializeSession: {e}")
 
-            if hasattr(adapter, 'register_with_session'):
-                adapter.register_with_session(request.session_id, self.sync_elixir_stub)
+                session_context = SessionContext(self.sync_elixir_stub, request.session_id)
+                adapter = self.adapter_class()
+                adapter.set_session_context(session_context)
 
-            if hasattr(adapter, 'initialize'):
-                if asyncio.iscoroutinefunction(adapter.initialize):
-                    await adapter.initialize()
+                if hasattr(adapter, 'register_with_session'):
+                    adapter.register_with_session(request.session_id, self.sync_elixir_stub)
+
+                if hasattr(adapter, 'initialize'):
+                    if asyncio.iscoroutinefunction(adapter.initialize):
+                        await adapter.initialize()
+                    else:
+                        adapter.initialize()
+
+                arguments = {
+                    key: TypeSerializer.decode_any(any_msg)
+                    for key, any_msg in request.parameters.items()
+                }
+                for key, binary_val in request.binary_parameters.items():
+                    arguments[key] = pickle.loads(binary_val)
+
+                if not hasattr(adapter, 'execute_tool'):
+                    await context.abort(
+                        grpc.StatusCode.UNIMPLEMENTED,
+                        "Adapter does not support tool execution"
+                    )
+                    return
+
+                if inspect.iscoroutinefunction(adapter.execute_tool):
+                    stream_iterator = await adapter.execute_tool(
+                        tool_name=request.tool_name,
+                        arguments=arguments,
+                        context=session_context
+                    )
                 else:
-                    adapter.initialize()
-
-            arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
-            for key, binary_val in request.binary_parameters.items():
-                arguments[key] = pickle.loads(binary_val)
-
-            if not hasattr(adapter, 'execute_tool'):
-                await context.abort(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support tool execution")
-                return
-
-            import inspect
-            if inspect.iscoroutinefunction(adapter.execute_tool):
-                stream_iterator = await adapter.execute_tool(
-                    tool_name=request.tool_name,
-                    arguments=arguments,
-                    context=session_context
-                )
-            else:
-                stream_iterator = adapter.execute_tool(
-                    tool_name=request.tool_name,
-                    arguments=arguments,
-                    context=session_context
-                )
-
-            chunk_id_counter = 0
-            from snakepit_bridge.adapters.showcase.tool import StreamChunk
-
-            if hasattr(stream_iterator, '__aiter__'):
-                async for chunk_data in stream_iterator:
-                    if isinstance(chunk_data, StreamChunk):
-                        data_payload = chunk_data.data
-                    else:
-                        data_payload = chunk_data
-
-                    data_bytes = json.dumps(data_payload).encode('utf-8')
-                    chunk_id_counter += 1
-                    chunk = pb2.ToolChunk(
-                        chunk_id=f"{request.tool_name}-{chunk_id_counter}",
-                        data=data_bytes,
-                        is_final=False
+                    stream_iterator = adapter.execute_tool(
+                        tool_name=request.tool_name,
+                        arguments=arguments,
+                        context=session_context
                     )
-                    yield chunk
 
-            elif hasattr(stream_iterator, '__iter__'):
-                for chunk_data in stream_iterator:
-                    if isinstance(chunk_data, StreamChunk):
-                        data_payload = chunk_data.data
-                    else:
-                        data_payload = chunk_data
+                chunk_id_counter = 0
+                from snakepit_bridge.adapters.showcase.tool import StreamChunk
 
-                    data_bytes = json.dumps(data_payload).encode('utf-8')
-                    chunk_id_counter += 1
-                    chunk = pb2.ToolChunk(
-                        chunk_id=f"{request.tool_name}-{chunk_id_counter}",
+                if hasattr(stream_iterator, '__aiter__'):
+                    async for chunk_data in stream_iterator:
+                        if isinstance(chunk_data, StreamChunk):
+                            data_payload = chunk_data.data
+                        else:
+                            data_payload = chunk_data
+
+                        data_bytes = json.dumps(data_payload).encode('utf-8')
+                        chunk_id_counter += 1
+                        chunk = pb2.ToolChunk(
+                            chunk_id=f"{request.tool_name}-{chunk_id_counter}",
+                            data=data_bytes,
+                            is_final=False
+                        )
+                        yield chunk
+
+                elif hasattr(stream_iterator, '__iter__'):
+                    for chunk_data in stream_iterator:
+                        if isinstance(chunk_data, StreamChunk):
+                            data_payload = chunk_data.data
+                        else:
+                            data_payload = chunk_data
+
+                        data_bytes = json.dumps(data_payload).encode('utf-8')
+                        chunk_id_counter += 1
+                        chunk = pb2.ToolChunk(
+                            chunk_id=f"{request.tool_name}-{chunk_id_counter}",
+                            data=data_bytes,
+                            is_final=False
+                        )
+                        yield chunk
+
+                else:
+                    data_bytes = json.dumps(stream_iterator).encode('utf-8')
+                    yield pb2.ToolChunk(
+                        chunk_id=f"{request.tool_name}-1",
                         data=data_bytes,
-                        is_final=False
+                        is_final=True
                     )
-                    yield chunk
 
-            else:
-                data_bytes = json.dumps(stream_iterator).encode('utf-8')
-                yield pb2.ToolChunk(
-                    chunk_id=f"{request.tool_name}-1",
-                    data=data_bytes,
-                    is_final=True
-                )
-
-            yield pb2.ToolChunk(is_final=True)
-            logger.info(f"[{thread_name}] ExecuteStreamingTool #{request_id} completed")
+                yield pb2.ToolChunk(is_final=True)
+                logger.info(f"[{thread_name}] ExecuteStreamingTool #{request_id} completed")
 
         except Exception as e:
             logger.error(f"[{thread_name}] ExecuteStreamingTool #{request_id} failed: {e}", exc_info=True)
@@ -461,19 +603,49 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         yield
 
     async def AddDependency(self, request, context):
-        return await self.elixir_stub.AddDependency(request)
+        metadata = context.invocation_metadata()
+        logger.debug("Proxying AddDependency (threaded)")
+        with telemetry.span(
+            "BridgeService/AddDependency",
+            context_metadata=metadata,
+        ):
+            return await self._proxy_to_elixir("AddDependency", request, metadata=metadata)
 
     async def StartOptimization(self, request, context):
-        return await self.elixir_stub.StartOptimization(request)
+        metadata = context.invocation_metadata()
+        logger.debug("Proxying StartOptimization (threaded)")
+        with telemetry.span(
+            "BridgeService/StartOptimization",
+            context_metadata=metadata,
+        ):
+            return await self._proxy_to_elixir("StartOptimization", request, metadata=metadata)
 
     async def StopOptimization(self, request, context):
-        return await self.elixir_stub.StopOptimization(request)
+        metadata = context.invocation_metadata()
+        logger.debug("Proxying StopOptimization (threaded)")
+        with telemetry.span(
+            "BridgeService/StopOptimization",
+            context_metadata=metadata,
+        ):
+            return await self._proxy_to_elixir("StopOptimization", request, metadata=metadata)
 
     async def GetVariableHistory(self, request, context):
-        return await self.elixir_stub.GetVariableHistory(request)
+        metadata = context.invocation_metadata()
+        logger.debug("Proxying GetVariableHistory (threaded)")
+        with telemetry.span(
+            "BridgeService/GetVariableHistory",
+            context_metadata=metadata,
+        ):
+            return await self._proxy_to_elixir("GetVariableHistory", request, metadata=metadata)
 
     async def RollbackVariable(self, request, context):
-        return await self.elixir_stub.RollbackVariable(request)
+        metadata = context.invocation_metadata()
+        logger.debug("Proxying RollbackVariable (threaded)")
+        with telemetry.span(
+            "BridgeService/RollbackVariable",
+            context_metadata=metadata,
+        ):
+            return await self._proxy_to_elixir("RollbackVariable", request, metadata=metadata)
 
     def set_server(self, server):
         """Set server reference for graceful shutdown"""

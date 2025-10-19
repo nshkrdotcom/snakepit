@@ -16,7 +16,7 @@ import time
 import inspect
 from concurrent import futures
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Mapping, Optional
 
 # Add the package to Python path
 sys.path.insert(0, '.')
@@ -24,7 +24,9 @@ sys.path.insert(0, '.')
 import snakepit_bridge_pb2 as pb2
 import snakepit_bridge_pb2_grpc as pb2_grpc
 from snakepit_bridge.session_context import SessionContext
+from snakepit_bridge.heartbeat import HeartbeatClient, HeartbeatConfig
 from snakepit_bridge.serialization import TypeSerializer
+from snakepit_bridge import telemetry
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf import any_pb2
 import json
@@ -33,10 +35,15 @@ import traceback
 import pickle
 
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - [corr=%(correlation_id)s] %(message)s",
+    level=logging.INFO,
 )
+
+telemetry.setup_tracing()
+_log_filter = telemetry.correlation_filter()
 logger = logging.getLogger(__name__)
+logger.addFilter(_log_filter)
+logging.getLogger().addFilter(_log_filter)
 
 
 def grpc_error_handler(func):
@@ -122,7 +129,8 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     For tool execution, it creates ephemeral contexts that callback to Elixir for state.
     """
 
-    def __init__(self, adapter_class, elixir_address: str):
+    def __init__(self, adapter_class, elixir_address: str,
+                 heartbeat_options: Optional[Mapping[str, Any]] = None):
         with open("/tmp/python_worker_debug.log", "a") as f:
             f.write(f"BridgeServiceServicer.__init__ called\n")
             f.flush()
@@ -152,9 +160,35 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             f.flush()
 
         logger.info(f"Python server initialized with Elixir backend at {elixir_address}")
+
+        self.heartbeat_config = HeartbeatConfig.from_mapping(heartbeat_options)
+        self.heartbeat_clients: Dict[str, HeartbeatClient] = {}
+        self._heartbeat_lock = asyncio.Lock()
+
+        if self.heartbeat_config.enabled:
+            logger.info(
+                "Heartbeat client staged (interval=%sms, timeout=%sms, max_missed=%s)",
+                self.heartbeat_config.interval_ms,
+                self.heartbeat_config.timeout_ms,
+                self.heartbeat_config.max_missed_heartbeats,
+            )
+        else:
+            logger.debug("Heartbeat client disabled by configuration")
+
+    async def _proxy_to_elixir(self, method_name: str, request, *, metadata=None):
+        metadata = telemetry.outgoing_metadata(metadata)
+        stub_method = getattr(self.elixir_stub, method_name)
+        call = stub_method(request, metadata=metadata)
+
+        if inspect.isawaitable(call):
+            return await call
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: call)
     
     async def close(self):
         """Clean up resources."""
+        await self._stop_all_heartbeat_clients()
         if self.elixir_channel:
             await self.elixir_channel.close()
         if self.sync_elixir_channel:
@@ -179,64 +213,135 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def InitializeSession(self, request, context):
         """
         Initialize a session - proxy to Elixir.
-        
+
         The Python server maintains no session state.
         All session data is managed by Elixir.
         """
         logger.info(f"Proxying InitializeSession for: {request.session_id}")
-        return await self.elixir_stub.InitializeSession(request)
-    
+        metadata = context.invocation_metadata()
+
+        with telemetry.span(
+            "BridgeService/InitializeSession",
+            context_metadata=metadata,
+            attributes={"snakepit.session_id": request.session_id},
+        ):
+            response = await self._proxy_to_elixir("InitializeSession", request)
+            await self._ensure_heartbeat_client(request.session_id)
+            return response
+
     async def CleanupSession(self, request, context):
         """Clean up a session - proxy to Elixir."""
         logger.info(f"Proxying CleanupSession for: {request.session_id}")
-        return await self.elixir_stub.CleanupSession(request)
-    
+        metadata = context.invocation_metadata()
+
+        with telemetry.span(
+            "BridgeService/CleanupSession",
+            context_metadata=metadata,
+            attributes={"snakepit.session_id": request.session_id},
+        ):
+            try:
+                response = await self._proxy_to_elixir("CleanupSession", request)
+            finally:
+                await self._stop_heartbeat_client(request.session_id)
+            return response
+
     async def GetSession(self, request, context):
         """Get session details - proxy to Elixir."""
         logger.debug(f"Proxying GetSession for: {request.session_id}")
-        return await self.elixir_stub.GetSession(request)
-    
+        metadata = context.invocation_metadata()
+
+        with telemetry.span(
+            "BridgeService/GetSession",
+            context_metadata=metadata,
+            attributes={"snakepit.session_id": request.session_id},
+        ):
+            response = await self._proxy_to_elixir("GetSession", request)
+            await self._ensure_heartbeat_client(request.session_id)
+            return response
+
     async def Heartbeat(self, request, context):
         """Send heartbeat - proxy to Elixir."""
         logger.debug(f"Proxying Heartbeat for: {request.session_id}")
-        return await self.elixir_stub.Heartbeat(request)
+        metadata = context.invocation_metadata()
+
+        with telemetry.span(
+            "BridgeService/Heartbeat",
+            context_metadata=metadata,
+            attributes={"snakepit.session_id": request.session_id},
+        ):
+            return await self._proxy_to_elixir("Heartbeat", request)
     
     # Variable Operations - All Proxied to Elixir
     
     async def RegisterVariable(self, request, context):
         """Register a variable - proxy to Elixir."""
         logger.debug(f"Proxying RegisterVariable: {request.name}")
-        return await self.elixir_stub.RegisterVariable(request)
-    
+        with telemetry.span(
+            "BridgeService/RegisterVariable",
+            context_metadata=context.invocation_metadata(),
+            attributes={"snakepit.variable": request.name},
+        ):
+            return await self._proxy_to_elixir("RegisterVariable", request)
+
     async def GetVariable(self, request, context):
         """Get a variable - proxy to Elixir."""
         logger.debug(f"Proxying GetVariable: {request.variable_identifier}")
-        return await self.elixir_stub.GetVariable(request)
-    
+        with telemetry.span(
+            "BridgeService/GetVariable",
+            context_metadata=context.invocation_metadata(),
+            attributes={"snakepit.variable": request.variable_identifier},
+        ):
+            return await self._proxy_to_elixir("GetVariable", request)
+
     async def SetVariable(self, request, context):
         """Set a variable - proxy to Elixir."""
         logger.debug(f"Proxying SetVariable: {request.variable_identifier}")
-        return await self.elixir_stub.SetVariable(request)
-    
+        with telemetry.span(
+            "BridgeService/SetVariable",
+            context_metadata=context.invocation_metadata(),
+            attributes={"snakepit.variable": request.variable_identifier},
+        ):
+            return await self._proxy_to_elixir("SetVariable", request)
+
     async def GetVariables(self, request, context):
         """Get multiple variables - proxy to Elixir."""
         logger.debug(f"Proxying GetVariables for {len(request.variable_identifiers)} variables")
-        return await self.elixir_stub.GetVariables(request)
-    
+        with telemetry.span(
+            "BridgeService/GetVariables",
+            context_metadata=context.invocation_metadata(),
+            attributes={"snakepit.variable_count": len(request.variable_identifiers)},
+        ):
+            return await self._proxy_to_elixir("GetVariables", request)
+
     async def SetVariables(self, request, context):
         """Set multiple variables - proxy to Elixir."""
         logger.debug(f"Proxying SetVariables for {len(request.updates)} variables")
-        return await self.elixir_stub.SetVariables(request)
-    
+        with telemetry.span(
+            "BridgeService/SetVariables",
+            context_metadata=context.invocation_metadata(),
+            attributes={"snakepit.variable_count": len(request.updates)},
+        ):
+            return await self._proxy_to_elixir("SetVariables", request)
+
     async def ListVariables(self, request, context):
         """List variables - proxy to Elixir."""
         logger.debug(f"Proxying ListVariables with pattern: {request.pattern}")
-        return await self.elixir_stub.ListVariables(request)
-    
+        with telemetry.span(
+            "BridgeService/ListVariables",
+            context_metadata=context.invocation_metadata(),
+            attributes={"snakepit.pattern": request.pattern},
+        ):
+            return await self._proxy_to_elixir("ListVariables", request)
+
     async def DeleteVariable(self, request, context):
         """Delete a variable - proxy to Elixir."""
         logger.debug(f"Proxying DeleteVariable: {request.variable_identifier}")
-        return await self.elixir_stub.DeleteVariable(request)
+        with telemetry.span(
+            "BridgeService/DeleteVariable",
+            context_metadata=context.invocation_metadata(),
+            attributes={"snakepit.variable": request.variable_identifier},
+        ):
+            return await self._proxy_to_elixir("DeleteVariable", request)
     
     # Tool Execution - Stateless with Ephemeral Context
     
@@ -245,7 +350,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         """Executes a non-streaming tool."""
         logger.info(f"ExecuteTool: {request.tool_name} for session {request.session_id}")
         start_time = time.time()
-        
+
         try:
             # Ensure session exists in Elixir
             init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
@@ -255,9 +360,10 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                 # Session might already exist, that's ok
                 if e.code() != grpc.StatusCode.ALREADY_EXISTS:
                     logger.debug(f"InitializeSession for {request.session_id}: {e}")
-            
+
             # Create ephemeral context for this request
             session_context = SessionContext(self.sync_elixir_stub, request.session_id)
+            await self._ensure_heartbeat_client(request.session_id)
             
             # Create adapter instance for this request
             adapter = self.adapter_class()
@@ -358,10 +464,11 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                 # Session might already exist, that's ok
                 if e.code() != grpc.StatusCode.ALREADY_EXISTS:
                     logger.debug(f"InitializeSession for {request.session_id}: {e}")
-            
+
             # Create ephemeral context for this request
             logger.info(f"Creating SessionContext for {request.session_id}")
             session_context = SessionContext(self.sync_elixir_stub, request.session_id)
+            await self._ensure_heartbeat_client(request.session_id)
             
             # Create adapter instance for this request
             logger.info(f"Creating adapter instance: {self.adapter_class}")
@@ -512,34 +619,124 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def AddDependency(self, request, context):
         """Add dependency - proxy to Elixir when implemented."""
         logger.debug("Proxying AddDependency")
-        return await self.elixir_stub.AddDependency(request)
-    
+        with telemetry.span(
+            "BridgeService/AddDependency",
+            context_metadata=context.invocation_metadata(),
+        ):
+            return await self._proxy_to_elixir("AddDependency", request)
+
     async def StartOptimization(self, request, context):
         """Start optimization - proxy to Elixir when implemented."""
         logger.debug("Proxying StartOptimization")
-        return await self.elixir_stub.StartOptimization(request)
-    
+        with telemetry.span(
+            "BridgeService/StartOptimization",
+            context_metadata=context.invocation_metadata(),
+        ):
+            return await self._proxy_to_elixir("StartOptimization", request)
+
     async def StopOptimization(self, request, context):
         """Stop optimization - proxy to Elixir when implemented."""
         logger.debug("Proxying StopOptimization")
-        return await self.elixir_stub.StopOptimization(request)
-    
+        with telemetry.span(
+            "BridgeService/StopOptimization",
+            context_metadata=context.invocation_metadata(),
+        ):
+            return await self._proxy_to_elixir("StopOptimization", request)
+
     async def GetVariableHistory(self, request, context):
         """Get variable history - proxy to Elixir when implemented."""
         logger.debug("Proxying GetVariableHistory")
-        return await self.elixir_stub.GetVariableHistory(request)
-    
+        with telemetry.span(
+            "BridgeService/GetVariableHistory",
+            context_metadata=context.invocation_metadata(),
+        ):
+            return await self._proxy_to_elixir("GetVariableHistory", request)
+
     async def RollbackVariable(self, request, context):
         """Rollback variable - proxy to Elixir when implemented."""
         logger.debug("Proxying RollbackVariable")
-        return await self.elixir_stub.RollbackVariable(request)
+        with telemetry.span(
+            "BridgeService/RollbackVariable",
+            context_metadata=context.invocation_metadata(),
+        ):
+            return await self._proxy_to_elixir("RollbackVariable", request)
     
     def set_server(self, server):
         """Set the server reference for graceful shutdown."""
         self.server = server
 
+    def create_heartbeat_client(self, session_id: str) -> Optional[HeartbeatClient]:
+        """
+        Prepare a heartbeat client for the given session.
 
-async def wait_for_elixir_server(elixir_address: str, max_retries: int = 10, initial_delay: float = 0.05):
+        The caller is responsible for starting/stopping the client; this helper
+        simply encapsulates configuration so future integration work can toggle
+        the feature without refactoring the servicer.
+        """
+        if not self.heartbeat_config.enabled:
+            return None
+
+        return HeartbeatClient(
+            self.elixir_stub,
+            session_id,
+            config=self.heartbeat_config,
+        )
+
+    async def _ensure_heartbeat_client(self, session_id: str) -> Optional[HeartbeatClient]:
+        """
+        Initialise and start a heartbeat client for the session if enabled.
+        """
+        if not self.heartbeat_config.enabled:
+            return None
+
+        client = self.heartbeat_clients.get(session_id)
+        if client:
+            return client
+
+        async with self._heartbeat_lock:
+            client = self.heartbeat_clients.get(session_id)
+            if client:
+                return client
+
+            client = self.create_heartbeat_client(session_id)
+            if client:
+                started = client.start()
+                if started:
+                    logger.debug("Heartbeat loop started for session %s", session_id)
+                self.heartbeat_clients[session_id] = client
+            return client
+
+    async def _stop_heartbeat_client(self, session_id: str) -> None:
+        """
+        Stop and remove the heartbeat client for the given session.
+        """
+        if not self.heartbeat_config.enabled:
+            return
+
+        async with self._heartbeat_lock:
+            client = self.heartbeat_clients.pop(session_id, None)
+
+        if client:
+            await client.stop()
+            logger.debug("Heartbeat loop stopped for session %s", session_id)
+
+    async def _stop_all_heartbeat_clients(self) -> None:
+        if not self.heartbeat_clients:
+            return
+
+        async with self._heartbeat_lock:
+            clients = list(self.heartbeat_clients.values())
+            self.heartbeat_clients.clear()
+
+        for client in clients:
+            await client.stop()
+
+
+async def wait_for_elixir_server(
+    elixir_address: str,
+    max_retries: Optional[int] = 60,
+    initial_delay: float = 0.05,
+):
     """
     Wait for the Elixir gRPC server to become available with exponential backoff.
 
@@ -555,7 +752,9 @@ async def wait_for_elixir_server(elixir_address: str, max_retries: int = 10, ini
         True if server is reachable, False otherwise
     """
     delay = initial_delay
-    for attempt in range(1, max_retries + 1):
+    attempt = 1
+
+    while True:
         try:
             # Attempt a simple connection test
             channel = grpc.aio.insecure_channel(elixir_address)
@@ -567,23 +766,58 @@ async def wait_for_elixir_server(elixir_address: str, max_retries: int = 10, ini
 
             # Success!
             await channel.close()
-            logger.info(f"Successfully connected to Elixir server at {elixir_address} after {attempt} attempt(s)")
+            logger.info(
+                "Successfully connected to Elixir server at %s after %d attempt(s)",
+                elixir_address,
+                attempt,
+            )
             return True
 
         except (grpc.aio.AioRpcError, asyncio.TimeoutError, Exception) as e:
-            if attempt < max_retries:
-                logger.debug(f"Elixir server at {elixir_address} not ready (attempt {attempt}/{max_retries}). "
-                           f"Retrying in {delay:.2f}s... Error: {type(e).__name__}")
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, 2.0)  # Exponential backoff, max 2s
-            else:
-                logger.error(f"Failed to connect to Elixir server at {elixir_address} after {max_retries} attempts")
+            if max_retries is not None and attempt >= max_retries:
+                logger.error(
+                    "Failed to connect to Elixir server at %s after %d attempts (last error: %s: %s)",
+                    elixir_address,
+                    attempt,
+                    type(e).__name__,
+                    e,
+                )
+                with open("/tmp/python_worker_debug.log", "a") as f:
+                    f.write(
+                        f"wait_for_elixir_server giving up after {attempt} attempts. "
+                        f"Last error: {type(e).__name__}: {e}\n"
+                    )
+                    f.flush()
                 return False
 
-    return False
+            total_suffix = f"/{max_retries}" if max_retries is not None else ""
+            logger.debug(
+                "Elixir server at %s not ready (attempt %d%s). Retrying in %.2fs... Error: %s: %s",
+                elixir_address,
+                attempt,
+                total_suffix,
+                delay,
+                type(e).__name__,
+                e,
+            )
+            with open("/tmp/python_worker_debug.log", "a") as f:
+                f.write(
+                    f"wait_for_elixir_server attempt {attempt} failed: {type(e).__name__}: {e}\n"
+                )
+                f.flush()
+
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 2.0)  # Exponential backoff, max 2s
+            attempt += 1
 
 
-async def serve_with_shutdown(port: int, adapter_module: str, elixir_address: str, shutdown_event: asyncio.Event):
+async def serve_with_shutdown(
+    port: int,
+    adapter_module: str,
+    elixir_address: str,
+    shutdown_event: asyncio.Event,
+    heartbeat_options: Optional[Mapping[str, Any]] = None,
+):
     """Start the stateless gRPC server with proper shutdown handling."""
     # DEBUG: Write to file to see execution flow
     with open("/tmp/python_worker_debug.log", "a") as f:
@@ -639,7 +873,7 @@ async def serve_with_shutdown(port: int, adapter_module: str, elixir_address: st
         f.write(f"Creating servicer...\n")
         f.flush()
 
-    servicer = BridgeServiceServicer(adapter_class, elixir_address)
+    servicer = BridgeServiceServicer(adapter_class, elixir_address, heartbeat_options=heartbeat_options)
     servicer.set_server(server)
 
     pb2_grpc.add_BridgeServiceServicer_to_server(servicer, server)
@@ -761,7 +995,13 @@ async def serve_with_shutdown(port: int, adapter_module: str, elixir_address: st
 async def serve(port: int, adapter_module: str, elixir_address: str):
     """Legacy entry point - creates its own shutdown event."""
     shutdown_event = asyncio.Event()
-    await serve_with_shutdown(port, adapter_module, elixir_address, shutdown_event)
+    await serve_with_shutdown(
+        port,
+        adapter_module,
+        elixir_address,
+        shutdown_event,
+        heartbeat_options=None,
+    )
 
 
 async def shutdown(server):
@@ -780,8 +1020,37 @@ def main():
                         help='Address of the Elixir gRPC server (e.g., localhost:50051)')
     parser.add_argument('--snakepit-run-id', type=str, default='',
                         help='Snakepit run ID for process cleanup')
+    parser.add_argument('--heartbeat-enabled', action='store_true',
+                        help='Enable Python heartbeat client')
+    parser.add_argument('--heartbeat-interval-ms', type=int, default=None,
+                        help='Heartbeat interval in milliseconds')
+    parser.add_argument('--heartbeat-timeout-ms', type=int, default=None,
+                        help='Heartbeat RPC timeout in milliseconds')
+    parser.add_argument('--heartbeat-max-missed', type=int, default=None,
+                        help='Maximum consecutive heartbeat failures before escalation')
+    parser.add_argument('--heartbeat-initial-delay-ms', type=int, default=None,
+                        help='Initial delay before starting heartbeat loop (milliseconds)')
 
     args = parser.parse_args()
+
+    heartbeat_overrides: Dict[str, Any] = {}
+
+    if args.heartbeat_enabled:
+        heartbeat_overrides["enabled"] = True
+
+    if args.heartbeat_interval_ms is not None:
+        heartbeat_overrides["interval_ms"] = args.heartbeat_interval_ms
+
+    if args.heartbeat_timeout_ms is not None:
+        heartbeat_overrides["timeout_ms"] = args.heartbeat_timeout_ms
+
+    if args.heartbeat_max_missed is not None:
+        heartbeat_overrides["max_missed_heartbeats"] = args.heartbeat_max_missed
+
+    if args.heartbeat_initial_delay_ms is not None:
+        heartbeat_overrides["initial_delay_ms"] = args.heartbeat_initial_delay_ms
+
+    heartbeat_options = heartbeat_overrides or None
 
     # Set up signal handlers at the module level before running asyncio
     shutdown_event = None
@@ -804,7 +1073,15 @@ def main():
     shutdown_event = asyncio.Event()
 
     try:
-        loop.run_until_complete(serve_with_shutdown(args.port, args.adapter, args.elixir_address, shutdown_event))
+        loop.run_until_complete(
+            serve_with_shutdown(
+                args.port,
+                args.adapter,
+                args.elixir_address,
+                shutdown_event,
+                heartbeat_options=heartbeat_options,
+            )
+        )
     except BaseException as e:
         # CRITICAL: Capture the final, fatal exception before the process dies
         # Catch ALL exceptions including SystemExit, KeyboardInterrupt, etc.
@@ -821,13 +1098,11 @@ def main():
     finally:
         loop.close()
 
-    # Tombstone: If we reach this point, the main() function completed normally
-    # which should NEVER happen for a daemon - it means we exited the event loop somehow
+    # Main loop exited after shutdown event; this is expected during graceful termination.
     with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"\n!!! MAIN FUNCTION COMPLETED NORMALLY AT {time.time()} !!!\n")
-        f.write(f"This should NEVER happen for a daemon!\n")
+        f.write(f"\nPython worker shutting down cleanly at {time.time()}.\n")
         f.flush()
-    logger.warning("!!! MAIN FUNCTION COMPLETED NORMALLY - THIS SHOULD NOT HAPPEN !!!")
+    logger.info("Python worker exiting gracefully.")
 
 
 if __name__ == '__main__':

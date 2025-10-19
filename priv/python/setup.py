@@ -56,23 +56,36 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        # Core Python library - no external dependencies required for legacy bridges
+        "grpcio>=1.60.0",
+        "grpcio-tools>=1.60.0",
+        "protobuf>=4.25.0",
+        "numpy>=1.21.0",
+        "psutil>=5.9.0",
+        "opentelemetry-api>=1.21.0",
+        "opentelemetry-sdk>=1.21.0",
+        "opentelemetry-exporter-otlp-proto-http>=1.21.0",
     ],
     extras_require={
         "grpc": [
             "grpcio>=1.50.0",
             "protobuf>=4.0.0",
+            "opentelemetry-api>=1.21.0",
+            "opentelemetry-sdk>=1.21.0",
+            "opentelemetry-exporter-otlp-proto-http>=1.21.0",
         ],
         "msgpack": [
             "msgpack>=1.0.5",
         ],
         "all": [
             "grpcio>=1.50.0",
-            "protobuf>=4.0.0", 
+            "protobuf>=4.0.0",
+            "opentelemetry-api>=1.21.0",
+            "opentelemetry-sdk>=1.21.0",
+            "opentelemetry-exporter-otlp-proto-http>=1.21.0",
             "msgpack>=1.0.5",
         ],
         "dev": [
-            "pytest>=6.0",
+            "pytest>=7.0",
             "pytest-cov>=2.0",
             "black>=22.0",
             "flake8>=4.0",
@@ -80,6 +93,9 @@ setup(
             "grpcio>=1.50.0",
             "protobuf>=4.0.0",
             "grpcio-tools>=1.50.0",  # For protoc compilation
+            "opentelemetry-api>=1.21.0",
+            "opentelemetry-sdk>=1.21.0",
+            "opentelemetry-exporter-otlp-proto-http>=1.21.0",
         ],
     },
     entry_points={

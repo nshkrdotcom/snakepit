@@ -4,24 +4,42 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
   alias Snakepit.GRPCWorker
   alias Snakepit.TestAdapters.MockGRPCAdapter
 
-  setup do
-    Process.flag(:trap_exit, true)
-    :ok
+  defmodule PoolStub do
+    use GenServer
+
+    def start_link(opts \\ []) do
+      GenServer.start_link(__MODULE__, opts)
+    end
+
+    @impl true
+    def init(state), do: {:ok, state}
+
+    @impl true
+    def handle_call({:worker_ready, _worker_id}, _from, state) do
+      {:reply, :ok, state}
+    end
   end
 
-  defp worker_opts(overrides \\ []) do
+  setup do
+    Process.flag(:trap_exit, true)
+    ensure_started(Snakepit.Pool.Registry)
+    ensure_started(Snakepit.Pool.ProcessRegistry)
+    {:ok, pool_pid} = start_supervised(PoolStub)
+    {:ok, pool: pool_pid}
+  end
+
+  defp worker_opts(overrides) do
     worker_id = "default_worker_hb_#{System.unique_integer([:positive])}"
 
     [
       id: worker_id,
       adapter: MockGRPCAdapter,
-      pool_name: Snakepit.Pool,
       worker_config: %{}
     ]
     |> Keyword.merge(overrides)
   end
 
-  test "starts heartbeat monitor when enabled and emits pings" do
+  test "starts heartbeat monitor when enabled and emits pings", %{pool: pool_pid} = _context do
     test_pid = self()
 
     heartbeat_config = %{
@@ -36,7 +54,12 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
       test_pid: test_pid
     }
 
-    opts = worker_opts(worker_config: %{heartbeat: heartbeat_config})
+    opts =
+      []
+      |> worker_opts()
+      |> Keyword.merge(worker_config: %{heartbeat: heartbeat_config})
+      |> Keyword.put(:pool_name, pool_pid)
+
     {:ok, worker} = GRPCWorker.start_link(opts)
     worker_id = opts[:id]
 
@@ -48,11 +71,13 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
     :ok = GenServer.stop(worker)
   end
 
-  test "does not start heartbeat monitor when disabled" do
+  test "does not start heartbeat monitor when disabled", %{pool: pool_pid} = _context do
     test_pid = self()
 
     opts =
-      worker_opts(
+      []
+      |> worker_opts()
+      |> Keyword.merge(
         worker_config: %{
           heartbeat: %{
             enabled: false,
@@ -60,6 +85,7 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
           }
         }
       )
+      |> Keyword.put(:pool_name, pool_pid)
 
     {:ok, worker} = GRPCWorker.start_link(opts)
     worker_id = opts[:id]
@@ -69,11 +95,13 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
     :ok = GenServer.stop(worker)
   end
 
-  test "terminates heartbeat monitor when worker stops" do
+  test "terminates heartbeat monitor when worker stops", %{pool: pool_pid} = _context do
     test_pid = self()
 
     opts =
-      worker_opts(
+      []
+      |> worker_opts()
+      |> Keyword.merge(
         worker_config: %{
           heartbeat: %{
             enabled: true,
@@ -87,6 +115,7 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
           }
         }
       )
+      |> Keyword.put(:pool_name, pool_pid)
 
     {:ok, worker} = GRPCWorker.start_link(opts)
     worker_id = opts[:id]
@@ -99,5 +128,15 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
 
     assert_receive {:heartbeat_monitor_stopped, ^worker_id, _reason}, 1_000
     assert_receive {:DOWN, ^ref, :process, ^monitor_pid, _reason}, 1_000
+  end
+
+  defp ensure_started(child_spec) do
+    case start_supervised(child_spec) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:already_started, _pid}} ->
+        :ok
+    end
   end
 end

@@ -6,12 +6,17 @@ defmodule Snakepit.MultiPoolExecutionTest do
   @moduletag timeout: 120_000
 
   setup do
+    prev_pools = Application.get_env(:snakepit, :pools)
+    prev_pooling = Application.get_env(:snakepit, :pooling_enabled)
+
     # Stop any running Snakepit
     Application.stop(:snakepit)
     Application.load(:snakepit)
 
     on_exit(fn ->
       Application.stop(:snakepit)
+      restore_env(:pools, prev_pools)
+      restore_env(:pooling_enabled, prev_pooling)
       # Wait for processes to actually stop
       assert_eventually(
         fn ->
@@ -24,6 +29,9 @@ defmodule Snakepit.MultiPoolExecutionTest do
 
     :ok
   end
+
+  defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
 
   describe "CRITICAL: Two pools running simultaneously" do
     test "starts two pools with different names and executes on both" do

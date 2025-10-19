@@ -19,6 +19,12 @@
 # Disable automatic pooling
 Application.put_env(:snakepit, :pooling_enabled, false)
 
+Code.require_file("../mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
+
 defmodule GILAwareSelection do
   require Logger
 

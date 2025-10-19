@@ -76,7 +76,9 @@ defmodule ElixirTools do
 end
 
 # Main demonstration script
-Mix.install([
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
   {:snakepit, path: ".", override: true},
   {:jason, "~> 1.4"}
 ])

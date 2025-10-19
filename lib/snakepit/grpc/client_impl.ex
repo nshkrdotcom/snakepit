@@ -155,6 +155,8 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
+    parameters = sanitize_parameters(parameters)
+
     # Convert Elixir terms to protobuf Any messages
     proto_params =
       Enum.reduce(parameters, %{}, fn {k, v}, acc ->
@@ -179,6 +181,7 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
+    parameters = sanitize_parameters(parameters)
     proto_params = encode_parameters(parameters)
 
     request = %Bridge.ExecuteToolRequest{
@@ -251,4 +254,21 @@ defmodule Snakepit.GRPC.ClientImpl do
       Map.put(acc, to_string(k), proto_any)
     end)
   end
+
+  defp sanitize_parameters(parameters) when is_map(parameters) do
+    parameters
+    |> Map.delete(:correlation_id)
+    |> Map.delete("correlation_id")
+  end
+
+  defp sanitize_parameters(parameters) when is_list(parameters) do
+    parameters
+    |> Enum.reject(fn
+      {:correlation_id, _} -> true
+      {"correlation_id", _} -> true
+      _ -> false
+    end)
+  end
+
+  defp sanitize_parameters(parameters), do: parameters
 end

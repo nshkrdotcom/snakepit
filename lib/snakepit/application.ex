@@ -55,6 +55,13 @@ defmodule Snakepit.Application do
     # Check if pooling is enabled (default: false to prevent auto-start issues)
     pooling_enabled = Application.get_env(:snakepit, :pooling_enabled, false)
 
+    if Application.get_env(:snakepit, :enable_otlp?, false) do
+      Logger.info("OTLP telemetry enabled (SNAKEPIT_ENABLE_OTLP=true)")
+      Snakepit.Telemetry.OpenTelemetry.setup()
+    else
+      Logger.info("OTLP telemetry disabled (set SNAKEPIT_ENABLE_OTLP=true to enable)")
+    end
+
     IO.inspect(
       pooling_enabled: pooling_enabled,
       env: Mix.env(),
@@ -65,6 +72,8 @@ defmodule Snakepit.Application do
     grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
 
     # Always start SessionStore as it's needed for tests and bridge functionality
+    telemetry_children = Snakepit.TelemetryMetrics.reporter_children()
+
     base_children = [
       Snakepit.Bridge.SessionStore,
       Snakepit.Bridge.ToolRegistry
@@ -128,7 +137,7 @@ defmodule Snakepit.Application do
         []
       end
 
-    children = base_children ++ pool_children
+    children = telemetry_children ++ base_children ++ pool_children
 
     opts = [strategy: :one_for_one, name: Snakepit.Supervisor]
     result = Supervisor.start_link(children, opts)

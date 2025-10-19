@@ -547,7 +547,7 @@ defmodule Snakepit.Pool do
           case checkout_worker(pool_state, session_id, state.affinity_cache) do
             {:ok, worker_id, new_pool_state} ->
               # Execute in a supervised, unlinked task
-              Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+              async_with_context(fn ->
                 # Extract the actual PID from the from tuple for monitoring
                 {client_pid, _tag} = from
                 ref = Process.monitor(client_pid)
@@ -681,7 +681,7 @@ defmodule Snakepit.Pool do
               {client_pid, _tag} = queued_from
 
               if Process.alive?(client_pid) do
-                Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+                async_with_context(fn ->
                   ref = Process.monitor(client_pid)
                   result = execute_on_worker(worker_id, command, args, opts)
 
@@ -1051,7 +1051,7 @@ defmodule Snakepit.Pool do
 
   defp store_session_affinity(session_id, worker_id) do
     # Store the worker affinity in a supervised task for better error logging
-    Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+    async_with_context(fn ->
       :ok = Snakepit.Bridge.SessionStore.store_worker_session(session_id, worker_id)
       Logger.debug("Stored session affinity: #{session_id} -> #{worker_id}")
       :ok
@@ -1129,6 +1129,26 @@ defmodule Snakepit.Pool do
         end
     end
   end
+
+  defp async_with_context(fun) when is_function(fun, 0) do
+    ctx = :otel_ctx.get_current()
+
+    Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+      token = maybe_attach_ctx(ctx)
+
+      try do
+        fun.()
+      after
+        maybe_detach_ctx(token)
+      end
+    end)
+  end
+
+  defp maybe_attach_ctx(nil), do: :undefined
+  defp maybe_attach_ctx(ctx), do: :otel_ctx.attach(ctx)
+
+  defp maybe_detach_ctx(:undefined), do: :ok
+  defp maybe_detach_ctx(token), do: :otel_ctx.detach(token)
 
   # DIAGNOSTIC: Resource monitoring helpers
   defp capture_resource_metrics do
