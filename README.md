@@ -30,8 +30,9 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
-- [What's New in v0.6.0](#whats-new-in-v060)
 - [Breaking Changes (v0.5.0)](#️-breaking-changes-v050)
+- [What's New in v0.6.1](#whats-new-in-v061)
+- [What's New in v0.6.0](#whats-new-in-v060)
 - [What's New in v0.5.1](#whats-new-in-v051)
 - [What's New in v0.5](#whats-new-in-v05)
 - [Quick Start](#quick-start)
@@ -51,7 +52,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 
-## ⚠️ Breaking Changes (v0.56.0)
+## ⚠️ Breaking Changes (v0.5.0)
 
 ### DSPy Integration Removed
 
@@ -102,6 +103,30 @@ For **non-DSPex users**, if you're using these classes directly:
 **Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
 
 ---
+
+## 🆕 What's New in v0.6.1
+
+### 📡 Production-Ready Observability
+- New `Snakepit.Telemetry.OpenTelemetry` boots OTLP exporters when `SNAKEPIT_ENABLE_OTLP=true`
+- Prometheus metrics server via `Snakepit.TelemetryMetrics`, covering heartbeat and worker execution stats
+- Configurable exporters, ports, and resource attributes from `config/config.exs`
+- Expanded docs set in `ARCHITECTURE.md` and new design blueprints for v0.7/v0.8 planning
+
+### ❤️‍🔥 Proactive Worker Heartbeats
+- `Snakepit.HeartbeatMonitor` tracks per-worker liveness with configurable ping cadence and tolerances
+- gRPC worker now emits heartbeat and execution telemetry, including tracing spans and correlation IDs
+- Python bridge ships heartbeat helpers and refactored threaded server instrumentation
+- New end-to-end tests exercise heartbeat failure detection and recovery paths
+
+### 🐍 Python Bridge Instrumentation
+- Added `snakepit_bridge.telemetry` with OTLP-ready metrics and structured logging
+- gRPC servers expose detailed request accounting, streaming stats, and thread usage insights
+- Telemetry unit tests guard the Python adapters and ensure compatibility across execution modes
+
+### ⚙️ Configuration & Examples Refresh
+- `config/config.exs` now ships safe defaults for OTLP, Prometheus, and heartbeat envelopes
+- Sample scripts updated with new monitoring stories, plus fresh dual-mode demos and telemetry walkthroughs
+- Additional docs under `docs/2025101x/` capture upgrade strategies, design prompts, and heartbeat rollout guides
 
 ## 🆕 What's New in v0.6.0
 
@@ -361,7 +386,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-{:snakepit, "~> 0.6.0"}
+{:snakepit, "~> 0.6.1"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2025-10-19
+
+### Added
+- Proactive worker heartbeat monitoring via `Snakepit.HeartbeatMonitor` with configurable cadence, miss thresholds, and per-pool overrides
+- Comprehensive telemetry stack: `Snakepit.Telemetry.OpenTelemetry` boot hook, `Snakepit.TelemetryMetrics` Prometheus exporter, and correlation helpers for tracing spans
+- Rich gRPC client utilities (`Snakepit.GRPC.ClientImpl`) covering ping, session lifecycle, heartbeats, and streaming tooling
+- Python bridge instrumentation (`snakepit_bridge.heartbeat`, `snakepit_bridge.telemetry`) plus new unit tests for telemetry and threaded servers
+- Default telemetry/heartbeat configuration shipped in `config/config.exs`, including OTLP environment toggles and Prometheus port selection
+
+### Changed
+- `Snakepit.GRPCWorker` now emits detailed telemetry, manages heartbeats, and wires correlation IDs through tracing spans
+- `Snakepit.Application` activates OTLP exporters based on environment variables and registers telemetry reporters alongside pool supervisors
+- Python gRPC servers (`grpc_server.py`, `grpc_server_threaded.py`) updated with structured logging, execution metrics, and heartbeat responses
+- Example scripts refreshed with observability storylines and dual-mode telemetry demos; new supervisor tree docs and architecture references added
+- GitHub workflows tightened to reflect new test layout and planning artifacts
+
+### Fixed
+- Hardened CI skips for `ApplicationCleanupTest` to avoid nondeterministic BEAM run IDs
+- Addressed flaky test ordering through targeted cleanup helpers and telemetry-aware assertions
+
+### Documentation
+- Major rewrite of `ARCHITECTURE.md`, new `AGENTS.md`, and comprehensive design dossiers for v0.7/v0.8 feature tracks
+- Added heartbeat, telemetry, and OTLP upgrade plans under `docs/2025101x/`
+- README refreshed with v0.6.1 highlights, installation guidance, and observability walkthroughs
+
 ## [0.6.0] - 2025-10-11
 
 ### Added - Phase 1: Dual-Mode Architecture Foundation
