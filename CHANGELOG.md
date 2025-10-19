@@ -15,13 +15,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rich gRPC client utilities (`Snakepit.GRPC.ClientImpl`) covering ping, session lifecycle, heartbeats, and streaming tooling
 - Python bridge instrumentation (`snakepit_bridge.heartbeat`, `snakepit_bridge.telemetry`) plus new unit tests for telemetry and threaded servers
 - Default telemetry/heartbeat configuration shipped in `config/config.exs`, including OTLP environment toggles and Prometheus port selection
+- Configurable logging system via the new `Snakepit.Logger` module with centralized control over verbosity (`:debug`, `:info`, `:warning`, `:error`, `:none`)
 
 ### Changed
 - `Snakepit.GRPCWorker` now emits detailed telemetry, manages heartbeats, and wires correlation IDs through tracing spans
-- `Snakepit.Application` activates OTLP exporters based on environment variables and registers telemetry reporters alongside pool supervisors
+- `Snakepit.Application` activates OTLP exporters based on environment variables, registers telemetry reporters alongside pool supervisors, and routes logs through `Snakepit.Logger`
 - Python gRPC servers (`grpc_server.py`, `grpc_server_threaded.py`) updated with structured logging, execution metrics, and heartbeat responses
-- Example scripts refreshed with observability storylines and dual-mode telemetry demos; new supervisor tree docs and architecture references added
+- Examples refreshed with observability storylines, dual-mode telemetry demos, and cleaner default output through `Snakepit.Logger`
 - GitHub workflows tightened to reflect new test layout and planning artifacts
+- 25+ Elixir modules migrated to `Snakepit.Logger` for consistent log suppression in demos and production
+
+### Configuration
+- New `:log_level` option under the `:snakepit` application config to control internal logging
+  ```elixir
+  # config/config.exs
+  config :snakepit,
+    log_level: :warning  # Options: :debug, :info, :warning, :error, :none
+  ```
 
 ### Fixed
 - Hardened CI skips for `ApplicationCleanupTest` to avoid nondeterministic BEAM run IDs
@@ -30,7 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 - Major rewrite of `ARCHITECTURE.md`, new `AGENTS.md`, and comprehensive design dossiers for v0.7/v0.8 feature tracks
 - Added heartbeat, telemetry, and OTLP upgrade plans under `docs/2025101x/`
-- README refreshed with v0.6.1 highlights, installation guidance, and observability walkthroughs
+- README refreshed with v0.6.1 highlights, logging guidance, installation tips, and observability walkthroughs
+
+### Notes
+- Existing configurations continue to work with the default `:info` log level
+- Log suppression is optional—set `log_level: :debug` to restore verbose output
+- Provides cleaner logs for production deployments and demos while retaining full visibility for debugging
+
+---
 
 ## [0.6.0] - 2025-10-11
 

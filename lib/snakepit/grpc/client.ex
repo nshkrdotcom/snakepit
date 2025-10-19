@@ -5,6 +5,8 @@ defmodule Snakepit.GRPC.Client do
   """
 
   require Logger
+  # Uncomment when logging is added to this module:
+  # alias Snakepit.Logger, as: SLog
 
   def connect(port) when is_integer(port) do
     connect("localhost:#{port}")

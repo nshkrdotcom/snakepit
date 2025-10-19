@@ -9,6 +9,7 @@ defmodule Snakepit.Bridge.SessionStore do
 
   use GenServer
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   alias Snakepit.Bridge.Session
 
@@ -340,7 +341,7 @@ defmodule Snakepit.Bridge.SessionStore do
       }
     }
 
-    Logger.info(
+    SLog.info(
       "SessionStore started with table #{table} and global programs table #{global_programs_table}"
     )
 
@@ -362,13 +363,13 @@ defmodule Snakepit.Bridge.SessionStore do
         case :ets.insert_new(state.table, ets_record) do
           true ->
             # We created the session
-            Logger.debug("Created new session: #{session_id}")
+            SLog.debug("Created new session: #{session_id}")
             new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
             {:reply, {:ok, session}, %{state | stats: new_stats}}
 
           false ->
             # Session already exists - return the existing one
-            Logger.debug("Session #{session_id} already exists - reusing (concurrent init)")
+            SLog.debug("Session #{session_id} already exists - reusing (concurrent init)")
 
             [{^session_id, {_last_accessed, _ttl, existing_session}}] =
               :ets.lookup(state.table, session_id)
@@ -405,7 +406,7 @@ defmodule Snakepit.Bridge.SessionStore do
           end
         rescue
           error ->
-            Logger.error("Error updating session #{session_id}: #{inspect(error)}")
+            SLog.error("Error updating session #{session_id}: #{inspect(error)}")
             {:reply, {:error, {:update_failed, error}}, state}
         end
 
@@ -543,7 +544,7 @@ defmodule Snakepit.Bridge.SessionStore do
 
           {:error, reason} ->
             # Session affinity is best-effort; log validation errors but don't fail
-            Logger.warning("Failed to validate session for worker affinity: #{inspect(reason)}")
+            SLog.warning("Failed to validate session for worker affinity: #{inspect(reason)}")
             {:reply, :ok, state}
         end
     end
@@ -568,7 +569,7 @@ defmodule Snakepit.Bridge.SessionStore do
 
   @impl true
   def handle_info(msg, state) do
-    Logger.warning("SessionStore received unexpected message: #{inspect(msg)}")
+    SLog.warning("SessionStore received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -640,7 +641,7 @@ defmodule Snakepit.Bridge.SessionStore do
     expired_count = :ets.select_delete(table, match_spec)
 
     if expired_count > 0 do
-      Logger.debug(
+      SLog.debug(
         "Cleaned up #{expired_count} expired sessions using high-performance select_delete"
       )
     end
@@ -668,7 +669,7 @@ defmodule Snakepit.Bridge.SessionStore do
     expired_count = :ets.select_delete(table, match_spec)
 
     if expired_count > 0 do
-      Logger.debug("Cleaned up #{expired_count} expired global programs")
+      SLog.debug("Cleaned up #{expired_count} expired global programs")
     end
 
     new_stats = Map.update(stats, :global_programs_expired, expired_count, &(&1 + expired_count))

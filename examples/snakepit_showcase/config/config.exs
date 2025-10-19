@@ -5,13 +5,18 @@ config :snakepit_showcase,
 
 # Snakepit configuration
 config :snakepit,
+  # Suppress Snakepit internal logs for clean demo output
+  log_level: :warning,
   adapter_module: Snakepit.Adapters.GRPCPython,
   pooling_enabled: true,
   pool_config: %{
     pool_size: 4,
     max_overflow: 2,
     strategy: :fifo,
-    adapter_args: ["--adapter", "snakepit_bridge.adapters.showcase.showcase_adapter.ShowcaseAdapter"]
+    adapter_args: [
+      "--adapter",
+      "snakepit_bridge.adapters.showcase.showcase_adapter.ShowcaseAdapter"
+    ]
   },
   grpc_config: %{
     base_port: 50051,

@@ -4,6 +4,7 @@ defmodule Snakepit.Telemetry do
   """
 
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   @doc """
   Lists all telemetry events used by Snakepit.
@@ -98,32 +99,32 @@ defmodule Snakepit.Telemetry do
 
   # Session event handlers
   defp handle_event([:snakepit, :session_store, :session, :created], _measurements, metadata, _) do
-    Logger.info("Session created: #{metadata.session_id}")
+    SLog.info("Session created: #{metadata.session_id}")
   end
 
   defp handle_event([:snakepit, :session_store, :session, :accessed], _measurements, metadata, _) do
-    Logger.debug("Session accessed: #{metadata.session_id}")
+    SLog.debug("Session accessed: #{metadata.session_id}")
   end
 
   defp handle_event([:snakepit, :session_store, :session, :deleted], _measurements, metadata, _) do
-    Logger.info("Session deleted: #{metadata.session_id}")
+    SLog.info("Session deleted: #{metadata.session_id}")
   end
 
   defp handle_event([:snakepit, :session_store, :session, :expired], measurements, _metadata, _) do
-    Logger.info("Sessions expired: count=#{measurements.count}")
+    SLog.info("Sessions expired: count=#{measurements.count}")
   end
 
   # Program event handlers
   defp handle_event([:snakepit, :session_store, :program, :stored], _measurements, metadata, _) do
-    Logger.debug("Program stored: #{metadata.program_id} in session #{metadata.session_id}")
+    SLog.debug("Program stored: #{metadata.program_id} in session #{metadata.session_id}")
   end
 
   defp handle_event([:snakepit, :session_store, :program, :retrieved], _measurements, metadata, _) do
-    Logger.debug("Program retrieved: #{metadata.program_id} from session #{metadata.session_id}")
+    SLog.debug("Program retrieved: #{metadata.program_id} from session #{metadata.session_id}")
   end
 
   defp handle_event([:snakepit, :session_store, :program, :deleted], _measurements, metadata, _) do
-    Logger.debug("Program deleted: #{metadata.program_id} from session #{metadata.session_id}")
+    SLog.debug("Program deleted: #{metadata.program_id} from session #{metadata.session_id}")
   end
 
   # Heartbeat events
@@ -159,7 +160,7 @@ defmodule Snakepit.Telemetry do
 
   # Catch-all handler for any unhandled events
   defp handle_event(event, measurements, metadata, _) do
-    Logger.debug(
+    SLog.debug(
       "Telemetry event: #{inspect(event)} measurements=#{inspect(measurements)} metadata=#{inspect(metadata)}"
     )
   end

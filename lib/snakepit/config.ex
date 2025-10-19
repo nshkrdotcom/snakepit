@@ -64,6 +64,7 @@ defmodule Snakepit.Config do
   """
 
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   @type pool_config :: map()
   @type validation_result :: {:ok, [pool_config()]} | {:error, term()}
@@ -288,7 +289,7 @@ defmodule Snakepit.Config do
 
     case validate_pool_config(legacy_pool) do
       {:ok, config} ->
-        Logger.info("Converted legacy configuration to pool config for :default pool")
+        SLog.info("Converted legacy configuration to pool config for :default pool")
         {:ok, [config]}
 
       error ->

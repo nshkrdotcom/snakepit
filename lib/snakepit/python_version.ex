@@ -29,6 +29,7 @@ defmodule Snakepit.PythonVersion do
   """
 
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   @type version ::
           {major :: non_neg_integer(), minor :: non_neg_integer(), patch :: non_neg_integer()}
@@ -102,7 +103,7 @@ defmodule Snakepit.PythonVersion do
         recommend_profile(version)
 
       {:error, _} ->
-        Logger.warning(
+        SLog.warning(
           "Could not detect Python version. Defaulting to :process profile for safety."
         )
 

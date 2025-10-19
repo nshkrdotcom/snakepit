@@ -35,11 +35,12 @@ defmodule Snakepit.GRPC.BridgeServer do
   alias Google.Protobuf.{Any, Timestamp}
 
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   # Health & Session Management
 
   def ping(%PingRequest{message: message}, _stream) do
-    Logger.debug("Ping received: #{message}")
+    SLog.debug("Ping received: #{message}")
 
     %PingResponse{
       message: "pong: #{message}",
@@ -48,7 +49,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def initialize_session(request, _stream) do
-    Logger.info("Initializing session: #{request.session_id}")
+    SLog.info("Initializing session: #{request.session_id}")
 
     case SessionStore.create_session(request.session_id, metadata: request.metadata) do
       {:ok, _session} ->
@@ -68,7 +69,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def cleanup_session(%CleanupSessionRequest{session_id: session_id, force: _force}, _stream) do
-    Logger.info("Cleaning up session: #{session_id}")
+    SLog.info("Cleaning up session: #{session_id}")
 
     # TODO: Implement force flag when supported by SessionStore
     # SessionStore.delete_session always returns :ok
@@ -81,7 +82,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def get_session(%GetSessionRequest{session_id: session_id}, _stream) do
-    Logger.debug("GetSession: #{session_id}")
+    SLog.debug("GetSession: #{session_id}")
 
     case SessionStore.get_session(session_id) do
       {:ok, session} ->
@@ -105,7 +106,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def heartbeat(%HeartbeatRequest{session_id: session_id, client_time: _client_time}, _stream) do
-    Logger.debug("Heartbeat: #{session_id}")
+    SLog.debug("Heartbeat: #{session_id}")
 
     # Check if session exists and update last_accessed
     session_valid =
@@ -127,7 +128,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   # Tool Execution
 
   def execute_tool(%ExecuteToolRequest{} = request, _stream) do
-    Logger.info("ExecuteTool: #{request.tool_name} for session #{request.session_id}")
+    SLog.info("ExecuteTool: #{request.tool_name} for session #{request.session_id}")
 
     start_time = System.monotonic_time(:millisecond)
 
@@ -166,7 +167,7 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   defp execute_tool_handler(%{type: :remote} = tool, request, session_id) do
     # Forward to Python worker
-    Logger.debug("Executing remote tool #{tool.name} on worker #{tool.worker_id}")
+    SLog.debug("Executing remote tool #{tool.name} on worker #{tool.worker_id}")
 
     with {:ok, worker_port} <- get_worker_port(tool.worker_id),
          {:ok, channel} <- create_worker_channel(worker_port),
@@ -175,7 +176,7 @@ defmodule Snakepit.GRPC.BridgeServer do
       {:ok, result}
     else
       {:error, reason} ->
-        Logger.error("Failed to execute remote tool #{tool.name}: #{inspect(reason)}")
+        SLog.error("Failed to execute remote tool #{tool.name}: #{inspect(reason)}")
         {:error, "Remote tool execution failed: #{inspect(reason)}"}
     end
   end
@@ -287,7 +288,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   # Tool Registration & Discovery
 
   def register_tools(%RegisterToolsRequest{} = request, _stream) do
-    Logger.info("RegisterTools for session #{request.session_id}, worker: #{request.worker_id}")
+    SLog.info("RegisterTools for session #{request.session_id}, worker: #{request.worker_id}")
 
     with {:ok, _session} <- SessionStore.get_session(request.session_id) do
       # Convert proto ToolRegistration to internal format
@@ -336,7 +337,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def get_exposed_elixir_tools(%GetExposedElixirToolsRequest{session_id: session_id}, _stream) do
-    Logger.debug("GetExposedElixirTools for session #{session_id}")
+    SLog.debug("GetExposedElixirTools for session #{session_id}")
 
     tools = ToolRegistry.list_exposed_elixir_tools(session_id)
 
@@ -375,7 +376,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def execute_elixir_tool(%ExecuteElixirToolRequest{} = request, _stream) do
-    Logger.info("ExecuteElixirTool: #{request.tool_name} for session #{request.session_id}")
+    SLog.info("ExecuteElixirTool: #{request.tool_name} for session #{request.session_id}")
 
     start_time = System.monotonic_time(:millisecond)
 
