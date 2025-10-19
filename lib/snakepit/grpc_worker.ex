@@ -32,6 +32,7 @@ defmodule Snakepit.GRPCWorker do
   use GenServer
   require Logger
   alias Snakepit.Telemetry.Correlation
+  alias Snakepit.Logger, as: SLog
   require OpenTelemetry.Tracer, as: Tracer
 
   def child_spec(opts) when is_list(opts) do
@@ -195,7 +196,7 @@ defmodule Snakepit.GRPCWorker do
     # This ensures we can track the process even if we crash during spawn
     case Snakepit.Pool.ProcessRegistry.reserve_worker(worker_id) do
       :ok ->
-        Logger.debug("Reserved worker slot for #{worker_id}")
+        SLog.debug("Reserved worker slot for #{worker_id}")
         # Generate unique session ID
         session_id =
           "session_#{:erlang.unique_integer([:positive, :monotonic])}_#{:erlang.system_time(:microsecond)}"
@@ -268,7 +269,7 @@ defmodule Snakepit.GRPCWorker do
         run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
         args = args ++ ["--snakepit-run-id", run_id]
 
-        Logger.info(
+        SLog.info(
           "Starting gRPC server: #{executable} #{script_path || ""} #{Enum.join(args, " ")}"
         )
 
@@ -326,11 +327,11 @@ defmodule Snakepit.GRPCWorker do
         process_pid =
           case Port.info(server_port, :os_pid) do
             {:os_pid, pid} ->
-              Logger.info("Started gRPC server process, will listen on TCP port #{port}")
+              SLog.info("Started gRPC server process, will listen on TCP port #{port}")
               pid
 
             error ->
-              Logger.error("Failed to get gRPC server process PID: #{inspect(error)}")
+              SLog.error("Failed to get gRPC server process PID: #{inspect(error)}")
               nil
           end
 
@@ -346,12 +347,12 @@ defmodule Snakepit.GRPCWorker do
                  "grpc_worker"
                ) do
             :ok ->
-              Logger.debug(
+              SLog.debug(
                 "Registered Python PID #{process_pid} for worker #{worker_id} in ProcessRegistry"
               )
 
             {:error, reason} ->
-              Logger.error(
+              SLog.error(
                 "Failed to register Python PID #{process_pid} for worker #{worker_id}: #{inspect(reason)}"
               )
           end
@@ -382,7 +383,7 @@ defmodule Snakepit.GRPCWorker do
         {:ok, state, {:continue, :connect_and_wait}}
 
       {:error, reason} ->
-        Logger.error("Failed to reserve worker slot for #{worker_id}: #{inspect(reason)}")
+        SLog.error("Failed to reserve worker slot for #{worker_id}: #{inspect(reason)}")
         {:stop, {:reservation_failed, reason}}
     end
   end
@@ -407,7 +408,7 @@ defmodule Snakepit.GRPCWorker do
 
             if not pool_alive do
               # Pool already dead - gracefully stop without crashing
-              Logger.debug(
+              SLog.debug(
                 "Worker #{state.id} finished starting but Pool is shut down. Stopping gracefully."
               )
 
@@ -426,9 +427,7 @@ defmodule Snakepit.GRPCWorker do
                     state.worker_config
                   )
 
-                  Logger.info(
-                    "✅ gRPC worker #{state.id} initialization complete and acknowledged."
-                  )
+                  SLog.info("✅ gRPC worker #{state.id} initialization complete and acknowledged.")
 
                   maybe_initialize_session(connection, state.session_id)
 
@@ -441,14 +440,14 @@ defmodule Snakepit.GRPCWorker do
                   {:noreply, new_state}
 
                 {:error, reason} ->
-                  Logger.error("Pool rejected worker registration: #{inspect(reason)}")
+                  SLog.error("Pool rejected worker registration: #{inspect(reason)}")
 
                   {:stop, {:pool_rejected_worker, reason}, state}
               end
             end
 
           {:error, reason} ->
-            Logger.error("Failed to connect to gRPC server: #{reason}")
+            SLog.error("Failed to connect to gRPC server: #{reason}")
             {:stop, {:grpc_connection_failed, reason}, state}
         end
 
@@ -456,10 +455,10 @@ defmodule Snakepit.GRPCWorker do
         # Suppress error logs for expected shutdown signals (143=SIGTERM, 137=SIGKILL, 0=graceful)
         case reason do
           {:exit_status, status} when status in [0, 137, 143] ->
-            Logger.debug("gRPC server exited during startup with status #{status} (shutdown)")
+            SLog.debug("gRPC server exited during startup with status #{status} (shutdown)")
 
           _ ->
-            Logger.error("Failed to start gRPC server: #{inspect(reason)}")
+            SLog.error("Failed to start gRPC server: #{inspect(reason)}")
         end
 
         {:stop, {:grpc_server_failed, reason}, state}
@@ -492,7 +491,7 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_call({:execute_stream, command, args, callback_fn, timeout}, _from, state) do
-    Logger.info(
+    SLog.info(
       "[GRPCWorker] handle_call execute_stream - command: #{command}, args: #{inspect(args)}"
     )
 
@@ -505,7 +504,7 @@ defmodule Snakepit.GRPCWorker do
         timeout
       )
 
-    Logger.info("[GRPCWorker] grpc_execute_stream returned: #{inspect(result)}")
+    SLog.info("[GRPCWorker] grpc_execute_stream returned: #{inspect(result)}")
 
     new_state =
       case result do
@@ -585,7 +584,7 @@ defmodule Snakepit.GRPCWorker do
         {:noreply, %{state | health_check_ref: health_ref}}
 
       {:error, reason} ->
-        Logger.warning("Health check failed: #{reason}")
+        SLog.warning("Health check failed: #{reason}")
         # Could implement reconnection logic here
         health_ref = schedule_health_check()
         {:noreply, %{state | health_check_ref: health_ref}}
@@ -594,7 +593,7 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_info({:DOWN, _ref, :port, port, reason}, %{server_port: port} = state) do
-    Logger.error("External gRPC process died: #{inspect(reason)}")
+    SLog.error("External gRPC process died: #{inspect(reason)}")
     {:stop, {:external_process_died, reason}, state}
   end
 
@@ -604,7 +603,7 @@ defmodule Snakepit.GRPCWorker do
     output = String.trim(to_string(data))
 
     if output != "" do
-      Logger.info("gRPC server output: #{output}")
+      SLog.info("gRPC server output: #{output}")
     end
 
     {:noreply, state}
@@ -615,7 +614,7 @@ defmodule Snakepit.GRPCWorker do
     # DIAGNOSTIC: Drain any remaining error output from the port buffer
     remaining_output = drain_port_buffer(port, 200)
 
-    Logger.error("""
+    SLog.error("""
     🔴 Python gRPC server exited with status #{status}
     Worker: #{state.id}
     Port: #{state.port}
@@ -628,7 +627,7 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_info(msg, state) do
-    Logger.debug("Unexpected message: #{inspect(msg)}")
+    SLog.debug("Unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -638,13 +637,11 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def terminate(reason, state) do
-    IO.puts("\n!!! GRPCWorker.terminate/2 CALLED !!!")
-
-    IO.inspect(%{worker_id: state.id, reason: reason, process_pid: state.process_pid},
-      label: "TERMINATE"
+    SLog.debug(
+      "GRPCWorker.terminate/2 called for #{state.id}, reason: #{inspect(reason)}, PID: #{state.process_pid}"
     )
 
-    Logger.debug("gRPC worker #{state.id} terminating: #{inspect(reason)}")
+    SLog.debug("gRPC worker #{state.id} terminating: #{inspect(reason)}")
 
     maybe_stop_heartbeat_monitor(state.heartbeat_monitor)
     maybe_notify_test_pid(state.heartbeat_config, {:heartbeat_monitor_stopped, state.id, reason})
@@ -656,7 +653,7 @@ defmodule Snakepit.GRPCWorker do
       # :normal occurs when pool dies during worker startup - we should still be graceful
       if reason in [:shutdown, :normal] do
         # Graceful shutdown - use SIGTERM with escalation
-        Logger.debug(
+        SLog.debug(
           "Starting graceful shutdown of external gRPC process PID: #{state.process_pid}..."
         )
 
@@ -665,23 +662,23 @@ defmodule Snakepit.GRPCWorker do
                @graceful_shutdown_timeout
              ) do
           :ok ->
-            Logger.debug("✅ gRPC server PID #{state.process_pid} terminated gracefully")
+            SLog.debug("✅ gRPC server PID #{state.process_pid} terminated gracefully")
 
           {:error, reason} ->
-            Logger.warning("Failed to gracefully kill #{state.process_pid}: #{inspect(reason)}")
+            SLog.warning("Failed to gracefully kill #{state.process_pid}: #{inspect(reason)}")
         end
       else
         # Non-graceful termination (crash, error, etc.) - immediate SIGKILL
-        Logger.warning(
+        SLog.warning(
           "Non-graceful termination (#{inspect(reason)}), immediately killing PID #{state.process_pid}"
         )
 
         case Snakepit.ProcessKiller.kill_process(state.process_pid, :sigkill) do
           :ok ->
-            Logger.debug("✅ Immediately killed gRPC server PID #{state.process_pid}")
+            SLog.debug("✅ Immediately killed gRPC server PID #{state.process_pid}")
 
           {:error, reason} ->
-            Logger.warning("Failed to kill #{state.process_pid}: #{inspect(reason)}")
+            SLog.warning("Failed to kill #{state.process_pid}: #{inspect(reason)}")
         end
       end
     end
@@ -742,7 +739,7 @@ defmodule Snakepit.GRPCWorker do
             %{state | heartbeat_monitor: monitor_pid, heartbeat_config: config}
 
           {:error, reason} ->
-            Logger.error("Failed to start heartbeat monitor for #{state.id}: #{inspect(reason)}")
+            SLog.error("Failed to start heartbeat monitor for #{state.id}: #{inspect(reason)}")
             maybe_notify_test_pid(config, {:heartbeat_monitor_failed, state.id, reason})
 
             %{state | heartbeat_monitor: nil, heartbeat_config: config}
@@ -798,11 +795,11 @@ defmodule Snakepit.GRPCWorker do
         :ok
       rescue
         exception ->
-          Logger.debug("Heartbeat session initialization failed: #{inspect(exception)}")
+          SLog.debug("Heartbeat session initialization failed: #{inspect(exception)}")
           :error
       catch
         :exit, reason ->
-          Logger.debug("Heartbeat session initialization exited: #{inspect(reason)}")
+          SLog.debug("Heartbeat session initialization exited: #{inspect(reason)}")
           :error
       end
     else
@@ -968,8 +965,8 @@ defmodule Snakepit.GRPCWorker do
 
   #       cond do
   #         String.contains?(output, "gRPC Bridge started") ->
-  #           Logger.info("gRPC worker started successfully on port #{expected_port}")
-  #           Logger.info("gRPC server output: #{String.trim(output)}")
+  #           SLog.info("gRPC worker started successfully on port #{expected_port}")
+  #           SLog.info("gRPC server output: #{String.trim(output)}")
   #           {:ok, port}
 
   #         true ->
@@ -1013,7 +1010,7 @@ defmodule Snakepit.GRPCWorker do
 
         # Log any output for debugging
         if String.trim(output) != "" do
-          Logger.debug("Python server output during startup: #{String.trim(output)}")
+          SLog.debug("Python server output during startup: #{String.trim(output)}")
         end
 
         # Look for the ready message anywhere in the output
@@ -1043,21 +1040,21 @@ defmodule Snakepit.GRPCWorker do
         # Exit status 137 is SIGKILL (128 + 9) - cleanup, don't alarm
         # Exit status 0 is graceful exit
         if status in [0, 137, 143] do
-          Logger.debug(
+          SLog.debug(
             "Python gRPC server process exited with status #{status} during startup (shutdown)"
           )
         else
-          Logger.error("Python gRPC server process exited with status #{status} during startup")
+          SLog.error("Python gRPC server process exited with status #{status} during startup")
         end
 
         {:error, {:exit_status, status}}
 
       {:DOWN, _ref, :port, ^port, reason} ->
-        Logger.error("Python gRPC server port died during startup: #{inspect(reason)}")
+        SLog.error("Python gRPC server port died during startup: #{inspect(reason)}")
         {:error, {:port_died, reason}}
     after
       timeout ->
-        Logger.error("Timeout waiting for Python gRPC server to start after #{timeout}ms")
+        SLog.error("Timeout waiting for Python gRPC server to start after #{timeout}ms")
         {:error, :timeout}
     end
   end

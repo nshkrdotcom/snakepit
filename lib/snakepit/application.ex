@@ -13,6 +13,7 @@ defmodule Snakepit.Application do
 
   use Application
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   @impl true
   def start(_type, _args) do
@@ -48,7 +49,7 @@ defmodule Snakepit.Application do
     # Unbuffered output for better logging
     System.put_env("PYTHONUNBUFFERED", "1")
 
-    Logger.info(
+    SLog.info(
       "🧵 Set Python thread limits: OPENBLAS=#{thread_limits.openblas}, OMP=#{thread_limits.omp}, MKL=#{thread_limits.mkl}, NUMEXPR=#{thread_limits.numexpr}, GRPC=single-threaded"
     )
 
@@ -56,16 +57,14 @@ defmodule Snakepit.Application do
     pooling_enabled = Application.get_env(:snakepit, :pooling_enabled, false)
 
     if Application.get_env(:snakepit, :enable_otlp?, false) do
-      Logger.info("OTLP telemetry enabled (SNAKEPIT_ENABLE_OTLP=true)")
+      SLog.info("OTLP telemetry enabled (SNAKEPIT_ENABLE_OTLP=true)")
       Snakepit.Telemetry.OpenTelemetry.setup()
     else
-      Logger.info("OTLP telemetry disabled (set SNAKEPIT_ENABLE_OTLP=true to enable)")
+      SLog.debug("OTLP telemetry disabled (set SNAKEPIT_ENABLE_OTLP=true to enable)")
     end
 
-    IO.inspect(
-      pooling_enabled: pooling_enabled,
-      env: Mix.env(),
-      label: "Snakepit.Application.start/2"
+    SLog.debug(
+      "Snakepit.Application.start/2: pooling_enabled=#{pooling_enabled}, env=#{Mix.env()}"
     )
 
     # Get gRPC config for the Elixir server
@@ -84,7 +83,7 @@ defmodule Snakepit.Application do
         pool_config = Application.get_env(:snakepit, :pool_config, %{})
         pool_size = Map.get(pool_config, :pool_size, System.schedulers_online() * 2)
 
-        Logger.info("🚀 Starting Snakepit with pooling enabled (size: #{pool_size})")
+        SLog.info("🚀 Starting Snakepit with pooling enabled (size: #{pool_size})")
 
         # Initialize ETS table for thread profile capacity tracking
         # Must be created before any workers start
@@ -102,10 +101,7 @@ defmodule Snakepit.Application do
              num_acceptors: 20,
              max_connections: 1000,
              socket_opts: [backlog: 512]
-           ]}
-          |> tap(fn spec ->
-            IO.inspect(spec, label: "Adding GRPC.Server.Supervisor to children")
-          end),
+           ]},
 
           # Task supervisor for async pool operations
           {Task.Supervisor, name: Snakepit.TaskSupervisor},
@@ -133,7 +129,7 @@ defmodule Snakepit.Application do
           Snakepit.Pool.ApplicationCleanup
         ]
       else
-        Logger.info("🔧 Starting Snakepit with pooling disabled")
+        SLog.info("🔧 Starting Snakepit with pooling disabled")
         []
       end
 
@@ -141,16 +137,13 @@ defmodule Snakepit.Application do
 
     opts = [strategy: :one_for_one, name: Snakepit.Supervisor]
     result = Supervisor.start_link(children, opts)
-    IO.inspect(System.monotonic_time(:millisecond), label: "Snakepit.Application started at")
+    SLog.debug("Snakepit.Application started at: #{System.monotonic_time(:millisecond)}")
     result
   end
 
   @impl true
   def stop(_state) do
-    IO.inspect(System.monotonic_time(:millisecond),
-      label: "Snakepit.Application.stop/1 called at"
-    )
-
+    SLog.debug("Snakepit.Application.stop/1 called at: #{System.monotonic_time(:millisecond)}")
     :ok
   end
 
@@ -169,7 +162,7 @@ defmodule Snakepit.Application do
           {:write_concurrency, true}
         ])
 
-        Logger.debug("Created worker capacity ETS table: #{table_name}")
+        SLog.debug("Created worker capacity ETS table: #{table_name}")
 
       _ ->
         # Table already exists

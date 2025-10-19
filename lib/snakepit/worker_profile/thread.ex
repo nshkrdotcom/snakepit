@@ -54,6 +54,7 @@ defmodule Snakepit.WorkerProfile.Thread do
   @behaviour Snakepit.WorkerProfile
 
   require Logger
+  alias Snakepit.Logger, as: SLog
 
   # ETS table name for tracking worker capacity
   @capacity_table :snakepit_worker_capacity
@@ -73,8 +74,8 @@ defmodule Snakepit.WorkerProfile.Thread do
     adapter_args = build_adapter_args(config)
     adapter_env = build_adapter_env(config)
 
-    Logger.info("Starting threaded worker #{worker_id} with #{threads_per_worker} threads")
-    Logger.debug("Thread worker adapter_args: #{inspect(adapter_args)}")
+    SLog.info("Starting threaded worker #{worker_id} with #{threads_per_worker} threads")
+    SLog.debug("Thread worker adapter_args: #{inspect(adapter_args)}")
 
     # Create enhanced worker config with thread profile settings
     worker_config =
@@ -94,14 +95,14 @@ defmodule Snakepit.WorkerProfile.Thread do
         # Track capacity in ETS
         :ets.insert(@capacity_table, {pid, threads_per_worker, 0})
 
-        Logger.info(
+        SLog.info(
           "Thread profile started worker #{worker_id}: #{inspect(pid)} with capacity #{threads_per_worker}"
         )
 
         {:ok, pid}
 
       error ->
-        Logger.error("Failed to start threaded worker #{worker_id}: #{inspect(error)}")
+        SLog.error("Failed to start threaded worker #{worker_id}: #{inspect(error)}")
         error
     end
   end
@@ -293,7 +294,7 @@ defmodule Snakepit.WorkerProfile.Thread do
           {:write_concurrency, true}
         ])
 
-        Logger.debug("Created worker capacity ETS table: #{@capacity_table}")
+        SLog.debug("Created worker capacity ETS table: #{@capacity_table}")
 
       _ ->
         # Table already exists
@@ -409,7 +410,7 @@ defmodule Snakepit.WorkerProfile.Thread do
 
       [] ->
         # Worker not tracked (shouldn't happen, but allow)
-        Logger.warning("Worker #{inspect(worker_pid)} not found in capacity table")
+        SLog.warning("Worker #{inspect(worker_pid)} not found in capacity table")
         :ok
     end
   end

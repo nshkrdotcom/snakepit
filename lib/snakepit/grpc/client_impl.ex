@@ -4,6 +4,7 @@ defmodule Snakepit.GRPC.ClientImpl do
   """
 
   require Logger
+  alias Snakepit.Logger, as: SLog
   alias Snakepit.Bridge
 
   @default_timeout 30_000
@@ -212,7 +213,7 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   defp handle_error({:error, %GRPC.RPCError{} = error}) do
-    Logger.error("gRPC error: #{inspect(error)}")
+    SLog.error("gRPC error: #{inspect(error)}")
 
     case error.status do
       3 -> {:error, :invalid_argument}

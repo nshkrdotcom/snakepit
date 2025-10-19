@@ -6,7 +6,6 @@
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :pooling_enabled, true)
-Application.put_env(:snakepit, :pool_size, 2)
 
 Application.put_env(:snakepit, :pools, [
   %{
@@ -20,17 +19,14 @@ Application.put_env(:snakepit, :pools, [
 Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
 Application.put_env(:snakepit, :grpc_port, 50051)
 
-Code.require_file("mix_bootstrap.exs", __DIR__)
+# Suppress Snakepit internal logs (options: :debug, :info, :warning, :error, :none)
+Application.put_env(:snakepit, :log_level, :warning)
 
-Snakepit.Examples.Bootstrap.ensure_mix!([
+Mix.install([
   {:snakepit, path: "."},
   {:grpc, "~> 0.10.2"},
   {:protobuf, "~> 0.14.1"}
 ])
-
-IO.inspect(Application.get_env(:snakepit, :enable_otlp?, false), label: "example enable otlp?")
-
-IO.inspect(Application.get_env(:snakepit, :opentelemetry), label: "example otel config")
 
 defmodule BasicExample do
   def run do
