@@ -43,12 +43,31 @@ defmodule Snakepit.GRPCWorker do
 
   @type worker_state :: %{
           adapter: module(),
+          connection: map() | nil,
           port: integer(),
-          channel: term() | nil,
+          process_pid: integer() | nil,
+          server_port: port() | nil,
+          id: String.t(),
+          pool_name: atom() | pid(),
           health_check_ref: reference() | nil,
+          heartbeat_monitor: pid() | nil,
+          heartbeat_config: map(),
           stats: map(),
-          session_id: String.t()
+          session_id: String.t(),
+          worker_config: map()
         }
+
+  @heartbeat_defaults %{
+    enabled: false,
+    ping_interval_ms: 2_000,
+    timeout_ms: 10_000,
+    max_missed_heartbeats: 3,
+    ping_fun: nil,
+    test_pid: nil
+  }
+
+  @heartbeat_known_keys Map.keys(@heartbeat_defaults)
+  @heartbeat_known_key_strings Enum.map(@heartbeat_known_keys, &Atom.to_string/1)
 
   # Client API
 
@@ -186,6 +205,11 @@ defmodule Snakepit.GRPCWorker do
         # CRITICAL: Get worker_config FIRST to use per-worker adapter settings
         worker_config = Keyword.get(opts, :worker_config, %{})
 
+        heartbeat_config =
+          worker_config
+          |> get_worker_config_section(:heartbeat)
+          |> normalize_heartbeat_config()
+
         # Start the gRPC server process non-blocking
         executable = adapter.executable_path()
 
@@ -204,7 +228,7 @@ defmodule Snakepit.GRPCWorker do
 
         # Determine which script to use based on adapter_args (threaded vs process mode)
         # If --max-workers is specified, use the threaded server
-        script =
+        script_path =
           if Enum.any?(adapter_args, fn arg ->
                is_binary(arg) and String.contains?(arg, "--max-workers")
              end) do
@@ -241,20 +265,39 @@ defmodule Snakepit.GRPCWorker do
         run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
         args = args ++ ["--snakepit-run-id", run_id]
 
-        Logger.info("Starting gRPC server: #{executable} #{script} #{Enum.join(args, " ")}")
+        Logger.info(
+          "Starting gRPC server: #{executable} #{script_path || ""} #{Enum.join(args, " ")}"
+        )
 
         # Spawn the Python executable directly. Cleanup is handled by ProcessKiller via run_id.
         # CRITICAL: Do NOT use setsid wrapper - it exits immediately with status 0 while the
         # actual Python process becomes an orphaned grandchild, causing the Port to think
         # the process died when it's actually still running.
-        port_opts = [
-          :binary,
-          :exit_status,
-          :use_stdio,
-          :stderr_to_stdout,
-          {:args, [script | args]},
-          {:cd, Path.dirname(script)}
-        ]
+        {spawn_args, port_opts} =
+          case script_path do
+            path when is_binary(path) and byte_size(path) > 0 ->
+              {
+                [path | args],
+                [
+                  :binary,
+                  :exit_status,
+                  :use_stdio,
+                  :stderr_to_stdout,
+                  {:cd, Path.dirname(path)}
+                ]
+              }
+
+            _ ->
+              {
+                args,
+                [
+                  :binary,
+                  :exit_status,
+                  :use_stdio,
+                  :stderr_to_stdout
+                ]
+              }
+          end
 
         # Apply adapter_env to the spawned process if provided
         port_opts =
@@ -271,7 +314,9 @@ defmodule Snakepit.GRPCWorker do
             port_opts
           end
 
-        server_port = Port.open({:spawn_executable, executable}, port_opts)
+        server_port =
+          Port.open({:spawn_executable, executable}, [{:args, spawn_args} | port_opts])
+
         Port.monitor(server_port)
 
         # Extract external process PID for cleanup registry
@@ -318,6 +363,8 @@ defmodule Snakepit.GRPCWorker do
           process_pid: process_pid,
           session_id: session_id,
           worker_config: worker_config,
+          heartbeat_config: heartbeat_config,
+          heartbeat_monitor: nil,
           # Will be established in handle_continue
           connection: nil,
           health_check_ref: nil,
@@ -380,7 +427,13 @@ defmodule Snakepit.GRPCWorker do
                     "✅ gRPC worker #{state.id} initialization complete and acknowledged."
                   )
 
-                  {:noreply, %{state | connection: connection, health_check_ref: health_ref}}
+                  new_state =
+                    state
+                    |> Map.put(:connection, connection)
+                    |> Map.put(:health_check_ref, health_ref)
+                    |> maybe_start_heartbeat_monitor()
+
+                  {:noreply, new_state}
 
                 {:error, reason} ->
                   Logger.error("Pool rejected worker registration: #{inspect(reason)}")
@@ -565,6 +618,9 @@ defmodule Snakepit.GRPCWorker do
 
     Logger.debug("gRPC worker #{state.id} terminating: #{inspect(reason)}")
 
+    maybe_stop_heartbeat_monitor(state.heartbeat_monitor)
+    maybe_notify_test_pid(state.heartbeat_config, {:heartbeat_monitor_stopped, state.id, reason})
+
     # ALWAYS kill the Python process, regardless of reason
     # This is critical to prevent orphaned processes
     if state.process_pid do
@@ -603,9 +659,7 @@ defmodule Snakepit.GRPCWorker do
     end
 
     # Final resource cleanup (run regardless of shutdown reason)
-    if state.connection do
-      GRPC.Stub.disconnect(state.connection.channel)
-    end
+    disconnect_connection(state.connection)
 
     if state.health_check_ref do
       Process.cancel_timer(state.health_check_ref)
@@ -622,6 +676,210 @@ defmodule Snakepit.GRPCWorker do
 
     :ok
   end
+
+  defp maybe_start_heartbeat_monitor(state) do
+    config = normalize_heartbeat_config(state.heartbeat_config)
+
+    cond do
+      not config[:enabled] ->
+        maybe_stop_heartbeat_monitor(state.heartbeat_monitor)
+        %{state | heartbeat_config: config, heartbeat_monitor: nil}
+
+      heartbeat_monitor_running?(state.heartbeat_monitor) ->
+        %{state | heartbeat_config: config}
+
+      state.connection == nil ->
+        %{state | heartbeat_config: config}
+
+      true ->
+        monitor_opts = [
+          {:worker_pid, self()},
+          {:worker_id, state.id},
+          {:ping_interval_ms, config[:ping_interval_ms]},
+          {:timeout_ms, config[:timeout_ms]},
+          {:max_missed_heartbeats, config[:max_missed_heartbeats]},
+          {:ping_fun, config[:ping_fun] || build_default_ping_fun(state, config)}
+        ]
+
+        case Snakepit.HeartbeatMonitor.start_link(monitor_opts) do
+          {:ok, monitor_pid} ->
+            maybe_notify_test_pid(config, {:heartbeat_monitor_started, state.id, monitor_pid})
+
+            %{state | heartbeat_monitor: monitor_pid, heartbeat_config: config}
+
+          {:error, {:already_started, monitor_pid}} when is_pid(monitor_pid) ->
+            maybe_notify_test_pid(config, {:heartbeat_monitor_started, state.id, monitor_pid})
+
+            %{state | heartbeat_monitor: monitor_pid, heartbeat_config: config}
+
+          {:error, reason} ->
+            Logger.error("Failed to start heartbeat monitor for #{state.id}: #{inspect(reason)}")
+            maybe_notify_test_pid(config, {:heartbeat_monitor_failed, state.id, reason})
+
+            %{state | heartbeat_monitor: nil, heartbeat_config: config}
+        end
+    end
+  end
+
+  defp heartbeat_monitor_running?(pid) when is_pid(pid) do
+    Process.alive?(pid)
+  end
+
+  defp heartbeat_monitor_running?(_), do: false
+
+  defp build_default_ping_fun(state, config) do
+    connection = state.connection
+    adapter = state.adapter
+    session_id = state.session_id
+    channel = connection && Map.get(connection, :channel)
+
+    fn timestamp ->
+      result =
+        cond do
+          function_exported?(adapter, :grpc_heartbeat, 3) ->
+            apply(adapter, :grpc_heartbeat, [connection, session_id, config])
+
+          function_exported?(adapter, :grpc_heartbeat, 2) ->
+            apply(adapter, :grpc_heartbeat, [connection, session_id])
+
+          heartbeat_channel_available?(channel) ->
+            Snakepit.GRPC.Client.heartbeat(channel, session_id, timeout: config[:timeout_ms])
+
+          true ->
+            {:error, :no_heartbeat_transport}
+        end
+
+      handle_heartbeat_response(self(), timestamp, result)
+    end
+  end
+
+  defp heartbeat_channel_available?(channel) when is_map(channel), do: true
+  defp heartbeat_channel_available?(channel) when is_struct(channel), do: true
+  defp heartbeat_channel_available?(channel) when is_reference(channel), do: true
+  defp heartbeat_channel_available?(channel) when is_pid(channel), do: true
+  defp heartbeat_channel_available?(channel) when is_binary(channel), do: byte_size(channel) > 0
+  defp heartbeat_channel_available?(_), do: false
+
+  defp handle_heartbeat_response(monitor_pid, timestamp, :ok) do
+    Snakepit.HeartbeatMonitor.notify_pong(monitor_pid, timestamp)
+    :ok
+  end
+
+  defp handle_heartbeat_response(monitor_pid, timestamp, {:ok, %{success: success}})
+       when success in [true, true, 1] do
+    Snakepit.HeartbeatMonitor.notify_pong(monitor_pid, timestamp)
+    :ok
+  end
+
+  defp handle_heartbeat_response(_monitor_pid, _timestamp, {:ok, %{success: false} = payload}) do
+    {:error, {:heartbeat_failed, payload}}
+  end
+
+  defp handle_heartbeat_response(monitor_pid, timestamp, {:ok, _response}) do
+    Snakepit.HeartbeatMonitor.notify_pong(monitor_pid, timestamp)
+    :ok
+  end
+
+  defp handle_heartbeat_response(_monitor_pid, _timestamp, {:error, reason}) do
+    {:error, reason}
+  end
+
+  defp handle_heartbeat_response(_monitor_pid, _timestamp, other) do
+    {:error, other}
+  end
+
+  defp maybe_notify_test_pid(%{test_pid: pid}, message) when is_pid(pid) do
+    send(pid, message)
+    :ok
+  end
+
+  defp maybe_notify_test_pid(%{"test_pid" => pid}, message) when is_pid(pid) do
+    send(pid, message)
+    :ok
+  end
+
+  defp maybe_notify_test_pid(_config, _message), do: :ok
+
+  defp maybe_stop_heartbeat_monitor(nil), do: :ok
+
+  defp maybe_stop_heartbeat_monitor(pid) when is_pid(pid) do
+    if Process.alive?(pid) do
+      try do
+        GenServer.stop(pid, :worker_stopping)
+      catch
+        :exit, _ -> :ok
+      end
+    end
+
+    :ok
+  end
+
+  defp normalize_heartbeat_config(config) when is_map(config) do
+    normalized =
+      Enum.reduce(@heartbeat_defaults, %{}, fn {key, default}, acc ->
+        Map.put(acc, key, get_config_value(config, key, default))
+      end)
+
+    extras =
+      config
+      |> Enum.reject(fn {key, _value} -> heartbeat_known_key?(key) end)
+      |> Map.new()
+
+    Map.merge(extras, normalized)
+  end
+
+  defp normalize_heartbeat_config(_config), do: Map.merge(%{}, @heartbeat_defaults)
+
+  defp get_config_value(config, key, default) when is_atom(key) do
+    cond do
+      Map.has_key?(config, key) ->
+        Map.get(config, key)
+
+      Map.has_key?(config, Atom.to_string(key)) ->
+        Map.get(config, Atom.to_string(key))
+
+      true ->
+        default
+    end
+  end
+
+  defp heartbeat_known_key?(key) when is_atom(key) do
+    key in @heartbeat_known_keys
+  end
+
+  defp heartbeat_known_key?(key) when is_binary(key) do
+    key in @heartbeat_known_key_strings
+  end
+
+  defp disconnect_connection(nil), do: :ok
+
+  defp disconnect_connection(%{channel: %GRPC.Channel{} = channel}) do
+    try do
+      GRPC.Stub.disconnect(channel)
+    rescue
+      _ -> :ok
+    catch
+      :exit, _ -> :ok
+    end
+  end
+
+  defp disconnect_connection(%{channel: channel}) when not is_nil(channel), do: :ok
+  defp disconnect_connection(_), do: :ok
+
+  defp get_worker_config_section(config, key) when is_map(config) and is_atom(key) do
+    cond do
+      Map.has_key?(config, key) ->
+        Map.get(config, key)
+
+      Map.has_key?(config, Atom.to_string(key)) ->
+        Map.get(config, Atom.to_string(key))
+
+      true ->
+        nil
+    end
+  end
+
+  defp get_worker_config_section(_config, _key), do: nil
 
   # CRITICAL FIX: Defensive port cleanup that handles all exit scenarios
   defp safe_close_port(port) do
