@@ -1134,21 +1134,15 @@ defmodule Snakepit.Pool do
     ctx = :otel_ctx.get_current()
 
     Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
-      token = maybe_attach_ctx(ctx)
+      token = :otel_ctx.attach(ctx)
 
       try do
         fun.()
       after
-        maybe_detach_ctx(token)
+        :otel_ctx.detach(token)
       end
     end)
   end
-
-  defp maybe_attach_ctx(nil), do: :undefined
-  defp maybe_attach_ctx(ctx), do: :otel_ctx.attach(ctx)
-
-  defp maybe_detach_ctx(:undefined), do: :ok
-  defp maybe_detach_ctx(token), do: :otel_ctx.detach(token)
 
   # DIAGNOSTIC: Resource monitoring helpers
   defp capture_resource_metrics do

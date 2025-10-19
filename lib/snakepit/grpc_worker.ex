@@ -1175,8 +1175,6 @@ defmodule Snakepit.GRPCWorker do
     |> ensure_correlation()
   end
 
-  defp ensure_correlation(_args), do: ensure_correlation(%{})
-
   defp correlation_id_from(%{} = args) do
     args
     |> Map.get(:correlation_id)
@@ -1186,8 +1184,6 @@ defmodule Snakepit.GRPCWorker do
     end
     |> Correlation.ensure()
   end
-
-  defp correlation_id_from(_args), do: Correlation.new_id()
 
   defp base_execute_metadata(kind, state, command, args, correlation_id, timeout) do
     session_id =

@@ -27,7 +27,7 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
     if config.enabled do
       configure_resource(config)
 
-      case ensure_runtime(config) do
+      case maybe_ensure_runtime(config) do
         :ok ->
           attach_grpc_handlers(config)
           attach_heartbeat_handlers(config)
@@ -357,10 +357,14 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
     _ -> :ok
   end
 
+  defp maybe_ensure_runtime(%{skip_runtime?: true}), do: :ok
+  defp maybe_ensure_runtime(config), do: ensure_runtime(config)
+
   defp load_config do
     defaults = %{
       enabled: false,
       tracer_id: :snakepit_grpc_worker,
+      skip_runtime?: false,
       exporters: %{
         otlp: %{
           enabled: false,
