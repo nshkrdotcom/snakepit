@@ -21,11 +21,24 @@ pool_size =
 
 # Configure Snakepit
 Application.put_env(:snakepit, :pooling_enabled, true)
+Application.put_env(:snakepit, :pool_size, pool_size)
+
+Application.put_env(:snakepit, :pools, [
+  %{
+    name: :default,
+    worker_profile: :process,
+    pool_size: pool_size,
+    adapter_module: Snakepit.Adapters.GRPCPython
+  }
+])
+
 Application.put_env(:snakepit, :pool_config, %{pool_size: pool_size})
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :grpc_port, 50051)
 
-Mix.install([
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
   {:snakepit, path: "."},
   {:grpc, "~> 0.10.2"},
   {:protobuf, "~> 0.14.1"}
@@ -74,7 +87,7 @@ defmodule StreamingDemo do
     IO.puts("-" |> String.duplicate(40))
 
     tasks =
-      for i <- 1..3 do
+      for _i <- 1..3 do
         Task.async(fn ->
           {:ok, result} = Snakepit.execute("ping", %{})
           result

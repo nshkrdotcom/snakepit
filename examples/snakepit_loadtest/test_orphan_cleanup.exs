@@ -1,11 +1,22 @@
 # Test script to verify orphan cleanup works correctly
+Code.require_file("../mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
+
 Application.ensure_all_started(:snakepit)
 
 # Wait for pool to initialize
 Process.sleep(3000)
 
 # Get PIDs of Python processes
-{output, 0} = System.cmd("bash", ["-c", "ps aux | grep -E 'python.*grpc_server' | grep -v grep | awk '{print $2}' | head -5"])
+{output, 0} =
+  System.cmd("bash", [
+    "-c",
+    "ps aux | grep -E 'python.*grpc_server' | grep -v grep | awk '{print $2}' | head -5"
+  ])
+
 pids = String.split(String.trim(output), "\n") |> Enum.filter(&(&1 != ""))
 
 IO.puts("Found #{length(pids)} Python processes: #{inspect(pids)}")

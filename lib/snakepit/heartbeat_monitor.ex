@@ -32,6 +32,7 @@ defmodule Snakepit.HeartbeatMonitor do
     :ping_timer,
     :timeout_timer,
     :last_ping_timestamp,
+    :initial_delay,
     missed_heartbeats: 0,
     stats: %{pings_sent: 0, pongs_received: 0, timeouts: 0}
   ]
@@ -65,6 +66,7 @@ defmodule Snakepit.HeartbeatMonitor do
     ping_interval = Keyword.get(opts, :ping_interval_ms, @default_ping_interval)
     timeout = Keyword.get(opts, :timeout_ms, @default_timeout)
     max_missed = Keyword.get(opts, :max_missed_heartbeats, @default_max_missed)
+    initial_delay = Keyword.get(opts, :initial_delay_ms, 0)
 
     ping_fun =
       Keyword.get(opts, :ping_fun, &default_ping_fun/1)
@@ -75,11 +77,14 @@ defmodule Snakepit.HeartbeatMonitor do
       ping_interval: ping_interval,
       timeout: timeout,
       max_missed_heartbeats: max_missed,
-      ping_fun: ping_fun
+      ping_fun: ping_fun,
+      initial_delay: initial_delay
     }
 
     Process.monitor(worker_pid)
-    {:ok, schedule_initial_ping(state)}
+    new_state = schedule_initial_ping(state)
+    emit_event(:monitor_started, new_state, %{})
+    {:ok, new_state}
   end
 
   @impl true
@@ -194,9 +199,10 @@ defmodule Snakepit.HeartbeatMonitor do
   end
 
   @impl true
-  def terminate(_reason, state) do
+  def terminate(reason, state) do
     cancel_timer(state.ping_timer)
     cancel_timer(state.timeout_timer)
+    emit_event(:monitor_stopped, state, %{reason: reason})
     :ok
   end
 
@@ -205,8 +211,9 @@ defmodule Snakepit.HeartbeatMonitor do
   end
 
   defp schedule_initial_ping(state) do
-    timer = Process.send_after(self(), :send_ping, 0)
-    %{state | ping_timer: timer}
+    delay = max(state.initial_delay || 0, 0)
+    timer = Process.send_after(self(), :send_ping, delay)
+    %{state | ping_timer: timer, initial_delay: 0}
   end
 
   defp schedule_next_ping(state) do
@@ -229,6 +236,7 @@ defmodule Snakepit.HeartbeatMonitor do
   end
 
   defp handle_worker_failure(state, reason) do
+    emit_event(:monitor_failure, state, %{failure_reason: reason})
     Process.exit(state.worker_pid, {:shutdown, reason})
     {:stop, {:shutdown, reason}, state}
   end
@@ -240,9 +248,10 @@ defmodule Snakepit.HeartbeatMonitor do
   defp normalize_ping_result(other), do: {:error, other}
 
   defp emit_event(event, state, metadata) do
-    :telemetry.execute(
-      [:snakepit, :heartbeat, event],
-      %{timestamp: System.monotonic_time(:millisecond), count: 1},
+    event_name = [:snakepit, :heartbeat, event]
+    measurements = heartbeat_measurements(event, state, metadata)
+
+    meta =
       Map.merge(
         %{
           worker_id: state.worker_id,
@@ -251,6 +260,39 @@ defmodule Snakepit.HeartbeatMonitor do
         },
         metadata
       )
-    )
+
+    :telemetry.execute(event_name, measurements, meta)
+  end
+
+  defp heartbeat_measurements(:ping_sent, _state, _metadata) do
+    %{timestamp: System.monotonic_time(:millisecond), count: 1, pings: 1}
+  end
+
+  defp heartbeat_measurements(:pong_received, _state, metadata) do
+    base = %{timestamp: System.monotonic_time(:millisecond), count: 1, pongs: 1}
+
+    case Map.get(metadata, :latency_ms) do
+      nil -> base
+      latency -> Map.put(base, :latency_ms, latency)
+    end
+  end
+
+  defp heartbeat_measurements(:monitor_failure, _state, _metadata) do
+    %{timestamp: System.monotonic_time(:millisecond), count: 1, failures: 1}
+  end
+
+  defp heartbeat_measurements(:heartbeat_timeout, state, metadata) do
+    missed = Map.get(metadata, :missed_count, state.missed_heartbeats)
+
+    %{
+      timestamp: System.monotonic_time(:millisecond),
+      count: 1,
+      timeouts: 1,
+      missed: missed
+    }
+  end
+
+  defp heartbeat_measurements(_event, _state, _metadata) do
+    %{timestamp: System.monotonic_time(:millisecond), count: 1}
   end
 end

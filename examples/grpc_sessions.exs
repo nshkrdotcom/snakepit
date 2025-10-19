@@ -6,14 +6,32 @@
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :pooling_enabled, true)
+Application.put_env(:snakepit, :pool_size, 4)
+
+Application.put_env(:snakepit, :pools, [
+  %{
+    name: :default,
+    worker_profile: :process,
+    pool_size: 4,
+    adapter_module: Snakepit.Adapters.GRPCPython
+  }
+])
+
 Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
 Application.put_env(:snakepit, :grpc_port, 50051)
 
-Mix.install([
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
   {:snakepit, path: "."},
   {:grpc, "~> 0.10.2"},
   {:protobuf, "~> 0.14.1"}
 ])
+
+IO.inspect(Application.get_env(:snakepit, :pool_size),
+  label: "example pool_size env",
+  limit: :infinity
+)
 
 defmodule SessionExample do
   def run do
@@ -99,7 +117,7 @@ defmodule SessionExample do
     # 4. Session statistics
     IO.puts("\n4. Session statistics:")
 
-    session_info =
+    _session_info =
       Enum.map(session_to_worker, fn {session_id, worker_id} ->
         case Snakepit.Bridge.SessionStore.get_session(session_id) do
           {:ok, session} ->

@@ -31,10 +31,23 @@ pool_size =
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :pooling_enabled, true)
+Application.put_env(:snakepit, :pool_size, pool_size)
+
+Application.put_env(:snakepit, :pools, [
+  %{
+    name: :default,
+    worker_profile: :process,
+    pool_size: pool_size,
+    adapter_module: Snakepit.Adapters.GRPCPython
+  }
+])
+
 Application.put_env(:snakepit, :pool_config, %{pool_size: pool_size})
 Application.put_env(:snakepit, :grpc_port, 50051)
 
-Mix.install([
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
   {:snakepit, path: "."},
   {:grpc, "~> 0.10.2"},
   {:protobuf, "~> 0.14.1"}

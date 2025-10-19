@@ -154,12 +154,22 @@ The test suite is designed to run in CI environments:
    - Ensure no other services are using this port
 
 2. **Python Dependencies**
-   - Some integration tests require Python dependencies
-   - Run `pip install -r priv/python/requirements.txt`
+   - Some integration tests require the Python bridge packages
+   - Create a virtualenv and install deps: `python3 -m venv .venv && .venv/bin/pip install -r priv/python/requirements.txt`
+   - Export the interpreter for Mix so workers reuse it: `export SNAKEPIT_PYTHON="$PWD/.venv/bin/python3"`
+   - Run bridge tests with the bundled modules on the path: `PYTHONPATH=priv/python .venv/bin/pytest priv/python/tests -q`
+   - `make test` wraps these steps; run it when debugging cross-language failures
 
 3. **Compilation Warnings**
    - Protocol buffer regeneration may be needed
    - Run `mix grpc.gen` to regenerate Elixir bindings
+
+### Telemetry Verification Checklist
+
+- `mix test` – exercises the Elixir OpenTelemetry spans/metrics wiring (fails fast if the Python bridge cannot import OTEL SDK).
+- `PYTHONPATH=priv/python .venv/bin/pytest priv/python/tests/test_telemetry.py -q` – validates the Python span helpers and correlation filter.
+- `curl http://localhost:9568/metrics` – shows Prometheus metrics after enabling the reporter with `config :snakepit, telemetry_metrics: %{prometheus: %{enabled: true}}`.
+- Set `SNAKEPIT_OTEL_ENDPOINT=http://collector:4318` (or `SNAKEPIT_OTEL_CONSOLE=true`) to watch trace exports when running end-to-end examples.
 
 ## Related Documentation
 

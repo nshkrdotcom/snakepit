@@ -5,6 +5,7 @@ import Config
 config :snakepit,
   # Enable pooling by default
   pooling_enabled: true,
+  enable_otlp?: false,
 
   # Pool configuration
   pool_config: %{
@@ -23,6 +24,40 @@ config :snakepit,
     # CRITICAL: Longer delays prevent system overload during startup
     # For 200+ workers, use 750ms+ to let the Elixir gRPC server catch up
     startup_batch_delay_ms: 750
+  },
+
+  # Global heartbeat defaults (per-worker overrides inherit from this map)
+  heartbeat: %{
+    enabled: false,
+    ping_interval_ms: 2_000,
+    timeout_ms: 10_000,
+    max_missed_heartbeats: 3,
+    initial_delay_ms: 0
+  },
+  telemetry_metrics: %{
+    prometheus: %{
+      enabled: false,
+      port: 9568,
+      name: :snakepit_prometheus_metrics
+    }
+  },
+  opentelemetry: %{
+    enabled: false,
+    exporters: %{
+      otlp: %{
+        enabled: false,
+        endpoint: "http://localhost:4318",
+        protocol: :http_protobuf,
+        headers: []
+      },
+      console: %{
+        enabled: false
+      }
+    },
+    resource: %{
+      service_name: "snakepit",
+      service_namespace: "snakepit"
+    }
   },
 
   # Worker configuration
@@ -62,6 +97,47 @@ config :snakepit,
     # gRPC polling threads (default: number of CPU cores)
     grpc_poll_threads: 1
   }
+
+enable_otlp_env =
+  System.get_env("SNAKEPIT_ENABLE_OTLP", "false")
+  |> String.downcase()
+  |> Kernel.==("true")
+
+config :snakepit, :enable_otlp?, enable_otlp_env
+
+if enable_otlp_env do
+  endpoint = System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+
+  console_enabled =
+    System.get_env("SNAKEPIT_OTEL_CONSOLE", "false")
+    |> String.downcase()
+    |> (&(&1 in ["1", "true", "yes", "on"])).()
+
+  config :snakepit, :opentelemetry,
+    enabled: true,
+    exporters: %{
+      otlp: %{
+        enabled: true,
+        endpoint: endpoint,
+        protocol: System.get_env("OTEL_EXPORTER_OTLP_PROTOCOL", "http_protobuf")
+      },
+      console: %{
+        enabled: console_enabled
+      }
+    }
+else
+  config :snakepit, :opentelemetry,
+    enabled: false,
+    exporters: %{
+      otlp: %{enabled: false},
+      console: %{enabled: false}
+    }
+
+  config :opentelemetry, :tracer, :none
+  config :opentelemetry, :meter, :none
+  config :opentelemetry, :processors, []
+  config :opentelemetry_exporter, :resource, []
+end
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

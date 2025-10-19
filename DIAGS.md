@@ -1,423 +1,144 @@
-# Snakepit Performance Architecture Diagrams (v0.4.0+)
+# Snakepit Performance Architecture Diagrams (v0.6.0)  
 
-This document provides detailed Mermaid diagrams focusing on the high-performance aspects of Snakepit's architecture. These diagrams emphasize the performance optimizations, concurrent operations, and O(1) data structures that make Snakepit suitable for production workloads.
+High-performance behaviour in Snakepit is anchored in constant-time routing, concurrent worker startup, and proactive health management. The diagrams below highlight the control-plane mechanics that keep latency low while tolerating heavy churn in external Python processes.
 
-## Key Performance Features Illustrated
+## Key Performance Features
 
-- **⚡ Concurrent Worker Initialization**: 1000x faster than sequential startup
-- **⚡ Non-blocking Async Execution**: Pool returns immediately, requests execute via Task.Supervisor  
-- **⚡ O(1) Registry Operations**: Constant-time worker lookups and assignments
-- **⚡ ETS Performance Optimizations**: Read/write concurrency with decentralized counters
-- **⚡ HTTP/2 Multiplexing**: Modern gRPC protocol for efficient communication
+- Dual worker profiles (process or thread) surfaced through the same pool API
+- Non-blocking pool backed by `Task.Supervisor.async_nolink/2`
+- ETS-backed registries with O(1) worker lookup and session affinity
+- Heartbeat-driven failure detection feeding back into OTP supervision
+- Lifecycle-driven recycling to cap memory growth and tail latency
 
 ---
 
-## 1. Overall System Architecture - High Performance Overview (v0.4.0+)
-
-```mermaid
-graph LR
-    ElixirOTPLayer["Elixir OTP Layer"]
-    subgraph ElixirOTPLayer
-        Client["Client API"]
-        Pool["Pool Manager<br/>⚡ Non-blocking async"]
-        TaskSup["Task Supervisor<br/>⚡ Isolated execution"]
-        
-        WorkerManagement["Worker Management"]
-        subgraph WorkerManagement
-            WorkerSup["Worker Supervisor<br/>⚡ Dynamic workers"]
-            Starter1["Worker Starter 1<br/>🔄 Auto-restart"]
-            Starter2["Worker Starter 2<br/>🔄 Auto-restart"]
-            StarterN["Worker Starter N<br/>🔄 Auto-restart"]
-            Worker1["Worker 1<br/>GenServer"]
-            Worker2["Worker 2<br/>GenServer"]
-            WorkerN["Worker N<br/>GenServer"]
-        end
-        
-        HighPerformanceRegistries["High Performance Registries"]
-        subgraph HighPerformanceRegistries
-            Registry["Worker Registry<br/>⚡ O(1) lookups"]
-            ProcReg["Process Registry<br/>⚡ PID tracking"]
-            StarterReg["Starter Registry<br/>⚡ Supervisor tracking"]
-        end
-        
-        SessionStoreETS["Session Store ETS"]
-        subgraph SessionStoreETS
-            SessionStore["Session Store<br/>⚡ Concurrent R/W<br/>📊 Decentralized counters"]
-            GlobalPrograms["Global Programs<br/>⚡ Public table access"]
-        end
-    end
-    
-    ExternalProcesses["External Processes"]
-    subgraph ExternalProcesses
-        Python1["Python Process 1<br/>🐍 Port communication"]
-        Python2["Python Process 2<br/>🐍 Port communication"]
-        PythonN["Python Process N<br/>🐍 Port communication"]
-    end
-    
-    Client -->|"⚡ Async call"| Pool
-    Pool -->|"⚡ O(1) checkout"| Registry
-    Pool -->|"🎯 Session affinity"| SessionStore
-    Pool -->|"⚡ Task.async_nolink"| TaskSup
-    TaskSup -->|Execute| Worker1
-    TaskSup -->|Execute| Worker2
-    TaskSup -->|Execute| WorkerN
-    
-    WorkerSup -->|Supervise| Starter1
-    WorkerSup -->|Supervise| Starter2
-    WorkerSup -->|Supervise| StarterN
-    
-    Starter1 -->|Auto-restart| Worker1
-    Starter2 -->|Auto-restart| Worker2
-    StarterN -->|Auto-restart| WorkerN
-    
-    Worker1 -->|gRPC protocol<br/>HTTP/2 + protobuf| Python1
-    Worker2 -->|gRPC protocol<br/>HTTP/2 + protobuf| Python2
-    WorkerN -->|gRPC protocol<br/>HTTP/2 + protobuf| PythonN
-    
-    Worker1 -->|Register| Registry
-    Worker2 -->|Register| Registry
-    WorkerN -->|Register| Registry
-    
-    Worker1 -->|Track PID| ProcReg
-    Worker2 -->|Track PID| ProcReg
-    WorkerN -->|Track PID| ProcReg
-    
-    style ElixirOTPLayer fill:#e6e6fa,stroke:#9370db,stroke-width:3px,color:#2e1065
-    style WorkerManagement fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style HighPerformanceRegistries fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style SessionStoreETS fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style ExternalProcesses fill:#f0f9ff,stroke:#0ea5e9,stroke-width:2px,color:#0c4a6e
-    style Pool fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style SessionStore fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style Registry fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style TaskSup fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-```
-
-This diagram shows the complete system architecture with emphasis on performance-critical components. Note the use of concurrent data structures (ETS tables with read/write concurrency) and O(1) operations throughout the system.
-
-## 2. Request Flow - Performance Critical Path
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant P as Pool<br/>⚡ Non-blocking
-    participant TS as TaskSupervisor<br/>⚡ Isolated
-    participant R as Registry<br/>⚡ O(1)
-    participant S as SessionStore<br/>⚡ ETS
-    participant W as Worker
-    participant E as External Process
-    
-    C->>P: execute(command, args)
-    
-    alt Session-based request
-        P->>S: get_preferred_worker<br/>⚡ O(1) ETS lookup
-        S-->>P: worker_id or nil
-    end
-    
-    P->>R: checkout_worker<br/>⚡ O(1) via Registry
-    R-->>P: worker_id
-    
-    P->>TS: Task.async_nolink<br/>⚡ Non-blocking
-    Note over P: Pool returns immediately<br/>to handle next request
-    
-    TS->>W: GenServer.call
-    W->>E: gRPC call<br/>⚡ HTTP/2 + protobuf
-    E-->>W: gRPC response<br/>⚡ protobuf encoded
-    W-->>TS: Result
-    TS-->>C: GenServer.reply<br/>⚡ Direct to client
-    
-    TS->>P: checkin_worker<br/>⚡ Cast (async)
-    
-    alt Queued requests exist
-        P->>P: Process next<br/>from queue
-    else No queued requests
-        P->>R: Mark available<br/>⚡ O(1) update
-    end
-```
-
-This sequence diagram illustrates the non-blocking request flow. Key performance insight: the Pool returns immediately after dispatching to Task.Supervisor, allowing it to handle the next request while the current one executes asynchronously.
-
-## 3. ETS Tables Architecture - High Performance Storage
-
-```mermaid
-graph LR
-    SessionStoreETSTables["Session Store ETS Tables"]
-    subgraph SessionStoreETSTables
-        SessionsTable["Sessions Table"]
-        subgraph SessionsTable
-            ST[":snakepit_sessions<br/>⚡ read_concurrency: true<br/>⚡ write_concurrency: true<br/>⚡ decentralized_counters: true"]
-            
-            S1["Key: session_1<br/>Value: {last_accessed, ttl, session_data}"]
-            S2["Key: session_2<br/>Value: {last_accessed, ttl, session_data}"]
-            SN["Key: session_N<br/>Value: {last_accessed, ttl, session_data}"]
-        end
-        
-        GlobalProgramsTable["Global Programs Table"]
-        subgraph GlobalProgramsTable
-            GP[":snakepit_sessions_global_programs<br/>⚡ Same optimizations"]
-            
-            P1["Key: program_1<br/>Value: {data, timestamp}"]
-            P2["Key: program_2<br/>Value: {data, timestamp}"]
-            PN["Key: program_N<br/>Value: {data, timestamp}"]
-        end
-    end
-    
-    OptimizedOperations["Optimized Operations"]
-    subgraph OptimizedOperations
-        Read["⚡ Concurrent reads<br/>No locking"]
-        Write["⚡ Concurrent writes<br/>Decentralized counters"]
-        Cleanup["⚡ select_delete<br/>Atomic batch cleanup"]
-    end
-    
-    ST --> S1
-    ST --> S2
-    ST --> SN
-    
-    GP --> P1
-    GP --> P2
-    GP --> PN
-    
-    Read --> ST
-    Read --> GP
-    Write --> ST
-    Write --> GP
-    Cleanup --> ST
-    Cleanup --> GP
-    
-    style SessionStoreETSTables fill:#e6e6fa,stroke:#9370db,stroke-width:3px,color:#2e1065
-    style SessionsTable fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style GlobalProgramsTable fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style OptimizedOperations fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style ST fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style GP fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style Read fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style Write fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style Cleanup fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-```
-
-ETS tables are configured for maximum performance with `read_concurrency: true`, `write_concurrency: true`, and `decentralized_counters: true`. This enables highly concurrent access patterns essential for production workloads.
-
-## 4. Worker Lifecycle - Performance & Reliability
-
-```mermaid
-stateDiagram-v2
-    [*] --> Starting: Pool requests worker
-    
-    Starting --> Initializing: Port opened<br/>⚡ Parallel startup
-    
-    Initializing --> Ready: Init ping OK<br/>📊 Telemetry emitted
-    Initializing --> Failed: Timeout/Error
-    
-    Ready --> Busy: Request received<br/>⚡ O(1) checkout
-    Busy --> Ready: Response sent<br/>⚡ O(1) checkin
-    
-    Ready --> HealthCheck: Periodic check<br/>⏱️ Every 30s
-    HealthCheck --> Ready: Healthy
-    HealthCheck --> Unhealthy: Failed
-    
-    Unhealthy --> Restarting: Supervisor detects
-    Failed --> Restarting: Auto-restart
-    
-    Restarting --> Starting: ♻️ Via Starter
-    
-    Ready --> Terminating: Shutdown signal
-    Busy --> Terminating: Graceful shutdown
-    
-    Terminating --> [*]: Process cleaned up
-    
-    note right of Ready
-        ⚡ Worker pool maintains
-        hot workers ready for
-        immediate use
-    end note
-    
-    note right of Busy
-        ⚡ Non-blocking async
-        execution via Task
-        Supervisor
-    end note
-```
-
-The worker lifecycle emphasizes automatic recovery and hot standby. Workers stay in the Ready state, eliminating cold-start latency. The supervision tree ensures automatic restart without Pool intervention.
-
-## 5. Concurrent Initialization Performance
+## 1. Control Plane & Worker Capsule (performance focus)
 
 ```mermaid
 graph TD
-    SequentialStartupTraditional["Sequential Startup Traditional"]
-    subgraph SequentialStartupTraditional
-        T0["Start"] --> W1S["Worker 1<br/>2s"]
-        W1S --> W2S["Worker 2<br/>2s"]
-        W2S --> W3S["Worker 3<br/>2s"]
-        W3S --> W4S["Worker 4<br/>2s"]
-        W4S --> DoneS["Ready<br/>Total: 8s"]
+    subgraph ControlPlane["Elixir Control Plane"]
+        Pool["Pool<br>GenServer"]
+        TaskSup["Task Supervisor<br>Async execution"]
+        Registries["Registries<br>Worker / Starter / Process"]
+        Lifecycle["Worker Lifecycle<br>Manager"]
+        GRPCServer["GRPC Endpoint<br>Cowboy + gRPC"]
+        WorkerSup["Worker Supervisor<br>DynamicSupervisor"]
     end
-    
-    ConcurrentStartupSnakepit["Concurrent Startup Snakepit"]
-    subgraph ConcurrentStartupSnakepit
-        T0C["Start"] --> Init["Task.async_stream"]
-        Init --> W1C["Worker 1<br/>2s"]
-        Init --> W2C["Worker 2<br/>2s"]
-        Init --> W3C["Worker 3<br/>2s"]
-        Init --> W4C["Worker 4<br/>2s"]
-        
-        W1C --> Collect
-        W2C --> Collect
-        W3C --> Collect
-        W4C --> Collect
-        
-        Collect --> DoneC["Ready<br/>Total: ~2s"]
+
+    subgraph WorkerCapsule["Worker Capsule (per worker)"]
+        Starter["Worker.Starter<br>Permanent supervisor"]
+        Profile["WorkerProfile<br>process/thread"]
+        Worker["GRPCWorker<br>GenServer"]
+        Heartbeat["HeartbeatMonitor<br>GenServer"]
     end
-    
-    style SequentialStartupTraditional fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#92400e
-    style ConcurrentStartupSnakepit fill:#e6e6fa,stroke:#9370db,stroke-width:3px,color:#2e1065
-    style Init fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style DoneC fill:#dcfce7,stroke:#22c55e,stroke-width:2px,color:#14532d
-    style DoneS fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#7f1d1d
+
+    subgraph External["Python Runtime"]
+        PythonProc["grpc_server.py<br>Stateless worker"]
+    end
+
+    Pool --> Registries
+    Pool --> TaskSup
+    WorkerSup --> Starter
+    Starter --> Profile
+    Profile --> Worker
+    Worker --> Heartbeat
+    Worker -->|Spawn & Port| PythonProc
+    PythonProc -->|gRPC state ops| GRPCServer
+    TaskSup -->|Execute| Worker
+    Lifecycle --> Worker
+    Heartbeat --> Lifecycle
+    Registries --> WorkerSup
+
+    style ControlPlane fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#000
+    style WorkerCapsule fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,color:#000
+    style External fill:#fff3e0,stroke:#ef6c00,stroke-width:2px,color:#000
+    style Pool fill:#c8e6c9,color:#000
+    style TaskSup fill:#c8e6c9,color:#000
+    style Registries fill:#c8e6c9,color:#000
+    style Lifecycle fill:#bbdefb,color:#000
+    style Starter fill:#bbdefb,color:#000
+    style Profile fill:#bbdefb,color:#000
+    style Worker fill:#bbdefb,color:#000
+    style Heartbeat fill:#bbdefb,color:#000
+    style PythonProc fill:#ffe0b2,color:#000
+    style GRPCServer fill:#c8e6c9,color:#000
 ```
 
-This comparison shows Snakepit's dramatic performance advantage during startup. Using `Task.async_stream`, all workers initialize concurrently instead of sequentially, reducing startup time from N×init_time to ~init_time.
+**Highlights**
+- Worker capsules contain all per-worker processes, so supervisor restarts are local.
+- LifecycleManager tracks request budgets and TTLs to trigger proactive replacement without blocking the pool.
+- HeartbeatMonitor feeds latency and timeout metrics back to LifecycleManager, enabling fast detection of wedged workers.
+- OpenTelemetry spans/metrics originate in the Pool + Worker capsule layers; enable them via `config :snakepit, opentelemetry: %{enabled: true}` (Elixir) and the Python requirements listed in `priv/python/requirements.txt` for cross-language correlation.
 
-## 6. Request Queueing & Load Distribution
+---
+
+## 2. Request Flow Sequence (with session affinity)
 
 ```mermaid
-graph LR
-    HighPerformanceRequestHandling["High Performance Request Handling"]
-    subgraph HighPerformanceRequestHandling
-        RequestQueue["Request Queue"]
-        subgraph RequestQueue
-            Q[":queue (Erlang)<br/>⚡ FIFO<br/>⚡ O(1) operations"]
-            R1["Request 1"]
-            R2["Request 2"]
-            R3["Request 3"]
-            RN["Request N"]
-        end
-        
-        WorkerPoolState["Worker Pool State"]
-        subgraph WorkerPoolState
-            Available["MapSet<br/>⚡ O(1) member check<br/>⚡ O(1) add/remove"]
-            Busy["Map<br/>⚡ O(1) lookup"]
-            
-            AW1["Worker 1"]
-            AW2["Worker 2"]
-            BW3["Worker 3 🔴"]
-            BW4["Worker 4 🔴"]
-        end
-        
-        LoadDistribution["Load Distribution"]
-        subgraph LoadDistribution
-            Check{"Worker<br/>Available?"}
-            Assign["Assign to worker<br/>⚡ O(1)"]
-            Queue["Queue request<br/>⚡ O(1)"]
-            Dequeue["Process from queue<br/>⚡ O(1)"]
-        end
+sequenceDiagram
+    participant Client as Client
+    participant Pool as Pool (GenServer)
+    participant Registry as Worker Registry
+    participant TaskSup as Task Supervisor
+    participant Worker as GRPCWorker
+    participant Python as Python Process
+    participant Store as SessionStore (ETS)
+
+    Client->>Pool: execute(command, args, session_id)
+    Pool->>Registry: checkout(session_id)
+    Registry-->>Pool: worker_id / nil
+    alt worker available
+        Pool->>TaskSup: async_nolink(request)
+        TaskSup->>Worker: execute(command, args, timeout)
+    else need spin-up
+        Pool->>WorkerSup: start_worker()
+        WorkerSup-->>Pool: {:ok, pid}
+        Pool->>TaskSup: async_nolink(request)
+        TaskSup->>Worker: execute(command, args, timeout)
     end
-    
-    R1 --> Check
-    R2 --> Check
-    R3 --> Check
-    RN --> Check
-    
-    Check -->|Yes| Assign
-    Check -->|No| Queue
-    
-    Queue --> Q
-    Q --> Dequeue
-    
-    Assign --> Available
-    Available --> AW1
-    Available --> AW2
-    
-    Busy --> BW3
-    Busy --> BW4
-    
-    Dequeue -->|Worker freed| Assign
-    
-    style HighPerformanceRequestHandling fill:#e6e6fa,stroke:#9370db,stroke-width:3px,color:#2e1065
-    style RequestQueue fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style WorkerPoolState fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style LoadDistribution fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style Q fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style Available fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style Check fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+
+    Worker->>Python: gRPC ExecuteTool
+    alt variable fetch
+        Python->>Worker: gRPC GetVariable
+        Worker->>Store: read(session_id, name)
+        Store-->>Worker: value
+        Worker-->>Python: value
+    end
+
+    Python-->>Worker: result
+    Worker-->>TaskSup: {:ok, result}
+    TaskSup-->>Client: reply
+    TaskSup->>Pool: checkin(worker_id)
+    Pool->>Lifecycle: increment_request(worker_id)
 ```
 
-The queueing system uses Erlang's built-in `:queue` module and `MapSet` for O(1) operations. This ensures consistent performance regardless of queue size or number of workers, making the system predictable under load.
+**Observations**
+- Pool is never blocked by work execution; it immediately returns after scheduling via the Task Supervisor.
+- Registry lookups and ETS-backed session reads stay O(1), keeping queue times predictable even with 100+ workers.
+- LifecycleManager is notified about completed requests so TTL/request budgets stay accurate.
 
-## 7. Process Registry - O(1) Performance
+---
+
+## 3. Health, Recycling, and Restart Loop
 
 ```mermaid
-graph LR
-    RegistryArchitecture["Registry Architecture"]
-    subgraph RegistryArchitecture
-        WorkerRegistry["Worker Registry"]
-        subgraph WorkerRegistry
-            WR["Elixir Registry<br/>⚡ :unique keys<br/>⚡ O(1) operations"]
-            WK1["worker_1 → PID1"]
-            WK2["worker_2 → PID2"]
-            WKN["worker_N → PIDN"]
-        end
-        
-        ProcessRegistryETS["Process Registry ETS"]
-        subgraph ProcessRegistryETS
-            PR["Process Registry<br/>⚡ :protected table<br/>⚡ read_concurrency"]
-            PK1["worker_1 → {pid, os_pid, fingerprint}"]
-            PK2["worker_2 → {pid, os_pid, fingerprint}"]
-            PKN["worker_N → {pid, os_pid, fingerprint}"]
-        end
-        
-        StarterRegistry["Starter Registry"]
-        subgraph StarterRegistry
-            SR["Starter Registry<br/>⚡ Supervisor tracking"]
-            SK1["worker_1 → Starter PID1"]
-            SK2["worker_2 → Starter PID2"]
-            SKN["worker_N → Starter PIDN"]
-        end
-    end
-    
-    O1Operations["O(1) Operations"]
-    subgraph O1Operations
-        Op1["via_tuple lookup<br/>⚡ Direct to worker"]
-        Op2["Reverse lookup<br/>⚡ PID to worker_id"]
-        Op3["OS PID tracking<br/>⚡ Cleanup guarantee"]
-    end
-    
-    WR --> WK1
-    WR --> WK2
-    WR --> WKN
-    
-    PR --> PK1
-    PR --> PK2
-    PR --> PKN
-    
-    SR --> SK1
-    SR --> SK2
-    SR --> SKN
-    
-    Op1 --> WR
-    Op2 --> WR
-    Op3 --> PR
-    
-    style RegistryArchitecture fill:#e6e6fa,stroke:#9370db,stroke-width:3px,color:#2e1065
-    style WorkerRegistry fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style ProcessRegistryETS fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style StarterRegistry fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style O1Operations fill:#f3e8ff,stroke:#a855f7,stroke-width:2px,color:#581c87
-    style WR fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style PR fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
-    style SR fill:#ddd6fe,stroke:#7c3aed,stroke-width:2px,color:#581c87
+stateDiagram-v2
+    [*] --> Booting
+    Booting --> Ready: Worker registered
+    Ready --> Executing: Request dispatched
+    Executing --> Ready: Completion
+    Ready --> HeartbeatPing: Monitor ping tick
+    HeartbeatPing --> Ready: Pong in time
+    HeartbeatPing --> MissedHeartbeat: Pong timeout
+    MissedHeartbeat --> Ready: Pong before limit
+    MissedHeartbeat --> Recycling: Max missed reached
+    Ready --> Recycling: TTL reached or max requests
+    Recycling --> Stopping: LifecycleManager requests stop
+    Stopping --> Restarting: WorkerStarter restarts capsule
+    Restarting --> Ready: Replacement live
 ```
 
-Multiple registry types provide different lookup capabilities while maintaining O(1) performance. The combination enables efficient worker management, process tracking, and supervision without performance bottlenecks.
-
-## Performance Summary
-
-These diagrams illustrate how Snakepit achieves production-grade performance through:
-
-- **Concurrent Everything**: Startup, execution, and state access all leverage concurrency
-- **O(1) Data Structures**: Registry, ETS tables, and queues maintain constant-time operations
-- **Non-blocking Architecture**: Pool never blocks, requests execute asynchronously
-- **Modern Protocols**: gRPC with HTTP/2 multiplexing replaces legacy stdio pipes
-- **Hot Workers**: Pre-warmed workers eliminate cold-start latency
-
-The result is a system capable of handling thousands of concurrent requests with predictable performance characteristics.
+**Notes**
+- Heartbeat failures and lifecycle thresholds converge on the same recycling path, ensuring consistent restart semantics.
+- When Recycling triggers, `Snakepit.ProcessKiller` cleans up OS processes before the supervisor brings the capsule back online.
+- Restart intensity is governed by `WorkerSupervisor` limits, keeping cluster stability under heavy churn.

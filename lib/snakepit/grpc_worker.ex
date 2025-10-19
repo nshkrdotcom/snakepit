@@ -31,6 +31,8 @@ defmodule Snakepit.GRPCWorker do
 
   use GenServer
   require Logger
+  alias Snakepit.Telemetry.Correlation
+  require OpenTelemetry.Tracer, as: Tracer
 
   def child_spec(opts) when is_list(opts) do
     %{
@@ -57,16 +59,17 @@ defmodule Snakepit.GRPCWorker do
           worker_config: map()
         }
 
-  @heartbeat_defaults %{
+  @base_heartbeat_defaults %{
     enabled: false,
     ping_interval_ms: 2_000,
     timeout_ms: 10_000,
     max_missed_heartbeats: 3,
     ping_fun: nil,
-    test_pid: nil
+    test_pid: nil,
+    initial_delay_ms: 0
   }
 
-  @heartbeat_known_keys Map.keys(@heartbeat_defaults)
+  @heartbeat_known_keys Map.keys(@base_heartbeat_defaults)
   @heartbeat_known_key_strings Enum.map(@heartbeat_known_keys, &Atom.to_string/1)
 
   # Client API
@@ -427,6 +430,8 @@ defmodule Snakepit.GRPCWorker do
                     "✅ gRPC worker #{state.id} initialization complete and acknowledged."
                   )
 
+                  maybe_initialize_session(connection, state.session_id)
+
                   new_state =
                     state
                     |> Map.put(:connection, connection)
@@ -463,7 +468,18 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_call({:execute, command, args, timeout}, _from, state) do
-    case state.adapter.grpc_execute(state.connection, command, args, timeout) do
+    args_with_corr = ensure_correlation(args)
+
+    case instrument_execute(
+           :execute,
+           state,
+           command,
+           args_with_corr,
+           timeout,
+           fn instrumented_args ->
+             state.adapter.grpc_execute(state.connection, command, instrumented_args, timeout)
+           end
+         ) do
       {:ok, result} ->
         new_state = update_stats(state, :success)
         {:reply, {:ok, result}, new_state}
@@ -507,9 +523,21 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_call({:execute_session, session_id, command, args, timeout}, _from, state) do
-    session_args = Map.put(args, :session_id, session_id)
+    session_args =
+      args
+      |> Map.put(:session_id, session_id)
+      |> ensure_correlation()
 
-    case state.adapter.grpc_execute(state.connection, command, session_args, timeout) do
+    case instrument_execute(
+           :execute_session,
+           state,
+           command,
+           session_args,
+           timeout,
+           fn instrumented_args ->
+             state.adapter.grpc_execute(state.connection, command, instrumented_args, timeout)
+           end
+         ) do
       {:ok, result} ->
         new_state = update_stats(state, :success)
         {:reply, {:ok, result}, new_state}
@@ -698,6 +726,7 @@ defmodule Snakepit.GRPCWorker do
           {:ping_interval_ms, config[:ping_interval_ms]},
           {:timeout_ms, config[:timeout_ms]},
           {:max_missed_heartbeats, config[:max_missed_heartbeats]},
+          {:initial_delay_ms, config[:initial_delay_ms]},
           {:ping_fun, config[:ping_fun] || build_default_ping_fun(state, config)}
         ]
 
@@ -760,6 +789,27 @@ defmodule Snakepit.GRPCWorker do
   defp heartbeat_channel_available?(channel) when is_binary(channel), do: byte_size(channel) > 0
   defp heartbeat_channel_available?(_), do: false
 
+  defp maybe_initialize_session(connection, session_id) do
+    channel = connection && Map.get(connection, :channel)
+
+    if heartbeat_channel_available?(channel) do
+      try do
+        _ = Snakepit.GRPC.Client.initialize_session(channel, session_id, %{})
+        :ok
+      rescue
+        exception ->
+          Logger.debug("Heartbeat session initialization failed: #{inspect(exception)}")
+          :error
+      catch
+        :exit, reason ->
+          Logger.debug("Heartbeat session initialization exited: #{inspect(reason)}")
+          :error
+      end
+    else
+      :error
+    end
+  end
+
   defp handle_heartbeat_response(monitor_pid, timestamp, :ok) do
     Snakepit.HeartbeatMonitor.notify_pong(monitor_pid, timestamp)
     :ok
@@ -815,9 +865,11 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp normalize_heartbeat_config(config) when is_map(config) do
+    defaults = default_heartbeat_config()
+
     normalized =
-      Enum.reduce(@heartbeat_defaults, %{}, fn {key, default}, acc ->
-        Map.put(acc, key, get_config_value(config, key, default))
+      Enum.reduce(@heartbeat_known_keys, %{}, fn key, acc ->
+        Map.put(acc, key, get_config_value(config, key, Map.get(defaults, key)))
       end)
 
     extras =
@@ -828,7 +880,15 @@ defmodule Snakepit.GRPCWorker do
     Map.merge(extras, normalized)
   end
 
-  defp normalize_heartbeat_config(_config), do: Map.merge(%{}, @heartbeat_defaults)
+  defp normalize_heartbeat_config(_config), do: default_heartbeat_config()
+
+  defp default_heartbeat_config do
+    Map.merge(
+      @base_heartbeat_defaults,
+      Snakepit.Config.heartbeat_defaults(),
+      fn _key, _base, override -> override end
+    )
+  end
 
   defp get_config_value(config, key, default) when is_atom(key) do
     cond do
@@ -1040,4 +1100,171 @@ defmodule Snakepit.GRPCWorker do
 
     %{state | stats: stats}
   end
+
+  defp instrument_execute(kind, state, command, args, timeout, fun) when is_function(fun, 1) do
+    correlation_id = correlation_id_from(args)
+    metadata = base_execute_metadata(kind, state, command, args, correlation_id, timeout)
+    span_name = otel_span_name(kind, command)
+    span_attributes = otel_start_attributes(state, command, args, correlation_id, timeout)
+
+    :telemetry.span([:snakepit, :grpc_worker, kind], metadata, fn ->
+      Tracer.with_span span_name, %{attributes: span_attributes, kind: :client} do
+        start_time = System.monotonic_time()
+        result = fun.(args)
+
+        duration_native = System.monotonic_time() - start_time
+        duration_ms = System.convert_time_unit(duration_native, :native, :millisecond)
+
+        measurements =
+          %{duration_ms: duration_ms, executions: 1}
+          |> maybe_track_error_measurement(result)
+
+        stop_metadata = build_stop_metadata(metadata, result)
+
+        Tracer.set_attributes(otel_stop_attributes(result, duration_ms, stop_metadata))
+        maybe_set_span_status(result, stop_metadata)
+
+        {result, measurements, stop_metadata}
+      end
+    end)
+  end
+
+  defp build_stop_metadata(metadata, {:error, {kind, reason}}) do
+    metadata
+    |> Map.put(:status, :error)
+    |> Map.put(:error_kind, kind)
+    |> Map.put(:error, reason)
+  end
+
+  defp build_stop_metadata(metadata, {:error, reason}) do
+    metadata
+    |> Map.put(:status, :error)
+    |> Map.put(:error, reason)
+  end
+
+  defp build_stop_metadata(metadata, _result) do
+    Map.put(metadata, :status, :ok)
+  end
+
+  defp maybe_track_error_measurement(measurements, {:error, _reason}) do
+    Map.put(measurements, :errors, 1)
+  end
+
+  defp maybe_track_error_measurement(measurements, _result), do: measurements
+
+  defp ensure_correlation(nil) do
+    id = Correlation.new_id()
+    %{"correlation_id" => id, correlation_id: id}
+  end
+
+  defp ensure_correlation(args) when is_map(args) do
+    existing =
+      Map.get(args, :correlation_id) ||
+        Map.get(args, "correlation_id")
+
+    id = Correlation.ensure(existing)
+
+    args
+    |> Map.put(:correlation_id, id)
+    |> Map.put("correlation_id", id)
+  end
+
+  defp ensure_correlation(args) when is_list(args) do
+    args
+    |> Map.new()
+    |> ensure_correlation()
+  end
+
+  defp ensure_correlation(_args), do: ensure_correlation(%{})
+
+  defp correlation_id_from(%{} = args) do
+    args
+    |> Map.get(:correlation_id)
+    |> case do
+      nil -> Map.get(args, "correlation_id")
+      value -> value
+    end
+    |> Correlation.ensure()
+  end
+
+  defp correlation_id_from(_args), do: Correlation.new_id()
+
+  defp base_execute_metadata(kind, state, command, args, correlation_id, timeout) do
+    session_id =
+      Map.get(args, :session_id) ||
+        Map.get(args, "session_id") ||
+        state.session_id
+
+    %{
+      operation: kind,
+      worker_id: state.id,
+      worker_pid: self(),
+      command: command,
+      adapter: adapter_name(state.adapter),
+      adapter_module: state.adapter,
+      pool: state.pool_name,
+      session_id: session_id,
+      correlation_id: correlation_id,
+      timeout_ms: timeout,
+      span_kind: :client,
+      rpc_system: :grpc,
+      telemetry_source: :snakepit_grpc_worker
+    }
+  end
+
+  defp otel_span_name(kind, command) do
+    operation = kind |> Atom.to_string() |> String.replace("_", "-")
+    "snakepit.grpc.#{operation}.#{command}"
+  end
+
+  defp otel_start_attributes(state, command, args, correlation_id, timeout) do
+    session_id = Map.get(args, :session_id) || Map.get(args, "session_id") || state.session_id
+
+    [
+      {"snakepit.worker.id", state.id},
+      {"snakepit.pool", pool_attribute(state.pool_name)},
+      {"snakepit.command", command},
+      {"snakepit.session_id", session_id},
+      {"snakepit.correlation_id", correlation_id},
+      {"snakepit.timeout_ms", timeout}
+    ]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+  end
+
+  defp otel_stop_attributes(result, duration_ms, metadata) do
+    [
+      {"snakepit.grpc.duration_ms", duration_ms},
+      {"snakepit.grpc.status", metadata[:status]},
+      {"snakepit.grpc.error", format_reason(metadata[:error] || error_from_result(result))},
+      {"snakepit.grpc.error_kind", metadata[:error_kind]}
+    ]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+  end
+
+  defp maybe_set_span_status({:error, _}, metadata) do
+    reason = format_reason(metadata[:error]) || "snakepit.grpc.error"
+    Tracer.set_status(:error, reason)
+  end
+
+  defp maybe_set_span_status(_result, _metadata), do: :ok
+
+  defp pool_attribute(nil), do: nil
+  defp pool_attribute(pool) when is_atom(pool), do: Atom.to_string(pool)
+  defp pool_attribute(pool), do: inspect(pool)
+
+  defp format_reason(nil), do: nil
+  defp format_reason({kind, reason}), do: "#{inspect(kind)}: #{inspect(reason)}"
+  defp format_reason(reason), do: inspect(reason)
+
+  defp error_from_result({:error, {kind, reason}}), do: {kind, reason}
+  defp error_from_result({:error, reason}), do: reason
+  defp error_from_result(_), do: nil
+
+  defp adapter_name(module) when is_atom(module) do
+    module
+    |> Atom.to_string()
+    |> String.replace_prefix("Elixir.", "")
+  end
+
+  defp adapter_name(other), do: inspect(other)
 end

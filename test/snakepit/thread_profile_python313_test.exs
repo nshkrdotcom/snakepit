@@ -7,6 +7,9 @@ defmodule Snakepit.ThreadProfilePython313Test do
   @moduletag timeout: 120_000
 
   setup do
+    prev_pools = Application.get_env(:snakepit, :pools)
+    prev_pooling = Application.get_env(:snakepit, :pooling_enabled)
+
     # Configure to use Python 3.13
     python313_path = Path.expand(".venv-py313/bin/python3")
 
@@ -25,6 +28,8 @@ defmodule Snakepit.ThreadProfilePython313Test do
         Application.stop(:snakepit)
         System.delete_env("SNAKEPIT_PYTHON")
         Application.delete_env(:snakepit, :python_executable)
+        restore_env(:pools, prev_pools)
+        restore_env(:pooling_enabled, prev_pooling)
         # Wait for processes to actually stop
         assert_eventually(
           fn ->
@@ -38,6 +43,9 @@ defmodule Snakepit.ThreadProfilePython313Test do
       {:ok, python_path: python313_path}
     end
   end
+
+  defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
 
   describe "CRITICAL: Thread profile with Python 3.13 actual execution" do
     test "thread profile worker starts with Python 3.13" do

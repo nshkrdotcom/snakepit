@@ -1,11 +1,18 @@
 # Test script to verify orphan cleanup
+Code.require_file("../mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
+
 Application.ensure_all_started(:snakepit)
 
 # Start just one worker
-{:ok, worker} = Snakepit.GRPCWorker.start_link(
-  adapter: Snakepit.Adapters.GRPCPython,
-  id: "test_worker_1"
-)
+{:ok, worker} =
+  Snakepit.GRPCWorker.start_link(
+    adapter: Snakepit.Adapters.GRPCPython,
+    id: "test_worker_1"
+  )
 
 IO.puts("Worker started: #{inspect(worker)}")
 

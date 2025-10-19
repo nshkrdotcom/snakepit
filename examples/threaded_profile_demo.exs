@@ -23,7 +23,9 @@ Application.put_env(:snakepit, :pooling_enabled, false)
 #   mix run examples/threaded_profile_demo.exs
 #
 
-Mix.install([
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
   {:snakepit, path: "."}
 ])
 

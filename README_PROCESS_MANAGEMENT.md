@@ -198,6 +198,47 @@ The ApplicationCleanup module ensures clean shutdown:
 
 ## Benefits
 
+# Heartbeat Configuration
+
+Snakepit now ships with a bidirectional heartbeat channel between BEAM and the
+Python bridge.  The feature is **off by default** so the existing behaviour is
+unchanged, but you can opt-in at either the application or pool level.
+
+```elixir
+# config/config.exs
+config :snakepit,
+  heartbeat: %{
+    enabled: true,
+    ping_interval_ms: 1_000,
+    timeout_ms: 5_000,
+    max_missed_heartbeats: 3,
+    initial_delay_ms: 0
+  }
+```
+
+- The map above seeds the defaults for every pool.  Worker-specific overrides
+  can be supplied via the existing pool configuration:
+
+  ```elixir
+  pools: [
+    %{
+      name: :default,
+      worker_profile: :process,
+      pool_size: 32,
+      heartbeat: %{enabled: true, ping_interval_ms: 2_000}
+    }
+  ]
+  ```
+
+- When `enabled: true`, the Elixir side starts `Snakepit.HeartbeatMonitor` for
+  each worker and the Python server spins up a matching
+  `snakepit_bridge.HeartbeatClient` once a session is initialised.  Disabling
+  the flag immediately stops the monitor and client again.
+
+Tune the intervals to balance responsiveness with overhead.  A good starting
+point is a 1–2 s ping interval with a 5–10 s timeout and `max_missed_heartbeats`
+set to 3.
+
 1. **No Manual Cleanup Required**: Python processes are automatically cleaned up, even after `kill -9` on BEAM
 2. **Production Ready**: Handles edge cases like VM crashes, OOM kills, and power failures
 3. **Zero Configuration**: Works out of the box with sensible defaults
@@ -294,6 +335,13 @@ The DETS file is automatically managed, but if needed:
        # Your code here
      end)
      ```
+
+## Observability Quickstart
+
+1. **Install bridge dependencies** – `python3 -m venv .venv && .venv/bin/pip install -r priv/python/requirements.txt`
+2. **Point Snakepit at the venv** – export `SNAKEPIT_PYTHON="$PWD/.venv/bin/python3"` so the worker port launches with OTEL + pytest available.
+3. **Enable metrics** – set `config :snakepit, telemetry_metrics: %{prometheus: %{enabled: true}}` (dev/test) and run `curl http://localhost:9568/metrics` to confirm heartbeat counters and pool gauges.
+4. **Enable tracing** – set `config :snakepit, opentelemetry: %{enabled: true, exporters: %{console: %{enabled: true}}}` locally or point `SNAKEPIT_OTEL_ENDPOINT=http://collector:4318` at your collector. Python logs include `corr=<id>` when correlation headers flow across the bridge.
 
 ## Future Enhancements
 

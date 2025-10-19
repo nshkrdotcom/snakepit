@@ -19,6 +19,12 @@
 # Disable automatic pooling to avoid port conflicts
 Application.put_env(:snakepit, :pooling_enabled, false)
 
+Code.require_file("../mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
+
 defmodule TelemetryIntegrationDemo do
   require Logger
 

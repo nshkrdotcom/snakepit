@@ -6,10 +6,23 @@
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :pooling_enabled, true)
+Application.put_env(:snakepit, :pool_size, 4)
+
+Application.put_env(:snakepit, :pools, [
+  %{
+    name: :default,
+    worker_profile: :process,
+    pool_size: 4,
+    adapter_module: Snakepit.Adapters.GRPCPython
+  }
+])
+
 Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
 Application.put_env(:snakepit, :grpc_port, 50051)
 
-Mix.install([
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
   {:snakepit, path: "."},
   {:grpc, "~> 0.10.2"},
   {:protobuf, "~> 0.14.1"}
@@ -78,8 +91,8 @@ defmodule AdvancedExample do
     IO.puts("  Testing non-existent tool (expect graceful error):")
 
     case Snakepit.execute("nonexistent_tool", %{}) do
-      {:ok, result} ->
-        IO.puts("    Unexpected success: #{inspect(result)}")
+      {:ok, unexpected} ->
+        IO.puts("    Unexpected success: #{inspect(unexpected)}")
 
       {:error, reason} ->
         IO.puts("    ✅ Gracefully handled error: #{inspect(reason)}")
@@ -88,7 +101,7 @@ defmodule AdvancedExample do
     IO.puts("\n  Testing successful operation after error:")
 
     case Snakepit.execute("ping", %{}) do
-      {:ok, result} ->
+      {:ok, _result} ->
         IO.puts("    ✅ System recovered, ping successful")
 
       {:error, reason} ->
@@ -117,7 +130,7 @@ defmodule AdvancedExample do
     IO.puts("  Completed #{length(results)} concurrent operations")
 
     # Verify all used same session
-    all_results = Enum.map(results, fn {i, result} -> result end)
+    all_results = Enum.map(results, fn {_i, result} -> result end)
     IO.puts("  All operations completed successfully: #{length(all_results) == 6}")
   end
 

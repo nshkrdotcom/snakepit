@@ -74,6 +74,17 @@ defmodule Snakepit.Config do
   @default_batch_delay 750
   @default_threads_per_worker 10
 
+  @default_heartbeat_config %{
+    enabled: false,
+    ping_interval_ms: 2_000,
+    timeout_ms: 10_000,
+    max_missed_heartbeats: 3,
+    initial_delay_ms: 0
+  }
+
+  @heartbeat_known_keys Map.keys(@default_heartbeat_config)
+  @heartbeat_string_keys Enum.map(@heartbeat_known_keys, &Atom.to_string/1)
+
   @doc """
   Get and validate pool configurations from application environment.
 
@@ -149,6 +160,14 @@ defmodule Snakepit.Config do
       |> Map.put_new(:adapter_env, [])
       |> Map.put_new(:worker_ttl, :infinity)
       |> Map.put_new(:worker_max_requests, :infinity)
+
+    heartbeat =
+      config
+      |> Map.get(:heartbeat, %{})
+      |> normalize_heartbeat_overrides()
+      |> merge_with_heartbeat_defaults(heartbeat_defaults())
+
+    base_config = Map.put(base_config, :heartbeat, heartbeat)
 
     # Add profile-specific defaults
     case profile do
@@ -229,6 +248,16 @@ defmodule Snakepit.Config do
       :process -> Snakepit.WorkerProfile.Process
       :thread -> Snakepit.WorkerProfile.Thread
     end
+  end
+
+  @doc """
+  Returns the normalized default heartbeat configuration, merged with application env overrides.
+  """
+  @spec heartbeat_defaults() :: map()
+  def heartbeat_defaults do
+    Application.get_env(:snakepit, :heartbeat, %{})
+    |> normalize_heartbeat_overrides()
+    |> merge_with_heartbeat_defaults()
   end
 
   # Private functions
@@ -367,5 +396,43 @@ defmodule Snakepit.Config do
       invalid ->
         {:error, {:invalid_worker_max_requests, invalid, "must be :infinity or positive integer"}}
     end
+  end
+
+  defp normalize_heartbeat_overrides(overrides) when is_map(overrides) do
+    Enum.reduce(overrides, %{}, fn {key, value}, acc ->
+      Map.put(acc, normalize_heartbeat_key(key), value)
+    end)
+  end
+
+  defp normalize_heartbeat_overrides(_), do: %{}
+
+  defp merge_with_heartbeat_defaults(overrides, base \\ @default_heartbeat_config) do
+    defaults =
+      Enum.reduce(base, %{}, fn {key, value}, acc ->
+        Map.put(acc, key, value)
+      end)
+
+    Map.merge(defaults, overrides, fn _key, _default, override -> override end)
+  end
+
+  defp normalize_heartbeat_key(key) when is_atom(key) do
+    if key in @heartbeat_known_keys do
+      key
+    else
+      key
+    end
+  end
+
+  defp normalize_heartbeat_key(key) when is_binary(key) do
+    cond do
+      key in @heartbeat_string_keys ->
+        String.to_existing_atom(key)
+
+      true ->
+        key
+    end
+  rescue
+    ArgumentError ->
+      key
   end
 end

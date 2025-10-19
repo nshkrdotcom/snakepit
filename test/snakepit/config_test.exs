@@ -50,6 +50,38 @@ defmodule Snakepit.ConfigTest do
       assert normalized.threads_per_worker > 0
       assert is_boolean(normalized.thread_safety_checks)
     end
+
+    test "injects heartbeat defaults into normalized config" do
+      normalized = Config.normalize_pool_config(%{name: :hb_test})
+      assert normalized.heartbeat.enabled == false
+      assert normalized.heartbeat.ping_interval_ms == 2_000
+      assert normalized.heartbeat.max_missed_heartbeats == 3
+    end
+
+    test "merges global heartbeat overrides from application env" do
+      Application.put_env(:snakepit, :heartbeat, %{enabled: true, ping_interval_ms: 500})
+
+      on_exit(fn ->
+        Application.delete_env(:snakepit, :heartbeat)
+      end)
+
+      normalized = Config.normalize_pool_config(%{name: :hb_env_test})
+      assert normalized.heartbeat.enabled == true
+      assert normalized.heartbeat.ping_interval_ms == 500
+      assert normalized.heartbeat.timeout_ms == 10_000
+    end
+
+    test "applies pool-specific heartbeat overrides" do
+      normalized =
+        Config.normalize_pool_config(%{
+          name: :hb_pool,
+          heartbeat: %{"enabled" => true, "max_missed_heartbeats" => 5}
+        })
+
+      assert normalized.heartbeat.enabled == true
+      assert normalized.heartbeat.max_missed_heartbeats == 5
+      assert normalized.heartbeat.ping_interval_ms == 2_000
+    end
   end
 
   describe "validate_pool_config/1" do
@@ -133,6 +165,29 @@ defmodule Snakepit.ConfigTest do
 
     test "defaults to process profile" do
       assert Config.get_profile_module(%{}) == Snakepit.WorkerProfile.Process
+    end
+  end
+
+  describe "heartbeat_defaults/0" do
+    test "returns base defaults when no overrides configured" do
+      Application.delete_env(:snakepit, :heartbeat)
+
+      defaults = Config.heartbeat_defaults()
+      assert defaults.enabled == false
+      assert defaults.ping_interval_ms == 2_000
+      assert defaults.timeout_ms == 10_000
+    end
+
+    test "merges application heartbeat overrides" do
+      Application.put_env(:snakepit, :heartbeat, %{timeout_ms: 5_000})
+
+      on_exit(fn ->
+        Application.delete_env(:snakepit, :heartbeat)
+      end)
+
+      defaults = Config.heartbeat_defaults()
+      assert defaults.timeout_ms == 5_000
+      assert defaults.max_missed_heartbeats == 3
     end
   end
 end

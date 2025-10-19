@@ -6,12 +6,17 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
   @moduletag timeout: 60_000
 
   setup do
+    prev_pools = Application.get_env(:snakepit, :pools)
+    prev_pooling = Application.get_env(:snakepit, :pooling_enabled)
+
     # Ensure clean state
     Application.stop(:snakepit)
     Application.load(:snakepit)
 
     on_exit(fn ->
       Application.stop(:snakepit)
+      restore_env(:pools, prev_pools)
+      restore_env(:pooling_enabled, prev_pooling)
       # Wait for processes to actually stop
       assert_eventually(
         fn ->
@@ -24,6 +29,9 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
 
     :ok
   end
+
+  defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
 
   describe "THE REAL TEST: Does multi-pool actually work?" do
     test "Pool.init accepts and uses multi-pool configuration" do
