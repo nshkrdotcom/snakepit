@@ -13,6 +13,7 @@ defmodule Snakepit.Telemetry.OpenTelemetryTest do
       enabled: true,
       debug_pid: self(),
       force?: true,
+      skip_runtime?: true,
       exporters: %{
         otlp: %{enabled: false},
         console: %{enabled: false}

@@ -78,6 +78,8 @@ ExUnit.start(exclude: [:performance])
 # CRITICAL: Start the application ONCE for all tests
 # This prevents test contamination and port conflicts from async start/stop
 IO.puts("\n=== Starting Snakepit application for test suite ===")
+Application.put_env(:tls_certificate_check, :log_level, :error)
+Application.ensure_all_started(:tls_certificate_check)
 {:ok, apps} = Application.ensure_all_started(:snakepit)
 IO.puts("Started applications: #{inspect(apps)}")
 
