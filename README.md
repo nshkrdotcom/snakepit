@@ -30,6 +30,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
+- [What's New in v0.6.3](#whats-new-in-v063)
 - [What's New in v0.6.2](#whats-new-in-v062)
 - [What's New in v0.6.1](#whats-new-in-v061)
 - [What's New in v0.6.0](#whats-new-in-v060)
@@ -102,6 +103,19 @@ For **non-DSPex users**, if you're using these classes directly:
 - [Architecture Decision](https://github.com/nshkrdotcom/dspex/blob/main/docs/architecture_review_20251007/09_ARCHITECTURE_DECISION_RECORD.md)
 
 **Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
+
+---
+
+## 🆕 What's New in v0.6.3
+
+**Flexible Heartbeat Failure Handling** - v0.6.3 introduces dependent/independent heartbeat modes, allowing workers to optionally continue running when Elixir heartbeats fail. Perfect for debugging scenarios or when you want Python workers to remain alive despite connectivity issues.
+
+- **Heartbeat Independence Mode** - New `dependent: false` configuration option allows workers to survive heartbeat failures
+- **Environment-based Configuration** - Heartbeat settings now passed via `SNAKEPIT_HEARTBEAT_CONFIG` environment variable
+- **Python Test Coverage** - Added comprehensive unit tests for dependent heartbeat termination behavior
+- **Default Heartbeat Enabled** - Heartbeat monitoring now enabled by default for better production reliability
+
+See the [CHANGELOG](CHANGELOG.md#063) for complete details.
 
 ---
 
@@ -477,7 +491,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-{:snakepit, "~> 0.6.2"}
+{:snakepit, "~> 0.6.3"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,

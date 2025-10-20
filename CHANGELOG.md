@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2025-10-19
+
+### Added
+- **Dependent/Independent Heartbeat Mode** - New `dependent` configuration flag allows workers to optionally continue running when Elixir heartbeats fail, enabling debugging scenarios where Python workers should remain alive
+- Environment variable-based heartbeat configuration via `SNAKEPIT_HEARTBEAT_CONFIG` for passing settings from Elixir to Python workers
+- Python unit test coverage for dependent heartbeat termination behavior (`priv/python/tests/test_heartbeat_client.py`)
+- CLI flags `--heartbeat-dependent` and `--heartbeat-independent` for Python gRPC server configuration
+
+### Changed
+- Default heartbeat enabled state changed from `false` to `true` for better production reliability
+- `HeartbeatMonitor` now suppresses worker termination when `dependent: false` is configured, logging warnings instead
+- Python `HeartbeatClient` includes default shutdown handler for dependent mode
+- `Snakepit.GRPCWorker` passes heartbeat configuration to Python via environment variables
+- Updated configuration tests to reflect new heartbeat defaults
+
+### Fixed
+- Heartbeat configuration now properly propagates from Elixir to Python across all code paths
+
+---
+
 ## [0.6.2] - 2025-10-26
 
 ### Added
