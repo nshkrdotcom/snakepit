@@ -7,6 +7,9 @@ config :snakepit,
   # Options: :debug, :info, :warning, :error, :none
   # Set to :warning or :none for clean output in production
   log_level: :info,
+  # Enable dev log fanout only when explicitly configured
+  dev_logfanout?: false,
+  dev_log_path: "/var/log/snakepit/python-dev.log",
   # Enable pooling by default
   pooling_enabled: true,
   enable_otlp?: false,

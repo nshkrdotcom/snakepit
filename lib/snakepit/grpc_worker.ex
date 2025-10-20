@@ -32,6 +32,7 @@ defmodule Snakepit.GRPCWorker do
   use GenServer
   require Logger
   alias Snakepit.Telemetry.Correlation
+  alias Snakepit.LogFanout
   alias Snakepit.Logger, as: SLog
   require OpenTelemetry.Tracer, as: Tracer
 
@@ -612,7 +613,14 @@ defmodule Snakepit.GRPCWorker do
     output = String.trim(to_string(data))
 
     if output != "" do
-      SLog.info("gRPC server output: #{output}")
+      metadata = %{
+        worker_id: state.id,
+        pool: state.pool_name,
+        port: state.port,
+        python_pid: state.process_pid
+      }
+
+      LogFanout.handle_log(output, metadata)
     end
 
     {:noreply, state}

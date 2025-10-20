@@ -30,7 +30,8 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
-- [What's New in v0.6.1](#whats-new-in-v061)
+- [What's New in v0.6.3](#whats-new-in-v063)
+- [What's New in v0.6.2](#whats-new-in-v061)
 - [What's New in v0.6.0](#whats-new-in-v060)
 - [Breaking Changes (v0.5.0)](#️-breaking-changes-v050)
 - [What's New in v0.5.1](#whats-new-in-v051)
@@ -104,11 +105,22 @@ For **non-DSPex users**, if you're using these classes directly:
 
 ---
 
-## 🆕 What's New in v0.6.1
+## 🆕 What's New in v0.6.3
+
+### Docker-Native Python Environments
+- Added `Snakepit.PythonEnvironment` abstraction with native and Docker resolvers.
+- New Docker resolver wraps Python execution in `docker exec`, supports custom arguments, env vars, and path rewriting for mounted volumes.
+- Per-pool `python_environment` overrides let hybrid deployments mix containerised and bare-metal workers.
+
+### Safer Worker Startup
+- `Snakepit.GRPCWorker` now launches Python via the resolved environment command and merges environment variables deterministically.
+- Improved error reporting when the configured Python environment cannot be resolved, avoiding silent pool start failures.
+
+## 🆕 What's New in v0.6.2
 
 ### 🔇 Configurable Logging System
 
-Snakepit v0.6.1 introduces fine-grained control over internal logging for cleaner output in production and demo environments.
+Snakepit v0.6.2 introduces fine-grained control over internal logging for cleaner output in production and demo environments.
 
 #### Key Features
 
@@ -149,6 +161,16 @@ config :logger, level: :debug
 config :snakepit,
   log_level: :none  # No Snakepit logs at all
 ```
+
+**Targeted Dev Log Fanout**:
+```elixir
+# config/dev.exs
+config :snakepit,
+  dev_logfanout?: true,
+  dev_log_path: "/var/log/snakepit/python-dev.log"
+```
+
+Set the `SNAKEPIT_VERBOSE=1` environment variable while iterating to enable the fanout and bump the LogFanout metadata in the Phoenix container (or any host app). Each worker line is stamped with `[snakepit]`, `worker_id`, `python_pid`, and written to the configured path while still flowing through `Snakepit.Logger`.
 
 #### What Gets Suppressed
 
@@ -458,7 +480,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-{:snakepit, "~> 0.6.1"}
+{:snakepit, "~> 0.6.3"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,
@@ -1000,6 +1022,31 @@ config :snakepit,
 ```
 
 The gRPC adapter automatically assigns unique ports to each worker within the specified range, ensuring isolation and parallel operation.
+
+### Python Environment
+
+```elixir
+# Run workers inside Docker while keeping BEAM on the host
+config :snakepit,
+  python_environment: {:docker, %{
+    container: "phoenix",
+    python_path: "/opt/venv/bin/python3",
+    path_mappings: [%{from: "/workspace", to: "/app"}],
+    env: [{"PYTHONUNBUFFERED", "1"}]
+  }},
+  pools: [
+    %{
+      name: :default,
+      pool_size: 4,
+      # Per-pool overrides let you mix environments
+      python_environment: :native
+    }
+  ]
+```
+
+_Default behaviour (when unset) remains the native resolver that looks for_
+`config :snakepit, :python_executable`, the `SNAKEPIT_PYTHON` environment
+variable, project virtualenvs, and finally `python3`/`python` on `PATH`.
 
 ### Advanced Configuration
 
