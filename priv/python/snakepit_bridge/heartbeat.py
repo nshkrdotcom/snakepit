@@ -13,8 +13,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 import random
 import re
+import signal
 import time
 from dataclasses import asdict, dataclass, fields
 from typing import Any, Awaitable, Callable, Mapping, Optional
@@ -35,12 +37,13 @@ class HeartbeatConfig:
     be coordinated from application configuration without duplicating logic.
     """
 
-    enabled: bool = False
+    enabled: bool = True
     interval_ms: int = 2_000
     timeout_ms: int = 10_000
     max_missed_heartbeats: int = 3
     initial_delay_ms: int = 0
     jitter_ms: int = 0
+    dependent: bool = True
 
     @classmethod
     def from_mapping(
@@ -81,7 +84,7 @@ class HeartbeatConfig:
 
     @staticmethod
     def _coerce_value(field_name: str, value: Any, default: Any) -> Any:
-        if field_name == "enabled":
+        if field_name in {"enabled", "dependent"}:
             if isinstance(value, bool):
                 return value
             if isinstance(value, str):
@@ -126,7 +129,13 @@ class HeartbeatClient:
         self._session_id = session_id
         self._config = config or HeartbeatConfig()
         self._loop = loop
-        self._on_threshold_exceeded = on_threshold_exceeded
+
+        if self._config.dependent:
+            self._on_threshold_exceeded = (
+                on_threshold_exceeded or self._default_shutdown_handler
+            )
+        else:
+            self._on_threshold_exceeded = on_threshold_exceeded
 
         self._task: Optional[asyncio.Task[None]] = None
         self._running = False
@@ -184,6 +193,7 @@ class HeartbeatClient:
             "last_ping_monotonic": self._last_ping_monotonic,
             "last_success_monotonic": self._last_success_monotonic,
             "running": self._running,
+            "dependent": self._config.dependent,
         }
 
     async def ping_once(self) -> Optional[pb2.HeartbeatResponse]:
@@ -260,11 +270,15 @@ class HeartbeatClient:
 
         self._missed += 1
 
-        if (
-            self._on_threshold_exceeded
-            and self._missed >= self._config.max_missed_heartbeats
-        ):
-            await self._emit_threshold_notification()
+        if self._missed >= self._config.max_missed_heartbeats:
+            if self._on_threshold_exceeded:
+                await self._emit_threshold_notification()
+            elif not self._config.dependent:
+                self._logger.info(
+                    "Heartbeat threshold reached for session %s (missed=%s); worker is independent.",
+                    self._session_id,
+                    self._missed,
+                )
 
         return None
 
@@ -276,6 +290,25 @@ class HeartbeatClient:
             await self._on_threshold_exceeded(self._missed)
         except Exception:
             self._logger.exception("Heartbeat threshold handler raised an exception.")
+
+    async def _default_shutdown_handler(self, missed: int) -> None:
+        self._logger.error(
+            "Heartbeat threshold exceeded for session %s (missed=%s); terminating.",
+            self._session_id,
+            missed,
+        )
+
+        loop = self._get_loop()
+
+        try:
+            if loop:
+                loop.call_soon(os.kill, os.getpid(), signal.SIGTERM)
+                loop.call_later(5.0, os._exit, 70)
+            else:
+                os.kill(os.getpid(), signal.SIGTERM)
+        except Exception:
+            self._logger.exception("Failed to signal process termination; forcing exit.")
+            os._exit(70)
 
     @staticmethod
     def _timestamp_now() -> Timestamp:

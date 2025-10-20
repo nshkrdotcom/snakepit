@@ -61,13 +61,14 @@ defmodule Snakepit.GRPCWorker do
         }
 
   @base_heartbeat_defaults %{
-    enabled: false,
+    enabled: true,
     ping_interval_ms: 2_000,
     timeout_ms: 10_000,
     max_missed_heartbeats: 3,
     ping_fun: nil,
     test_pid: nil,
-    initial_delay_ms: 0
+    initial_delay_ms: 0,
+    dependent: true
   }
 
   @heartbeat_known_keys Map.keys(@base_heartbeat_defaults)
@@ -229,6 +230,7 @@ defmodule Snakepit.GRPCWorker do
           end
 
         adapter_env = Map.get(worker_config, :adapter_env, [])
+        heartbeat_env_json = encode_heartbeat_env(heartbeat_config)
 
         # Determine which script to use based on adapter_args (threaded vs process mode)
         # If --max-workers is specified, use the threaded server
@@ -304,15 +306,14 @@ defmodule Snakepit.GRPCWorker do
           end
 
         # Apply adapter_env to the spawned process if provided
-        port_opts =
-          if adapter_env != [] do
-            # Convert adapter_env to the format expected by Port.open
-            # Each entry should be a charlist tuple {~c"KEY", ~c"VALUE"}
-            env_tuples =
-              Enum.map(adapter_env, fn {key, value} ->
-                {String.to_charlist(key), String.to_charlist(value)}
-              end)
+        env_entries =
+          adapter_env
+          |> normalize_adapter_env_entries()
+          |> maybe_put_heartbeat_env(heartbeat_env_json)
 
+        port_opts =
+          if env_entries != [] do
+            env_tuples = Enum.map(env_entries, &to_env_tuple/1)
             port_opts ++ [{:env, env_tuples}]
           else
             port_opts
@@ -733,6 +734,7 @@ defmodule Snakepit.GRPCWorker do
           {:timeout_ms, config[:timeout_ms]},
           {:max_missed_heartbeats, config[:max_missed_heartbeats]},
           {:initial_delay_ms, config[:initial_delay_ms]},
+          {:dependent, config[:dependent]},
           {:ping_fun, config[:ping_fun] || build_default_ping_fun(state, config)}
         ]
 
@@ -861,7 +863,7 @@ defmodule Snakepit.GRPCWorker do
   defp maybe_stop_heartbeat_monitor(pid) when is_pid(pid) do
     if Process.alive?(pid) do
       try do
-        GenServer.stop(pid, :worker_stopping)
+        GenServer.stop(pid, :shutdown)
       catch
         :exit, _ -> :ok
       end
@@ -946,6 +948,65 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp get_worker_config_section(_config, _key), do: nil
+
+  defp encode_heartbeat_env(config) when is_map(config) do
+    config
+    |> Map.new()
+    |> Map.take([
+      :enabled,
+      :ping_interval_ms,
+      :timeout_ms,
+      :max_missed_heartbeats,
+      :initial_delay_ms,
+      :dependent
+    ])
+    |> Enum.reduce(%{}, fn
+      {:ping_interval_ms, value}, acc -> Map.put(acc, "interval_ms", value)
+      {key, value}, acc -> Map.put(acc, to_string(key), value)
+    end)
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+    |> case do
+      %{} = map when map == %{} -> nil
+      map -> Jason.encode!(map)
+    end
+  end
+
+  defp encode_heartbeat_env(_), do: nil
+
+  defp normalize_adapter_env_entries(nil), do: []
+
+  defp normalize_adapter_env_entries(env) when is_map(env) do
+    env
+    |> Map.to_list()
+    |> normalize_adapter_env_entries()
+  end
+
+  defp normalize_adapter_env_entries(env) when is_list(env) do
+    Enum.flat_map(env, fn
+      {key, value} -> [{to_string(key), to_string(value)}]
+      key when is_binary(key) -> [{key, ""}]
+      key when is_atom(key) -> [{Atom.to_string(key), ""}]
+      _ -> []
+    end)
+  end
+
+  defp maybe_put_heartbeat_env(entries, nil), do: entries
+
+  defp maybe_put_heartbeat_env(entries, json) do
+    key = "SNAKEPIT_HEARTBEAT_CONFIG"
+
+    filtered =
+      Enum.reject(entries, fn {existing_key, _value} ->
+        String.downcase(existing_key) == String.downcase(key)
+      end)
+
+    [{key, json} | filtered]
+  end
+
+  defp to_env_tuple({key, value}) do
+    {String.to_charlist(key), String.to_charlist(value)}
+  end
 
   # CRITICAL FIX: Defensive port cleanup that handles all exit scenarios
   defp safe_close_port(port) do
