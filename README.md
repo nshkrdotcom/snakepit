@@ -30,6 +30,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
+- [What's New in v0.6.2](#whats-new-in-v062)
 - [What's New in v0.6.1](#whats-new-in-v061)
 - [What's New in v0.6.0](#whats-new-in-v060)
 - [Breaking Changes (v0.5.0)](#️-breaking-changes-v050)
@@ -103,6 +104,24 @@ For **non-DSPex users**, if you're using these classes directly:
 **Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
 
 ---
+
+## 🆕 What's New in v0.6.2
+
+### ❤️ Heartbeat Reliability Hardening
+
+- Workers now shut down automatically when their heartbeat monitor crashes, ensuring unhealthy Python processes never get reused
+- Added end-to-end regression coverage that exercises missed heartbeat scenarios, validates registry cleanup, and confirms OS-level process termination
+- Extended heartbeat monitor regression guards to watch for drift across sustained ping/pong cycles
+
+### 🔬 Telemetry Regression Coverage
+
+- Python bridge regression now verifies outbound metadata preserves correlation identifiers when proxying requests back to Elixir
+- Expanded telemetry fixtures and test harnesses surface misconfigurations by defaulting `SNAKEPIT_OTEL_CONSOLE` to disabled during tests
+
+### 🛠️ Developer Experience
+
+- `make test` honors your project virtualenv, exports `PYTHONPATH`, and runs `mix test --color` for consistent local feedback loops
+- Added heartbeat & observability deep-dive notes plus a consolidated testing command crib sheet under `docs/20251019/`
 
 ## 🆕 What's New in v0.6.1
 
@@ -458,7 +477,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-{:snakepit, "~> 0.6.1"}
+{:snakepit, "~> 0.6.2"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,
