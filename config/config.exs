@@ -32,11 +32,12 @@ config :snakepit,
 
   # Global heartbeat defaults (per-worker overrides inherit from this map)
   heartbeat: %{
-    enabled: false,
+    enabled: true,
     ping_interval_ms: 2_000,
     timeout_ms: 10_000,
     max_missed_heartbeats: 3,
-    initial_delay_ms: 0
+    initial_delay_ms: 0,
+    dependent: true
   },
   telemetry_metrics: %{
     prometheus: %{

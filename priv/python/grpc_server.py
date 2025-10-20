@@ -14,6 +14,7 @@ import signal
 import sys
 import time
 import inspect
+import os
 from concurrent import futures
 from datetime import datetime
 from typing import Any, Dict, Mapping, Optional
@@ -44,6 +45,32 @@ _log_filter = telemetry.correlation_filter()
 logger = logging.getLogger(__name__)
 logger.addFilter(_log_filter)
 logging.getLogger().addFilter(_log_filter)
+
+
+def _resolve_heartbeat_options(cli_options: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Merge CLI-provided heartbeat overrides with Elixir-sourced env config."""
+
+    options: Dict[str, Any] = {}
+
+    if cli_options:
+        options.update(dict(cli_options))
+
+    raw_env = os.environ.get("SNAKEPIT_HEARTBEAT_CONFIG")
+
+    if raw_env:
+        try:
+            env_options = json.loads(raw_env)
+        except json.JSONDecodeError:
+            logger.warning("Invalid SNAKEPIT_HEARTBEAT_CONFIG payload; ignoring.")
+        else:
+            if isinstance(env_options, dict):
+                options.update(env_options)
+            else:
+                logger.warning(
+                    "Expected dict for SNAKEPIT_HEARTBEAT_CONFIG, got %s", type(env_options)
+                )
+
+    return options or None
 
 
 def grpc_error_handler(func):
@@ -129,8 +156,14 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     For tool execution, it creates ephemeral contexts that callback to Elixir for state.
     """
 
-    def __init__(self, adapter_class, elixir_address: str,
-                 heartbeat_options: Optional[Mapping[str, Any]] = None):
+    def __init__(
+        self,
+        adapter_class,
+        elixir_address: str,
+        heartbeat_options: Optional[Mapping[str, Any]] = None,
+        *,
+        shutdown_event: Optional[asyncio.Event] = None,
+    ):
         with open("/tmp/python_worker_debug.log", "a") as f:
             f.write(f"BridgeServiceServicer.__init__ called\n")
             f.flush()
@@ -138,6 +171,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         self.adapter_class = adapter_class
         self.elixir_address = elixir_address
         self.server: Optional[grpc.aio.Server] = None
+        self.shutdown_event = shutdown_event
 
         with open("/tmp/python_worker_debug.log", "a") as f:
             f.write(f"Creating async channel to {elixir_address}...\n")
@@ -161,7 +195,8 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
         logger.info(f"Python server initialized with Elixir backend at {elixir_address}")
 
-        self.heartbeat_config = HeartbeatConfig.from_mapping(heartbeat_options)
+        resolved_heartbeat_options = _resolve_heartbeat_options(heartbeat_options)
+        self.heartbeat_config = HeartbeatConfig.from_mapping(resolved_heartbeat_options)
         self.heartbeat_clients: Dict[str, HeartbeatClient] = {}
         self._heartbeat_lock = asyncio.Lock()
 
@@ -676,11 +711,33 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         if not self.heartbeat_config.enabled:
             return None
 
+        threshold_handler = None
+
+        if self.heartbeat_config.dependent:
+            threshold_handler = self._build_dependent_threshold_handler(session_id)
+
         return HeartbeatClient(
             self.elixir_stub,
             session_id,
             config=self.heartbeat_config,
+            on_threshold_exceeded=threshold_handler,
         )
+
+    def _build_dependent_threshold_handler(self, session_id: str):
+        async def _handler(missed: int) -> None:
+            logger.error(
+                "Heartbeat threshold exceeded for session %s (missed=%s); shutting down.",
+                session_id,
+                missed,
+            )
+
+            if self.shutdown_event and not self.shutdown_event.is_set():
+                self.shutdown_event.set()
+
+            loop = asyncio.get_running_loop()
+            loop.call_soon(os.kill, os.getpid(), signal.SIGTERM)
+
+        return _handler
 
     async def _ensure_heartbeat_client(self, session_id: str) -> Optional[HeartbeatClient]:
         """
@@ -873,7 +930,12 @@ async def serve_with_shutdown(
         f.write(f"Creating servicer...\n")
         f.flush()
 
-    servicer = BridgeServiceServicer(adapter_class, elixir_address, heartbeat_options=heartbeat_options)
+    servicer = BridgeServiceServicer(
+        adapter_class,
+        elixir_address,
+        heartbeat_options=heartbeat_options,
+        shutdown_event=shutdown_event,
+    )
     servicer.set_server(server)
 
     pb2_grpc.add_BridgeServiceServicer_to_server(servicer, server)
@@ -1030,6 +1092,19 @@ def main():
                         help='Maximum consecutive heartbeat failures before escalation')
     parser.add_argument('--heartbeat-initial-delay-ms', type=int, default=None,
                         help='Initial delay before starting heartbeat loop (milliseconds)')
+    parser.add_argument(
+        '--heartbeat-dependent',
+        dest='heartbeat_dependent',
+        action='store_true',
+        help='Exit when Elixir heartbeat is lost (default behaviour)'
+    )
+    parser.add_argument(
+        '--heartbeat-independent',
+        dest='heartbeat_dependent',
+        action='store_false',
+        help='Keep running even when Elixir heartbeat is lost'
+    )
+    parser.set_defaults(heartbeat_dependent=None)
 
     args = parser.parse_args()
 
@@ -1049,6 +1124,9 @@ def main():
 
     if args.heartbeat_initial_delay_ms is not None:
         heartbeat_overrides["initial_delay_ms"] = args.heartbeat_initial_delay_ms
+
+    if args.heartbeat_dependent is not None:
+        heartbeat_overrides["dependent"] = args.heartbeat_dependent
 
     heartbeat_options = heartbeat_overrides or None
 

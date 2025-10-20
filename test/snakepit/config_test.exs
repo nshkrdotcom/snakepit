@@ -53,7 +53,7 @@ defmodule Snakepit.ConfigTest do
 
     test "injects heartbeat defaults into normalized config" do
       normalized = Config.normalize_pool_config(%{name: :hb_test})
-      assert normalized.heartbeat.enabled == false
+      assert normalized.heartbeat.enabled == true
       assert normalized.heartbeat.ping_interval_ms == 2_000
       assert normalized.heartbeat.max_missed_heartbeats == 3
     end
@@ -173,7 +173,7 @@ defmodule Snakepit.ConfigTest do
       Application.delete_env(:snakepit, :heartbeat)
 
       defaults = Config.heartbeat_defaults()
-      assert defaults.enabled == false
+      assert defaults.enabled == true
       assert defaults.ping_interval_ms == 2_000
       assert defaults.timeout_ms == 10_000
     end

@@ -21,6 +21,7 @@ defmodule Snakepit.HeartbeatMonitor do
           | {:timeout_ms, non_neg_integer()}
           | {:max_missed_heartbeats, non_neg_integer()}
           | {:ping_fun, (integer() -> :ok | {:ok, term()} | {:error, term()} | term())}
+          | {:dependent, boolean()}
 
   defstruct [
     :worker_pid,
@@ -33,6 +34,7 @@ defmodule Snakepit.HeartbeatMonitor do
     :timeout_timer,
     :last_ping_timestamp,
     :initial_delay,
+    dependent: true,
     missed_heartbeats: 0,
     stats: %{pings_sent: 0, pongs_received: 0, timeouts: 0}
   ]
@@ -67,6 +69,7 @@ defmodule Snakepit.HeartbeatMonitor do
     timeout = Keyword.get(opts, :timeout_ms, @default_timeout)
     max_missed = Keyword.get(opts, :max_missed_heartbeats, @default_max_missed)
     initial_delay = Keyword.get(opts, :initial_delay_ms, 0)
+    dependent = Keyword.get(opts, :dependent, true)
 
     ping_fun =
       Keyword.get(opts, :ping_fun, &default_ping_fun/1)
@@ -78,7 +81,8 @@ defmodule Snakepit.HeartbeatMonitor do
       timeout: timeout,
       max_missed_heartbeats: max_missed,
       ping_fun: ping_fun,
-      initial_delay: initial_delay
+      initial_delay: initial_delay,
+      dependent: dependent
     }
 
     Process.monitor(worker_pid)
@@ -94,7 +98,8 @@ defmodule Snakepit.HeartbeatMonitor do
       worker_pid: state.worker_pid,
       missed_heartbeats: state.missed_heartbeats,
       last_ping_timestamp: state.last_ping_timestamp,
-      stats: state.stats
+      stats: state.stats,
+      dependent: state.dependent
     }
 
     {:reply, status, state}
@@ -169,9 +174,14 @@ defmodule Snakepit.HeartbeatMonitor do
     })
 
     if missed >= state.max_missed_heartbeats do
-      Logger.error(
+      log_message =
         "Worker #{state.worker_id} missed #{missed} heartbeat(s); initiating termination"
-      )
+
+      if state.dependent do
+        Logger.error(log_message)
+      else
+        Logger.warning("#{log_message} (worker configured as heartbeat-independent)")
+      end
 
       handle_worker_failure(
         %{state | missed_heartbeats: missed, stats: stats},
@@ -237,8 +247,23 @@ defmodule Snakepit.HeartbeatMonitor do
 
   defp handle_worker_failure(state, reason) do
     emit_event(:monitor_failure, state, %{failure_reason: reason})
-    Process.exit(state.worker_pid, {:shutdown, reason})
-    {:stop, {:shutdown, reason}, state}
+
+    if state.dependent do
+      Process.exit(state.worker_pid, {:shutdown, reason})
+      {:stop, {:shutdown, reason}, state}
+    else
+      Logger.debug(
+        "Heartbeat monitor for #{state.worker_id} suppressing termination (independent worker, reason=#{inspect(reason)})"
+      )
+
+      cancel_timer(state.timeout_timer)
+
+      new_state =
+        %{state | timeout_timer: nil}
+        |> schedule_next_ping()
+
+      {:noreply, new_state}
+    end
   end
 
   defp normalize_ping_result(:ok), do: :ok
@@ -256,7 +281,8 @@ defmodule Snakepit.HeartbeatMonitor do
         %{
           worker_id: state.worker_id,
           worker_pid: state.worker_pid,
-          missed_heartbeats: state.missed_heartbeats
+          missed_heartbeats: state.missed_heartbeats,
+          dependent: state.dependent
         },
         metadata
       )
