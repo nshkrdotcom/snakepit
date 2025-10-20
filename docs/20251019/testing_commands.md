@@ -33,6 +33,9 @@ This executes the full 41-test suite, including `test_proxy_outgoing_metadata_ca
 make test
 ```
 
-`make test` boots the Elixir test suite after invoking `python -m pytest tests/`. On systems where `python` is not in $PATH, the Python phase will fail; prefer the explicit virtualenv invocation above if you do not have a global interpreter.
+`make test` now auto-detects `.venv/bin/python` (falling back to `python3`/`python`) and runs:
 
-For CI integration, run `mix test` and the virtualenv-backed pytest command separately.
+1. `PYTHONPATH=priv/python <python> -m pytest priv/python/tests`
+2. `mix test --color`
+
+Run `python3 -m venv .venv` first if you rely on the local virtualenv. For CI integration, you can still invoke `mix test` and the explicit pytest command separately.
