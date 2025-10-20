@@ -1,7 +1,12 @@
 import io
 import logging
+import os
+
+import asyncio
 
 import pytest
+
+import grpc_server
 
 from snakepit_bridge import telemetry
 
@@ -47,6 +52,7 @@ def test_logging_filter_injects_correlation(monkeypatch):
 
 
 def test_log_record_factory_adds_correlation_id(monkeypatch):
+    monkeypatch.setenv("SNAKEPIT_OTEL_CONSOLE", "0")
     telemetry.setup_tracing()
 
     stream = io.StringIO()
@@ -77,3 +83,37 @@ def test_log_record_factory_adds_correlation_id(monkeypatch):
     finally:
         logger.handlers = previous_handlers
         logger.propagate = previous_propagate
+
+
+def test_proxy_outgoing_metadata_carries_correlation():
+    os.environ["SNAKEPIT_OTEL_CONSOLE"] = "0"
+    telemetry.setup_tracing()
+    token = telemetry.set_correlation_id("cid-proxy")
+
+    class _FakeStub:
+        def __init__(self):
+            self.metadata = None
+
+        async def InitializeSession(self, request, metadata=None):
+            self.metadata = metadata
+            return "ok"
+
+    try:
+        service = object.__new__(grpc_server.BridgeServiceServicer)
+        service.elixir_stub = _FakeStub()
+
+        asyncio.run(
+            grpc_server.BridgeServiceServicer._proxy_to_elixir(
+                service,
+                "InitializeSession",
+                request={"session_id": "s-123"},
+            )
+        )
+
+        assert service.elixir_stub.metadata is not None
+        assert (
+            telemetry.CORRELATION_HEADER,
+            "cid-proxy",
+        ) in service.elixir_stub.metadata
+    finally:
+        telemetry.reset_correlation_id(token)
