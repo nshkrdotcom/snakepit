@@ -80,4 +80,37 @@ defmodule Snakepit.HeartbeatMonitorTest do
 
     assert_receive {:DOWN, _mon_ref, :process, ^worker_pid, {:shutdown, :heartbeat_timeout}}, 500
   end
+
+  test "maintains heartbeat stability over sustained intervals" do
+    worker_pid = spawn_worker()
+    parent = self()
+
+    ping_fun = fn timestamp ->
+      send(parent, {:steady_ping, timestamp})
+      HeartbeatMonitor.notify_pong(self(), timestamp)
+      :ok
+    end
+
+    {:ok, monitor} =
+      HeartbeatMonitor.start_link(
+        worker_pid: worker_pid,
+        worker_id: "worker-stable",
+        ping_interval_ms: 50,
+        timeout_ms: 200,
+        max_missed_heartbeats: 5,
+        ping_fun: ping_fun
+      )
+
+    # Allow multiple cycles to run
+    Process.sleep(1_000)
+
+    status = HeartbeatMonitor.get_status(monitor)
+
+    assert status.missed_heartbeats == 0
+    assert status.stats.pings_sent >= 8
+    assert status.stats.pongs_received == status.stats.pings_sent
+
+    :ok = GenServer.stop(monitor)
+    send(worker_pid, :halt)
+  end
 end
