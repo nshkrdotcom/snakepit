@@ -13,6 +13,9 @@ PYTHON_GRPC_FILES = $(PYTHON_OUT_DIR)/snakepit_bridge_pb2.py $(PYTHON_OUT_DIR)/s
 
 .PHONY: all clean proto-python proto-elixir install-dev test help
 
+# Python interpreter (prefer local virtualenv, fallback to python3/python)
+PYTHON ?= $(shell if [ -x ".venv/bin/python" ]; then echo "./.venv/bin/python"; elif command -v python3 >/dev/null 2>&1; then echo "python3"; else echo "python"; fi)
+
 # Default target
 all: proto-python
 
@@ -23,7 +26,7 @@ $(PYTHON_GRPC_FILES): $(PROTO_FILE)
 	@echo "Generating Python gRPC code..."
 	@mkdir -p $(PYTHON_OUT_DIR)
 	@touch $(PYTHON_OUT_DIR)/__init__.py
-	python -m grpc_tools.protoc \
+	$(PYTHON) -m grpc_tools.protoc \
 		--proto_path=$(PROTO_DIR) \
 		--python_out=$(PYTHON_OUT_DIR) \
 		--grpc_python_out=$(PYTHON_OUT_DIR) \
@@ -57,8 +60,8 @@ clean:
 # Run tests
 test:
 	@echo "Running tests..."
-	cd priv/python && python -m pytest tests/
-	mix test
+	PYTHONPATH=priv/python $(PYTHON) -m pytest priv/python/tests
+	mix test --color
 
 # Show help
 help:
