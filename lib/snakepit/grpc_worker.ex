@@ -598,6 +598,15 @@ defmodule Snakepit.GRPCWorker do
   end
 
   @impl true
+  def handle_info({:EXIT, monitor_pid, exit_reason}, %{heartbeat_monitor: monitor_pid} = state) do
+    SLog.warning(
+      "Heartbeat monitor for #{state.id} exited with #{inspect(exit_reason)}; terminating worker"
+    )
+
+    {:stop, {:shutdown, exit_reason}, %{state | heartbeat_monitor: nil}}
+  end
+
+  @impl true
   def handle_info({port, {:data, data}}, %{server_port: port} = state) do
     # Log server output for debugging
     output = String.trim(to_string(data))
