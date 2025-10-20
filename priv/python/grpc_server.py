@@ -14,6 +14,7 @@ import signal
 import sys
 import time
 import inspect
+import os
 from concurrent import futures
 from datetime import datetime
 from typing import Any, Dict, Mapping, Optional
@@ -34,16 +35,35 @@ import functools
 import traceback
 import pickle
 
+
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - [corr=%(correlation_id)s] %(message)s",
+    format="%(asctime)s [snakepit][pid=%(process)d][worker=%(snakepit_worker)s] [corr=%(correlation_id)s] %(levelname)s %(message)s",
     level=logging.INFO,
 )
 
+
+class SnakepitWorkerFilter(logging.Filter):
+    def __init__(self, worker_id: str = "unknown"):
+        super().__init__()
+        self.worker_id = worker_id or "unknown"
+
+    def set_worker_id(self, worker_id: str) -> None:
+        self.worker_id = worker_id or "unknown"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.snakepit_worker = self.worker_id
+        return True
+
+
 telemetry.setup_tracing()
 _log_filter = telemetry.correlation_filter()
+_worker_filter = SnakepitWorkerFilter()
 logger = logging.getLogger(__name__)
 logger.addFilter(_log_filter)
-logging.getLogger().addFilter(_log_filter)
+logger.addFilter(_worker_filter)
+root_logger = logging.getLogger()
+root_logger.addFilter(_log_filter)
+root_logger.addFilter(_worker_filter)
 
 
 def grpc_error_handler(func):
@@ -1032,6 +1052,11 @@ def main():
                         help='Initial delay before starting heartbeat loop (milliseconds)')
 
     args = parser.parse_args()
+    _worker_filter.set_worker_id(args.snakepit_run_id)
+
+    if args.snakepit_run_id:
+        os.environ["SNAKEPIT_RUN_ID"] = args.snakepit_run_id
+
 
     heartbeat_overrides: Dict[str, Any] = {}
 

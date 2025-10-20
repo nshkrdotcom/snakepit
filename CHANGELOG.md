@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2025-10-21
+
+### Added
+- Introduced `Snakepit.PythonEnvironment` with native and Docker resolvers plus a reusable command structure for wrappers.
+- Docker resolver supports `docker exec` launches, environment injection, and filesystem path mapping for mounted volumes.
+- Per-pool `python_environment` overrides allow mixing containerised and bare-metal workers in the same deployment.
+
+### Changed
+- `Snakepit.GRPCWorker` now spawns Python through the resolved environment, merges environment variables deterministically, and surfaces resolution errors early.
+- Documentation refreshed with Docker configuration examples and guidance for the new environment abstraction.
+
 ## [0.6.1] - 2025-10-19
 
 ### Added
@@ -775,3 +786,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.1.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.1.2
 [0.1.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.1.1
 [0.1.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.1.0
+
+## v0.6.2 - 2025-10-19
+
+### Logging Fanout
+
+- Added dev fanout helper that always mirrors worker output through Snakepit.Logger and optionally appends [snakepit]-prefixed lines to a configurable log file (lib/snakepit/log_fanout.ex:1).
+- GRPC worker now feeds port output and worker metadata into the fanout module so Phoenix consumers get structured metadata whenever dev_logfanout? is enabled (lib/snakepit/grpc_worker.ex:615).
+- Default config ships the new knobs (dev_logfanout?, dev_log_path) while config/dev.exs:3 reads SNAKEPIT_VERBOSE to toggle verbose logging and fanout automatically.
+
+### Python Workers
+
+- Introduced a SnakepitWorkerFilter that injects worker IDs into every Python log record and refreshed the default formatter to include [snakepit][pid=...][worker=...] prefixes (priv/python/grpc_server.py:39).
+- Parsed --snakepit-run-id now seeds both the logging filter and SNAKEPIT_RUN_ID env var for downstream tooling (priv/python/grpc_server.py:1054).
+
+### Docs & Tests
+
+- Documented the new workflow and config flags in README.md:153 and LOG_LEVEL_CONFIGURATION.md:122, plus a dedicated unit test covering both fanout paths (test/snakepit/log_fanout_test.exs:1).
+
+### Tests
+
+- make test (runs PYTHONPATH=priv/python ./.venv/bin/python -m pytest priv/python/tests and mix test --color) – passes; OpenTelemetry exporter still logs the pre-existing “I/O operation on closed file” warning after pytest, but it doesn’t affect the result.
+

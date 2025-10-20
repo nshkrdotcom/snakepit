@@ -118,3 +118,19 @@ Ping result: %{"message" => "pong"}
 ```
 
 Much cleaner!
+
+## Development Log Fanout
+
+For verbose development workflows you can mirror Python worker output to a dedicated log file.
+
+```elixir
+config :snakepit,
+  dev_logfanout?: true,
+  dev_log_path: "/var/log/snakepit/python-dev.log"
+```
+
+Set the `SNAKEPIT_VERBOSE=1` environment variable in development to enable the fanout automatically (see `config/dev.exs`). When enabled, every worker log line is prefixed with `[snakepit]` and appended to the configured path while still flowing through `Snakepit.Logger` with metadata (`worker_id`, `pool`, `python_pid`).
+
+```bash
+SNAKEPIT_VERBOSE=1 mix test
+```
