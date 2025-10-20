@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2025-10-26
+
+### Added
+- End-to-end heartbeat regression suite covering monitor boot, timeout handling, and OS-level process cleanup (`test/snakepit/grpc/heartbeat_end_to_end_test.exs`)
+- Long-running heartbeat stability test to guard against drift and missed ping accumulation (`test/snakepit/heartbeat_monitor_test.exs`)
+- Python-side telemetry regression ensuring outbound metadata preserves correlation identifiers (`priv/python/tests/test_telemetry.py`)
+- Deep-dive documentation for the heartbeat and observability stack plus consolidated testing command guide (`docs/20251019/*.md`)
+
+### Changed
+- `Snakepit.GRPCWorker` now terminates itself whenever the heartbeat monitor exits, preventing pools from keeping unhealthy workers alive
+- `make test` preferentially uses the repository’s virtualenv interpreter, exports `PYTHONPATH`, and runs `mix test --color` for consistent local runs
+
+### Fixed
+- Guard against leaking heartbeat monitors by stopping the worker when the monitor crashes, ensuring registry entries and OS ports are released
+
+---
+
 ## [0.6.1] - 2025-10-19
 
 ### Added
