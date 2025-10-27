@@ -84,10 +84,6 @@ defmodule Snakepit.Application do
 
         SLog.info("🚀 Starting Snakepit with pooling enabled (size: #{pool_size})")
 
-        # Initialize ETS table for thread profile capacity tracking
-        # Must be created before any workers start
-        ensure_thread_capacity_table()
-
         [
           # Start the central gRPC server that manages state
           # DIAGNOSTIC: Increase backlog to handle high concurrent connection load (200+ workers)
@@ -113,6 +109,9 @@ defmodule Snakepit.Application do
 
           # Process registry for PID tracking
           Snakepit.Pool.ProcessRegistry,
+
+          # Thread profile capacity tracking
+          Snakepit.WorkerProfile.Thread.CapacityStore,
 
           # Worker supervisor for managing worker processes
           Snakepit.Pool.WorkerSupervisor,
@@ -144,28 +143,5 @@ defmodule Snakepit.Application do
   def stop(_state) do
     SLog.debug("Snakepit.Application.stop/1 called at: #{System.monotonic_time(:millisecond)}")
     :ok
-  end
-
-  # Private helper functions
-
-  defp ensure_thread_capacity_table do
-    table_name = :snakepit_worker_capacity
-
-    case :ets.info(table_name) do
-      :undefined ->
-        :ets.new(table_name, [
-          :set,
-          :public,
-          :named_table,
-          {:read_concurrency, true},
-          {:write_concurrency, true}
-        ])
-
-        SLog.debug("Created worker capacity ETS table: #{table_name}")
-
-      _ ->
-        # Table already exists
-        :ok
-    end
   end
 end

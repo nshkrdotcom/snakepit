@@ -262,88 +262,86 @@ defmodule Mix.Tasks.Diagnose.Scaling do
     IO.puts("📊 TEST 3: DETS LOCK CONTENTION")
     IO.puts(String.duplicate("-", 80))
 
-    # Check if DETS table exists
-    dets_table = :snakepit_process_registry_dets
+    case Process.whereis(Snakepit.Pool.ProcessRegistry) do
+      nil ->
+        IO.puts("⚠️  ProcessRegistry is not running. Skipping DETS diagnostics.")
 
-    case :dets.info(dets_table) do
-      :undefined ->
-        IO.puts("⚠️  DETS table not initialized yet")
+      _pid ->
+        case Snakepit.Pool.ProcessRegistry.dets_table_size() do
+          {:ok, size} ->
+            IO.puts("DETS table size: #{size} entries")
 
-      _info ->
-        size = :dets.info(dets_table, :size)
-        IO.puts("DETS table size: #{size} entries")
+          {:error, :not_initialized} ->
+            IO.puts("⚠️  DETS table not initialized yet")
 
-        # Test concurrent write performance
-        IO.puts("\nTesting concurrent DETS writes (simulating 110 workers)...")
+          {:error, reason} ->
+            IO.puts("⚠️  Could not query DETS table: #{inspect(reason)}")
+        end
 
-        {time_us, results} =
+        IO.puts("\nTesting registry write throughput (110 concurrent operations)...")
+
+        {time_us, outcomes} =
           :timer.tc(fn ->
             1..110
-            |> Task.async_stream(
-              fn i ->
-                start = System.monotonic_time(:microsecond)
-
-                result =
-                  :dets.insert(
-                    dets_table,
-                    {"test_worker_#{i}_#{:rand.uniform(999_999)}",
-                     %{pid: self(), started_at: System.system_time(:second)}}
-                  )
-
-                elapsed = System.monotonic_time(:microsecond) - start
-                {result, elapsed}
-              end,
+            |> Task.async_stream(&stress_process_registry/1,
               max_concurrency: 110,
               timeout: 30_000
             )
-            |> Enum.to_list()
+            |> Enum.map(fn
+              {:ok, {:ok, elapsed}} -> {:ok, elapsed}
+              {:ok, {:error, reason, elapsed}} -> {:error, reason, elapsed}
+              {:exit, reason} -> {:error, reason, 0}
+            end)
           end)
 
-        time_s = time_us / 1_000_000
+        total_time_s = time_us / 1_000_000
 
-        successes =
-          Enum.count(results, fn
-            {:ok, {:ok, _}} -> true
-            _ -> false
-          end)
-
-        failures = 110 - successes
-
-        # Get individual write times
-        write_times =
-          Enum.map(results, fn
-            {:ok, {_result, elapsed}} -> elapsed
-            _ -> nil
-          end)
-          |> Enum.reject(&is_nil/1)
-
-        if length(write_times) > 0 do
-          avg_write_us = Enum.sum(write_times) / length(write_times)
-          max_write_us = Enum.max(write_times)
-          min_write_us = Enum.min(write_times)
-
-          IO.puts("\nResults:")
-          IO.puts("  Total time:     #{Float.round(time_s, 3)}s")
-          IO.puts("  Successes:      #{successes}/110")
-          IO.puts("  Failures:       #{failures}/110")
-          IO.puts("  Avg write time: #{Float.round(avg_write_us / 1000, 2)}ms")
-          IO.puts("  Min write time: #{Float.round(min_write_us / 1000, 2)}ms")
-          IO.puts("  Max write time: #{Float.round(max_write_us / 1000, 2)}ms")
-
-          # Diagnosis
-          if time_s > 5.0 do
-            IO.puts("\n🔴 CRITICAL: DETS serialization is likely your bottleneck!")
-            IO.puts("    110 concurrent writes took #{Float.round(time_s, 1)}s")
-            IO.puts("    DETS locks on every write, causing extreme serialization")
-            IO.puts("\n💡 SOLUTION: Replace DETS with ETS or remove registry entirely")
-          else
-            if time_s > 2.0 do
-              IO.puts("\n⚠️  WARNING: DETS writes are slow (#{Float.round(time_s, 1)}s)")
-              IO.puts("    This could contribute to timeouts during worker startup")
-            else
-              IO.puts("\n✅ DETS performance acceptable (#{Float.round(time_s, 3)}s)")
-            end
+        success_times =
+          for {:ok, elapsed} <- outcomes do
+            elapsed
           end
+
+        failure_reasons =
+          for {:error, reason, _elapsed} <- outcomes do
+            reason
+          end
+
+        successes = length(success_times)
+        failures = length(failure_reasons)
+
+        IO.puts("\nResults:")
+        IO.puts("  Total time:     #{Float.round(total_time_s, 3)}s")
+        IO.puts("  Successes:      #{successes}/110")
+        IO.puts("  Failures:       #{failures}/110")
+
+        if success_times != [] do
+          avg_write_us = Enum.sum(success_times) / length(success_times)
+          max_write_us = Enum.max(success_times)
+          min_write_us = Enum.min(success_times)
+
+          IO.puts("  Avg cycle time: #{Float.round(avg_write_us / 1000, 2)}ms")
+          IO.puts("  Min cycle time: #{Float.round(min_write_us / 1000, 2)}ms")
+          IO.puts("  Max cycle time: #{Float.round(max_write_us / 1000, 2)}ms")
+
+          cond do
+            total_time_s > 5.0 ->
+              IO.puts("\n🔴 CRITICAL: Registry writes are extremely slow!")
+              IO.puts("    110 reserve/activate cycles took #{Float.round(total_time_s, 1)}s")
+              IO.puts("    Investigate DETS serialization and worker startup congestion.")
+
+            total_time_s > 2.0 ->
+              IO.puts("\n⚠️  WARNING: Registry writes are slow (#{Float.round(total_time_s, 1)}s)")
+              IO.puts("    This could contribute to timeouts during worker startup.")
+
+            true ->
+              IO.puts("\n✅ Registry throughput looks acceptable.")
+          end
+        end
+
+        if failure_reasons != [] do
+          sample_reason = hd(failure_reasons)
+          IO.puts("\n⚠️  Failures detected: #{failures}")
+          IO.puts("    Example failure: #{inspect(sample_reason)}")
         end
     end
 
@@ -356,42 +354,51 @@ defmodule Mix.Tasks.Diagnose.Scaling do
 
     IO.puts("Testing Python process spawn rate (110 processes)...")
 
-    # Test python3 spawn rate
-    {time_us, {output, exit_code}} =
-      :timer.tc(fn ->
-        System.cmd(
-          "sh",
-          [
-            "-c",
-            """
-            for i in {1..110}; do
-              python3 -c "import sys; sys.exit(0)" &
-            done
-            wait
-            """
-          ],
-          stderr_to_stdout: true
-        )
-      end)
+    case python_executable() do
+      nil ->
+        IO.puts("⚠️  python3/python executable not found on PATH. Skipping test.\n")
 
-    time_s = time_us / 1_000_000
+      python ->
+        spawn_fun = fn ->
+          case System.cmd(python, ["-c", "import sys; sys.exit(0)"], stderr_to_stdout: true) do
+            {_output, 0} ->
+              :ok
 
-    IO.puts("Time to spawn 110 Python processes: #{Float.round(time_s, 2)}s")
-    IO.puts("Exit code: #{exit_code}")
+            {output, code} ->
+              {:error, {:exit_status, code, String.trim(output)}}
+          end
+        end
 
-    if exit_code != 0 do
-      IO.puts("Output: #{String.slice(output, 0, 500)}")
-    end
+        case measure_python_spawn(110, spawn_fun) do
+          {:ok, %{duration_us: duration_us, results: results}} ->
+            time_s = duration_us / 1_000_000
+            successes = Enum.count(results, &(&1 == :ok))
+            failures = Enum.reject(results, &(&1 == :ok))
 
-    if time_s > 30.0 do
-      IO.puts("\n🔴 CRITICAL: Python spawn rate is very slow!")
-      IO.puts("    System may be CPU or fork() constrained")
-    else
-      if time_s > 10.0 do
-        IO.puts("\n⚠️  WARNING: Python spawn rate is slow (#{Float.round(time_s, 1)}s)")
-      else
-        IO.puts("\n✅ Python spawn rate looks good (#{Float.round(time_s, 2)}s)")
-      end
+            IO.puts("Time to spawn 110 Python processes: #{Float.round(time_s, 2)}s")
+            IO.puts("Successes: #{successes}")
+            IO.puts("Failures:  #{length(failures)}")
+
+            if failures != [] do
+              sample_failure = hd(failures)
+              IO.puts("Sample failure: #{inspect(sample_failure)}")
+            end
+
+            cond do
+              time_s > 30.0 ->
+                IO.puts("\n🔴 CRITICAL: Python spawn rate is very slow!")
+                IO.puts("    System may be CPU or fork() constrained.")
+
+              time_s > 10.0 ->
+                IO.puts("\n⚠️  WARNING: Python spawn rate is slow (#{Float.round(time_s, 1)}s)")
+
+              true ->
+                IO.puts("\n✅ Python spawn rate looks good (#{Float.round(time_s, 2)}s)")
+            end
+
+          {:error, reason} ->
+            IO.puts("⚠️  Failed to measure Python spawn rate: #{inspect(reason)}")
+        end
     end
 
     IO.puts("\n")
@@ -412,9 +419,9 @@ defmodule Mix.Tasks.Diagnose.Scaling do
     end
 
     # Count TCP connections
-    case System.cmd("sh", ["-c", "ss -tan | grep ESTAB | wc -l"], stderr_to_stdout: true) do
-      {output, 0} ->
-        tcp_count = String.trim(output) |> String.to_integer()
+    case fetch_ss_lines(["-tan"]) do
+      {:ok, lines} ->
+        tcp_count = count_established_from_lines(lines)
         IO.puts("\nEstablished TCP connections: #{tcp_count}")
 
         worker_count = count_workers()
@@ -424,18 +431,24 @@ defmodule Mix.Tasks.Diagnose.Scaling do
           IO.puts("TCP connections per worker: #{Float.round(tcp_per_worker, 2)}")
         end
 
-      {output, _} ->
-        IO.puts("Could not count TCP connections: #{output}")
+      {:error, reason} ->
+        IO.puts("\n⚠️  Unable to count TCP connections: #{format_ss_error(reason)}")
     end
 
     # Check gRPC port status
-    case System.cmd("sh", ["-c", "ss -tlnp | grep -E ':(50051|50052)'"], stderr_to_stdout: true) do
-      {output, 0} ->
-        IO.puts("\ngRPC port status:")
-        IO.puts(output)
+    case fetch_ss_lines(["-tlnp"]) do
+      {:ok, lines} ->
+        ports = filter_listener_lines(lines, [50051, 50052])
 
-      {_output, _} ->
-        IO.puts("\ngRPC ports not listening or ss command failed")
+        if ports == [] do
+          IO.puts("\ngRPC ports not currently listening (50051/50052)")
+        else
+          IO.puts("\ngRPC port status:")
+          Enum.each(ports, &IO.puts/1)
+        end
+
+      {:error, reason} ->
+        IO.puts("\n⚠️  Unable to inspect gRPC ports: #{format_ss_error(reason)}")
     end
 
     IO.puts("\n")
@@ -684,6 +697,140 @@ defmodule Mix.Tasks.Diagnose.Scaling do
     IO.puts("  4. Monitor system resources (CPU, memory, file descriptors)")
   end
 
+  defp stress_process_registry(index) do
+    worker_id = "diagnostic_worker_#{index}_#{System.unique_integer([:positive])}"
+    start = System.monotonic_time(:microsecond)
+
+    result =
+      try do
+        case Snakepit.Pool.ProcessRegistry.reserve_worker(worker_id) do
+          :ok ->
+            activation =
+              Snakepit.Pool.ProcessRegistry.activate_worker(
+                worker_id,
+                self(),
+                0,
+                %{diagnostic: true}
+              )
+
+            case activation do
+              :ok ->
+                Snakepit.Pool.ProcessRegistry.unregister_worker(worker_id)
+                :ok
+
+              {:error, reason} ->
+                Snakepit.Pool.ProcessRegistry.unregister_worker(worker_id)
+                {:error, {:activate_failed, reason}}
+
+              other ->
+                Snakepit.Pool.ProcessRegistry.unregister_worker(worker_id)
+                {:error, {:activate_failed, other}}
+            end
+
+          {:error, _reason} = error ->
+            error
+        end
+      rescue
+        error -> {:error, {:exception, error}}
+      catch
+        :exit, reason -> {:error, {:exit, reason}}
+      end
+
+    elapsed = System.monotonic_time(:microsecond) - start
+
+    case result do
+      :ok -> {:ok, elapsed}
+      {:error, reason} -> {:error, reason, elapsed}
+      other -> {:error, other, elapsed}
+    end
+  end
+
+  @doc false
+  def python_executable do
+    System.find_executable("python3") || System.find_executable("python")
+  end
+
+  @doc false
+  def measure_python_spawn(count, spawn_fun)
+      when is_integer(count) and count > 0 and is_function(spawn_fun, 0) do
+    {duration_us, results} =
+      :timer.tc(fn ->
+        1..count
+        |> Task.async_stream(fn _ -> spawn_fun.() end, max_concurrency: count, timeout: 30_000)
+        |> Enum.map(fn
+          {:ok, :ok} -> :ok
+          {:ok, {:error, reason}} -> {:error, reason}
+          {:exit, reason} -> {:error, reason}
+          other -> {:error, other}
+        end)
+      end)
+
+    {:ok, %{duration_us: duration_us, results: results}}
+  rescue
+    error -> {:error, error}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  @doc false
+  def fetch_ss_lines(args) when is_list(args) do
+    ss_path = System.find_executable("ss")
+
+    cond do
+      not match?({:unix, _}, :os.type()) ->
+        {:error, :unsupported_os}
+
+      is_nil(ss_path) ->
+        {:error, :ss_not_found}
+
+      true ->
+        case System.cmd(ss_path, args, stderr_to_stdout: true) do
+          {output, 0} ->
+            lines =
+              output
+              |> String.split("\n", trim: true)
+              |> Enum.reject(&(&1 == ""))
+
+            {:ok, lines}
+
+          {output, code} ->
+            {:error, {:ss_failed, code, String.trim(output)}}
+        end
+    end
+  end
+
+  @doc false
+  def count_established_from_lines(lines) when is_list(lines) do
+    lines
+    |> Enum.reject(&header_line?/1)
+    |> Enum.count(fn line -> String.contains?(line, "ESTAB") end)
+  end
+
+  defp header_line?(line) do
+    String.starts_with?(String.trim_leading(line), "Netid")
+  end
+
+  @doc false
+  def filter_listener_lines(lines, ports) when is_list(lines) and is_list(ports) do
+    Enum.filter(lines, fn line ->
+      Enum.any?(ports, fn port -> String.contains?(line, ":#{port}") end)
+    end)
+  end
+
+  defp format_ss_error(:unsupported_os) do
+    os = :os.type() |> inspect()
+    "ss command not supported on #{os}"
+  end
+
+  defp format_ss_error(:ss_not_found), do: "ss command not available (install iproute2 package)"
+
+  defp format_ss_error({:ss_failed, code, output}) do
+    snippet = String.slice(output || "", 0, 200)
+    "ss exited with #{code}: #{snippet}"
+  end
+
+  defp format_ss_error(reason), do: inspect(reason)
+
   defp count_workers do
     try do
       case Process.whereis(Snakepit.Pool.Registry) do
@@ -699,12 +846,9 @@ defmodule Mix.Tasks.Diagnose.Scaling do
   end
 
   defp count_tcp_connections do
-    case System.cmd("sh", ["-c", "ss -tan | grep ESTAB | wc -l"], stderr_to_stdout: true) do
-      {output, 0} ->
-        output |> String.trim() |> String.to_integer()
-
-      _ ->
-        0
+    case fetch_ss_lines(["-tan"]) do
+      {:ok, lines} -> count_established_from_lines(lines)
+      {:error, _reason} -> 0
     end
   end
 

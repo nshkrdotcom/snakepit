@@ -33,22 +33,24 @@ defmodule Snakepit.ProcessKiller do
     )
 
     try do
-      # Use Erlang's :os.cmd for POSIX-compliant kill
-      # This avoids shelling out and uses direct syscalls
-      result = :os.cmd(~c"kill -#{signal_num} #{os_pid} 2>&1")
-
-      case result do
-        [] ->
+      case System.cmd("kill", ["-#{signal_num}", Integer.to_string(os_pid)],
+             stderr_to_stdout: true
+           ) do
+        {"", 0} ->
           :ok
 
-        error ->
-          error_msg = :erlang.list_to_binary(error) |> String.trim()
+        {output, code} ->
+          error_msg = String.trim(output || "")
 
-          # Empty error or "No such process" means it's already dead - that's ok
-          if error_msg == "" or String.contains?(error_msg, "No such process") do
-            :ok
-          else
-            {:error, error_msg}
+          cond do
+            error_msg == "" and code == 0 ->
+              :ok
+
+            String.contains?(error_msg, "No such process") ->
+              :ok
+
+            true ->
+              {:error, if(error_msg == "", do: {:exit_status, code}, else: error_msg)}
           end
       end
     rescue
@@ -61,17 +63,31 @@ defmodule Snakepit.ProcessKiller do
   Uses kill -0 (signal 0) which doesn't kill but checks existence.
   """
   def process_alive?(os_pid) when is_integer(os_pid) do
-    # kill -0 returns exit code 0 (success) if process exists
-    # :os.cmd returns the output as charlist, empty if command succeeded
-    case System.cmd("kill", ["-0", to_string(os_pid)], stderr_to_stdout: true) do
-      # Exit code 0 = process exists
-      {_, 0} -> true
-      # Non-zero = process doesn't exist
-      {_, _} -> false
+    case :os.type() do
+      {:unix, :linux} ->
+        File.exists?("/proc/#{os_pid}")
+
+      {:unix, _} ->
+        process_alive_via_ps(os_pid)
+
+      _ ->
+        false
     end
   end
 
   def process_alive?(_), do: false
+
+  defp process_alive_via_ps(os_pid) do
+    case System.cmd("ps", ["-p", Integer.to_string(os_pid), "-o", "pid="], stderr_to_stdout: true) do
+      {output, 0} ->
+        String.trim(output || "") != ""
+
+      _ ->
+        false
+    end
+  rescue
+    _ -> false
+  end
 
   @doc """
   Gets the command line of a process.
@@ -100,13 +116,17 @@ defmodule Snakepit.ProcessKiller do
 
   defp get_process_command_ps(os_pid) do
     # POSIX-compliant ps command
-    case :os.cmd(~c"ps -p #{os_pid} -o args= 2>/dev/null") do
-      [] ->
-        {:error, :not_found}
+    case System.cmd("ps", ["-p", Integer.to_string(os_pid), "-o", "args="],
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        case String.trim(output || "") do
+          "" -> {:error, :not_found}
+          cmd -> {:ok, cmd}
+        end
 
-      result ->
-        cmd = :erlang.list_to_binary(result) |> String.trim()
-        {:ok, cmd}
+      _ ->
+        {:error, :not_found}
     end
   end
 
@@ -159,28 +179,108 @@ defmodule Snakepit.ProcessKiller do
     {:ok, killed_count}
   end
 
+  defp find_python_processes_linux do
+    case File.ls("/proc") do
+      {:ok, entries} ->
+        entries
+        |> Enum.reduce([], fn entry, acc ->
+          case Integer.parse(entry) do
+            {pid, ""} ->
+              if python_command?(pid) do
+                [pid | acc]
+              else
+                acc
+              end
+
+            _ ->
+              acc
+          end
+        end)
+        |> Enum.uniq()
+
+      {:error, _} ->
+        find_python_processes_posix()
+    end
+  end
+
+  defp python_command?(pid) do
+    comm_path = "/proc/#{pid}/comm"
+    cmdline_path = "/proc/#{pid}/cmdline"
+
+    cond do
+      File.exists?(comm_path) ->
+        case File.read(comm_path) do
+          {:ok, comm} ->
+            comm
+            |> String.trim()
+            |> String.downcase()
+            |> String.contains?("python")
+
+          _ ->
+            python_cmdline?(cmdline_path)
+        end
+
+      true ->
+        python_cmdline?(cmdline_path)
+    end
+  rescue
+    _ -> false
+  end
+
+  defp python_cmdline?(path) do
+    case File.read(path) do
+      {:ok, content} ->
+        try do
+          content
+          |> String.replace(<<0>>, " ")
+          |> String.downcase()
+          |> String.contains?("python")
+        rescue
+          ArgumentError -> false
+        end
+
+      _ ->
+        false
+    end
+  end
+
+  defp find_python_processes_posix do
+    case System.cmd("ps", ["-eo", "pid,comm"], stderr_to_stdout: true) do
+      {output, 0} ->
+        output
+        |> String.split("\n", trim: true)
+        |> Enum.reduce([], fn line, acc ->
+          trimmed = String.trim_leading(line)
+
+          case Regex.split(~r/\s+/, trimmed, parts: 2) do
+            [pid_str, command] ->
+              with {pid, ""} <- Integer.parse(pid_str),
+                   true <- String.contains?(String.downcase(command), "python") do
+                [pid | acc]
+              else
+                _ -> acc
+              end
+
+            _ ->
+              acc
+          end
+        end)
+        |> Enum.reverse()
+
+      _ ->
+        []
+    end
+  end
+
   @doc """
   Finds all Python processes on the system.
   Returns a list of OS PIDs.
   """
   def find_python_processes do
-    # Use ps to find all Python processes
-    # POSIX-compliant command
-    case :os.cmd(~c"ps -eo pid,comm 2>/dev/null | grep python | awk '{print $1}'") do
-      [] ->
-        []
-
-      result ->
-        result
-        |> :erlang.list_to_binary()
-        |> String.split("\n", trim: true)
-        |> Enum.map(fn pid_str ->
-          case Integer.parse(pid_str) do
-            {pid, ""} -> pid
-            _ -> nil
-          end
-        end)
-        |> Enum.reject(&is_nil/1)
+    case :os.type() do
+      {:unix, :linux} -> find_python_processes_linux()
+      {:unix, _} -> find_python_processes_posix()
+      _ -> []
     end
   end
 

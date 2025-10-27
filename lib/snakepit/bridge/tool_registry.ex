@@ -135,7 +135,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
   @impl true
   def init(_opts) do
     # Create ETS table for fast lookups
-    :ets.new(@table_name, [:named_table, :set, :public, read_concurrency: true])
+    :ets.new(@table_name, [:named_table, :set, :protected, read_concurrency: true])
 
     SLog.info("ToolRegistry started with ETS table: #{@table_name}")
 

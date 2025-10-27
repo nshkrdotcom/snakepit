@@ -16,7 +16,6 @@ defmodule Snakepit.Pool.ProcessRegistry do
   alias Snakepit.Logger, as: SLog
 
   @table_name :snakepit_pool_process_registry
-  @dets_table :snakepit_process_registry_dets
   @cleanup_interval 30_000
 
   defstruct [
@@ -175,6 +174,13 @@ defmodule Snakepit.Pool.ProcessRegistry do
     GenServer.call(__MODULE__, :debug_show_all_entries)
   end
 
+  @doc """
+  Returns the number of entries currently stored in the DETS table.
+  """
+  def dets_table_size do
+    GenServer.call(__MODULE__, :dets_table_size)
+  end
+
   # Server Callbacks
 
   @impl true
@@ -202,8 +208,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
     File.mkdir_p!(dets_dir)
 
     # Open DETS for persistence with repair option
+    dets_table_name = :"snakepit_process_registry_dets_#{beam_run_id}"
+
     dets_result =
-      :dets.open_file(@dets_table, [
+      :dets.open_file(dets_table_name, [
         {:file, to_charlist(dets_file)},
         {:type, :set},
         # Auto-save every 1000ms
@@ -222,7 +230,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
           File.rm(dets_file)
 
           {:ok, table} =
-            :dets.open_file(@dets_table, [
+            :dets.open_file(dets_table_name, [
               {:file, to_charlist(dets_file)},
               {:type, :set},
               {:auto_save, 1000}
@@ -436,6 +444,20 @@ defmodule Snakepit.Pool.ProcessRegistry do
       end)
 
     {:reply, {entries_info, state.beam_run_id}, state}
+  end
+
+  @impl true
+  def handle_call(:dets_table_size, _from, state) do
+    reply =
+      case state.dets_table do
+        nil ->
+          {:error, :not_initialized}
+
+        table ->
+          {:ok, :dets.info(table, :size)}
+      end
+
+    {:reply, reply, state}
   end
 
   @impl true
