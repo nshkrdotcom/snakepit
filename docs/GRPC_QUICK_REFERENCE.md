@@ -1,173 +1,115 @@
 # gRPC Integration Quick Reference
 
-## Current State Summary
+Keep this page handy when working on Snakepit's gRPC bridge. It summarizes the
+current implementation, the critical entry points, and the fastest ways to test
+streaming behaviour end-to-end.
 
-### What Works ✅
-- Protocol buffer definitions complete
-- Python gRPC server fully implemented
-- Elixir worker/adapter structure ready
-- Documentation and examples complete
+## Current State
 
-### What's Missing ❌
-- Pool manager doesn't know about GRPCWorker
-- No actual gRPC client calls (only placeholders)
-- Streaming API not exposed in public interface
-- No Elixir protobuf code generation
+- ✅ `Snakepit.execute_stream/4` and `execute_in_session_stream/5` stream results
+  through the gRPC adapter with full session awareness.
+- ✅ `Snakepit.Adapters.GRPCPython` handles request/response and streaming calls
+  via `Snakepit.GRPC.Client` with per-worker session IDs.
+- ✅ Python bridge servers (`priv/python/grpc_server.py` and
+  `priv/python/grpc_server_threaded.py`) bridge async generators and synchronous
+  iterators into gRPC streams using an `asyncio.Queue`.
+- ✅ Regression coverage lives in `test/snakepit/streaming_regression_test.exs`.
+- ✅ A runnable showcase lives in `examples/stream_progress_demo.exs`.
 
-## Critical Integration Points
-
-### 1. Worker Type Selection (HIGHEST PRIORITY)
-
-**File**: `lib/snakepit/pool/pool.ex`
+## Adapter Entry Points
 
 ```elixir
-# Current (always uses standard worker):
-defp start_worker(worker_id) do
-  Worker.Starter.start_link(worker_id: worker_id)
+def grpc_execute(connection, session_id, command, args, timeout \ 30_000) do
+  Snakepit.GRPC.Client.execute_tool(
+    connection.channel,
+    session_id,
+    command,
+    args,
+    timeout: timeout
+  )
 end
 
-# Needed:
-defp start_worker(worker_id) do
-  adapter = Application.get_env(:snakepit, :adapter_module)
-  
-  worker_module = if adapter.uses_grpc?() do
-    GRPCWorker
-  else
-    Worker
-  end
-  
-  worker_module.start_link(id: worker_id, adapter: adapter)
+def grpc_execute_stream(connection, session_id, command, args, callback, timeout \ 300_000)
+      when is_function(callback, 1) do
+  connection.channel
+  |> Snakepit.GRPC.Client.execute_streaming_tool(session_id, command, args, timeout: timeout)
+  |> consume_stream(callback)
 end
 ```
 
-### 2. Public API Streaming Methods
+`consume_stream/2` decodes each `Snakepit.Bridge.ToolChunk` into a plain map and
+invokes the callback. Payloads always include an `"is_final"` flag and preserve
+metadata under `_metadata` when present.
 
-**File**: `lib/snakepit.ex`
+## Python Stream Bridge (Process Mode)
 
-```elixir
-# Add these functions:
-def execute_stream(command, args, callback, opts \\ [])
-def execute_in_session_stream(session_id, command, args, callback, opts \\ [])
+```python
+queue: asyncio.Queue = asyncio.Queue()
+sentinel = object()
+
+async def produce_chunks():
+    ...  # Drain async or sync iterators
+    await queue.put(pb2.ToolChunk(...))
+    await queue.put(sentinel)
+
+asyncio.create_task(produce_chunks())
+
+while True:
+    item = await queue.get()
+    if item is sentinel:
+        break
+    if isinstance(item, Exception):
+        await context.abort(grpc.StatusCode.INTERNAL, str(item))
+        return
+    yield item
 ```
 
-### 3. gRPC Client Implementation
+The threaded server mirrors this logic but supports adapters that can safely run
+inside a `ThreadPoolExecutor`.
 
-**File**: `lib/snakepit/adapters/grpc_python.ex`
+## Pool/Worker Flow
 
-Replace placeholder functions:
+1. `Snakepit.execute_stream/4` validates the adapter supports gRPC and delegates
+   to `Snakepit.Pool.execute_stream/4`.
+2. The pool checks out a worker (respecting session affinity) and forwards the
+   request to `Snakepit.GRPCWorker.execute_stream/5`.
+3. The worker ensures a session is initialised, calls the adapter's
+   `grpc_execute_stream/6`, and tracks success/error telemetry.
+
+## Testing & Diagnostics
+
+- Run the regression suite: `mix test test/snakepit/streaming_regression_test.exs`
+- Run Python bridge tests (handles venv, PYTHONPATH, and proto generation): `./test_python.sh`
+- Exercise everything interactively:
+
+  ```bash
+  MIX_ENV=dev mix run examples/stream_progress_demo.exs
+  ```
+
+- Inspect decoded payloads quickly:
+
+  ```elixir
+  {:ok, agent} = Agent.start(fn -> [] end)
+
+  Snakepit.execute_stream("stream_progress", %{"steps" => 3}, fn chunk ->
+    Agent.update(agent, &[chunk | &1])
+  end)
+
+  Agent.get(agent, &Enum.reverse/1)
+  ```
+
+## Common Payload Shape
+
 ```elixir
-# Current:
-defp make_grpc_call(_channel, _method, _request) do
-  {:error, "gRPC client not implemented yet"}
-end
-
-# Needed:
-def grpc_execute(connection, command, args, timeout) do
-  Snakepit.GRPC.Client.execute(connection.channel, command, args, timeout)
-end
+%{
+  "step" => 1,
+  "total" => 5,
+  "message" => "Processing step 1/5",
+  "progress" => 20.0,
+  "is_final" => false,
+  "_metadata" => %{}
+}
 ```
 
-### 4. Pool Request Routing
-
-**File**: `lib/snakepit/pool/pool.ex`
-
-```elixir
-# Add worker type detection:
-defp execute_on_worker(worker_pid, command, args, timeout) do
-  case get_worker_type(worker_pid) do
-    :grpc -> GRPCWorker.execute(worker_pid, command, args, timeout)
-    :standard -> Worker.execute(worker_pid, command, args, timeout)
-  end
-end
-```
-
-## Implementation Checklist
-
-### Day 1: Foundation (4-6 hours)
-- [ ] Generate Elixir protobuf code
-- [ ] Create Snakepit.GRPC.Client module
-- [ ] Update GRPCPython adapter to use real client
-- [ ] Add `uses_grpc?/0` to adapter behavior
-
-### Day 2: Integration (4-6 hours)
-- [ ] Update Pool to support worker type selection
-- [ ] Update WorkerSupervisor for dynamic worker type
-- [ ] Add streaming methods to public API
-- [ ] Fix GRPCWorker initialization
-
-### Day 3: Testing & Polish (2-4 hours)
-- [ ] Integration tests for gRPC execution
-- [ ] Streaming tests with callbacks
-- [ ] Performance benchmarks
-- [ ] Error handling improvements
-
-## Key Files to Modify
-
-1. **Pool Manager** (`lib/snakepit/pool/pool.ex`)
-   - Add worker type detection
-   - Support streaming execution
-   - Route requests to appropriate worker type
-
-2. **Worker Supervisor** (`lib/snakepit/pool/worker_supervisor.ex`)
-   - Dynamic worker module selection
-   - Pass adapter to worker initialization
-
-3. **Public API** (`lib/snakepit.ex`)
-   - Add `execute_stream/4`
-   - Add `execute_in_session_stream/5`
-   - Check adapter capabilities
-
-4. **gRPC Adapter** (`lib/snakepit/adapters/grpc_python.ex`)
-   - Remove placeholder implementations
-   - Use real gRPC client
-   - Implement `uses_grpc?/0`
-
-5. **gRPC Worker** (`lib/snakepit/grpc_worker.ex`)
-   - Fix server startup
-   - Proper connection initialization
-   - Health check implementation
-
-## Testing the Integration
-
-### Quick Smoke Test
-```elixir
-# Configure gRPC
-Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-
-# Test basic execution
-{:ok, result} = Snakepit.execute("ping", %{})
-
-# Test streaming
-Snakepit.execute_stream("ping_stream", %{count: 3}, fn chunk ->
-  IO.inspect(chunk)
-end)
-```
-
-### Verify Worker Type
-```elixir
-# Check if pool created correct worker type
-workers = Registry.select(Snakepit.Pool.Registry, [{{:"$1", :"$2", :"$3"}, [], [:"$2"]}])
-Enum.each(workers, fn pid ->
-  IO.puts("Worker: #{inspect(Process.info(pid, :registered_name))}")
-end)
-```
-
-## Common Pitfalls to Avoid
-
-1. **Don't break existing workers** - Use feature detection, not hard switches
-2. **Handle missing gRPC gracefully** - Check if GRPC module is loaded
-3. **Preserve pool semantics** - GRPCWorker should behave like Worker from pool's perspective
-4. **Test concurrent streams** - Ensure multiple streams can run simultaneously
-5. **Monitor port allocation** - Prevent port conflicts with proper range management
-
-## Success Indicators
-
-1. `mix test` passes with both adapter types
-2. Streaming demo runs without errors
-3. Can switch adapters at runtime
-4. Performance benchmarks show gRPC benefits
-5. Health checks report accurate status
-
----
-
-**Remember**: The architecture is solid. You're just connecting pipes that already exist.
+Use the `"is_final"` flag to trigger completion handlers without relying on the
+stream returning an empty chunk.

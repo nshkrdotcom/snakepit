@@ -31,11 +31,14 @@ defmodule Snakepit.Test.MockGRPCWorker do
     # Store test PID for sending messages
     Process.put(:test_pid, Keyword.get(opts, :test_pid, self()))
 
+    session_id = Keyword.get(opts, :session_id, "mock_session")
+
     state = %{
       id: worker_id,
       adapter: adapter,
       port: port,
       connection: nil,
+      session_id: session_id,
       stats: %{requests: 0, errors: 0}
     }
 
@@ -67,7 +70,7 @@ defmodule Snakepit.Test.MockGRPCWorker do
 
   @impl true
   def handle_call({:execute, command, args, timeout}, _from, state) do
-    case state.adapter.grpc_execute(state.connection, command, args, timeout) do
+    case state.adapter.grpc_execute(state.connection, state.session_id, command, args, timeout) do
       {:ok, result} ->
         new_state = update_in(state.stats.requests, &(&1 + 1))
         {:reply, {:ok, result}, new_state}

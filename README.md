@@ -59,6 +59,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
+- [What's New in v0.6.4](#whats-new-in-v064)
 - [What's New in v0.6.3](#whats-new-in-v063)
 - [What's New in v0.6.2](#whats-new-in-v062)
 - [What's New in v0.6.1](#whats-new-in-v061)
@@ -134,6 +135,15 @@ For **non-DSPex users**, if you're using these classes directly:
 **Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
 
 ---
+
+## 🆕 What's New in v0.6.4
+
+**Streaming stability + tooling** – v0.6.4 polishes the gRPC streaming path and supporting tooling so real-time updates flow as expected.
+
+- **Chunk-by-chunk pacing** – Python bridge servers now yield streaming results incrementally, decoding payloads on the Elixir side with `is_final`, metadata, and callback guardrails.
+- **Showcase improvements** – `stream_progress` supports configurable pacing and elapsed timings; `examples/stream_progress_demo.exs` prints rich updates.
+- **Regression guard** – Added `test/snakepit/streaming_regression_test.exs` plus Python coverage executed via the new helper script.
+- **Instant pytest runs** – `./test_python.sh` regenerates protobuf stubs, activates `.venv`, wires `PYTHONPATH`, and forwards args to `pytest`.
 
 ## 🆕 What's New in v0.6.3
 
@@ -520,7 +530,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-{:snakepit, "~> 0.6.3"}
+{:snakepit, "~> 0.6.4"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,

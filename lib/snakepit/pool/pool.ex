@@ -77,23 +77,23 @@ defmodule Snakepit.Pool do
   def execute_stream(command, args, callback_fn, opts \\ []) do
     pool = opts[:pool] || __MODULE__
     timeout = opts[:timeout] || 300_000
-    SLog.info("[Pool] execute_stream called for command: #{command}, args: #{inspect(args)}")
+    SLog.debug("[Pool] execute_stream #{command} with #{inspect(args)}")
 
     case checkout_worker_for_stream(pool, opts) do
       {:ok, worker_id} ->
-        SLog.info("[Pool] Checked out worker: #{worker_id}")
+        SLog.debug("[Pool] Checked out worker #{worker_id} for streaming")
 
         # CRITICAL FIX: Use try/after to guarantee worker checkin even if execution crashes
         try do
           execute_on_worker_stream(worker_id, command, args, callback_fn, timeout)
         after
           # This block ALWAYS executes, preventing worker leaks on crashes
-          SLog.info("[Pool] Checking in worker #{worker_id} after stream execution")
+          SLog.debug("[Pool] Checking in worker #{worker_id} after stream execution")
           checkin_worker(pool, worker_id)
         end
 
       {:error, reason} ->
-        SLog.error("[Pool] Failed to checkout worker: #{inspect(reason)}")
+        SLog.error("[Pool] Failed to checkout worker for streaming: #{inspect(reason)}")
         {:error, reason}
     end
   end
@@ -109,12 +109,12 @@ defmodule Snakepit.Pool do
 
   defp execute_on_worker_stream(worker_id, command, args, callback_fn, timeout) do
     worker_module = get_worker_module(worker_id)
-    SLog.info("[Pool] execute_on_worker_stream - worker_module: #{inspect(worker_module)}")
+    SLog.debug("[Pool] execute_on_worker_stream using #{inspect(worker_module)}")
 
     if function_exported?(worker_module, :execute_stream, 5) do
-      SLog.info("[Pool] Calling #{worker_module}.execute_stream with timeout: #{timeout}")
+      SLog.debug("[Pool] Invoking #{worker_module}.execute_stream with timeout #{timeout}")
       result = worker_module.execute_stream(worker_id, command, args, callback_fn, timeout)
-      SLog.info("[Pool] execute_stream returned: #{inspect(result)}")
+      SLog.debug("[Pool] execute_stream result: #{inspect(result)}")
       result
     else
       SLog.error("[Pool] Worker module #{worker_module} does not export execute_stream/5")
