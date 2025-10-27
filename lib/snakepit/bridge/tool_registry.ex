@@ -43,6 +43,10 @@ defmodule Snakepit.Bridge.ToolRegistry do
   alias Snakepit.Bridge.InternalToolSpec
 
   @table_name :snakepit_tool_registry
+  @max_tool_name_length 64
+  @tool_name_pattern ~r/^[A-Za-z0-9][A-Za-z0-9_\-\.]*$/
+  @max_metadata_entries 32
+  @max_metadata_bytes 4_096
 
   # Client API
 
@@ -144,21 +148,31 @@ defmodule Snakepit.Bridge.ToolRegistry do
 
   @impl true
   def handle_call({:register_elixir_tool, session_id, tool_name, handler, metadata}, _from, state) do
-    tool_spec = %InternalToolSpec{
-      name: tool_name,
-      type: :local,
-      handler: handler,
-      parameters: Map.get(metadata, :parameters, []),
-      description: Map.get(metadata, :description, ""),
-      metadata: metadata,
-      exposed_to_python: Map.get(metadata, :exposed_to_python, false)
-    }
+    with {:ok, normalized_name} <- validate_tool_name(tool_name),
+         {:ok, normalized_metadata} <- validate_metadata(metadata),
+         :ok <- ensure_tool_not_registered(session_id, normalized_name) do
+      tool_spec = %InternalToolSpec{
+        name: normalized_name,
+        type: :local,
+        handler: handler,
+        parameters: Map.get(normalized_metadata, :parameters, []),
+        description: Map.get(normalized_metadata, :description, ""),
+        metadata: normalized_metadata,
+        exposed_to_python: Map.get(normalized_metadata, :exposed_to_python, false)
+      }
 
-    :ets.insert(@table_name, {{session_id, tool_name}, tool_spec})
+      case :ets.insert_new(@table_name, {{session_id, normalized_name}, tool_spec}) do
+        true ->
+          SLog.debug("Registered Elixir tool: #{normalized_name} for session: #{session_id}")
+          {:reply, :ok, state}
 
-    SLog.debug("Registered Elixir tool: #{tool_name} for session: #{session_id}")
-
-    {:reply, :ok, state}
+        false ->
+          {:reply, {:error, {:duplicate_tool, normalized_name}}, state}
+      end
+    else
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl true
@@ -167,43 +181,43 @@ defmodule Snakepit.Bridge.ToolRegistry do
         _from,
         state
       ) do
-    tool_spec = %InternalToolSpec{
-      name: tool_name,
-      type: :remote,
-      worker_id: worker_id,
-      parameters: Map.get(metadata, :parameters, []),
-      description: Map.get(metadata, :description, ""),
-      metadata: metadata
-    }
+    with {:ok, normalized_name} <- validate_tool_name(tool_name),
+         {:ok, normalized_metadata} <- validate_metadata(metadata),
+         :ok <- ensure_tool_not_registered(session_id, normalized_name) do
+      tool_spec = %InternalToolSpec{
+        name: normalized_name,
+        type: :remote,
+        worker_id: worker_id,
+        parameters: Map.get(normalized_metadata, :parameters, []),
+        description: Map.get(normalized_metadata, :description, ""),
+        metadata: normalized_metadata
+      }
 
-    :ets.insert(@table_name, {{session_id, tool_name}, tool_spec})
+      case :ets.insert_new(@table_name, {{session_id, normalized_name}, tool_spec}) do
+        true ->
+          SLog.debug("Registered Python tool: #{normalized_name} for session: #{session_id}")
+          {:reply, :ok, state}
 
-    SLog.debug("Registered Python tool: #{tool_name} for session: #{session_id}")
-
-    {:reply, :ok, state}
+        false ->
+          {:reply, {:error, {:duplicate_tool, normalized_name}}, state}
+      end
+    else
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl true
   def handle_call({:register_tools, session_id, tool_specs}, _from, state) do
-    # Register multiple tools at once
-    results =
-      Enum.map(tool_specs, fn spec ->
-        tool_spec = %InternalToolSpec{
-          name: spec.name,
-          type: :remote,
-          worker_id: spec.worker_id,
-          parameters: spec.parameters,
-          description: spec.description,
-          metadata: spec.metadata || %{}
-        }
-
-        :ets.insert(@table_name, {{session_id, spec.name}, tool_spec})
-        spec.name
-      end)
-
-    SLog.info("Registered #{length(results)} tools for session: #{session_id}")
-
-    {:reply, {:ok, results}, state}
+    with {:ok, normalized_specs} <- build_remote_specs(tool_specs),
+         :ok <- ensure_batch_not_registered(session_id, normalized_specs),
+         {:ok, names} <- insert_tool_batch(session_id, normalized_specs) do
+      SLog.info("Registered #{length(names)} tools for session: #{session_id}")
+      {:reply, {:ok, names}, state}
+    else
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl true
@@ -214,5 +228,131 @@ defmodule Snakepit.Bridge.ToolRegistry do
     SLog.debug("Cleaned up #{num_deleted} tools for session: #{session_id}")
 
     {:reply, :ok, state}
+  end
+
+  defp validate_tool_name(name) when is_binary(name) do
+    trimmed = String.trim(name)
+
+    cond do
+      trimmed == "" ->
+        {:error, {:invalid_tool_name, :empty}}
+
+      byte_size(trimmed) > @max_tool_name_length ->
+        {:error, {:invalid_tool_name, :too_long}}
+
+      not Regex.match?(@tool_name_pattern, trimmed) ->
+        {:error, {:invalid_tool_name, :invalid_format}}
+
+      true ->
+        {:ok, trimmed}
+    end
+  end
+
+  defp validate_tool_name(_), do: {:error, {:invalid_tool_name, :invalid_type}}
+
+  defp validate_metadata(nil), do: {:ok, %{}}
+  defp validate_metadata(%{} = metadata), do: enforce_metadata_constraints(metadata)
+
+  defp validate_metadata(metadata) when is_list(metadata) do
+    try do
+      metadata
+      |> Enum.into(%{})
+      |> enforce_metadata_constraints()
+    rescue
+      ArgumentError ->
+        {:error, {:invalid_metadata, :duplicate_keys}}
+    end
+  end
+
+  defp validate_metadata(_), do: {:error, {:invalid_metadata, :unsupported_type}}
+
+  defp enforce_metadata_constraints(metadata) do
+    entry_count = map_size(metadata)
+
+    cond do
+      entry_count > @max_metadata_entries ->
+        {:error, {:invalid_metadata, :too_many_entries}}
+
+      byte_size(:erlang.term_to_binary(metadata)) > @max_metadata_bytes ->
+        {:error, {:invalid_metadata, :too_large}}
+
+      true ->
+        {:ok, metadata}
+    end
+  end
+
+  defp ensure_tool_not_registered(session_id, tool_name) do
+    case :ets.lookup(@table_name, {session_id, tool_name}) do
+      [] -> :ok
+      _ -> {:error, {:duplicate_tool, tool_name}}
+    end
+  end
+
+  defp build_remote_specs(tool_specs) do
+    Enum.reduce_while(tool_specs, {:ok, [], MapSet.new()}, fn spec, {:ok, acc, names} ->
+      case build_remote_tool_spec(spec) do
+        {:ok, tool_spec} ->
+          if MapSet.member?(names, tool_spec.name) do
+            {:halt, {:error, {:duplicate_tool, tool_spec.name}}}
+          else
+            {:cont, {:ok, [tool_spec | acc], MapSet.put(names, tool_spec.name)}}
+          end
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, specs, _names} -> {:ok, Enum.reverse(specs)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp build_remote_tool_spec(spec) do
+    metadata = Map.get(spec, :metadata, %{})
+
+    with {:ok, normalized_name} <- validate_tool_name(Map.get(spec, :name)),
+         {:ok, normalized_metadata} <- validate_metadata(metadata) do
+      {:ok,
+       %InternalToolSpec{
+         name: normalized_name,
+         type: :remote,
+         worker_id: Map.get(spec, :worker_id),
+         parameters: Map.get(spec, :parameters, []),
+         description: Map.get(spec, :description, ""),
+         metadata: normalized_metadata
+       }}
+    else
+      {:error, _} = error -> error
+    end
+  end
+
+  defp ensure_batch_not_registered(session_id, specs) do
+    Enum.reduce_while(specs, :ok, fn spec, :ok ->
+      case :ets.lookup(@table_name, {session_id, spec.name}) do
+        [] -> {:cont, :ok}
+        _ -> {:halt, {:error, {:duplicate_tool, spec.name}}}
+      end
+    end)
+  end
+
+  defp insert_tool_batch(session_id, specs) do
+    Enum.reduce_while(specs, {:ok, []}, fn spec, {:ok, inserted_names} ->
+      case :ets.insert_new(@table_name, {{session_id, spec.name}, spec}) do
+        true ->
+          {:cont, {:ok, [spec.name | inserted_names]}}
+
+        false ->
+          Enum.each(inserted_names, fn name ->
+            :ets.delete(@table_name, {session_id, name})
+          end)
+
+          {:halt, {:error, {:duplicate_tool, spec.name}}}
+      end
+    end)
+    |> case do
+      {:ok, names} -> {:ok, Enum.reverse(names)}
+      {:error, reason} -> {:error, reason}
+    end
   end
 end

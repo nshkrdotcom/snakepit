@@ -159,6 +159,15 @@ defmodule Snakepit.Pool.WorkerSupervisor do
       port_to_probe = port_probe_target(current_port, requested_port)
       probe_port? = should_probe_port?(requested_port) and port_to_probe not in [nil, 0]
 
+      if probe_port? and retries == @cleanup_max_retries do
+        initial_delay = min(backoff, 50)
+
+        receive do
+        after
+          initial_delay -> :ok
+        end
+      end
+
       port_released? =
         cond do
           not probe_port? ->

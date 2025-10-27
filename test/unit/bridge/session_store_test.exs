@@ -61,4 +61,70 @@ defmodule SessionStoreTest do
       :ets.insert(:snakepit_sessions, {session_id <> "_evil", {0, 0, %{}}})
     end
   end
+
+  test "enforces session quota and respects cleanup" do
+    server_name = :session_store_quota_server
+
+    start_supervised!(
+      {Snakepit.Bridge.SessionStore,
+       name: server_name, table_name: :session_store_quota_table, max_sessions: 1}
+    )
+
+    assert {:ok, _} = Snakepit.Bridge.SessionStore.create_session(server_name, "s1", ttl: 0)
+
+    assert {:error, :session_quota_exceeded} =
+             Snakepit.Bridge.SessionStore.create_session(server_name, "s2", [])
+
+    assert_eventually(
+      fn ->
+        Snakepit.Bridge.SessionStore.cleanup_expired_sessions(server_name) > 0
+      end,
+      timeout: 2_000,
+      interval: 50
+    )
+
+    assert {:ok, _} = Snakepit.Bridge.SessionStore.create_session(server_name, "s2", ttl: 0)
+  end
+
+  test "enforces per-session program quota" do
+    server_name = :session_store_program_quota
+
+    start_supervised!(
+      {Snakepit.Bridge.SessionStore,
+       name: server_name, table_name: :session_store_program_table, max_programs_per_session: 1}
+    )
+
+    session_id = "quota_session_#{System.unique_integer([:positive])}"
+    assert {:ok, _} = Snakepit.Bridge.SessionStore.create_session(server_name, session_id, [])
+
+    assert :ok =
+             Snakepit.Bridge.SessionStore.store_program(server_name, session_id, "prog1", %{})
+
+    assert {:error, {:program_quota_exceeded, ^session_id}} =
+             Snakepit.Bridge.SessionStore.store_program(server_name, session_id, "prog2", %{})
+
+    # Updating existing program is allowed under the quota
+    assert :ok =
+             Snakepit.Bridge.SessionStore.store_program(server_name, session_id, "prog1", %{
+               "version" => 2
+             })
+  end
+
+  test "enforces global program quota" do
+    server_name = :session_store_global_quota
+
+    start_supervised!(
+      {Snakepit.Bridge.SessionStore,
+       name: server_name, table_name: :session_store_global_table, max_global_programs: 1}
+    )
+
+    assert :ok = Snakepit.Bridge.SessionStore.store_global_program(server_name, "prog1", %{})
+
+    assert {:error, :global_program_quota_exceeded} =
+             Snakepit.Bridge.SessionStore.store_global_program(server_name, "prog2", %{})
+
+    :ok = Snakepit.Bridge.SessionStore.delete_global_program(server_name, "prog1")
+
+    assert :ok = Snakepit.Bridge.SessionStore.store_global_program(server_name, "prog2", %{})
+  end
 end
