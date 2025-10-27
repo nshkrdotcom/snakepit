@@ -1,5 +1,5 @@
 defmodule MixDiagnoseScalingTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Mix.Tasks.Diagnose.Scaling
 
@@ -50,6 +50,74 @@ defmodule MixDiagnoseScalingTest do
 
       assert Enum.count(results, &(&1 == :ok)) == 2
       assert Enum.count(results, &match?({:error, _}, &1)) == 1
+    end
+  end
+
+  describe "native_tcp_connection_count/0" do
+    test "detects active connections" do
+      {:ok, before} = Scaling.native_tcp_connection_count()
+
+      {:ok, listener} =
+        :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+
+      on_exit(fn ->
+        try do
+          :gen_tcp.close(listener)
+        catch
+          _, _ -> :ok
+        end
+      end)
+
+      {:ok, port} = :inet.port(listener)
+
+      server_task =
+        Task.async(fn ->
+          {:ok, socket} = :gen_tcp.accept(listener)
+          # Wait for client to close
+          :gen_tcp.recv(socket, 0)
+          :gen_tcp.close(socket)
+        end)
+
+      {:ok, client} =
+        :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 1000)
+
+      on_exit(fn ->
+        try do
+          :gen_tcp.close(client)
+        catch
+          _, _ -> :ok
+        end
+      end)
+
+      Process.sleep(100)
+
+      {:ok, after_connect} = Scaling.native_tcp_connection_count()
+      assert after_connect >= before + 1
+
+      :gen_tcp.close(client)
+      Task.await(server_task, 500)
+      :gen_tcp.close(listener)
+
+      Process.sleep(50)
+
+      {:ok, after_close} = Scaling.native_tcp_connection_count()
+      assert after_close <= after_connect
+    end
+  end
+
+  describe "native_listener_ports/1" do
+    test "identifies requested listening ports" do
+      {:ok, listener} =
+        :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+
+      {:ok, port} = :inet.port(listener)
+
+      try do
+        {:ok, ports} = Scaling.native_listener_ports([port])
+        assert port in ports
+      after
+        :gen_tcp.close(listener)
+      end
     end
   end
 end

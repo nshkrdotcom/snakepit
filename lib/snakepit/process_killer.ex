@@ -11,6 +11,9 @@ defmodule Snakepit.ProcessKiller do
   require Logger
   alias Snakepit.Logger, as: SLog
 
+  @kill_command_candidates ["/bin/kill", "/usr/bin/kill"]
+  @ps_command_candidates ["/bin/ps", "/usr/bin/ps"]
+
   @doc """
   Kills a process by PID using proper Erlang signals.
 
@@ -32,29 +35,25 @@ defmodule Snakepit.ProcessKiller do
       "ProcessKiller.kill_process: PID=#{os_pid}, signal=#{signal}, caller=#{inspect(caller)}"
     )
 
-    try do
-      case System.cmd("kill", ["-#{signal_num}", Integer.to_string(os_pid)],
-             stderr_to_stdout: true
-           ) do
-        {"", 0} ->
+    with {:ok, kill_path} <- require_executable("kill", @kill_command_candidates),
+         {:ok, output, code} <-
+           run_command(kill_path, ["-#{signal_num}", Integer.to_string(os_pid)]) do
+      trimmed = String.trim(output || "")
+
+      cond do
+        code == 0 ->
           :ok
 
-        {output, code} ->
-          error_msg = String.trim(output || "")
+        String.contains?(trimmed, "No such process") ->
+          :ok
 
-          cond do
-            error_msg == "" and code == 0 ->
-              :ok
-
-            String.contains?(error_msg, "No such process") ->
-              :ok
-
-            true ->
-              {:error, if(error_msg == "", do: {:exit_status, code}, else: error_msg)}
-          end
+        true ->
+          {:error, if(trimmed == "", do: {:exit_status, code}, else: trimmed)}
       end
-    rescue
-      e -> {:error, e}
+    else
+      {:error, reason} ->
+        SLog.warning("Failed to execute kill command: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
@@ -78,15 +77,13 @@ defmodule Snakepit.ProcessKiller do
   def process_alive?(_), do: false
 
   defp process_alive_via_ps(os_pid) do
-    case System.cmd("ps", ["-p", Integer.to_string(os_pid), "-o", "pid="], stderr_to_stdout: true) do
-      {output, 0} ->
-        String.trim(output || "") != ""
-
-      _ ->
-        false
+    with {:ok, ps_path} <- require_executable("ps", @ps_command_candidates),
+         {:ok, output, 0} <-
+           run_command(ps_path, ["-p", Integer.to_string(os_pid), "-o", "pid="]) do
+      String.trim(output || "") != ""
+    else
+      _ -> false
     end
-  rescue
-    _ -> false
   end
 
   @doc """
@@ -115,15 +112,16 @@ defmodule Snakepit.ProcessKiller do
   end
 
   defp get_process_command_ps(os_pid) do
-    # POSIX-compliant ps command
-    case System.cmd("ps", ["-p", Integer.to_string(os_pid), "-o", "args="],
-           stderr_to_stdout: true
-         ) do
-      {output, 0} ->
-        case String.trim(output || "") do
-          "" -> {:error, :not_found}
-          cmd -> {:ok, cmd}
-        end
+    with {:ok, ps_path} <- require_executable("ps", @ps_command_candidates),
+         {:ok, output, 0} <-
+           run_command(ps_path, ["-p", Integer.to_string(os_pid), "-o", "args="]) do
+      case String.trim(output || "") do
+        "" -> {:error, :not_found}
+        cmd -> {:ok, cmd}
+      end
+    else
+      {:error, {:executable_not_found, _cmd}} ->
+        {:error, :not_found}
 
       _ ->
         {:error, :not_found}
@@ -245,27 +243,31 @@ defmodule Snakepit.ProcessKiller do
   end
 
   defp find_python_processes_posix do
-    case System.cmd("ps", ["-eo", "pid,comm"], stderr_to_stdout: true) do
-      {output, 0} ->
-        output
-        |> String.split("\n", trim: true)
-        |> Enum.reduce([], fn line, acc ->
-          trimmed = String.trim_leading(line)
+    with {:ok, ps_path} <- require_executable("ps", @ps_command_candidates),
+         {:ok, output, 0} <- run_command(ps_path, ["-eo", "pid,comm"]) do
+      output
+      |> String.split("\n", trim: true)
+      |> Enum.reduce([], fn line, acc ->
+        trimmed = String.trim_leading(line)
 
-          case Regex.split(~r/\s+/, trimmed, parts: 2) do
-            [pid_str, command] ->
-              with {pid, ""} <- Integer.parse(pid_str),
-                   true <- String.contains?(String.downcase(command), "python") do
-                [pid | acc]
-              else
-                _ -> acc
-              end
+        case Regex.split(~r/\s+/, trimmed, parts: 2) do
+          [pid_str, command] ->
+            with {pid, ""} <- Integer.parse(pid_str),
+                 true <- String.contains?(String.downcase(command), "python") do
+              [pid | acc]
+            else
+              _ -> acc
+            end
 
-            _ ->
-              acc
-          end
-        end)
-        |> Enum.reverse()
+          _ ->
+            acc
+        end
+      end)
+      |> Enum.reverse()
+    else
+      {:error, {:executable_not_found, _cmd}} ->
+        SLog.warning("ps command not available; skipping python process discovery")
+        []
 
       _ ->
         []
@@ -338,4 +340,28 @@ defmodule Snakepit.ProcessKiller do
   defp signal_to_number(:sigkill), do: 9
   defp signal_to_number(:sighup), do: 1
   defp signal_to_number(n) when is_integer(n), do: n
+
+  defp require_executable(cmd, fallback_paths) when is_list(fallback_paths) do
+    case System.find_executable(cmd) do
+      nil ->
+        fallback_paths
+        |> Enum.find(&File.exists?/1)
+        |> case do
+          nil -> {:error, {:executable_not_found, cmd}}
+          path -> {:ok, path}
+        end
+
+      path ->
+        {:ok, path}
+    end
+  end
+
+  defp run_command(path, args) when is_binary(path) and is_list(args) do
+    try do
+      {output, status} = System.cmd(path, args, stderr_to_stdout: true)
+      {:ok, output, status}
+    rescue
+      error -> {:error, error}
+    end
+  end
 end

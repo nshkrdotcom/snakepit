@@ -419,10 +419,9 @@ defmodule Mix.Tasks.Diagnose.Scaling do
     end
 
     # Count TCP connections
-    case fetch_ss_lines(["-tan"]) do
-      {:ok, lines} ->
-        tcp_count = count_established_from_lines(lines)
-        IO.puts("\nEstablished TCP connections: #{tcp_count}")
+    case native_tcp_connection_count() do
+      {:ok, tcp_count} ->
+        IO.puts("\nEstablished TCP connections (native): #{tcp_count}")
 
         worker_count = count_workers()
 
@@ -432,23 +431,54 @@ defmodule Mix.Tasks.Diagnose.Scaling do
         end
 
       {:error, reason} ->
-        IO.puts("\n⚠️  Unable to count TCP connections: #{format_ss_error(reason)}")
+        IO.puts("\n⚠️  Native TCP inspection failed: #{inspect(reason)}")
+
+        case fetch_ss_lines(["-tan"]) do
+          {:ok, lines} ->
+            tcp_count = count_established_from_lines(lines)
+            IO.puts("Established TCP connections (ss): #{tcp_count}")
+
+            worker_count = count_workers()
+
+            if worker_count > 0 do
+              tcp_per_worker = tcp_count / worker_count
+              IO.puts("TCP connections per worker: #{Float.round(tcp_per_worker, 2)}")
+            end
+
+          {:error, ss_reason} ->
+            IO.puts("⚠️  Unable to count TCP connections via ss: #{format_ss_error(ss_reason)}")
+        end
     end
 
     # Check gRPC port status
-    case fetch_ss_lines(["-tlnp"]) do
-      {:ok, lines} ->
-        ports = filter_listener_lines(lines, [50051, 50052])
+    case native_listener_ports([50051, 50052]) do
+      {:ok, []} ->
+        IO.puts("\ngRPC ports not currently listening (50051/50052)")
 
-        if ports == [] do
-          IO.puts("\ngRPC ports not currently listening (50051/50052)")
-        else
-          IO.puts("\ngRPC port status:")
-          Enum.each(ports, &IO.puts/1)
-        end
+      {:ok, ports} ->
+        IO.puts("\ngRPC port status (native):")
+
+        ports
+        |> Enum.sort()
+        |> Enum.each(fn port -> IO.puts("  listening on #{port}") end)
 
       {:error, reason} ->
-        IO.puts("\n⚠️  Unable to inspect gRPC ports: #{format_ss_error(reason)}")
+        IO.puts("\n⚠️  Native listener inspection failed: #{inspect(reason)}")
+
+        case fetch_ss_lines(["-tlnp"]) do
+          {:ok, lines} ->
+            ports = filter_listener_lines(lines, [50051, 50052])
+
+            if ports == [] do
+              IO.puts("gRPC ports not currently listening (50051/50052)")
+            else
+              IO.puts("gRPC port status (ss):")
+              Enum.each(ports, &IO.puts/1)
+            end
+
+          {:error, ss_reason} ->
+            IO.puts("⚠️  Unable to inspect gRPC ports via ss: #{format_ss_error(ss_reason)}")
+        end
     end
 
     IO.puts("\n")
@@ -811,6 +841,68 @@ defmodule Mix.Tasks.Diagnose.Scaling do
   end
 
   @doc false
+  def native_tcp_connection_count do
+    try do
+      count =
+        :erlang.ports()
+        |> Enum.reduce(0, fn port, acc ->
+          case :erlang.port_info(port, :name) do
+            {:name, name} when name in [~c"tcp_inet", ~c"tcp_inet6"] ->
+              case :inet.peername(port) do
+                {:ok, _peer} -> acc + 1
+                {:error, :enotconn} -> acc
+                {:error, _other} -> acc
+              end
+
+            _ ->
+              acc
+          end
+        end)
+
+      {:ok, count}
+    rescue
+      error -> {:error, {:port_scan_failed, error}}
+    end
+  end
+
+  @doc false
+  def native_listener_ports(port_filter) when is_list(port_filter) do
+    try do
+      listener_ports =
+        :erlang.ports()
+        |> Enum.reduce(MapSet.new(), fn port, acc ->
+          case :erlang.port_info(port, :name) do
+            {:name, name} when name in [~c"tcp_inet", ~c"tcp_inet6"] ->
+              case :inet.peername(port) do
+                {:error, :enotconn} ->
+                  case :inet.sockname(port) do
+                    {:ok, {_addr, port_number}} ->
+                      if Enum.member?(port_filter, port_number) do
+                        MapSet.put(acc, port_number)
+                      else
+                        acc
+                      end
+
+                    _ ->
+                      acc
+                  end
+
+                _ ->
+                  acc
+              end
+
+            _ ->
+              acc
+          end
+        end)
+
+      {:ok, MapSet.to_list(listener_ports)}
+    rescue
+      error -> {:error, {:port_scan_failed, error}}
+    end
+  end
+
+  @doc false
   def filter_listener_lines(lines, ports) when is_list(lines) and is_list(ports) do
     Enum.filter(lines, fn line ->
       Enum.any?(ports, fn port -> String.contains?(line, ":#{port}") end)
@@ -846,9 +938,15 @@ defmodule Mix.Tasks.Diagnose.Scaling do
   end
 
   defp count_tcp_connections do
-    case fetch_ss_lines(["-tan"]) do
-      {:ok, lines} -> count_established_from_lines(lines)
-      {:error, _reason} -> 0
+    case native_tcp_connection_count() do
+      {:ok, count} ->
+        count
+
+      {:error, _reason} ->
+        case fetch_ss_lines(["-tan"]) do
+          {:ok, lines} -> count_established_from_lines(lines)
+          {:error, _} -> 0
+        end
     end
   end
 
