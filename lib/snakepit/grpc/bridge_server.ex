@@ -163,64 +163,94 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   defp execute_tool_handler(%{type: :local} = tool, request, session_id) do
     # Execute local Elixir tool
-    params = decode_tool_parameters(request.parameters)
-    ToolRegistry.execute_local_tool(session_id, tool.name, params)
+    case decode_tool_parameters(request.parameters) do
+      {:ok, params} ->
+        ToolRegistry.execute_local_tool(session_id, tool.name, params)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   defp execute_tool_handler(%{type: :remote} = tool, request, session_id) do
     # Forward to Python worker
     SLog.debug("Executing remote tool #{tool.name} on worker #{tool.worker_id}")
 
-    case ensure_worker_channel(tool.worker_id) do
-      {:ok, channel, cleanup} ->
-        result =
-          try do
-            forward_tool_to_worker(channel, request, session_id)
-          after
-            cleanup.()
-          end
-
-        case result do
-          {:ok, response} ->
-            {:ok, response}
-
-          {:error, reason} ->
-            SLog.error("Failed to execute remote tool #{tool.name}: #{inspect(reason)}")
-            {:error, "Remote tool execution failed: #{inspect(reason)}"}
+    with {:ok, params} <- decode_tool_parameters(request.parameters),
+         {:ok, channel, cleanup} <- ensure_worker_channel(tool.worker_id) do
+      result =
+        try do
+          forward_tool_to_worker(channel, request, session_id, params)
+        after
+          cleanup.()
         end
+
+      case result do
+        {:ok, response} ->
+          {:ok, response}
+
+        {:error, reason} ->
+          SLog.error("Failed to execute remote tool #{tool.name}: #{inspect(reason)}")
+          {:error, {:remote_execution_failed, reason}}
+      end
+    else
+      {:error, {:invalid_parameter, _, _}} = error ->
+        error
 
       {:error, reason} ->
         SLog.error("Failed to execute remote tool #{tool.name}: #{inspect(reason)}")
-        {:error, "Remote tool execution failed: #{inspect(reason)}"}
+        {:error, {:remote_execution_failed, reason}}
     end
   end
 
-  defp decode_tool_parameters(params) do
-    params
-    |> Enum.map(fn {key, any_value} ->
-      # Decode the protobuf Any value
-      decoded =
-        case any_value do
-          %Any{type_url: "type.googleapis.com/google.protobuf.StringValue", value: value} ->
-            # The value is JSON encoded as bytes, decode it
-            case Jason.decode(value) do
-              {:ok, decoded} -> decoded
-              # Return as-is if not valid JSON
-              {:error, _} -> value
-            end
+  defp decode_tool_parameters(params) when is_map(params) do
+    Enum.reduce_while(params, {:ok, %{}}, fn {key, any_value}, {:ok, acc} ->
+      case decode_any_value(any_value) do
+        {:ok, decoded} ->
+          {:cont, {:ok, Map.put(acc, key, decoded)}}
 
-          _ ->
-            # For other types, try JSON decode or return value as-is
-            case Jason.decode(any_value.value) do
-              {:ok, decoded} -> decoded
-              {:error, _} -> any_value.value
-            end
-        end
-
-      {key, decoded}
+        {:error, reason} ->
+          {:halt, {:error, {:invalid_parameter, key, reason}}}
+      end
     end)
-    |> Map.new()
   end
+
+  defp decode_tool_parameters(_), do: {:ok, %{}}
+
+  defp decode_any_value(%Any{
+         type_url: "type.googleapis.com/google.protobuf.StringValue",
+         value: value
+       }) do
+    decode_json(value)
+  end
+
+  defp decode_any_value(%Any{type_url: type_url, value: value}) do
+    case decode_json(value) do
+      {:ok, decoded} ->
+        {:ok, decoded}
+
+      {:error, message} ->
+        {:error, {:invalid_json, message, type_url}}
+    end
+  end
+
+  defp decode_any_value(value) when is_map(value) or is_list(value) do
+    {:ok, value}
+  end
+
+  defp decode_any_value(value), do: {:ok, value}
+
+  defp decode_json(value) when is_binary(value) do
+    case Jason.decode(value) do
+      {:ok, decoded} ->
+        {:ok, decoded}
+
+      {:error, %Jason.DecodeError{} = decode_error} ->
+        {:error, Exception.message(decode_error)}
+    end
+  end
+
+  defp decode_json(_), do: {:error, "expected JSON encoded string"}
 
   # Helper functions for remote tool execution
 
@@ -256,7 +286,7 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  defp forward_tool_to_worker(channel, request, session_id) do
+  defp forward_tool_to_worker(channel, request, session_id, decoded_params) do
     # Create the request to forward to the worker
     worker_request = %ExecuteToolRequest{
       session_id: session_id,
@@ -265,14 +295,13 @@ defmodule Snakepit.GRPC.BridgeServer do
       metadata: request.metadata
     }
 
-    params = decode_tool_parameters(worker_request.parameters)
     opts = tool_call_options(worker_request.metadata)
 
     case GRPCClient.execute_tool(
            channel,
            worker_request.session_id,
            worker_request.tool_name,
-           params,
+           decoded_params,
            opts
          ) do
       {:ok, response} ->
@@ -366,6 +395,26 @@ defmodule Snakepit.GRPC.BridgeServer do
   defp format_error({:error, reason}), do: format_error(reason)
   defp format_error({:unknown_type, type}), do: "Unknown type: #{inspect(type)}"
   defp format_error({:invalid_constraints, reason}), do: "Invalid constraints: #{reason}"
+
+  defp format_error({:invalid_parameter, key, {:invalid_json, message}}) do
+    "Invalid parameter #{key}: #{message}"
+  end
+
+  defp format_error({:invalid_parameter, key, {:invalid_json, message, type_url}}) do
+    "Invalid parameter #{key} (#{type_url}): #{message}"
+  end
+
+  defp format_error({:invalid_parameter, key, reason}) do
+    "Invalid parameter #{key}: #{inspect(reason)}"
+  end
+
+  defp format_error({:remote_execution_failed, reason}) when is_binary(reason) do
+    "Remote tool execution failed: #{reason}"
+  end
+
+  defp format_error({:remote_execution_failed, reason}) do
+    "Remote tool execution failed: #{inspect(reason)}"
+  end
 
   defp format_error({:validation_failed, details}) when is_map(details) do
     "Validation failed: #{inspect(details)}"
@@ -471,7 +520,7 @@ defmodule Snakepit.GRPC.BridgeServer do
     with {:ok, _session} <- SessionStore.get_session(request.session_id),
          {:ok, tool} <- ToolRegistry.get_tool(request.session_id, request.tool_name),
          :local <- tool.type,
-         params <- decode_tool_parameters(request.parameters),
+         {:ok, params} <- decode_tool_parameters(request.parameters),
          {:ok, result} <-
            ToolRegistry.execute_local_tool(request.session_id, request.tool_name, params) do
       execution_time = System.monotonic_time(:millisecond) - start_time

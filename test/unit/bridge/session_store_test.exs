@@ -51,4 +51,14 @@ defmodule SessionStoreTest do
       interval: 50
     )
   end
+
+  test "rejects direct ETS writes from external processes" do
+    session_id = "direct_write_#{System.unique_integer([:positive])}"
+
+    {:ok, _session} = Snakepit.Bridge.SessionStore.create_session(session_id)
+
+    assert_raise ArgumentError, fn ->
+      :ets.insert(:snakepit_sessions, {session_id <> "_evil", {0, 0, %{}}})
+    end
+  end
 end

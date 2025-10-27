@@ -294,7 +294,7 @@ defmodule Snakepit.Bridge.SessionStore do
     table =
       :ets.new(table_name, [
         :set,
-        :public,
+        :protected,
         :named_table,
         {:read_concurrency, true},
         {:write_concurrency, true},
@@ -307,7 +307,7 @@ defmodule Snakepit.Bridge.SessionStore do
     global_programs_table =
       :ets.new(global_programs_table_name, [
         :set,
-        :public,
+        :protected,
         :named_table,
         {:read_concurrency, true},
         {:write_concurrency, true},

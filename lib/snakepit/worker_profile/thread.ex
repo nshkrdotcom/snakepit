@@ -56,9 +56,7 @@ defmodule Snakepit.WorkerProfile.Thread do
   require Logger
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.Registry, as: PoolRegistry
-
-  # ETS table name for tracking worker capacity
-  @capacity_table :snakepit_worker_capacity
+  alias Snakepit.WorkerProfile.Thread.CapacityStore
 
   @impl true
   def start_worker(config) do
@@ -93,8 +91,7 @@ defmodule Snakepit.WorkerProfile.Thread do
            worker_config
          ) do
       {:ok, pid} ->
-        # Track capacity in ETS
-        :ets.insert(@capacity_table, {pid, threads_per_worker, 0})
+        :ok = CapacityStore.track_worker(pid, threads_per_worker)
 
         SLog.info(
           "Thread profile started worker #{worker_id}: #{inspect(pid)} with capacity #{threads_per_worker}"
@@ -111,7 +108,8 @@ defmodule Snakepit.WorkerProfile.Thread do
   @impl true
   def stop_worker(worker_pid) when is_pid(worker_pid) do
     # Remove from capacity table
-    :ets.delete(@capacity_table, worker_pid)
+    ensure_capacity_table()
+    :ok = CapacityStore.untrack_worker(worker_pid)
 
     case PoolRegistry.get_worker_id_by_pid(worker_pid) do
       {:ok, worker_id} ->
@@ -170,10 +168,8 @@ defmodule Snakepit.WorkerProfile.Thread do
 
   @impl true
   def get_capacity(worker_pid) when is_pid(worker_pid) do
-    case :ets.lookup(@capacity_table, worker_pid) do
-      [{^worker_pid, capacity, _load}] -> capacity
-      [] -> 1
-    end
+    ensure_capacity_table()
+    CapacityStore.get_capacity(worker_pid)
   end
 
   def get_capacity(worker_id) when is_atom(worker_id) do
@@ -190,10 +186,8 @@ defmodule Snakepit.WorkerProfile.Thread do
 
   @impl true
   def get_load(worker_pid) when is_pid(worker_pid) do
-    case :ets.lookup(@capacity_table, worker_pid) do
-      [{^worker_pid, _capacity, load}] -> load
-      [] -> 0
-    end
+    ensure_capacity_table()
+    CapacityStore.get_load(worker_pid)
   end
 
   def get_load(worker_id) when is_atom(worker_id) do
@@ -282,21 +276,12 @@ defmodule Snakepit.WorkerProfile.Thread do
   # Private helpers
 
   defp ensure_capacity_table do
-    # Create table if it doesn't exist
-    case :ets.info(@capacity_table) do
-      :undefined ->
-        :ets.new(@capacity_table, [
-          :set,
-          :public,
-          :named_table,
-          {:read_concurrency, true},
-          {:write_concurrency, true}
-        ])
+    case CapacityStore.ensure_started() do
+      {:ok, _pid} ->
+        :ok
 
-        SLog.debug("Created worker capacity ETS table: #{@capacity_table}")
-
-      _ ->
-        # Table already exists
+      {:error, reason} ->
+        SLog.warning("Capacity store failed to start: #{inspect(reason)}")
         :ok
     end
   end
@@ -380,13 +365,10 @@ defmodule Snakepit.WorkerProfile.Thread do
   end
 
   defp check_and_increment_load(worker_pid) do
-    # Atomically check capacity and increment load if available
-    case :ets.lookup(@capacity_table, worker_pid) do
-      [{^worker_pid, capacity, load}] when load < capacity ->
-        # Attempt to increment (thread-safe with update_counter)
-        new_load = :ets.update_counter(@capacity_table, worker_pid, {3, 1})
+    ensure_capacity_table()
 
-        # Emit telemetry if we just reached capacity
+    case CapacityStore.check_and_increment_load(worker_pid) do
+      {:ok, capacity, new_load} ->
         if new_load == capacity do
           :telemetry.execute(
             [:snakepit, :pool, :capacity_reached],
@@ -397,8 +379,7 @@ defmodule Snakepit.WorkerProfile.Thread do
 
         :ok
 
-      [{^worker_pid, capacity, load}] ->
-        # At capacity - emit telemetry
+      {:at_capacity, capacity, load} ->
         :telemetry.execute(
           [:snakepit, :pool, :capacity_reached],
           %{capacity: capacity, load: load},
@@ -407,21 +388,15 @@ defmodule Snakepit.WorkerProfile.Thread do
 
         {:error, :at_capacity}
 
-      [] ->
-        # Worker not tracked (shouldn't happen, but allow)
-        SLog.warning("Worker #{inspect(worker_pid)} not found in capacity table")
+      {:error, :unknown_worker} ->
+        SLog.warning("Worker #{inspect(worker_pid)} not found in capacity store")
         :ok
     end
   end
 
   defp decrement_load(worker_pid) do
-    try do
-      :ets.update_counter(@capacity_table, worker_pid, {3, -1})
-    rescue
-      ArgumentError ->
-        # Worker was removed from table (shutdown in progress)
-        :ok
-    end
+    ensure_capacity_table()
+    CapacityStore.decrement_load(worker_pid)
   end
 
   defp get_worker_module(worker_pid) do

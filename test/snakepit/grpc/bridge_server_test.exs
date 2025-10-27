@@ -12,10 +12,12 @@ defmodule Snakepit.GRPC.BridgeServerTest do
     InitializeSessionRequest,
     InitializeSessionResponse,
     ExecuteToolRequest,
-    ExecuteToolResponse
+    ExecuteToolResponse,
+    ExecuteElixirToolRequest,
+    ExecuteElixirToolResponse
   }
 
-  alias Google.Protobuf.Timestamp
+  alias Google.Protobuf.{Timestamp, Any}
 
   setup do
     # Start SessionStore
@@ -177,6 +179,35 @@ defmodule Snakepit.GRPC.BridgeServerTest do
       response = BridgeServer.execute_tool(request, nil)
 
       assert %ExecuteToolResponse{success: true} = response
+    end
+  end
+
+  describe "execute_elixir_tool/2" do
+    test "returns error when parameters contain malformed JSON", %{session_id: session_id} do
+      ensure_tool_registry_started()
+
+      {:ok, _session} = SessionStore.create_session(session_id)
+
+      :ok =
+        ToolRegistry.register_elixir_tool(session_id, "echo", fn _params -> {:ok, :ok} end)
+
+      request = %ExecuteElixirToolRequest{
+        session_id: session_id,
+        tool_name: "echo",
+        parameters: %{
+          "payload" => %Any{
+            type_url: "type.googleapis.com/google.protobuf.StringValue",
+            value: "not-json"
+          }
+        },
+        metadata: %{}
+      }
+
+      response = BridgeServer.execute_elixir_tool(request, nil)
+
+      assert %ExecuteElixirToolResponse{success: false, error_message: message} = response
+      assert message =~ "Invalid parameter payload"
+      assert response.result == nil
     end
   end
 
