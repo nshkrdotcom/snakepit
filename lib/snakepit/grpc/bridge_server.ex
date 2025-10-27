@@ -9,6 +9,8 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   alias Snakepit.Bridge.SessionStore
   alias Snakepit.Bridge.ToolRegistry
+  alias Snakepit.GRPCWorker
+  alias Snakepit.GRPC.Client, as: GRPCClient
 
   alias Snakepit.Bridge.{
     PingRequest,
@@ -169,12 +171,24 @@ defmodule Snakepit.GRPC.BridgeServer do
     # Forward to Python worker
     SLog.debug("Executing remote tool #{tool.name} on worker #{tool.worker_id}")
 
-    with {:ok, worker_port} <- get_worker_port(tool.worker_id),
-         {:ok, channel} <- create_worker_channel(worker_port),
-         {:ok, result} <- forward_tool_to_worker(channel, request, session_id) do
-      # Channel will be cleaned up automatically
-      {:ok, result}
-    else
+    case ensure_worker_channel(tool.worker_id) do
+      {:ok, channel, cleanup} ->
+        result =
+          try do
+            forward_tool_to_worker(channel, request, session_id)
+          after
+            cleanup.()
+          end
+
+        case result do
+          {:ok, response} ->
+            {:ok, response}
+
+          {:error, reason} ->
+            SLog.error("Failed to execute remote tool #{tool.name}: #{inspect(reason)}")
+            {:error, "Remote tool execution failed: #{inspect(reason)}"}
+        end
+
       {:error, reason} ->
         SLog.error("Failed to execute remote tool #{tool.name}: #{inspect(reason)}")
         {:error, "Remote tool execution failed: #{inspect(reason)}"}
@@ -232,16 +246,17 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   defp create_worker_channel(port) do
     try do
-      GRPC.Stub.connect("localhost:#{port}")
+      case GRPC.Stub.connect("localhost:#{port}") do
+        {:ok, channel} -> {:ok, channel}
+        {:error, reason} -> {:error, reason}
+        other -> other
+      end
     rescue
       error -> {:error, "Failed to connect to worker: #{inspect(error)}"}
     end
   end
 
   defp forward_tool_to_worker(channel, request, session_id) do
-    # Forward the ExecuteToolRequest to the Python worker's gRPC server
-    alias Snakepit.Bridge.BridgeService.Stub
-
     # Create the request to forward to the worker
     worker_request = %ExecuteToolRequest{
       session_id: session_id,
@@ -250,20 +265,93 @@ defmodule Snakepit.GRPC.BridgeServer do
       metadata: request.metadata
     }
 
-    try do
-      case Stub.execute_tool(channel, worker_request) do
-        {:ok, response} ->
-          if response.success do
-            {:ok, response.result}
-          else
-            {:error, response.error_message}
-          end
+    params = decode_tool_parameters(worker_request.parameters)
+    opts = tool_call_options(worker_request.metadata)
 
-        {:error, reason} ->
-          {:error, "gRPC call failed: #{inspect(reason)}"}
+    case GRPCClient.execute_tool(
+           channel,
+           worker_request.session_id,
+           worker_request.tool_name,
+           params,
+           opts
+         ) do
+      {:ok, response} ->
+        {:ok, response}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp tool_call_options(metadata) when is_map(metadata) do
+    metadata
+    |> Map.get("timeout_ms") ||
+      Map.get(metadata, :timeout_ms)
+      |> parse_timeout_ms()
+      |> case do
+        {:ok, timeout} -> [timeout: timeout]
+        :error -> []
       end
+  end
+
+  defp tool_call_options(_metadata), do: []
+
+  defp parse_timeout_ms(nil), do: :error
+
+  defp parse_timeout_ms(value) when is_integer(value) and value > 0, do: {:ok, value}
+
+  defp parse_timeout_ms(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, ""} when int > 0 -> {:ok, int}
+      _ -> :error
+    end
+  end
+
+  defp parse_timeout_ms(_), do: :error
+
+  defp ensure_worker_channel(worker_id) do
+    case get_existing_worker_channel(worker_id) do
+      {:ok, channel} ->
+        {:ok, channel, fn -> :ok end}
+
+      {:error, reason} when is_binary(reason) ->
+        {:error, reason}
+
+      {:error, _reason} ->
+        with {:ok, port} <- get_worker_port(worker_id),
+             {:ok, channel} <- create_worker_channel(port) do
+          {:ok, channel, fn -> disconnect_channel(channel) end}
+        end
+    end
+  end
+
+  defp get_existing_worker_channel(worker_id) do
+    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
+      [{pid, metadata}] when is_pid(pid) ->
+        case Map.get(metadata, :worker_module, GRPCWorker) do
+          module when module == GRPCWorker ->
+            case GRPCWorker.get_channel(pid) do
+              {:ok, channel} -> {:ok, channel}
+              {:error, reason} -> {:error, reason}
+            end
+
+          _ ->
+            {:error, :unsupported_worker_module}
+        end
+
+      [] ->
+        {:error, "Worker not found: #{worker_id}"}
+    end
+  rescue
+    _ -> {:error, :channel_unavailable}
+  end
+
+  defp disconnect_channel(channel) do
+    try do
+      _ = GRPC.Stub.disconnect(channel)
+      :ok
     rescue
-      error -> {:error, "Exception during gRPC call: #{inspect(error)}"}
+      _ -> :ok
     end
   end
 

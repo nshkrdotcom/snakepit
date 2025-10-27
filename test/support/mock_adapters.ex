@@ -107,3 +107,53 @@ defmodule Snakepit.TestAdapters.FailingAdapter do
 
   def uses_grpc?, do: true
 end
+
+defmodule Snakepit.TestAdapters.EphemeralPortGRPCAdapter do
+  @moduledoc false
+  @behaviour Snakepit.Adapter
+
+  @actual_port 61234
+
+  def actual_port, do: @actual_port
+
+  @impl true
+  def executable_path do
+    Path.join([__DIR__, "mock_grpc_server_ephemeral.sh"])
+  end
+
+  @impl true
+  def script_path, do: ""
+
+  @impl true
+  def script_args, do: []
+
+  @impl true
+  def supported_commands, do: ["ping"]
+
+  @impl true
+  def validate_command(_command, _args), do: :ok
+
+  def get_port, do: 0
+
+  def init_grpc_connection(port) do
+    {:ok,
+     %{
+       channel: %{
+         mock: true,
+         port: port,
+         adapter: __MODULE__
+       },
+       port: port
+     }}
+  end
+
+  def grpc_execute(_conn, _session_id, "ping", _args, _timeout) do
+    {:ok, %{"status" => "pong"}}
+  end
+
+  def grpc_execute(_conn, _session_id, command, _args, _timeout) do
+    {:error, {:unsupported_command, command}}
+  end
+
+  def uses_grpc?, do: true
+end
