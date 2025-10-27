@@ -435,6 +435,7 @@ defmodule Snakepit.GRPCWorker do
                   new_state =
                     state
                     |> Map.put(:connection, connection)
+                    |> Map.put(:port, actual_port)
                     |> Map.put(:health_check_ref, health_ref)
                     |> maybe_start_heartbeat_monitor()
 

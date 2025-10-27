@@ -1,14 +1,18 @@
 defmodule Snakepit.GRPC.BridgeServerTest do
-  use ExUnit.Case, async: false
+  use Snakepit.TestCase, async: false
 
   alias Snakepit.Bridge.SessionStore
+  alias Snakepit.Bridge.ToolRegistry
   alias Snakepit.GRPC.BridgeServer
+  alias Snakepit.GRPCWorker
 
   alias Snakepit.Bridge.{
     PingRequest,
     PingResponse,
     InitializeSessionRequest,
-    InitializeSessionResponse
+    InitializeSessionResponse,
+    ExecuteToolRequest,
+    ExecuteToolResponse
   }
 
   alias Google.Protobuf.Timestamp
@@ -75,6 +79,124 @@ defmodule Snakepit.GRPC.BridgeServerTest do
 
       # Session should still exist and be usable
       assert {:ok, _session} = SessionStore.get_session(session_id)
+    end
+  end
+
+  defmodule PoolStub do
+    use GenServer
+
+    def start_link(opts \\ []) do
+      GenServer.start_link(__MODULE__, opts)
+    end
+
+    @impl true
+    def init(state), do: {:ok, state}
+
+    @impl true
+    def handle_call({:worker_ready, _worker_id}, _from, state) do
+      {:reply, :ok, state}
+    end
+  end
+
+  describe "execute_tool/2 with remote workers" do
+    setup %{session_id: session_id} do
+      ensure_tool_registry_started()
+      ensure_started(Snakepit.Pool.Registry)
+      ensure_started(Snakepit.Pool.ProcessRegistry)
+      {:ok, pool_pid} = start_supervised(PoolStub)
+
+      script_path =
+        Path.join([__DIR__, "..", "..", "support", "mock_grpc_server_ephemeral.sh"])
+
+      File.chmod!(script_path, 0o755)
+
+      worker_id = "bridge_worker_#{System.unique_integer([:positive])}"
+
+      {:ok, worker} =
+        GRPCWorker.start_link(
+          id: worker_id,
+          adapter: Snakepit.TestAdapters.EphemeralPortGRPCAdapter,
+          pool_name: pool_pid,
+          worker_config: %{
+            heartbeat: %{enabled: false}
+          }
+        )
+
+      on_exit(fn ->
+        if Process.alive?(worker) do
+          try do
+            GenServer.stop(worker)
+          catch
+            :exit, _ -> :ok
+          end
+        end
+
+        ToolRegistry.cleanup_session(session_id)
+      end)
+
+      # Ensure session exists before tool registration
+      {:ok, _session} = SessionStore.create_session(session_id)
+
+      :ok =
+        ToolRegistry.register_python_tool(
+          session_id,
+          "mock_tool",
+          worker_id,
+          %{}
+        )
+
+      assert_eventually(
+        fn ->
+          case GRPCWorker.get_channel(worker) do
+            {:ok, _channel} -> true
+            _ -> false
+          end
+        end,
+        timeout: 5_000,
+        interval: 25
+      )
+
+      {:ok,
+       %{
+         worker_id: worker_id,
+         worker: worker,
+         pool: pool_pid
+       }}
+    end
+
+    test "returns success using the worker's established channel", %{
+      session_id: session_id
+    } do
+      request = %ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: "mock_tool",
+        parameters: %{},
+        metadata: %{}
+      }
+
+      response = BridgeServer.execute_tool(request, nil)
+
+      assert %ExecuteToolResponse{success: true} = response
+    end
+  end
+
+  defp ensure_tool_registry_started do
+    case ToolRegistry.start_link() do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:already_started, _pid}} ->
+        :ok
+    end
+  end
+
+  defp ensure_started(child_spec) do
+    case start_supervised(child_spec) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:already_started, _pid}} ->
+        :ok
     end
   end
 end
