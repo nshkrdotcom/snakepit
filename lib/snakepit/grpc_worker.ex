@@ -32,6 +32,7 @@ defmodule Snakepit.GRPCWorker do
   use GenServer
   require Logger
   alias Snakepit.Telemetry.Correlation
+  alias Snakepit.Logger.Redaction
   alias Snakepit.Logger, as: SLog
   require OpenTelemetry.Tracer, as: Tracer
 
@@ -502,7 +503,7 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_call({:execute_stream, command, args, callback_fn, timeout}, _from, state) do
-    SLog.debug("[GRPCWorker] execute_stream #{command} with args #{inspect(args)}")
+    SLog.debug("[GRPCWorker] execute_stream #{command} with args #{Redaction.describe(args)}")
 
     result =
       state.adapter.grpc_execute_stream(
@@ -514,7 +515,7 @@ defmodule Snakepit.GRPCWorker do
         timeout
       )
 
-    SLog.debug("[GRPCWorker] execute_stream result: #{inspect(result)}")
+    SLog.debug("[GRPCWorker] execute_stream result: #{Redaction.describe(result)}")
 
     new_state =
       case result do

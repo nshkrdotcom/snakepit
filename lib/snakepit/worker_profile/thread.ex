@@ -55,6 +55,7 @@ defmodule Snakepit.WorkerProfile.Thread do
 
   require Logger
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Logger.Redaction
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.WorkerProfile.Thread.CapacityStore
 
@@ -74,7 +75,7 @@ defmodule Snakepit.WorkerProfile.Thread do
     adapter_env = build_adapter_env(config)
 
     SLog.info("Starting threaded worker #{worker_id} with #{threads_per_worker} threads")
-    SLog.debug("Thread worker adapter_args: #{inspect(adapter_args)}")
+    SLog.debug("Thread worker adapter_args: #{Redaction.describe(adapter_args)}")
 
     # Create enhanced worker config with thread profile settings
     worker_config =

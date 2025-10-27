@@ -13,6 +13,7 @@ defmodule Snakepit.Pool do
   use GenServer
   require Logger
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Logger.Redaction
 
   @default_size System.schedulers_online() * 2
   @default_startup_timeout 10_000
@@ -79,7 +80,7 @@ defmodule Snakepit.Pool do
   def execute_stream(command, args, callback_fn, opts \\ []) do
     pool = opts[:pool] || __MODULE__
     timeout = opts[:timeout] || 300_000
-    SLog.debug("[Pool] execute_stream #{command} with #{inspect(args)}")
+    SLog.debug("[Pool] execute_stream #{command} with #{Redaction.describe(args)}")
 
     case checkout_worker_for_stream(pool, opts) do
       {:ok, worker_id} ->
@@ -116,7 +117,7 @@ defmodule Snakepit.Pool do
     if function_exported?(worker_module, :execute_stream, 5) do
       SLog.debug("[Pool] Invoking #{worker_module}.execute_stream with timeout #{timeout}")
       result = worker_module.execute_stream(worker_id, command, args, callback_fn, timeout)
-      SLog.debug("[Pool] execute_stream result: #{inspect(result)}")
+      SLog.debug("[Pool] execute_stream result: #{Redaction.describe(result)}")
       result
     else
       SLog.error("[Pool] Worker module #{worker_module} does not export execute_stream/5")
@@ -555,39 +556,64 @@ defmodule Snakepit.Pool do
                 # Extract the actual PID from the from tuple for monitoring
                 {client_pid, _tag} = from
                 ref = Process.monitor(client_pid)
-
-                # Track execution time
                 start_time = System.monotonic_time(:microsecond)
-                result = execute_on_worker(worker_id, command, args, opts)
-                duration_us = System.monotonic_time(:microsecond) - start_time
 
-                # Emit telemetry for request execution
-                :telemetry.execute(
-                  [:snakepit, :request, :executed],
-                  %{duration_us: duration_us},
-                  %{
-                    pool: pool_name,
-                    worker_id: worker_id,
-                    command: command,
-                    success: match?({:ok, _}, result)
-                  }
-                )
+                case monitor_client_status(ref, client_pid) do
+                  {:down, reason} ->
+                    Process.demonitor(ref, [:flush])
+                    duration_us = System.monotonic_time(:microsecond) - start_time
 
-                # Check if the client is still alive
-                receive do
-                  {:DOWN, ^ref, :process, ^client_pid, _reason} ->
-                    # Client is dead, don't try to reply. Just check in the worker.
-                    SLog.warning(
-                      "Client #{inspect(client_pid)} died before receiving reply. Checking in worker #{worker_id}."
+                    :telemetry.execute(
+                      [:snakepit, :request, :executed],
+                      %{duration_us: duration_us},
+                      %{
+                        pool: pool_name,
+                        worker_id: worker_id,
+                        command: command,
+                        success: false,
+                        aborted: true,
+                        reason: :client_down,
+                        client_down_reason: reason
+                      }
+                    )
+
+                    SLog.debug(
+                      "Client #{inspect(client_pid)} was already down; skipping work on worker #{worker_id}"
                     )
 
                     GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
-                after
-                  0 ->
-                    # Client is alive. Clean up the monitor and proceed.
-                    Process.demonitor(ref, [:flush])
-                    GenServer.reply(from, result)
-                    GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
+
+                  :alive ->
+                    result = execute_on_worker(worker_id, command, args, opts)
+                    duration_us = System.monotonic_time(:microsecond) - start_time
+
+                    :telemetry.execute(
+                      [:snakepit, :request, :executed],
+                      %{duration_us: duration_us},
+                      %{
+                        pool: pool_name,
+                        worker_id: worker_id,
+                        command: command,
+                        success: match?({:ok, _}, result)
+                      }
+                    )
+
+                    # Check if the client is still alive
+                    receive do
+                      {:DOWN, ^ref, :process, ^client_pid, _reason} ->
+                        # Client is dead, don't try to reply. Just check in the worker.
+                        SLog.warning(
+                          "Client #{inspect(client_pid)} died before receiving reply. Checking in worker #{worker_id}."
+                        )
+
+                        GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
+                    after
+                      0 ->
+                        # Client is alive. Clean up the monitor and proceed.
+                        Process.demonitor(ref, [:flush])
+                        GenServer.reply(from, result)
+                        GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
+                    end
                 end
               end)
 
@@ -1278,6 +1304,25 @@ defmodule Snakepit.Pool do
         else
           nil
         end
+    end
+  end
+
+  defp monitor_client_status(ref, client_pid) do
+    if Process.alive?(client_pid) do
+      await_client_down(ref, client_pid)
+    else
+      case await_client_down(ref, client_pid) do
+        :alive -> {:down, :unknown}
+        other -> other
+      end
+    end
+  end
+
+  defp await_client_down(ref, client_pid) do
+    receive do
+      {:DOWN, ^ref, :process, ^client_pid, reason} -> {:down, reason}
+    after
+      0 -> :alive
     end
   end
 

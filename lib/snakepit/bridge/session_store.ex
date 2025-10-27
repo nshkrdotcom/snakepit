@@ -18,6 +18,9 @@ defmodule Snakepit.Bridge.SessionStore do
   @cleanup_interval 60_000
   # 1 hour
   @default_ttl 3600
+  @default_max_sessions 10_000
+  @default_max_programs_per_session 200
+  @default_max_global_programs 10_000
 
   ## Client API
 
@@ -319,6 +322,22 @@ defmodule Snakepit.Bridge.SessionStore do
     # 1 hour default
     global_program_ttl = Keyword.get(opts, :global_program_ttl, 3600)
 
+    quota_config = Application.get_env(:snakepit, :session_store, %{})
+
+    max_sessions =
+      resolve_quota(opts, quota_config, :max_sessions, @default_max_sessions)
+
+    max_programs_per_session =
+      resolve_quota(
+        opts,
+        quota_config,
+        :max_programs_per_session,
+        @default_max_programs_per_session
+      )
+
+    max_global_programs =
+      resolve_quota(opts, quota_config, :max_global_programs, @default_max_global_programs)
+
     # Schedule periodic cleanup
     Process.send_after(self(), :cleanup_expired_sessions, cleanup_interval)
 
@@ -330,6 +349,9 @@ defmodule Snakepit.Bridge.SessionStore do
       cleanup_interval: cleanup_interval,
       default_ttl: default_ttl,
       global_program_ttl: global_program_ttl,
+      max_sessions: max_sessions,
+      max_programs_per_session: max_programs_per_session,
+      max_global_programs: max_global_programs,
       stats: %{
         sessions_created: 0,
         sessions_deleted: 0,
@@ -359,22 +381,28 @@ defmodule Snakepit.Bridge.SessionStore do
         # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
         ets_record = {session_id, {session.last_accessed, session.ttl, session}}
 
-        # Atomic insert-if-not-exists
-        case :ets.insert_new(state.table, ets_record) do
+        cond do
+          session_quota_reached?(state) ->
+            {:reply, {:error, :session_quota_exceeded}, state}
+
           true ->
-            # We created the session
-            SLog.debug("Created new session: #{session_id}")
-            new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
-            {:reply, {:ok, session}, %{state | stats: new_stats}}
+            # Atomic insert-if-not-exists
+            case :ets.insert_new(state.table, ets_record) do
+              true ->
+                # We created the session
+                SLog.debug("Created new session: #{session_id}")
+                new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
+                {:reply, {:ok, session}, %{state | stats: new_stats}}
 
-          false ->
-            # Session already exists - return the existing one
-            SLog.debug("Session #{session_id} already exists - reusing (concurrent init)")
+              false ->
+                # Session already exists - return the existing one
+                SLog.debug("Session #{session_id} already exists - reusing (concurrent init)")
 
-            [{^session_id, {_last_accessed, _ttl, existing_session}}] =
-              :ets.lookup(state.table, session_id)
+                [{^session_id, {_last_accessed, _ttl, existing_session}}] =
+                  :ets.lookup(state.table, session_id)
 
-            {:reply, {:ok, existing_session}, state}
+                {:reply, {:ok, existing_session}, state}
+            end
         end
 
       {:error, reason} ->
@@ -484,10 +512,20 @@ defmodule Snakepit.Bridge.SessionStore do
     timestamp = System.monotonic_time(:second)
     program_entry = {program_id, program_data, timestamp}
 
-    :ets.insert(state.global_programs_table, program_entry)
+    case :ets.lookup(state.global_programs_table, program_id) do
+      [{^program_id, _existing, _old_timestamp}] ->
+        :ets.insert(state.global_programs_table, program_entry)
+        {:reply, :ok, state}
 
-    new_stats = Map.update!(state.stats, :global_programs_stored, &(&1 + 1))
-    {:reply, :ok, %{state | stats: new_stats}}
+      [] ->
+        if global_program_quota_reached?(state) do
+          {:reply, {:error, :global_program_quota_exceeded}, state}
+        else
+          :ets.insert(state.global_programs_table, program_entry)
+          new_stats = Map.update!(state.stats, :global_programs_stored, &(&1 + 1))
+          {:reply, :ok, %{state | stats: new_stats}}
+        end
+    end
   end
 
   @impl true
@@ -507,6 +545,32 @@ defmodule Snakepit.Bridge.SessionStore do
 
     new_stats = Map.update!(state.stats, :global_programs_deleted, &(&1 + 1))
     {:reply, :ok, %{state | stats: new_stats}}
+  end
+
+  @impl true
+  def handle_call({:store_program, session_id, program_id, program_data}, _from, state) do
+    case :ets.lookup(state.table, session_id) do
+      [{^session_id, {_last_accessed, _ttl, session}}] ->
+        is_update = Map.has_key?(session.programs, program_id)
+
+        if is_update or not program_quota_reached?(session, state.max_programs_per_session) do
+          updated_session =
+            session
+            |> Session.put_program(program_id, program_data)
+            |> Session.touch()
+
+          ets_record =
+            {session_id, {updated_session.last_accessed, updated_session.ttl, updated_session}}
+
+          :ets.insert(state.table, ets_record)
+          {:reply, :ok, state}
+        else
+          {:reply, {:error, {:program_quota_exceeded, session_id}}, state}
+        end
+
+      [] ->
+        {:reply, {:error, :not_found}, state}
+    end
   end
 
   @impl true
@@ -578,13 +642,13 @@ defmodule Snakepit.Bridge.SessionStore do
   """
   @spec store_program(String.t(), String.t(), map()) :: :ok | {:error, term()}
   def store_program(session_id, program_id, program_data) do
-    update_session(session_id, fn session ->
-      Session.put_program(session, program_id, program_data)
-    end)
-    |> case do
-      {:ok, _} -> :ok
-      error -> error
-    end
+    store_program(__MODULE__, session_id, program_id, program_data)
+  end
+
+  @spec store_program(GenServer.server(), String.t(), String.t(), map()) :: :ok | {:error, term()}
+  def store_program(server, session_id, program_id, program_data)
+      when is_binary(session_id) and is_binary(program_id) do
+    GenServer.call(server, {:store_program, session_id, program_id, program_data})
   end
 
   @doc """
@@ -675,5 +739,42 @@ defmodule Snakepit.Bridge.SessionStore do
     new_stats = Map.update(stats, :global_programs_expired, expired_count, &(&1 + expired_count))
 
     {expired_count, new_stats}
+  end
+
+  defp resolve_quota(opts, config, key, default) do
+    value = Keyword.get(opts, key, Map.get(config, key, default))
+    normalize_quota(value, default)
+  end
+
+  defp normalize_quota(:infinity, _default), do: :infinity
+
+  defp normalize_quota(value, _default) when is_integer(value) and value > 0, do: value
+
+  defp normalize_quota(value, default) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, _} when int > 0 -> int
+      _ -> default
+    end
+  end
+
+  defp normalize_quota(_value, default), do: default
+
+  defp session_quota_reached?(%{max_sessions: :infinity}), do: false
+
+  defp session_quota_reached?(state) do
+    :ets.info(state.table, :size) >= state.max_sessions
+  end
+
+  defp global_program_quota_reached?(%{max_global_programs: :infinity}), do: false
+
+  defp global_program_quota_reached?(state) do
+    :ets.info(state.global_programs_table, :size) >= state.max_global_programs
+  end
+
+  defp program_quota_reached?(_session, :infinity), do: false
+
+  defp program_quota_reached?(session, limit) do
+    programs = Map.get(session, :programs, %{})
+    map_size(programs) >= limit
   end
 end
