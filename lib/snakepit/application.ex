@@ -14,6 +14,7 @@ defmodule Snakepit.Application do
   use Application
   require Logger
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.PythonThreadLimits
 
   @runtime_env Application.compile_env(:snakepit, :environment, :prod)
 
@@ -27,19 +28,15 @@ defmodule Snakepit.Application do
     # - Other libraries (absl, protobuf, etc.)
     # With 250 workers, this can create 6,000+ threads causing "Cannot fork" errors
     thread_limits =
-      Application.get_env(:snakepit, :python_thread_limits, %{
-        openblas: 1,
-        omp: 1,
-        mkl: 1,
-        numexpr: 1,
-        grpc_poll_threads: 1
-      })
+      :snakepit
+      |> Application.get_env(:python_thread_limits)
+      |> PythonThreadLimits.resolve()
 
     # Scientific computing libraries
-    System.put_env("OPENBLAS_NUM_THREADS", to_string(thread_limits.openblas))
-    System.put_env("OMP_NUM_THREADS", to_string(thread_limits.omp))
-    System.put_env("MKL_NUM_THREADS", to_string(thread_limits.mkl))
-    System.put_env("NUMEXPR_NUM_THREADS", to_string(thread_limits.numexpr))
+    System.put_env("OPENBLAS_NUM_THREADS", thread_limits[:openblas] |> to_string())
+    System.put_env("OMP_NUM_THREADS", thread_limits[:omp] |> to_string())
+    System.put_env("MKL_NUM_THREADS", thread_limits[:mkl] |> to_string())
+    System.put_env("NUMEXPR_NUM_THREADS", thread_limits[:numexpr] |> to_string())
 
     # gRPC library threading
     # Use single-threaded polling
@@ -52,7 +49,7 @@ defmodule Snakepit.Application do
     System.put_env("PYTHONUNBUFFERED", "1")
 
     SLog.info(
-      "🧵 Set Python thread limits: OPENBLAS=#{thread_limits.openblas}, OMP=#{thread_limits.omp}, MKL=#{thread_limits.mkl}, NUMEXPR=#{thread_limits.numexpr}, GRPC=single-threaded"
+      "🧵 Set Python thread limits: OPENBLAS=#{thread_limits[:openblas]}, OMP=#{thread_limits[:omp]}, MKL=#{thread_limits[:mkl]}, NUMEXPR=#{thread_limits[:numexpr]}, GRPC=single-threaded"
     )
 
     # Check if pooling is enabled (default: false to prevent auto-start issues)

@@ -145,6 +145,7 @@ For **non-DSPex users**, if you're using these classes directly:
 - **Accurate worker teardown** – `Snakepit.Pool.WorkerSupervisor.stop_worker/1` now targets the worker starter supervisor and accepts either worker ids or pids, preventing leaking processes.
 - **Profile parity** – Process and threaded worker profiles resolve worker ids through the registry so lifecycle manager shutdowns succeed regardless of handle type.
 - **Regression coverage** – Added unit suites covering supervisor stop/restart behaviour and profile-level shutdown helpers.
+- **Config-friendly thread limits** – Partial overrides of `:python_thread_limits` merge with defaults, keeping startup resilient while allowing fine-grained tuning.
 
 ## 🆕 What's New in v0.6.4
 
