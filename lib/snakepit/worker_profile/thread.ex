@@ -55,6 +55,7 @@ defmodule Snakepit.WorkerProfile.Thread do
 
   require Logger
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Pool.Registry, as: PoolRegistry
 
   # ETS table name for tracking worker capacity
   @capacity_table :snakepit_worker_capacity
@@ -112,25 +113,23 @@ defmodule Snakepit.WorkerProfile.Thread do
     # Remove from capacity table
     :ets.delete(@capacity_table, worker_pid)
 
-    # Graceful shutdown via supervisor
-    case Registry.lookup(Snakepit.Pool.Registry, worker_pid) do
-      [{_pid, %{worker_id: worker_id}}] ->
-        Snakepit.Pool.WorkerSupervisor.stop_worker(worker_id)
+    case PoolRegistry.get_worker_id_by_pid(worker_pid) do
+      {:ok, worker_id} ->
+        case Snakepit.Pool.WorkerSupervisor.stop_worker(worker_id) do
+          {:error, :worker_not_found} -> :ok
+          other -> other
+        end
 
-      [] ->
+      {:error, :not_found} ->
         # Worker not found, may already be stopped
         :ok
     end
   end
 
   def stop_worker(worker_id) when is_binary(worker_id) do
-    # Lookup PID and stop
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [{pid, _}] ->
-        stop_worker(pid)
-
-      [] ->
-        :ok
+    case PoolRegistry.get_worker_pid(worker_id) do
+      {:ok, pid} -> stop_worker(pid)
+      {:error, :not_found} -> :ok
     end
   end
 

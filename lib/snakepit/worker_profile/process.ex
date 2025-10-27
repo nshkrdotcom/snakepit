@@ -38,6 +38,7 @@ defmodule Snakepit.WorkerProfile.Process do
 
   require Logger
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Pool.Registry, as: PoolRegistry
 
   @impl true
   def start_worker(config) do
@@ -68,12 +69,14 @@ defmodule Snakepit.WorkerProfile.Process do
 
   @impl true
   def stop_worker(worker_pid) when is_pid(worker_pid) do
-    # Graceful shutdown via supervisor
-    case Registry.lookup(Snakepit.Pool.Registry, worker_pid) do
-      [{_pid, %{worker_id: worker_id}}] ->
-        Snakepit.Pool.WorkerSupervisor.stop_worker(worker_id)
+    case PoolRegistry.get_worker_id_by_pid(worker_pid) do
+      {:ok, worker_id} ->
+        case Snakepit.Pool.WorkerSupervisor.stop_worker(worker_id) do
+          {:error, :worker_not_found} -> :ok
+          other -> other
+        end
 
-      [] ->
+      {:error, :not_found} ->
         # Worker not found, may already be stopped
         :ok
     end

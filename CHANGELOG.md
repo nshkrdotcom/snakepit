@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.5] - 2025-10-31
+
+### Added
+- Regression suites covering worker supervisor stop/restart flows and profile-level shutdown helpers (`test/unit/pool/worker_supervisor_test.exs`, `test/unit/worker_profile/worker_profile_stop_worker_test.exs`).
+
+### Changed
+- `Snakepit.Application` now reads the current environment from compile-time configuration instead of calling `Mix.env/0`, keeping OTP releases Mix-free.
+
+### Fixed
+- `Snakepit.Pool.WorkerSupervisor.stop_worker/1` targets worker starter supervisors and accepts either worker ids or pids, ensuring restarts actually decommission the old worker.
+- `Snakepit.WorkerProfile.Process` and `Snakepit.WorkerProfile.Thread` resolve worker ids through the pool registry so lifecycle manager shutdowns succeed for pid handles.
+
 ## [0.6.4] - 2025-10-30
 
 ### Added

@@ -11,6 +11,8 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   use DynamicSupervisor
   require Logger
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Pool.Registry, as: PoolRegistry
+  alias Snakepit.Pool.Worker.StarterRegistry
 
   @doc """
   Starts the worker supervisor.
@@ -72,10 +74,17 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   @doc """
   Stops a worker gracefully.
   """
-  def stop_worker(worker_id) do
-    case Snakepit.Pool.Registry.get_worker_pid(worker_id) do
-      {:ok, pid} ->
-        DynamicSupervisor.terminate_child(__MODULE__, pid)
+  def stop_worker(worker_pid) when is_pid(worker_pid) do
+    case PoolRegistry.get_worker_id_by_pid(worker_pid) do
+      {:ok, worker_id} -> stop_worker(worker_id)
+      {:error, :not_found} -> {:error, :worker_not_found}
+    end
+  end
+
+  def stop_worker(worker_id) when is_binary(worker_id) do
+    case StarterRegistry.get_starter_pid(worker_id) do
+      {:ok, starter_pid} ->
+        DynamicSupervisor.terminate_child(__MODULE__, starter_pid)
 
       {:error, :not_found} ->
         {:error, :worker_not_found}
@@ -101,17 +110,18 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   Restarts a worker by ID.
   """
   def restart_worker(worker_id) do
-    case Snakepit.Pool.Registry.get_worker_pid(worker_id) do
+    case PoolRegistry.get_worker_pid(worker_id) do
       {:ok, old_pid} ->
         # Get the port before terminating so we can check if it's released
         old_port = get_worker_port(old_pid)
 
         # Worker exists, terminate it and wait for resource cleanup
-        with :ok <- DynamicSupervisor.terminate_child(__MODULE__, old_pid),
+        with :ok <- stop_worker(worker_id),
              :ok <- wait_for_resource_cleanup(worker_id, old_port) do
           start_worker(worker_id)
         else
           # Propagate termination/cleanup errors
+          {:error, :worker_not_found} -> start_worker(worker_id)
           error -> error
         end
 
@@ -201,7 +211,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   defp port_available?(nil), do: true
 
   defp registry_cleaned?(worker_id) do
-    case Snakepit.Pool.Registry.get_worker_pid(worker_id) do
+    case PoolRegistry.get_worker_pid(worker_id) do
       {:error, :not_found} -> true
       {:ok, _pid} -> false
     end
