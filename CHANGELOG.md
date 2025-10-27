@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `Snakepit.Application` now reads the current environment from compile-time configuration instead of calling `Mix.env/0`, keeping OTP releases Mix-free.
+- Introduced `Snakepit.PythonThreadLimits.resolve/1` to merge partial thread-limit overrides with defaults before applying environment variables.
 
 ### Fixed
 - `Snakepit.Pool.WorkerSupervisor.stop_worker/1` targets worker starter supervisors and accepts either worker ids or pids, ensuring restarts actually decommission the old worker.
