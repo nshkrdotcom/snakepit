@@ -28,6 +28,7 @@ Review these files before you start making changes:
 2. **Functional streaming implementation**:
    - Ensure `priv/python/grpc_server.py` and `priv/python/grpc_server_threaded.py` bridge async generators correctly. The queue-backed synchronous iterator approach is acceptable; just make sure it’s production-quality (no debug logging, clean shutdown, error propagation).
    - Confirm `Snakepit.GRPC.Client.execute_streaming_tool/5` and `Snakepit.GRPCWorker` behave correctly.
+   - When streaming support is disabled, `Snakepit.GRPC.BridgeServer.execute_streaming_tool/2` now returns an `UNIMPLEMENTED` gRPC error with remediation guidance (“Enable streaming support on the adapter … or use execute_tool instead”). Tests should assert on this structured response.
 3. **Real streaming example** (inside Snakepit repo, e.g., `examples/`):
    - A script or Mix task that starts Snakepit, calls a Python tool which yields five chunks (`1..5`) with a short `time.sleep` between them, and prints the arriving chunks.
 4. **Documentation updates**:
@@ -71,4 +72,3 @@ Review these files before you start making changes:
 - Keep `/tmp/python_worker_debug.log` (or similar) handy during development, but remove debug logging before publishing.
 
 > Once all the above is complete and validated inside Snakepit, come back to Snakebridge and rerun its streaming example using the newly published Snakepit release.
-

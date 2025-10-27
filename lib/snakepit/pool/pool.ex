@@ -1097,6 +1097,7 @@ defmodule Snakepit.Pool do
                   |> Map.put(:worker_module, worker_module)
                   |> Map.put(:adapter_module, adapter_module)
                   |> Map.put(:pool_name, pool_genserver_name)
+                  |> Map.put(:pool_identifier, pool_name)
 
                 # Call profile's start_worker
                 profile_module.start_worker(worker_config)
@@ -1106,7 +1107,8 @@ defmodule Snakepit.Pool do
                   worker_id,
                   worker_module,
                   adapter_module,
-                  pool_genserver_name
+                  pool_genserver_name,
+                  %{pool_identifier: pool_name}
                 )
               end
 
@@ -1363,17 +1365,112 @@ defmodule Snakepit.Pool do
     }
   end
 
-  # Helper to extract pool_name from worker_id
-  defp extract_pool_name_from_worker_id(worker_id) do
-    # Worker IDs are formatted as: "pool_name_worker_N_unique"
+  @doc false
+  def extract_pool_name_from_worker_id(worker_id) do
+    case lookup_pool_from_registry(worker_id) do
+      {:ok, pool_name} ->
+        pool_name
+
+      {:error, reason} ->
+        inferred = infer_pool_from_id(worker_id)
+
+        SLog.warning(
+          "Falling back to worker_id parsing for #{worker_id}: #{inspect(reason)}. Using #{inspect(inferred)}"
+        )
+
+        inferred
+    end
+  end
+
+  defp lookup_pool_from_registry(worker_id) do
+    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
+      [{pid, metadata}] ->
+        metadata
+        |> ensure_map()
+        |> extract_pool_from_metadata(pid)
+
+      [] ->
+        {:error, :worker_not_registered}
+    end
+  rescue
+    _ -> {:error, :registry_lookup_failed}
+  end
+
+  defp ensure_map(metadata) when is_map(metadata), do: metadata
+  defp ensure_map(_), do: %{}
+
+  defp extract_pool_from_metadata(metadata, pid) do
+    case Map.get(metadata, :pool_identifier) do
+      pool_identifier when is_atom(pool_identifier) and not is_nil(pool_identifier) ->
+        {:ok, pool_identifier}
+
+      _ ->
+        extract_pool_from_name(metadata, pid)
+    end
+  end
+
+  defp extract_pool_from_name(metadata, pid) do
+    case Map.get(metadata, :pool_name) do
+      pool_name when is_atom(pool_name) ->
+        if module_atom?(pool_name) do
+          {:error, {:pool_metadata_module_atom, pool_name}}
+        else
+          {:ok, pool_name}
+        end
+
+      pool_pid when is_pid(pool_pid) ->
+        case Process.info(pool_pid, :registered_name) do
+          {:registered_name, name} when is_atom(name) ->
+            {:ok, name}
+
+          _ ->
+            {:error, {:pool_metadata_not_atom, pool_pid}}
+        end
+
+      pool_name when is_binary(pool_name) ->
+        try do
+          atom_name = String.to_existing_atom(pool_name)
+
+          if module_atom?(atom_name) do
+            {:error, {:pool_metadata_module_atom, atom_name}}
+          else
+            {:ok, atom_name}
+          end
+        rescue
+          ArgumentError -> {:error, {:pool_metadata_not_atom, pool_name}}
+        end
+
+      nil ->
+        {:error,
+         {:pool_metadata_missing,
+          %{
+            metadata_keys: Map.keys(metadata),
+            worker_pid: pid
+          }}}
+    end
+  end
+
+  defp module_atom?(atom) when is_atom(atom) do
+    Atom.to_string(atom) |> String.starts_with?("Elixir.")
+  end
+
+  defp module_atom?(_), do: false
+
+  defp infer_pool_from_id(worker_id) do
     case String.split(worker_id, "_worker_", parts: 2) do
       [pool_name_str, _rest] ->
-        String.to_existing_atom(pool_name_str)
+        safe_to_existing_atom(pool_name_str)
 
       _ ->
         :default
     end
-  catch
-    _, _ -> :default
+  end
+
+  defp safe_to_existing_atom(pool_name_str) do
+    try do
+      String.to_existing_atom(pool_name_str)
+    rescue
+      ArgumentError -> :default
+    end
   end
 end

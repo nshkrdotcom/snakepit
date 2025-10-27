@@ -380,10 +380,19 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  def execute_streaming_tool(_request, _stream) do
+  def execute_streaming_tool(%ExecuteToolRequest{} = request, _stream) do
+    hint =
+      "Streaming execution is not enabled for tool #{request.tool_name}. " <>
+        "Enable streaming support on the adapter (set supports_streaming: true) or use execute_tool instead. " <>
+        "See docs/20251026/SNAKEPIT_STREAMING_PROMPT.md for enablement steps."
+
+    SLog.warning(
+      "Streaming request received for #{request.tool_name} but streaming support is disabled. Returning UNIMPLEMENTED."
+    )
+
     raise GRPC.RPCError,
       status: :unimplemented,
-      message: "Streaming tool execution not yet implemented"
+      message: hint
   end
 
   defp format_error(reason) when is_binary(reason), do: reason

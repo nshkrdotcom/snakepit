@@ -145,12 +145,14 @@ defmodule Snakepit.Pool.Worker.Starter do
     # CRITICAL FIX: Pass pool_name to worker so it knows which pool to notify when ready
     # Default to Snakepit.Pool for backward compatibility (production use)
     # v0.6.0: Pass worker_config for lifecycle management
-    worker_opts = [
-      id: worker_id,
-      adapter: adapter,
-      pool_name: pool_name || Snakepit.Pool,
-      worker_config: worker_config
-    ]
+    worker_opts =
+      [
+        id: worker_id,
+        adapter: adapter,
+        pool_name: pool_name || Snakepit.Pool,
+        worker_config: worker_config
+      ]
+      |> maybe_put_pool_identifier(pool_name, worker_config)
 
     children = [
       %{
@@ -167,4 +169,41 @@ defmodule Snakepit.Pool.Worker.Starter do
 
     Supervisor.init(children, strategy: :one_for_one)
   end
+
+  defp maybe_put_pool_identifier(opts, pool_name, worker_config) do
+    identifier =
+      cond do
+        is_map(worker_config) ->
+          worker_config
+          |> Map.get(:pool_identifier)
+          |> normalize_identifier()
+
+        true ->
+          normalize_identifier(pool_name)
+      end
+
+    if identifier do
+      Keyword.put(opts, :pool_identifier, identifier)
+    else
+      opts
+    end
+  end
+
+  defp normalize_identifier(value) when is_atom(value) do
+    if Atom.to_string(value) |> String.starts_with?("Elixir.") do
+      nil
+    else
+      value
+    end
+  end
+
+  defp normalize_identifier(value) when is_binary(value) do
+    try do
+      normalize_identifier(String.to_existing_atom(value))
+    rescue
+      ArgumentError -> nil
+    end
+  end
+
+  defp normalize_identifier(_), do: nil
 end

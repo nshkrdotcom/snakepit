@@ -82,10 +82,43 @@ defmodule Snakepit.GRPCWorker do
   """
   def start_link(opts) do
     worker_id = Keyword.get(opts, :id)
+    pool_name = Keyword.get(opts, :pool_name, Snakepit.Pool)
+
+    pool_identifier =
+      case Keyword.get(opts, :pool_identifier) do
+        identifier when is_atom(identifier) ->
+          identifier
+
+        identifier when is_binary(identifier) ->
+          try do
+            String.to_existing_atom(identifier)
+          rescue
+            ArgumentError -> nil
+          end
+
+        _ ->
+          cond do
+            is_atom(pool_name) ->
+              pool_name
+
+            is_pid(pool_name) ->
+              case Process.info(pool_name, :registered_name) do
+                {:registered_name, name} when is_atom(name) -> name
+                _ -> nil
+              end
+
+            true ->
+              nil
+          end
+      end
+
+    metadata =
+      %{worker_module: __MODULE__, pool_name: pool_name}
+      |> maybe_put_pool_identifier(pool_identifier)
 
     name =
       if worker_id do
-        {:via, Registry, {Snakepit.Pool.Registry, worker_id, %{worker_module: __MODULE__}}}
+        {:via, Registry, {Snakepit.Pool.Registry, worker_id, metadata}}
       else
         nil
       end
@@ -178,6 +211,11 @@ defmodule Snakepit.GRPCWorker do
   def get_session_id(worker) do
     GenServer.call(worker, :get_session_id)
   end
+
+  defp maybe_put_pool_identifier(metadata, nil), do: metadata
+
+  defp maybe_put_pool_identifier(metadata, identifier),
+    do: Map.put(metadata, :pool_identifier, identifier)
 
   # Server callbacks
 
