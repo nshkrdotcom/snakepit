@@ -68,11 +68,13 @@ defmodule StreamingExample do
     IO.puts("Pool initialized with #{pool_size()} workers\n")
 
     # Test basic commands with the pool
-    IO.puts("1. Testing pool with basic commands:\n")
+    request_count = pool_size()
+
+    IO.puts("1. Testing pool with #{request_count} concurrent commands:\n")
 
     # Run some concurrent requests to demonstrate pool usage
     tasks =
-      for i <- 1..10 do
+      for i <- 1..request_count do
         Task.async(fn ->
           case Snakepit.execute("ping", %{}) do
             {:ok, result} ->
@@ -88,7 +90,7 @@ defmodule StreamingExample do
 
     results = Task.await_many(tasks, 30_000)
     successes = Enum.count(results, &(&1 == :ok))
-    IO.puts("\n  Completed #{successes}/10 requests successfully")
+    IO.puts("\n  Completed #{successes}/#{request_count} requests successfully")
 
     IO.puts("\n2. Pool statistics:")
 

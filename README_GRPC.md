@@ -169,7 +169,7 @@ end)
 
 ### Logging redaction & diagnostics
 
-- `Snakepit.Logger.Redaction` now collapses sensitive payloads into short summaries before anything hits the log pipeline, preventing credential or large blob leaks during gRPC debugging.
+- \Snakepit.Logger.Redaction (internal helper) now collapses sensitive payloads into short summaries before anything hits the log pipeline, preventing credential or large blob leaks during gRPC debugging.
 - Bridge telemetry ties the redaction summaries to execution spans so you still get useful context without sacrificing safety.
 - Guarded by `test/unit/logger/redaction_test.exs`, which asserts both redaction coverage and fallback behaviour.
 

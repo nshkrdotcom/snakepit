@@ -144,7 +144,9 @@ For **non-DSPex users**, if you're using these classes directly:
 
 - **Persistent worker ports & channel reuse** – gRPC workers now cache the OS-assigned port and BridgeServer reuses the worker-owned channel before dialing a fallback, eliminating connection churn (`test/unit/grpc/grpc_worker_ephemeral_port_test.exs`, `test/snakepit/grpc/bridge_server_test.exs`).
 - **Hardened registries & quotas** – ETS tables ship with `:protected` visibility and DETS handles stay private while SessionStore enforces session/program quotas (`test/unit/pool/process_registry_security_test.exs`, `test/unit/bridge/session_store_test.exs`).
-- **Strict parameter validation** – Tool invocations fail fast with descriptive errors when protobuf payloads contain malformed JSON or unsupported types (`test/snakepit/grpc/bridge_server_test.exs`).
+- **Strict parameter validation** – Tool invocations fail fast with descriptive errors when protobuf payloads contain malformed JSON or when parameters cannot be JSON encoded, keeping both client and server paths crash-free (`test/snakepit/grpc/bridge_server_test.exs`, `test/unit/grpc/client_impl_test.exs`).
+- **Actionable streaming fallback** – When streaming support is disabled, `BridgeServer.execute_streaming_tool/2` now returns an `UNIMPLEMENTED` RPC error with remediation hints so callers can downgrade gracefully (`test/snakepit/grpc/bridge_server_test.exs`).
+- **Metadata-driven pool routing** – Worker registry entries publish pool identifiers so the pool manager resolves ownership without brittle string parsing; fallbacks log once for malformed IDs (`test/unit/pool/pool_registry_lookup_test.exs`).
 - **Streaming chunk contract** – The streaming callback now receives consistent `chunk_id`/`data`/`is_final` payloads with metadata fan-out, documented alongside regression coverage (`test/snakepit/streaming_regression_test.exs`).
 - **Redacted diagnostics** – the logger redaction helper now summarises sensitive payloads instead of dumping secrets or large blobs into logs (`test/unit/logger/redaction_test.exs`).
 

@@ -17,14 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Snakepit.GRPC.BridgeServer` reuses worker-owned gRPC channels and only dials a disposable connection when the worker has not yet published one; fallbacks are closed after each invocation.
 - gRPC streaming helpers document and enforce the JSON-plus-metadata chunk envelope, clarifying `_metadata` and `raw_data_base64` handling.
 - Worker startup handshake waits for the negotiated gRPC port before publishing worker metadata, eliminating transient routing failures during boot.
+- `Snakepit.GRPC.ClientImpl` now returns structured `{:error, {:invalid_parameter, :json_encode_failed, message}}` tuples when parameters cannot be JSON-encoded, preventing calling processes from crashing (`test/unit/grpc/client_impl_test.exs`).
+- `Snakepit.GRPC.BridgeServer.execute_streaming_tool/2` raises `UNIMPLEMENTED` with remediation guidance so callers can fall back gracefully when streaming is disabled (`test/snakepit/grpc/bridge_server_test.exs`).
 
 ### Fixed
 - `Snakepit.GRPCWorker` persists the OS-assigned port discovered during startup so BridgeServer never receives `0` when routing requests (`test/unit/grpc/grpc_worker_ephemeral_port_test.exs`).
 - Parameter decoding now rejects malformed protobuf payloads with descriptive `{:invalid_parameter, key, reason}` errors, preventing unexpected crashes (`test/snakepit/grpc/bridge_server_test.exs`).
 - Process registry ETS tables are `:protected` and DETS handles remain private, guarding against external mutation attempts (`test/unit/pool/process_registry_security_test.exs`).
+- Pool name inference prefers registry metadata and logs once when falling back to worker-id parsing, eliminating silent misroutes (`test/unit/pool/pool_registry_lookup_test.exs`).
 
 ### Documentation
-- Refreshed README, gRPC guides (including the streaming and quick reference docs), and testing notes to cover port persistence, channel reuse, quota enforcement, DETS/ETS protections, streaming payload envelopes, logging redaction guardrails, and the expanded regression suite.
+- Refreshed README, gRPC guides (including the streaming and quick reference docs), and testing notes to cover port persistence, channel reuse, quota enforcement, DETS/ETS protections, streaming payload envelopes and fallbacks, metadata-driven pool routing, logging redaction guardrails, and the expanded regression suite.
 
 ## [0.6.5] - 2025-10-26
 

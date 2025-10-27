@@ -158,44 +158,44 @@ defmodule Snakepit.GRPC.ClientImpl do
   def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     parameters = sanitize_parameters(parameters)
 
-    # Convert Elixir terms to protobuf Any messages
-    proto_params =
-      Enum.reduce(parameters, %{}, fn {k, v}, acc ->
-        {:ok, proto_any} = infer_and_encode_any(v)
-        Map.put(acc, to_string(k), proto_any)
-      end)
+    with {:ok, proto_params} <- encode_parameters(parameters) do
+      request = %Bridge.ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: tool_name,
+        parameters: proto_params
+      }
 
-    request = %Bridge.ExecuteToolRequest{
-      session_id: session_id,
-      tool_name: tool_name,
-      parameters: proto_params
-    }
+      timeout = opts[:timeout] || @default_timeout
+      call_opts = [timeout: timeout]
 
-    timeout = opts[:timeout] || @default_timeout
-    call_opts = [timeout: timeout]
-
-    case Bridge.BridgeService.Stub.execute_tool(channel, request, call_opts) do
-      {:ok, response, _headers} -> handle_tool_response(response)
-      {:ok, response} -> handle_tool_response(response)
-      {:error, reason} -> handle_error(reason)
+      case Bridge.BridgeService.Stub.execute_tool(channel, request, call_opts) do
+        {:ok, response, _headers} -> handle_tool_response(response)
+        {:ok, response} -> handle_tool_response(response)
+        {:error, reason} -> handle_error(reason)
+      end
+    else
+      {:error, reason} -> {:error, reason}
     end
   end
 
   def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     parameters = sanitize_parameters(parameters)
-    proto_params = encode_parameters(parameters)
 
-    request = %Bridge.ExecuteToolRequest{
-      session_id: session_id,
-      tool_name: tool_name,
-      parameters: proto_params,
-      stream: true
-    }
+    with {:ok, proto_params} <- encode_parameters(parameters) do
+      request = %Bridge.ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: tool_name,
+        parameters: proto_params,
+        stream: true
+      }
 
-    timeout = opts[:timeout] || 300_000
-    call_opts = [timeout: timeout]
+      timeout = opts[:timeout] || 300_000
+      call_opts = [timeout: timeout]
 
-    Bridge.BridgeService.Stub.execute_streaming_tool(channel, request, call_opts)
+      Bridge.BridgeService.Stub.execute_streaming_tool(channel, request, call_opts)
+    else
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   # Helper functions
@@ -228,13 +228,20 @@ defmodule Snakepit.GRPC.ClientImpl do
 
   # Simple encoder for tool parameters - just use JSON encoding for now
   defp infer_and_encode_any(value) do
-    json_value = Jason.encode!(value)
+    case Jason.encode(value) do
+      {:ok, json_value} ->
+        {:ok,
+         %Google.Protobuf.Any{
+           type_url: "type.googleapis.com/google.protobuf.StringValue",
+           value: json_value
+         }}
 
-    {:ok,
-     %Google.Protobuf.Any{
-       type_url: "type.googleapis.com/google.protobuf.StringValue",
-       value: json_value
-     }}
+      {:error, %Jason.EncodeError{} = encode_error} ->
+        {:error, {:invalid_parameter, :json_encode_failed, Exception.message(encode_error)}}
+
+      {:error, other} ->
+        {:error, {:invalid_parameter, :json_encode_failed, inspect(other)}}
+    end
   end
 
   defp handle_tool_response(%Bridge.ExecuteToolResponse{success: true, result: any_result}) do
@@ -250,9 +257,14 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   defp encode_parameters(parameters) do
-    Enum.reduce(parameters, %{}, fn {k, v}, acc ->
-      {:ok, proto_any} = infer_and_encode_any(v)
-      Map.put(acc, to_string(k), proto_any)
+    Enum.reduce_while(parameters, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
+      case infer_and_encode_any(v) do
+        {:ok, proto_any} ->
+          {:cont, {:ok, Map.put(acc, to_string(k), proto_any)}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
     end)
   end
 

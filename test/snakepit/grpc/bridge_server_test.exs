@@ -18,6 +18,7 @@ defmodule Snakepit.GRPC.BridgeServerTest do
   }
 
   alias Google.Protobuf.{Timestamp, Any}
+  alias GRPC.Status
 
   setup do
     # Start SessionStore
@@ -208,6 +209,26 @@ defmodule Snakepit.GRPC.BridgeServerTest do
       assert %ExecuteElixirToolResponse{success: false, error_message: message} = response
       assert message =~ "Invalid parameter payload"
       assert response.result == nil
+    end
+  end
+
+  describe "execute_streaming_tool/2" do
+    test "raises UNIMPLEMENTED with remediation guidance", %{session_id: session_id} do
+      request = %ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: "unconfigured_stream_tool",
+        parameters: %{},
+        metadata: %{}
+      }
+
+      error =
+        assert_raise GRPC.RPCError, fn ->
+          BridgeServer.execute_streaming_tool(request, nil)
+        end
+
+      assert error.status == Status.unimplemented()
+      assert String.contains?(error.message, "Enable streaming support")
+      assert String.contains?(error.message, "execute_tool")
     end
   end
 
