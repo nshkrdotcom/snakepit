@@ -112,12 +112,15 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   def restart_worker(worker_id) do
     case PoolRegistry.get_worker_pid(worker_id) do
       {:ok, old_pid} ->
-        # Get the port before terminating so we can check if it's released
-        old_port = get_worker_port(old_pid)
+        # Get port metadata before terminating so we can check if it's released
+        %{current_port: old_port, requested_port: requested_port} =
+          get_worker_port_info(old_pid)
+
+        port_check? = should_probe_port?(requested_port)
 
         # Worker exists, terminate it and wait for resource cleanup
         with :ok <- stop_worker(worker_id),
-             :ok <- wait_for_resource_cleanup(worker_id, old_port) do
+             :ok <- wait_for_resource_cleanup(worker_id, old_port, port_check?) do
           start_worker(worker_id)
         else
           # Propagate termination/cleanup errors
@@ -150,11 +153,30 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   defp wait_for_resource_cleanup(
          worker_id,
          old_port,
+         port_check?,
          retries \\ @cleanup_max_retries,
          backoff \\ @cleanup_retry_interval
        ) do
     if retries > 0 do
-      if (is_nil(old_port) or port_available?(old_port)) and registry_cleaned?(worker_id) do
+      port_released? =
+        cond do
+          not port_check? ->
+            if retries == @cleanup_max_retries do
+              SLog.info(
+                "Skipping port availability probe for #{worker_id}; worker requested an ephemeral port"
+              )
+            end
+
+            true
+
+          is_nil(old_port) ->
+            true
+
+          true ->
+            port_available?(old_port)
+        end
+
+      if port_released? and registry_cleaned?(worker_id) do
         SLog.debug("Resources released for #{worker_id}, safe to restart")
         :ok
       else
@@ -167,7 +189,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
           delay -> :ok
         end
 
-        wait_for_resource_cleanup(worker_id, old_port, retries - 1, backoff * 2)
+        wait_for_resource_cleanup(worker_id, old_port, port_check?, retries - 1, backoff * 2)
       end
     else
       SLog.warning(
@@ -179,15 +201,31 @@ defmodule Snakepit.Pool.WorkerSupervisor do
     end
   end
 
-  defp get_worker_port(worker_pid) do
+  defp get_worker_port_info(worker_pid) do
     try do
-      case GenServer.call(worker_pid, :get_port, 1000) do
-        {:ok, port} -> port
-        _ -> nil
+      case GenServer.call(worker_pid, :get_port_metadata, 1000) do
+        {:ok, %{current_port: port} = info} ->
+          %{
+            current_port: port,
+            requested_port: Map.get(info, :requested_port)
+          }
+
+        _ ->
+          legacy_port_info(worker_pid)
       end
     catch
-      # Worker already dead or not responding
-      :exit, _ -> nil
+      :exit, _ -> %{current_port: nil, requested_port: nil}
+    end
+  end
+
+  defp legacy_port_info(worker_pid) do
+    try do
+      case GenServer.call(worker_pid, :get_port, 1000) do
+        {:ok, port} -> %{current_port: port, requested_port: port}
+        _ -> %{current_port: nil, requested_port: nil}
+      end
+    catch
+      :exit, _ -> %{current_port: nil, requested_port: nil}
     end
   end
 
@@ -215,5 +253,9 @@ defmodule Snakepit.Pool.WorkerSupervisor do
       {:error, :not_found} -> true
       {:ok, _pid} -> false
     end
+  end
+
+  defp should_probe_port?(requested_port) do
+    requested_port not in [nil, 0]
   end
 end

@@ -19,6 +19,24 @@ defmodule Snakepit.GRPCWorkerEphemeralPortTest do
     end
   end
 
+  defmodule BlockingPoolStub do
+    use GenServer
+
+    def start_link(test_pid) do
+      GenServer.start_link(__MODULE__, test_pid)
+    end
+
+    @impl true
+    def init(test_pid), do: {:ok, %{test_pid: test_pid}}
+
+    @impl true
+    def handle_call({:worker_ready, worker_id}, _from, state) do
+      send(state.test_pid, {:worker_ready_called, worker_id, self()})
+      Process.sleep(:infinity)
+      {:reply, :ok, state}
+    end
+  end
+
   setup do
     Process.flag(:trap_exit, true)
     ensure_started(Snakepit.Pool.Registry)
@@ -63,6 +81,31 @@ defmodule Snakepit.GRPCWorkerEphemeralPortTest do
     )
 
     :ok = GenServer.stop(worker)
+  end
+
+  test "shuts down gracefully if pool terminates during startup handshake" do
+    worker_id = "pool_shutdown_race_#{System.unique_integer([:positive])}"
+
+    {:ok, pool_pid} = start_supervised({BlockingPoolStub, self()})
+
+    {:ok, worker} =
+      GRPCWorker.start_link(
+        id: worker_id,
+        adapter: Snakepit.TestAdapters.EphemeralPortGRPCAdapter,
+        pool_name: pool_pid,
+        worker_config: %{
+          heartbeat: %{enabled: false}
+        }
+      )
+
+    worker_ref = Process.monitor(worker)
+
+    assert_receive {:worker_ready_called, ^worker_id, ^pool_pid}, 5_000
+
+    Process.exit(pool_pid, :kill)
+
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :shutdown}, 5_000
+    refute Process.alive?(worker)
   end
 
   defp ensure_started(child_spec) do

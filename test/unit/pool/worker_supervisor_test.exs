@@ -6,7 +6,8 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Pool.Worker.StarterRegistry
   alias Snakepit.Pool.WorkerSupervisor
-  alias Snakepit.TestAdapters.MockGRPCAdapter
+  alias Snakepit.TestAdapters.{EphemeralPortGRPCAdapter, MockGRPCAdapter}
+  import ExUnit.CaptureLog
 
   describe "stop_worker/1" do
     test "shuts down worker and starter when given a worker id" do
@@ -57,9 +58,55 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
 
       assert_eventually(fn -> not Process.alive?(worker_pid) end)
     end
+
+    test "skips port probe when worker requested an ephemeral port" do
+      worker_id = unique_worker_id()
+      assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 5_000)
+      {_starter_pid, worker_pid} = start_mock_worker(worker_id, EphemeralPortGRPCAdapter)
+
+      assert {:ok, %{requested_port: 0}} =
+               GenServer.call(worker_pid, :get_port_metadata, 1_000)
+
+      original_level = Application.get_env(:snakepit, :log_level, :info)
+      Application.put_env(:snakepit, :log_level, :debug)
+
+      on_exit(fn ->
+        Application.put_env(:snakepit, :log_level, original_level)
+      end)
+
+      :erlang.trace(self(), true, [:call])
+      :erlang.trace_pattern({:gen_tcp, :listen, 2}, [{:_, [], [{:return_trace}]}], [])
+
+      _log =
+        capture_log([level: :debug], fn ->
+          {:ok, new_starter_pid} = WorkerSupervisor.restart_worker(worker_id)
+          assert is_pid(new_starter_pid)
+
+          assert_eventually(fn ->
+            match?({:ok, ^new_starter_pid}, StarterRegistry.get_starter_pid(worker_id))
+          end)
+
+          assert_eventually(fn ->
+            case PoolRegistry.get_worker_pid(worker_id) do
+              {:ok, new_pid} ->
+                new_pid != worker_pid and Process.alive?(new_pid)
+
+              {:error, :not_found} ->
+                false
+            end
+          end)
+        end)
+
+      listen_calls = collect_listen_calls()
+
+      :erlang.trace_pattern({:gen_tcp, :listen, 2}, false, [])
+      :erlang.trace(self(), false, [:call])
+
+      assert listen_calls == []
+    end
   end
 
-  defp start_mock_worker(worker_id) do
+  defp start_mock_worker(worker_id, adapter \\ MockGRPCAdapter) do
     worker_config = %{
       test_pid: self(),
       heartbeat: %{enabled: false}
@@ -69,7 +116,7 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
       WorkerSupervisor.start_worker(
         worker_id,
         Snakepit.GRPCWorker,
-        MockGRPCAdapter,
+        adapter,
         Snakepit.Pool,
         worker_config
       )
@@ -99,5 +146,18 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
 
   defp unique_worker_id do
     "worker_supervisor_test_#{System.unique_integer([:positive])}"
+  end
+
+  defp collect_listen_calls(acc \\ []) do
+    receive do
+      {:trace, _pid, :call, {:gen_tcp, :listen, args}} ->
+        collect_listen_calls([args | acc])
+
+      {:trace, _pid, :return_from, {:gen_tcp, :listen, _arity}, _result} ->
+        collect_listen_calls(acc)
+    after
+      0 ->
+        Enum.reverse(acc)
+    end
   end
 end

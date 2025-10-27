@@ -208,7 +208,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
     File.mkdir_p!(dets_dir)
 
     # Open DETS for persistence with repair option
-    dets_table_name = :"snakepit_process_registry_dets_#{beam_run_id}"
+    # Generate an unguessable table identifier so callers cannot mutate DETS directly.
+    dets_table_name =
+      :crypto.strong_rand_bytes(8)
+      |> Base.encode32(case: :lower)
+      |> then(&:"snakepit_process_registry_dets_#{&1}")
 
     dets_result =
       :dets.open_file(dets_table_name, [

@@ -367,6 +367,7 @@ defmodule Snakepit.GRPCWorker do
           server_port: server_port,
           process_pid: process_pid,
           session_id: session_id,
+          requested_port: port,
           worker_config: worker_config,
           heartbeat_config: heartbeat_config,
           heartbeat_monitor: nil,
@@ -415,7 +416,7 @@ defmodule Snakepit.GRPCWorker do
 
               {:stop, :normal, state}
             else
-              case GenServer.call(state.pool_name, {:worker_ready, state.id}, 30_000) do
+              case notify_pool_ready(pool_pid, state.id) do
                 :ok ->
                   # Schedule health checks
                   health_ref = schedule_health_check()
@@ -442,9 +443,11 @@ defmodule Snakepit.GRPCWorker do
                   {:noreply, new_state}
 
                 {:error, reason} ->
-                  SLog.error("Pool rejected worker registration: #{inspect(reason)}")
+                  SLog.debug(
+                    "Pool handshake failed for worker #{state.id} (pool pid: #{inspect(pool_pid)}): #{inspect(reason)}"
+                  )
 
-                  {:stop, {:pool_rejected_worker, reason}, state}
+                  {:stop, :shutdown, state}
               end
             end
 
@@ -525,6 +528,16 @@ defmodule Snakepit.GRPCWorker do
   @impl true
   def handle_call(:get_port, _from, state) do
     {:reply, {:ok, state.port}, state}
+  end
+
+  @impl true
+  def handle_call(:get_port_metadata, _from, state) do
+    info = %{
+      current_port: state.port,
+      requested_port: Map.get(state, :requested_port, state.port)
+    }
+
+    {:reply, {:ok, info}, state}
   end
 
   @impl true
@@ -722,6 +735,35 @@ defmodule Snakepit.GRPCWorker do
     Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
 
     :ok
+  end
+
+  defp notify_pool_ready(nil, _worker_id), do: {:error, :pool_not_found}
+
+  defp notify_pool_ready(pool_pid, worker_id) when is_pid(pool_pid) do
+    try do
+      GenServer.call(pool_pid, {:worker_ready, worker_id}, 30_000)
+    catch
+      :exit, {:noproc, _} ->
+        {:error, :pool_not_found}
+
+      :exit, {:shutdown, _} = reason ->
+        {:error, reason}
+
+      :exit, {:killed, _} = reason ->
+        {:error, reason}
+
+      :exit, {:timeout, _} = reason ->
+        {:error, reason}
+
+      :exit, reason ->
+        {:error, reason}
+    else
+      :ok ->
+        :ok
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
   end
 
   defp maybe_start_heartbeat_monitor(state) do
