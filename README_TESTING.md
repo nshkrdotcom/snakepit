@@ -9,6 +9,7 @@ Snakepit contains comprehensive test coverage for:
 - Core variable system with SessionStore
 - Type system and serialization
 - Bridge server implementation
+- Worker lifecycle hardening (port persistence, channel reuse, ETS/DETS protections, logging redaction)
 - Python integration
 
 ## Running Tests
@@ -25,11 +26,23 @@ mix test --only performance      # Run only performance tests
 # Run specific test files
 mix test test/snakepit/bridge/session_store_test.exs
 mix test test/snakepit/streaming_regression_test.exs  # gRPC streaming regression
+mix test test/unit/grpc/grpc_worker_ephemeral_port_test.exs           # Worker port persistence
+mix test test/snakepit/grpc/bridge_server_test.exs                    # Channel reuse & parameter validation
+mix test test/unit/pool/process_registry_security_test.exs            # DETS/ETS access control
+mix test test/unit/logger/redaction_test.exs                          # Log redaction summaries
 
 # Run Python bridge tests (auto-activates .venv, regenerates protos, sets PYTHONPATH)
 ./test_python.sh
 ./test_python.sh -k streaming  # Any args are forwarded to pytest
 ```
+
+### Reliability Regression Targets (v0.6.6)
+
+- `test/unit/grpc/grpc_worker_ephemeral_port_test.exs` – verifies workers persist negotiated ports and survive pool shutdown races.
+- `test/snakepit/grpc/bridge_server_test.exs` – asserts BridgeServer reuses worker channels and surfaces invalid parameter errors.
+- `test/unit/pool/process_registry_security_test.exs` – prevents direct DETS writes and confirms registry APIs enforce visibility.
+- `test/unit/logger/redaction_test.exs` – exercises the redaction summaries that keep secrets out of logs.
+- `test/unit/bridge/session_store_test.exs` – covers per-session and global quotas plus safe reuse of existing program slots.
 
 ### Test Modes
 
@@ -64,18 +77,24 @@ Finished in 1.9 seconds (1.1s async, 0.7s sync)
 
 ```
 test/
+├── unit/
+│   ├── bridge/            # SessionStore quotas, ToolRegistry validation
+│   ├── config/            # Mix config normalization helpers
+│   ├── grpc/              # Worker port persistence, channel reuse, telemetry
+│   ├── logger/            # Redaction utilities
+│   ├── mix/               # Diagnose tasks and shell fallbacks
+│   ├── pool/              # Supervisor lifecycle, registry hardening
+│   └── worker_profile/    # Profile-specific control logic
 ├── snakepit/
-│   ├── bridge/
-│   │   ├── session_store_test.exs      # Core state management
-│   │   ├── serialization_test.exs      # Type serialization
-│   │   └── variables/
-│   │       └── types_test.exs          # Type system tests
-│   ├── grpc/
-│   │   ├── bridge_server_test.exs      # gRPC server implementation
-│   │   └── client_test.exs             # gRPC client tests
-│   └── integration/
-│       └── bridge_integration_test.exs  # Full stack integration
-└── test_helper.exs                      # Test configuration
+│   ├── bridge/            # End-to-end bridge flows
+│   ├── grpc/              # BridgeServer + heartbeat integration
+│   ├── integration/       # Cross-language happy-paths
+│   ├── pool/              # Session affinity + multipool integration
+│   ├── telemetry/         # Metrics + tracing plumbing
+│   └── worker_profile/    # Profile behaviour under real pools
+├── performance/           # Optional perf benchmarks (:performance tag)
+├── support/               # Shared helpers and fixtures
+└── test_helper.exs        # Global test configuration
 ```
 
 ## Key Test Categories

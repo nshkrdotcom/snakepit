@@ -99,6 +99,12 @@ This only affects **Snakepit's internal logs**. It does not affect:
 - Elixir's Logger configuration
 - Python worker output (configure separately with `PYTHONUNBUFFERED`)
 
+## Redaction helpers
+
+- Use the logger redaction helper when logging payloads you cannot drop entirely. It summarises maps/lists by shape, truncates long keys, and reports binary lengths instead of contents.
+- The bridge and session store already call into the helper for tool parameters and metadata, protecting API keys and large blobs from leaking into log files (`test/unit/logger/redaction_test.exs`).
+- Feel free to reuse the helper in downstream adapters for consistent masking semantics.
+
 ## Example Output Comparison
 
 ### Before (`:info` level):

@@ -743,19 +743,17 @@ defmodule Mix.Tasks.Diagnose.Scaling do
                 %{diagnostic: true}
               )
 
-            case activation do
-              :ok ->
-                Snakepit.Pool.ProcessRegistry.unregister_worker(worker_id)
-                :ok
+            result =
+              case activation do
+                :ok ->
+                  :ok
 
-              {:error, reason} ->
-                Snakepit.Pool.ProcessRegistry.unregister_worker(worker_id)
-                {:error, {:activate_failed, reason}}
+                {:error, reason} ->
+                  {:error, {:activate_failed, reason}}
+              end
 
-              other ->
-                Snakepit.Pool.ProcessRegistry.unregister_worker(worker_id)
-                {:error, {:activate_failed, other}}
-            end
+            Snakepit.Pool.ProcessRegistry.unregister_worker(worker_id)
+            result
 
           {:error, _reason} = error ->
             error
@@ -771,7 +769,6 @@ defmodule Mix.Tasks.Diagnose.Scaling do
     case result do
       :ok -> {:ok, elapsed}
       {:error, reason} -> {:error, reason, elapsed}
-      other -> {:error, other, elapsed}
     end
   end
 
@@ -917,11 +914,13 @@ defmodule Mix.Tasks.Diagnose.Scaling do
   defp format_ss_error(:ss_not_found), do: "ss command not available (install iproute2 package)"
 
   defp format_ss_error({:ss_failed, code, output}) do
-    snippet = String.slice(output || "", 0, 200)
+    snippet =
+      output
+      |> to_string()
+      |> String.slice(0, 200)
+
     "ss exited with #{code}: #{snippet}"
   end
-
-  defp format_ss_error(reason), do: inspect(reason)
 
   defp count_workers do
     try do
