@@ -214,6 +214,29 @@ end
 
 ## Streaming Examples
 
+### Quick Demo
+
+Run the end-to-end streaming example to watch five progress updates stream from Python back into Elixir:
+
+```bash
+MIX_ENV=dev mix run examples/stream_progress_demo.exs
+```
+
+Internally it calls the `stream_progress` tool with a configurable `delay_ms`
+so you can watch each chunk arrive roughly every 750 ms. Chunks look like:
+
+```elixir
+%{
+  "is_final" => boolean(),
+  "message" => String.t(),
+  "progress" => float(),
+  "step" => pos_integer(),
+  "total" => pos_integer()
+}
+```
+
+`"is_final"` is set on the last chunk so you can detect completion without relying on timeouts.
+
 ### 1. ML Batch Inference
 
 Stream inference results as each item completes:

@@ -24,6 +24,11 @@ mix test --only performance      # Run only performance tests
 
 # Run specific test files
 mix test test/snakepit/bridge/session_store_test.exs
+mix test test/snakepit/streaming_regression_test.exs  # gRPC streaming regression
+
+# Run Python bridge tests (auto-activates .venv, regenerates protos, sets PYTHONPATH)
+./test_python.sh
+./test_python.sh -k streaming  # Any args are forwarded to pytest
 ```
 
 ### Test Modes

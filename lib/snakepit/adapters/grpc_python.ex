@@ -43,6 +43,7 @@ defmodule Snakepit.Adapters.GRPCPython do
 
   require Logger
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Bridge.ToolChunk
 
   @impl true
   def executable_path do
@@ -281,13 +282,13 @@ defmodule Snakepit.Adapters.GRPCPython do
   @doc """
   Execute a command via gRPC.
   """
-  def grpc_execute(connection, command, args, timeout \\ 30_000) do
+  def grpc_execute(connection, session_id, command, args, timeout \\ 30_000) do
     unless grpc_available?() do
       {:error, :grpc_not_available}
     else
       Snakepit.GRPC.Client.execute_tool(
         connection.channel,
-        "default_session",
+        session_id,
         command,
         args,
         timeout: timeout
@@ -298,71 +299,19 @@ defmodule Snakepit.Adapters.GRPCPython do
   @doc """
   Execute a streaming command via gRPC with callback.
   """
-  def grpc_execute_stream(connection, command, args, callback_fn, timeout \\ 300_000) do
-    SLog.info(
-      "[GRPCPython] grpc_execute_stream - command: #{command}, args: #{inspect(args)}, timeout: #{timeout}"
-    )
-
+  def grpc_execute_stream(connection, session_id, command, args, callback_fn, timeout \\ 300_000)
+      when is_function(callback_fn, 1) do
     unless grpc_available?() do
-      SLog.error("[GRPCPython] gRPC not available")
       {:error, :grpc_not_available}
     else
-      # Use the streaming endpoint
-      SLog.info("[GRPCPython] Using streaming endpoint")
-      SLog.info("[GRPCPython] Channel info: #{inspect(connection.channel)}")
-
-      result =
-        Snakepit.GRPC.Client.execute_streaming_tool(
-          connection.channel,
-          "default_session",
-          command,
-          args,
-          timeout: timeout
-        )
-
-      SLog.info("[GRPCPython] execute_streaming_tool returned: #{inspect(result)}")
-
-      case result do
-        {:ok, stream} ->
-          SLog.info("[GRPCPython] Starting to consume stream...")
-          # Consume the stream directly without Task.async to avoid deadlock
-          try do
-            SLog.info("[GRPCPython] Starting Enum.each on stream")
-
-            Enum.each(stream, fn chunk ->
-              case chunk do
-                {:ok, %Snakepit.Bridge.ToolChunk{data: data_bytes, is_final: false}}
-                when is_binary(data_bytes) ->
-                  # Decode the JSON payload from the chunk
-                  decoded_chunk = Jason.decode!(data_bytes)
-                  SLog.info("[GRPCPython] Decoded chunk: #{inspect(decoded_chunk)}")
-                  callback_fn.(decoded_chunk)
-
-                {:ok, %Snakepit.Bridge.ToolChunk{is_final: true}} ->
-                  # Final empty chunk, ignore
-                  SLog.info("[GRPCPython] Received final chunk")
-
-                {:error, reason} ->
-                  SLog.error("[GRPCPython] Stream error: #{inspect(reason)}")
-                  callback_fn.({:error, reason})
-
-                other ->
-                  SLog.warning("[GRPCPython] Unexpected chunk format: #{inspect(other)}")
-              end
-            end)
-
-            SLog.info("[GRPCPython] Stream consumption complete")
-            :ok
-          rescue
-            e ->
-              SLog.error("[GRPCPython] Error consuming stream: #{inspect(e)}")
-              {:error, e}
-          end
-
-        {:error, reason} ->
-          SLog.error("[GRPCPython] Failed to initiate stream: #{inspect(reason)}")
-          {:error, reason}
-      end
+      connection.channel
+      |> Snakepit.GRPC.Client.execute_streaming_tool(
+        session_id,
+        command,
+        args,
+        timeout: timeout
+      )
+      |> consume_stream(callback_fn)
     end
   end
 
@@ -387,4 +336,80 @@ defmodule Snakepit.Adapters.GRPCPython do
   def command_timeout("process_large_dataset", _args), do: 600_000
   # Default 30 seconds
   def command_timeout(_command, _args), do: 30_000
+
+  defp consume_stream({:ok, stream}, callback_fn) do
+    Enum.reduce_while(stream, :ok, fn message, _acc ->
+      process_stream_message(message, callback_fn)
+    end)
+  end
+
+  defp consume_stream({:error, reason}, _callback_fn), do: {:error, reason}
+
+  defp process_stream_message({:ok, %ToolChunk{} = chunk}, callback_fn) do
+    deliver_chunk(chunk, callback_fn)
+  end
+
+  defp process_stream_message(%ToolChunk{} = chunk, callback_fn) do
+    deliver_chunk(chunk, callback_fn)
+  end
+
+  defp process_stream_message({:error, reason}, _callback_fn), do: {:halt, {:error, reason}}
+
+  defp process_stream_message(other, _callback_fn),
+    do: {:halt, {:error, {:unexpected_stream_item, other}}}
+
+  defp deliver_chunk(%ToolChunk{} = chunk, callback_fn) do
+    payload = build_payload(chunk)
+
+    try do
+      case callback_fn.(payload) do
+        :halt -> {:halt, :ok}
+        {:halt, reason} -> {:halt, {:error, reason}}
+        _ -> {:cont, :ok}
+      end
+    rescue
+      exception ->
+        {:halt, {:error, {:callback_exception, exception, __STACKTRACE__}}}
+    end
+  end
+
+  defp build_payload(%ToolChunk{} = chunk) do
+    base =
+      case decode_chunk_data(chunk.data) do
+        :empty -> %{}
+        {:ok, %{} = map} -> map
+        {:ok, value} -> %{"data" => value}
+        {:error, raw} -> %{"raw_data_base64" => raw}
+      end
+
+    base
+    |> Map.put("is_final", chunk.is_final)
+    |> maybe_with_metadata(chunk.metadata)
+  end
+
+  defp decode_chunk_data(data) when is_binary(data) do
+    if data == "" do
+      :empty
+    else
+      case Jason.decode(data) do
+        {:ok, decoded} -> {:ok, decoded}
+        {:error, _} -> {:error, Base.encode64(data)}
+      end
+    end
+  end
+
+  defp decode_chunk_data(_), do: :empty
+
+  defp maybe_with_metadata(payload, metadata) when metadata in [%{}, nil], do: payload
+
+  defp maybe_with_metadata(payload, metadata) do
+    metadata
+    |> Map.new()
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Map.new()
+    |> case do
+      %{} = cleaned when map_size(cleaned) > 0 -> Map.put(payload, "_metadata", cleaned)
+      _ -> payload
+    end
+  end
 end

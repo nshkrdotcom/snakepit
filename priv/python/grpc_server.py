@@ -16,7 +16,6 @@ import time
 import inspect
 import os
 from concurrent import futures
-from datetime import datetime
 from typing import Any, Dict, Mapping, Optional
 
 # Add the package to Python path
@@ -45,6 +44,8 @@ _log_filter = telemetry.correlation_filter()
 logger = logging.getLogger(__name__)
 logger.addFilter(_log_filter)
 logging.getLogger().addFilter(_log_filter)
+
+logger.info("Loaded grpc_server.py from %s", __file__)
 
 
 def _resolve_heartbeat_options(cli_options: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -162,38 +163,35 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         elixir_address: str,
         heartbeat_options: Optional[Mapping[str, Any]] = None,
         *,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
         shutdown_event: Optional[asyncio.Event] = None,
     ):
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"BridgeServiceServicer.__init__ called\n")
-            f.flush()
+        logger.debug("BridgeServiceServicer.__init__ called")
 
         self.adapter_class = adapter_class
         self.elixir_address = elixir_address
         self.server: Optional[grpc.aio.Server] = None
         self.shutdown_event = shutdown_event
 
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"Creating async channel to {elixir_address}...\n")
-            f.flush()
+        logger.debug("Creating async channel to %s", elixir_address)
 
         # Create async client channel for async operations (proxying)
         self.elixir_channel = grpc.aio.insecure_channel(elixir_address)
         self.elixir_stub = pb2_grpc.BridgeServiceStub(self.elixir_channel)
 
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"Creating sync channel to {elixir_address}...\n")
-            f.flush()
+        logger.debug("Creating sync channel to %s", elixir_address)
 
         # Create sync client channel for SessionContext
         self.sync_elixir_channel = grpc.insecure_channel(elixir_address)
         self.sync_elixir_stub = pb2_grpc.BridgeServiceStub(self.sync_elixir_channel)
 
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"Channels created successfully\n")
-            f.flush()
-
-        logger.info(f"Python server initialized with Elixir backend at {elixir_address}")
+        logger.debug("gRPC channels created successfully")
+        logger.debug("grpc_server.py __file__=%s", __file__)
+        logger.info(
+            "ExecuteStreamingTool is coroutine? %s",
+            inspect.iscoroutinefunction(self.ExecuteStreamingTool),
+        )
+        self.loop = loop or asyncio.get_event_loop()
 
         resolved_heartbeat_options = _resolve_heartbeat_options(heartbeat_options)
         self.heartbeat_config = HeartbeatConfig.from_mapping(resolved_heartbeat_options)
@@ -479,17 +477,14 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             response.error_message = str(e)
             return response
     
-    @grpc_error_handler
     async def ExecuteStreamingTool(self, request, context):
-        """Executes a streaming tool (supports both sync and async generators)."""
-        logger.info(f"ExecuteStreamingTool: {request.tool_name} for session {request.session_id}")
-        logger.info(f"ExecuteStreamingTool request.stream: {request.stream}")
-        
-        # Debug logging to file
-        with open("/tmp/grpc_streaming_debug.log", "a") as f:
-            f.write(f"ExecuteStreamingTool called: {request.tool_name} at {time.time()}\n")
-            f.flush()
-        
+        """Execute a streaming tool, bridging async/sync generators safely."""
+        logger.info(
+            "ExecuteStreamingTool: %s for session %s", request.tool_name, request.session_id
+        )
+
+        metadata = context.invocation_metadata()
+
         try:
             # Ensure session exists in Elixir
             init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
@@ -546,101 +541,113 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                     arguments=arguments,
                     context=session_context
                 )
-            
-            # Handle both sync and async generators
+
+            loop = self.loop
+            queue: asyncio.Queue = asyncio.Queue()
+            sentinel = object()
             chunk_id_counter = 0
-            
-            # Import StreamChunk for proper handling
-            from snakepit_bridge.adapters.showcase.tool import StreamChunk
-            
-            logger.info(f"Stream iterator type: {type(stream_iterator)}")
-            logger.info(f"Has __aiter__: {hasattr(stream_iterator, '__aiter__')}")
-            logger.info(f"Has __iter__: {hasattr(stream_iterator, '__iter__')}")
+            marked_final = False
 
-            # CRITICAL FIX: Handle both async and sync generators uniformly
-            if hasattr(stream_iterator, '__aiter__'):
-                # Async generator - use async for
-                logger.info(f"Processing async generator for {request.tool_name}")
-                with open("/tmp/grpc_streaming_debug.log", "a") as f:
-                    f.write(f"Starting async iteration at {time.time()}\n")
-                    f.flush()
+            def encode_payload(payload):
+                if payload is None:
+                    return b""
+                if isinstance(payload, (bytes, bytearray, memoryview)):
+                    return bytes(payload)
+                if isinstance(payload, str):
+                    return payload.encode("utf-8")
+                return json.dumps(payload).encode("utf-8")
 
-                async for chunk_data in stream_iterator:
-                    logger.info(f"Got async chunk data: {chunk_data}")
-                    with open("/tmp/grpc_streaming_debug.log", "a") as f:
-                        f.write(f"Got async chunk: {chunk_data} at {time.time()}\n")
-                        f.flush()
-
-                    if isinstance(chunk_data, StreamChunk):
-                        data_payload = chunk_data.data
-                    else:
-                        data_payload = chunk_data
-
-                    data_bytes = json.dumps(data_payload).encode('utf-8')
-                    chunk_id_counter += 1
-                    chunk = pb2.ToolChunk(
-                        chunk_id=f"{request.tool_name}-{chunk_id_counter}",
-                        data=data_bytes,
-                        is_final=False
-                    )
-                    logger.info(f"Yielding async chunk {chunk_id_counter}: {chunk.chunk_id}")
-                    with open("/tmp/grpc_streaming_debug.log", "a") as f:
-                        f.write(f"Yielding async chunk_id={chunk.chunk_id} at {time.time()}\n")
-                        f.flush()
-                    yield chunk
-
-            elif hasattr(stream_iterator, '__iter__'):
-                # Sync generator - use regular for
-                logger.info(f"Processing sync iterator for {request.tool_name}")
-                with open("/tmp/grpc_streaming_debug.log", "a") as f:
-                    f.write(f"Starting sync iteration at {time.time()}\n")
-                    f.flush()
-
-                for chunk_data in stream_iterator:
-                    logger.info(f"Got sync chunk data: {chunk_data}")
-                    with open("/tmp/grpc_streaming_debug.log", "a") as f:
-                        f.write(f"Got sync chunk: {chunk_data} at {time.time()}\n")
-                        f.flush()
-
-                    if isinstance(chunk_data, StreamChunk):
-                        data_payload = chunk_data.data
-                    else:
-                        data_payload = chunk_data
-
-                    data_bytes = json.dumps(data_payload).encode('utf-8')
-                    chunk_id_counter += 1
-                    chunk = pb2.ToolChunk(
-                        chunk_id=f"{request.tool_name}-{chunk_id_counter}",
-                        data=data_bytes,
-                        is_final=False
-                    )
-                    logger.info(f"Yielding sync chunk {chunk_id_counter}: {chunk.chunk_id}")
-                    with open("/tmp/grpc_streaming_debug.log", "a") as f:
-                        f.write(f"Yielding sync chunk_id={chunk.chunk_id} at {time.time()}\n")
-                        f.flush()
-                    yield chunk
-
-            else:
-                # Non-generator return
-                logger.info(f"Non-generator return from {request.tool_name}")
-                data_bytes = json.dumps(stream_iterator).encode('utf-8')
-                yield pb2.ToolChunk(
-                    chunk_id=f"{request.tool_name}-1",
-                    data=data_bytes,
-                    is_final=True
+            def build_chunk(payload, *, is_final=False, metadata=None):
+                nonlocal chunk_id_counter, marked_final
+                chunk_id_counter += 1
+                chunk = pb2.ToolChunk(
+                    chunk_id=f"{request.tool_name}-{chunk_id_counter}",
+                    data=encode_payload(payload),
+                    is_final=is_final,
                 )
-            
-            # Yield the final empty chunk after the loop
-            logger.info(f"Yielding final chunk for {request.tool_name}")
-            with open("/tmp/grpc_streaming_debug.log", "a") as f:
-                f.write(f"Yielding final chunk at {time.time()}\n")
-                f.flush()
-            yield pb2.ToolChunk(is_final=True)
-                
+
+                if metadata and isinstance(metadata, dict):
+                    chunk.metadata.update({str(k): str(v) for k, v in metadata.items()})
+
+                if is_final:
+                    marked_final = True
+
+                return chunk
+
+            async def enqueue_chunk(payload, *, is_final=False, metadata=None):
+                await queue.put(build_chunk(payload, is_final=is_final, metadata=metadata))
+
+            def unpack_chunk(chunk_data):
+                payload = chunk_data
+                metadata = None
+                is_final = False
+
+                if hasattr(chunk_data, "data"):
+                    payload = getattr(chunk_data, "data")
+
+                if hasattr(chunk_data, "is_final"):
+                    is_final = bool(getattr(chunk_data, "is_final"))
+
+                if hasattr(chunk_data, "metadata"):
+                    meta_attr = getattr(chunk_data, "metadata")
+                    if isinstance(meta_attr, dict):
+                        metadata = meta_attr
+
+                return payload, is_final, metadata
+
+            async def drain_async(iterator):
+                async for chunk_data in iterator:
+                    payload, is_final, metadata = unpack_chunk(chunk_data)
+                    await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
+
+            def drain_sync(iterator):
+                for chunk_data in iterator:
+                    payload, is_final, metadata = unpack_chunk(chunk_data)
+                    fut = asyncio.run_coroutine_threadsafe(
+                        enqueue_chunk(payload, is_final=is_final, metadata=metadata),
+                        loop,
+                    )
+                    fut.result()
+
+            async def produce_chunks():
+                error_raised = False
+                try:
+                    if hasattr(stream_iterator, "__aiter__"):
+                        await drain_async(stream_iterator)
+                    elif hasattr(stream_iterator, "__iter__"):
+                        await asyncio.to_thread(drain_sync, stream_iterator)
+                    else:
+                        payload, is_final, metadata = unpack_chunk(stream_iterator)
+                        await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
+                except Exception as iteration_error:
+                    error_raised = True
+                    await queue.put(iteration_error)
+                finally:
+                    if not error_raised and not marked_final:
+                        await enqueue_chunk(None, is_final=True)
+                    await queue.put(sentinel)
+
+            asyncio.create_task(produce_chunks())
+
+            while True:
+                item = await queue.get()
+                if item is sentinel:
+                    break
+                if isinstance(item, Exception):
+                    logger.error(
+                        "Streaming tool %s raised %s",
+                        request.tool_name,
+                        item,
+                        exc_info=True,
+                    )
+                    await context.abort(grpc.StatusCode.INTERNAL, str(item))
+                    return
+                yield item
+
         except Exception as e:
             logger.error(f"ExecuteStreamingTool failed: {e}", exc_info=True)
-            context.abort(grpc.StatusCode.INTERNAL, str(e))
-    
+            await context.abort(grpc.StatusCode.INTERNAL, str(e))
+
     async def WatchVariables(self, request, context):
         """Watch variables for changes - placeholder for Stage 3."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -839,12 +846,6 @@ async def wait_for_elixir_server(
                     type(e).__name__,
                     e,
                 )
-                with open("/tmp/python_worker_debug.log", "a") as f:
-                    f.write(
-                        f"wait_for_elixir_server giving up after {attempt} attempts. "
-                        f"Last error: {type(e).__name__}: {e}\n"
-                    )
-                    f.flush()
                 return False
 
             total_suffix = f"/{max_retries}" if max_retries is not None else ""
@@ -857,11 +858,12 @@ async def wait_for_elixir_server(
                 type(e).__name__,
                 e,
             )
-            with open("/tmp/python_worker_debug.log", "a") as f:
-                f.write(
-                    f"wait_for_elixir_server attempt {attempt} failed: {type(e).__name__}: {e}\n"
-                )
-                f.flush()
+            logger.debug(
+                "wait_for_elixir_server attempt %d failed: %s: %s",
+                attempt,
+                type(e).__name__,
+                e,
+            )
 
             await asyncio.sleep(delay)
             delay = min(delay * 2, 2.0)  # Exponential backoff, max 2s
@@ -876,29 +878,23 @@ async def serve_with_shutdown(
     heartbeat_options: Optional[Mapping[str, Any]] = None,
 ):
     """Start the stateless gRPC server with proper shutdown handling."""
-    # DEBUG: Write to file to see execution flow
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"\n=== serve_with_shutdown called at {time.time()} ===\n")
-        f.write(f"port={port}, adapter={adapter_module}, elixir_address={elixir_address}\n")
-        f.flush()
+    logger.debug(
+        "serve_with_shutdown called (port=%s, adapter=%s, elixir_address=%s)",
+        port,
+        adapter_module,
+        elixir_address,
+    )
 
     # CRITICAL: Wait for Elixir server to be ready before proceeding
     # This prevents the Python worker from exiting if the Elixir server is still starting up
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"Calling wait_for_elixir_server...\n")
-        f.flush()
+    logger.debug("Waiting for Elixir server before starting worker")
 
     result = await wait_for_elixir_server(elixir_address)
 
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"wait_for_elixir_server returned: {result}\n")
-        f.flush()
+    logger.debug("wait_for_elixir_server returned %s", result)
 
     if not result:
         logger.error(f"Cannot start Python worker: Elixir server at {elixir_address} is not available")
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"ERROR: Elixir server not available, calling sys.exit(1)\n")
-            f.flush()
         sys.exit(1)
 
     # Import the adapter
@@ -914,9 +910,7 @@ async def serve_with_shutdown(
         sys.exit(1)
 
     # Create server
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"Creating gRPC server...\n")
-        f.flush()
+    logger.debug("Creating gRPC server")
 
     server = grpc.aio.server(
         futures.ThreadPoolExecutor(max_workers=10),
@@ -926,14 +920,15 @@ async def serve_with_shutdown(
         ]
     )
 
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"Creating servicer...\n")
-        f.flush()
+    logger.debug("Creating bridge servicer")
+
+    loop = asyncio.get_running_loop()
 
     servicer = BridgeServiceServicer(
         adapter_class,
         elixir_address,
         heartbeat_options=heartbeat_options,
+        loop=loop,
         shutdown_event=shutdown_event,
     )
     servicer.set_server(server)
@@ -941,117 +936,70 @@ async def serve_with_shutdown(
     pb2_grpc.add_BridgeServiceServicer_to_server(servicer, server)
 
     # Listen on port
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"Binding to port {port}...\n")
-        f.flush()
+    logger.debug("Binding to port %s", port)
 
     try:
         actual_port = server.add_insecure_port(f'[::]:{port}')
 
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"Bound to port {actual_port}\n")
-            f.flush()
+        logger.debug("Bound to port %s", actual_port)
 
         if actual_port == 0 and port != 0:
             error_msg = f"Failed to bind to port {port} - port may already be in use"
             logger.error(error_msg)
-            with open(f"/tmp/grpc_worker_port_{port}_error.log", "w") as f:
-                f.write(f"{error_msg}\n")
-                f.write(f"Timestamp: {datetime.now()}\n")
-                f.write(f"Requested port: {port}\n")
-                f.write(f"Actual port returned: {actual_port}\n")
-                f.flush()
-            with open("/tmp/python_worker_debug.log", "a") as f:
-                f.write(f"ERROR: {error_msg}, calling sys.exit(1)\n")
-                f.flush()
             sys.exit(1)
     except Exception as e:
         error_msg = f"Exception binding to port {port}: {type(e).__name__}: {e}"
-        logger.error(error_msg)
-        with open(f"/tmp/grpc_worker_port_{port}_error.log", "w") as f:
-            f.write(f"{error_msg}\n")
-            f.write(f"Timestamp: {datetime.now()}\n")
-            f.write("--- TRACEBACK ---\n")
-            traceback.print_exc(file=f)
-            f.write("-----------------\n")
-            f.flush()
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"EXCEPTION binding to port: {error_msg}\n")
-            traceback.print_exc(file=f)
-            f.flush()
+        logger.exception(error_msg)
         sys.exit(1)
 
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"Starting server...\n")
-        f.flush()
+    logger.debug("Starting gRPC server")
 
     await server.start()
 
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"Server started! Printing GRPC_READY:{actual_port}\n")
-        f.flush()
+    logger.debug("Server started; announcing readiness on port %s", actual_port)
 
     # Signal that the server is ready
     # CRITICAL: Use logger instead of print() for reliable capture via :stderr_to_stdout
     logger.info(f"GRPC_READY:{actual_port}")
 
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"GRPC_READY printed to logger\n")
-        f.flush()
-
     logger.info(f"gRPC server started on port {actual_port}")
     logger.info(f"Connected to Elixir backend at {elixir_address}")
 
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"Entering main loop...\n")
-        f.flush()
+    logger.debug("Entering main event loop")
 
     # CRITICAL: A true daemon waits ONLY for the shutdown signal.
     # Do not wait for server termination - that would cause premature exit.
     server_task = asyncio.create_task(server.wait_for_termination())
 
     try:
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"Waiting indefinitely for shutdown signal (SIGTERM/SIGINT)...\n")
-            f.flush()
+        logger.debug("Awaiting shutdown signal (SIGTERM/SIGINT)")
 
         # Wait indefinitely until a shutdown signal is received
         # This makes the worker a true daemon that will not exit on its own
         await shutdown_event.wait()
 
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"Shutdown signal received. Proceeding with graceful shutdown.\n")
-            f.flush()
+        logger.debug("Shutdown signal received; initiating graceful shutdown")
 
     finally:
         # This block executes regardless of how we exited the try block
         # Clean up the server_task
         server_task.cancel()
 
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"Closing servicer and stopping server...\n")
-            f.flush()
+        logger.debug("Closing servicer and stopping server")
 
         try:
             await servicer.close()
             # CRITICAL FIX: grpcio 1.75+ changed API - grace period is positional, not keyword
             await server.stop(0.5)
 
-            with open("/tmp/python_worker_debug.log", "a") as f:
-                f.write(f"Server stopped gracefully.\n")
-                f.flush()
+            logger.debug("Server stopped gracefully")
         except asyncio.CancelledError:
             # CRITICAL FIX: This is expected if the parent Elixir process closes the port
             # while we are in the middle of a graceful shutdown.
             # We can safely ignore it and allow the process to exit.
             logger.info("Shutdown cancelled by parent (this is normal).")
-            with open("/tmp/python_worker_debug.log", "a") as f:
-                f.write(f"Shutdown cancelled by parent (normal).\n")
-                f.flush()
 
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"serve_with_shutdown completing.\n")
-            f.flush()
+        logger.debug("serve_with_shutdown completed")
 
 
 async def serve(port: int, adapter_module: str, elixir_address: str):
@@ -1134,10 +1082,11 @@ def main():
     shutdown_event = None
 
     def handle_signal(signum, frame):
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write(f"\n!!! SIGNAL {signum} RECEIVED AT {time.time()} !!!\n")
-            f.write(f"Signal name: {signal.Signals(signum).name}\n")
-            f.flush()
+        logger.warning(
+            "Signal %s (%s) received; initiating shutdown",
+            signum,
+            signal.Signals(signum).name,
+        )
         if shutdown_event and not shutdown_event.is_set():
             # Schedule the shutdown in the running loop
             asyncio.get_running_loop().call_soon_threadsafe(shutdown_event.set)
@@ -1163,23 +1112,13 @@ def main():
     except BaseException as e:
         # CRITICAL: Capture the final, fatal exception before the process dies
         # Catch ALL exceptions including SystemExit, KeyboardInterrupt, etc.
-        with open("/tmp/python_worker_debug.log", "a") as f:
-            f.write("\n\n!!! UNHANDLED EXCEPTION IN MAIN !!!\n")
-            f.write(f"Exception Type: {type(e).__name__}\n")
-            f.write(f"Exception Args: {e.args}\n")
-            f.write("--- TRACEBACK ---\n")
-            traceback.print_exc(file=f)
-            f.write("-----------------\n")
-            f.flush()
+        logger.exception("Unhandled exception in main loop: %s", e)
         # Re-exit with error code so OS knows it failed
         sys.exit(1)
     finally:
         loop.close()
 
     # Main loop exited after shutdown event; this is expected during graceful termination.
-    with open("/tmp/python_worker_debug.log", "a") as f:
-        f.write(f"\nPython worker shutting down cleanly at {time.time()}.\n")
-        f.flush()
     logger.info("Python worker exiting gracefully.")
 
 

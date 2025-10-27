@@ -477,7 +477,13 @@ defmodule Snakepit.GRPCWorker do
            args_with_corr,
            timeout,
            fn instrumented_args ->
-             state.adapter.grpc_execute(state.connection, command, instrumented_args, timeout)
+             state.adapter.grpc_execute(
+               state.connection,
+               state.session_id,
+               command,
+               instrumented_args,
+               timeout
+             )
            end
          ) do
       {:ok, result} ->
@@ -492,20 +498,19 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_call({:execute_stream, command, args, callback_fn, timeout}, _from, state) do
-    SLog.info(
-      "[GRPCWorker] handle_call execute_stream - command: #{command}, args: #{inspect(args)}"
-    )
+    SLog.debug("[GRPCWorker] execute_stream #{command} with args #{inspect(args)}")
 
     result =
       state.adapter.grpc_execute_stream(
         state.connection,
+        state.session_id,
         command,
         args,
         callback_fn,
         timeout
       )
 
-    SLog.info("[GRPCWorker] grpc_execute_stream returned: #{inspect(result)}")
+    SLog.debug("[GRPCWorker] execute_stream result: #{inspect(result)}")
 
     new_state =
       case result do
@@ -535,7 +540,13 @@ defmodule Snakepit.GRPCWorker do
            session_args,
            timeout,
            fn instrumented_args ->
-             state.adapter.grpc_execute(state.connection, command, instrumented_args, timeout)
+             state.adapter.grpc_execute(
+               state.connection,
+               state.session_id,
+               command,
+               instrumented_args,
+               timeout
+             )
            end
          ) do
       {:ok, result} ->

@@ -47,7 +47,7 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
     {:ok, %{channel: make_ref(), port: port}}
   end
 
-  def grpc_execute(_conn, command, args, _timeout) do
+  def grpc_execute(_conn, _session_id, command, args, _timeout) do
     # Simulate command execution
     case command do
       "ping" ->

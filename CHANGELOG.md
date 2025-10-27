@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2025-10-30
+
+### Added
+- Streaming regression guard in `test/snakepit/streaming_regression_test.exs` covering both success and adapter capability failures
+- `examples/stream_progress_demo.exs` showcasing five timed streaming updates with rich progress output
+- `test_python.sh` helper that regenerates protobuf stubs, activates the project virtualenv, wires `PYTHONPATH`, and forwards arguments to `pytest`
+
+### Changed
+- Python gRPC servers now bridge streaming iterators through an `asyncio.Queue`, yielding chunks as soon as they are produced and removing ad-hoc log files
+- `Snakepit.Adapters.GRPCPython` consumes streaming chunks incrementally, decoding JSON payloads, surfacing metadata, and safeguarding callback failures
+- Showcase `stream_progress` tool accepts `delay_ms` and reports elapsed timing so demos and diagnostics show meaningful pacing
+
+### Fixed
+- Eliminated burst delivery of streaming responses by ensuring each chunk is forwarded to Elixir immediately, restoring real-time feedback for `execute_stream/4`
+
+---
+
 ## [0.6.3] - 2025-10-19
 
 ### Added

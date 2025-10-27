@@ -30,7 +30,6 @@ import time
 import threading
 import traceback
 from concurrent import futures
-from datetime import datetime
 from typing import Dict, Optional, Sequence, Tuple
 from collections import defaultdict
 
@@ -56,6 +55,8 @@ _log_filter = telemetry.correlation_filter()
 logger = logging.getLogger(__name__)
 logger.addFilter(_log_filter)
 logging.getLogger().addFilter(_log_filter)
+
+logger.info("Loaded grpc_server_threaded.py from %s", __file__)
 
 
 class ThreadSafetyMonitor:
@@ -118,12 +119,21 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     - ML libraries must release GIL during computation
     """
 
-    def __init__(self, adapter_class, elixir_address: str, max_workers: int, enable_safety_checks: bool = False):
+    def __init__(
+        self,
+        adapter_class,
+        elixir_address: str,
+        max_workers: int,
+        enable_safety_checks: bool = False,
+        *,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+    ):
         logger.info(f"Initializing threaded servicer: max_workers={max_workers}, safety_checks={enable_safety_checks}")
 
         self.adapter_class = adapter_class
         self.elixir_address = elixir_address
         self.max_workers = max_workers
+        self.loop = loop or asyncio.get_event_loop()
         self.server: Optional[grpc.aio.Server] = None
 
         # Thread safety monitoring
@@ -541,55 +551,112 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                         context=session_context
                     )
 
+                loop = self.loop
+                queue: asyncio.Queue = asyncio.Queue()
+                sentinel = object()
                 chunk_id_counter = 0
-                from snakepit_bridge.adapters.showcase.tool import StreamChunk
+                marked_final = False
 
-                if hasattr(stream_iterator, '__aiter__'):
-                    async for chunk_data in stream_iterator:
-                        if isinstance(chunk_data, StreamChunk):
-                            data_payload = chunk_data.data
-                        else:
-                            data_payload = chunk_data
+                def encode_payload(payload):
+                    if payload is None:
+                        return b""
+                    if isinstance(payload, (bytes, bytearray, memoryview)):
+                        return bytes(payload)
+                    if isinstance(payload, str):
+                        return payload.encode("utf-8")
+                    return json.dumps(payload).encode("utf-8")
 
-                        data_bytes = json.dumps(data_payload).encode('utf-8')
-                        chunk_id_counter += 1
-                        chunk = pb2.ToolChunk(
-                            chunk_id=f"{request.tool_name}-{chunk_id_counter}",
-                            data=data_bytes,
-                            is_final=False
-                        )
-                        yield chunk
-
-                elif hasattr(stream_iterator, '__iter__'):
-                    for chunk_data in stream_iterator:
-                        if isinstance(chunk_data, StreamChunk):
-                            data_payload = chunk_data.data
-                        else:
-                            data_payload = chunk_data
-
-                        data_bytes = json.dumps(data_payload).encode('utf-8')
-                        chunk_id_counter += 1
-                        chunk = pb2.ToolChunk(
-                            chunk_id=f"{request.tool_name}-{chunk_id_counter}",
-                            data=data_bytes,
-                            is_final=False
-                        )
-                        yield chunk
-
-                else:
-                    data_bytes = json.dumps(stream_iterator).encode('utf-8')
-                    yield pb2.ToolChunk(
-                        chunk_id=f"{request.tool_name}-1",
-                        data=data_bytes,
-                        is_final=True
+                def build_chunk(payload, *, is_final=False, metadata=None):
+                    nonlocal chunk_id_counter, marked_final
+                    chunk_id_counter += 1
+                    chunk = pb2.ToolChunk(
+                        chunk_id=f"{request.tool_name}-{chunk_id_counter}",
+                        data=encode_payload(payload),
+                        is_final=is_final,
                     )
 
-                yield pb2.ToolChunk(is_final=True)
-                logger.info(f"[{thread_name}] ExecuteStreamingTool #{request_id} completed")
+                    if metadata and isinstance(metadata, dict):
+                        chunk.metadata.update({str(k): str(v) for k, v in metadata.items()})
+
+                    if is_final:
+                        marked_final = True
+
+                    return chunk
+
+                async def enqueue_chunk(payload, *, is_final=False, metadata=None):
+                    await queue.put(build_chunk(payload, is_final=is_final, metadata=metadata))
+
+                def unpack_chunk(chunk_data):
+                    payload = chunk_data
+                    metadata = None
+                    is_final = False
+
+                    if hasattr(chunk_data, "data"):
+                        payload = getattr(chunk_data, "data")
+
+                    if hasattr(chunk_data, "is_final"):
+                        is_final = bool(getattr(chunk_data, "is_final"))
+
+                    if hasattr(chunk_data, "metadata"):
+                        meta_attr = getattr(chunk_data, "metadata")
+                        if isinstance(meta_attr, dict):
+                            metadata = meta_attr
+
+                    return payload, is_final, metadata
+
+                async def drain_async(iterator):
+                    async for chunk_data in iterator:
+                        payload, is_final, metadata = unpack_chunk(chunk_data)
+                        await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
+
+                def drain_sync(iterator):
+                    for chunk_data in iterator:
+                        payload, is_final, metadata = unpack_chunk(chunk_data)
+                        fut = asyncio.run_coroutine_threadsafe(
+                            enqueue_chunk(payload, is_final=is_final, metadata=metadata),
+                            loop,
+                        )
+                        fut.result()
+
+                async def produce_chunks():
+                    error_raised = False
+                    try:
+                        if hasattr(stream_iterator, "__aiter__"):
+                            await drain_async(stream_iterator)
+                        elif hasattr(stream_iterator, "__iter__"):
+                            await asyncio.to_thread(drain_sync, stream_iterator)
+                        else:
+                            payload, is_final, metadata = unpack_chunk(stream_iterator)
+                            await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
+                    except Exception as iteration_error:
+                        error_raised = True
+                        await queue.put(iteration_error)
+                    finally:
+                        if not error_raised and not marked_final:
+                            await enqueue_chunk(None, is_final=True)
+                        await queue.put(sentinel)
+
+                asyncio.create_task(produce_chunks())
+
+                while True:
+                    item = await queue.get()
+                    if item is sentinel:
+                        break
+                    if isinstance(item, Exception):
+                        logger.error(
+                            "[%s] ExecuteStreamingTool #%s raised %s",
+                            thread_name,
+                            request_id,
+                            item,
+                            exc_info=True,
+                        )
+                        await context.abort(grpc.StatusCode.INTERNAL, str(item))
+                        return
+                    yield item
 
         except Exception as e:
             logger.error(f"[{thread_name}] ExecuteStreamingTool #{request_id} failed: {e}", exc_info=True)
-            context.abort(grpc.StatusCode.INTERNAL, str(e))
+            await context.abort(grpc.StatusCode.INTERNAL, str(e))
 
         finally:
             self._record_request_end()
@@ -714,11 +781,14 @@ async def serve_threaded(
         ]
     )
 
+    loop = asyncio.get_running_loop()
+
     servicer = ThreadedBridgeServiceServicer(
         adapter_class,
         elixir_address,
         max_workers,
-        enable_safety_checks
+        enable_safety_checks,
+        loop=loop,
     )
     servicer.set_server(server)
 

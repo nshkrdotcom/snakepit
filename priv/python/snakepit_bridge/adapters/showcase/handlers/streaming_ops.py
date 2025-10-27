@@ -19,17 +19,29 @@ class StreamingOpsHandler:
             "infinite_stream": Tool(self.infinite_stream),
         }
     
-    def stream_progress(self, ctx, steps: int = 10) -> StreamChunk:
-        """Demonstrate streaming with progress updates."""
+    def stream_progress(
+        self,
+        ctx,
+        steps: int = 10,
+        delay_ms: int = 500,
+    ) -> StreamChunk:
+        """Demonstrate streaming with progress updates and configurable pacing."""
+        delay_seconds = max(delay_ms, 0) / 1000.0
+        start = time.perf_counter()
+
         for i in range(steps):
             progress = (i + 1) / steps * 100
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+
             yield StreamChunk({
                 "step": i + 1,
                 "total": steps,
                 "progress": round(progress, 1),
-                "message": f"Processing step {i + 1}/{steps}"
+                "message": f"Processing step {i + 1}/{steps}",
+                "elapsed_ms": round(elapsed_ms, 1)
             }, is_final=(i == steps - 1))
-            time.sleep(0.1)
+            if i < steps - 1 and delay_seconds > 0:
+                time.sleep(delay_seconds)
     
     def stream_fibonacci(self, ctx, count: int = 20) -> StreamChunk:
         """Stream Fibonacci sequence."""
