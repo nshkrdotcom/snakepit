@@ -18,6 +18,8 @@ defmodule Snakepit.Pool do
   @default_startup_timeout 10_000
   @default_queue_timeout 5_000
   @default_max_queue_size 1000
+  @cancelled_retention_multiplier 4
+  @max_cancelled_entries 1024
 
   # Per-pool state structure
   defmodule PoolState do
@@ -226,7 +228,7 @@ defmodule Snakepit.Pool do
           available: MapSet.new(),
           busy: %{},
           request_queue: :queue.new(),
-          cancelled_requests: MapSet.new(),
+          cancelled_requests: %{},
           stats: %{
             requests: 0,
             queued: 0,
@@ -542,6 +544,7 @@ defmodule Snakepit.Pool do
         if not pool_state.initialized do
           {:reply, {:error, :pool_not_initialized}, state}
         else
+          pool_state = compact_pool_queue(pool_state)
           session_id = opts[:session_id]
 
           # Pass affinity_cache from top-level state
@@ -663,11 +666,17 @@ defmodule Snakepit.Pool do
         {:noreply, state}
 
       pool_state ->
+        now = System.monotonic_time(:millisecond)
+        retention_ms = cancellation_retention_ms(pool_state.queue_timeout)
+
+        pruned_cancelled =
+          prune_cancelled_requests(pool_state.cancelled_requests, now, retention_ms)
+
         case :queue.out(pool_state.request_queue) do
           {{:value, {queued_from, command, args, opts, _queued_at}}, new_queue} ->
-            if MapSet.member?(pool_state.cancelled_requests, queued_from) do
+            if Map.has_key?(pruned_cancelled, queued_from) do
               SLog.debug("Skipping cancelled request from #{inspect(queued_from)}")
-              new_cancelled = MapSet.delete(pool_state.cancelled_requests, queued_from)
+              new_cancelled = drop_cancelled_request(pruned_cancelled, queued_from)
 
               updated_pool_state = %{
                 pool_state
@@ -699,13 +708,24 @@ defmodule Snakepit.Pool do
                   end
                 end)
 
-                updated_pool_state = %{pool_state | request_queue: new_queue}
+                updated_pool_state = %{
+                  pool_state
+                  | request_queue: new_queue,
+                    cancelled_requests: pruned_cancelled
+                }
+
                 updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
                 {:noreply, %{state | pools: updated_pools}}
               else
                 SLog.debug("Discarding request from dead client #{inspect(client_pid)}")
                 GenServer.cast(self(), {:checkin_worker, pool_name, worker_id})
-                updated_pool_state = %{pool_state | request_queue: new_queue}
+
+                updated_pool_state = %{
+                  pool_state
+                  | request_queue: new_queue,
+                    cancelled_requests: pruned_cancelled
+                }
+
                 updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
                 {:noreply, %{state | pools: updated_pools}}
               end
@@ -714,7 +734,14 @@ defmodule Snakepit.Pool do
           {:empty, _} ->
             new_available = MapSet.put(pool_state.available, worker_id)
             new_busy = Map.delete(pool_state.busy, worker_id)
-            updated_pool_state = %{pool_state | available: new_available, busy: new_busy}
+
+            updated_pool_state = %{
+              pool_state
+              | available: new_available,
+                busy: new_busy,
+                cancelled_requests: pruned_cancelled
+            }
+
             updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
             {:noreply, %{state | pools: updated_pools}}
         end
@@ -736,12 +763,25 @@ defmodule Snakepit.Pool do
 
       pool_state ->
         GenServer.reply(from, {:error, :queue_timeout})
-        new_cancelled = MapSet.put(pool_state.cancelled_requests, from)
+        now = System.monotonic_time(:millisecond)
+        retention_ms = cancellation_retention_ms(pool_state.queue_timeout)
+
+        {pruned_queue, dropped?} =
+          drop_request_from_queue(pool_state.request_queue, from)
+
+        if dropped? do
+          SLog.debug("Removed timed out request #{inspect(from)} from queue in pool #{pool_name}")
+        end
+
+        new_cancelled =
+          record_cancelled_request(pool_state.cancelled_requests, from, now, retention_ms)
+
         updated_stats = Map.update!(pool_state.stats, :queue_timeouts, &(&1 + 1))
 
         updated_pool_state = %{
           pool_state
-          | cancelled_requests: new_cancelled,
+          | request_queue: pruned_queue,
+            cancelled_requests: new_cancelled,
             stats: updated_stats
         }
 
@@ -842,6 +882,120 @@ defmodule Snakepit.Pool do
   # REMOVE the wait_for_ports_to_exit/2 helper functions.
 
   # Private Functions
+
+  defp compact_pool_queue(pool_state) do
+    now_ms = System.monotonic_time(:millisecond)
+    retention_ms = cancellation_retention_ms(pool_state.queue_timeout)
+
+    {new_queue, new_cancelled} =
+      compact_request_queue(
+        pool_state.request_queue,
+        pool_state.cancelled_requests,
+        now_ms,
+        retention_ms
+      )
+
+    %{pool_state | request_queue: new_queue, cancelled_requests: new_cancelled}
+  end
+
+  defp compact_request_queue(queue, cancelled_requests, now_ms, retention_ms) do
+    pruned_cancelled = prune_cancelled_requests(cancelled_requests, now_ms, retention_ms)
+
+    {filtered, updated_cancelled} =
+      queue
+      |> :queue.to_list()
+      |> Enum.reduce({[], pruned_cancelled}, fn
+        {from, _command, _args, _opts, _queued_at} = request, {acc, current_cancelled} ->
+          cond do
+            Map.has_key?(current_cancelled, from) ->
+              {acc, drop_cancelled_request(current_cancelled, from)}
+
+            not alive_from?(from) ->
+              {acc, drop_cancelled_request(current_cancelled, from)}
+
+            true ->
+              {[request | acc], current_cancelled}
+          end
+      end)
+
+    new_queue =
+      filtered
+      |> Enum.reverse()
+      |> :queue.from_list()
+
+    {new_queue, updated_cancelled}
+  end
+
+  defp drop_request_from_queue(queue, from) do
+    {remaining, dropped?} =
+      queue
+      |> :queue.to_list()
+      |> Enum.reduce({[], false}, fn
+        {queued_from, _command, _args, _opts, _queued_at}, {acc, _} when queued_from == from ->
+          {acc, true}
+
+        request, {acc, dropped?} ->
+          {[request | acc], dropped?}
+      end)
+
+    new_queue =
+      remaining
+      |> Enum.reverse()
+      |> :queue.from_list()
+
+    {new_queue, dropped?}
+  end
+
+  defp alive_from?({pid, _ref}) when is_pid(pid), do: Process.alive?(pid)
+  defp alive_from?(_), do: false
+
+  defp cancellation_retention_ms(queue_timeout)
+       when is_integer(queue_timeout) and queue_timeout > 0 do
+    retention = queue_timeout * @cancelled_retention_multiplier
+    max(retention, queue_timeout)
+  end
+
+  defp cancellation_retention_ms(_queue_timeout) do
+    @default_queue_timeout * @cancelled_retention_multiplier
+  end
+
+  defp prune_cancelled_requests(cancelled_requests, _now_ms, _retention_ms)
+       when cancelled_requests == %{} do
+    cancelled_requests
+  end
+
+  defp prune_cancelled_requests(cancelled_requests, now_ms, retention_ms) do
+    cutoff = now_ms - retention_ms
+
+    cancelled_requests
+    |> Enum.reject(fn {_from, recorded_at} -> recorded_at < cutoff end)
+    |> Map.new()
+  end
+
+  defp record_cancelled_request(cancelled_requests, from, now_ms, retention_ms) do
+    cancelled_requests
+    |> prune_cancelled_requests(now_ms, retention_ms)
+    |> Map.put(from, now_ms)
+    |> trim_cancelled_requests()
+  end
+
+  defp drop_cancelled_request(cancelled_requests, from) do
+    Map.delete(cancelled_requests, from)
+  end
+
+  defp trim_cancelled_requests(cancelled_requests) do
+    if map_size(cancelled_requests) <= @max_cancelled_entries do
+      cancelled_requests
+    else
+      entries_to_keep = @max_cancelled_entries
+      drop_count = map_size(cancelled_requests) - entries_to_keep
+
+      cancelled_requests
+      |> Enum.sort_by(fn {_from, recorded_at} -> recorded_at end)
+      |> Enum.drop(drop_count)
+      |> Map.new()
+    end
+  end
 
   defp start_workers_concurrently(
          pool_name,
