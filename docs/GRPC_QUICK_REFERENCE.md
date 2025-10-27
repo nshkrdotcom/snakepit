@@ -37,7 +37,7 @@ def grpc_execute_stream(connection, session_id, command, args, callback, timeout
 end
 ```
 
-`consume_stream/2` decodes each `Snakepit.Bridge.ToolChunk` into a plain map and
+`consume_stream/2` decodes each `ToolChunk` into a plain map and
 invokes the callback. Payloads always include an `"is_final"` flag and preserve
 metadata under `_metadata` when present.
 
