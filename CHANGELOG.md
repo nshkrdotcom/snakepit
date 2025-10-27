@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.6] - 2025-11-02
+## [0.6.6] - 2025-10-27
 
 ### Added
 - Configurable session/program quotas now surface tagged errors when limits are exceeded, with regression coverage in `test/unit/bridge/session_store_test.exs`.
@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `Snakepit.GRPC.BridgeServer` reuses worker-owned gRPC channels and only dials a disposable connection when the worker has not yet published one; fallbacks are closed after each invocation.
 - gRPC streaming helpers document and enforce the JSON-plus-metadata chunk envelope, clarifying `_metadata` and `raw_data_base64` handling.
+- Worker startup handshake waits for the negotiated gRPC port before publishing worker metadata, eliminating transient routing failures during boot.
 
 ### Fixed
 - `Snakepit.GRPCWorker` persists the OS-assigned port discovered during startup so BridgeServer never receives `0` when routing requests (`test/unit/grpc/grpc_worker_ephemeral_port_test.exs`).
@@ -23,9 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Process registry ETS tables are `:protected` and DETS handles remain private, guarding against external mutation attempts (`test/unit/pool/process_registry_security_test.exs`).
 
 ### Documentation
-- Refreshed README, gRPC guides, and testing notes to cover port persistence, channel reuse, streaming payload shape, quota configuration, and the expanded regression suite.
+- Refreshed README, gRPC guides (including the streaming and quick reference docs), and testing notes to cover port persistence, channel reuse, quota enforcement, DETS/ETS protections, streaming payload envelopes, logging redaction guardrails, and the expanded regression suite.
 
-## [0.6.5] - 2025-10-31
+## [0.6.5] - 2025-10-26
 
 ### Added
 - Regression suites covering worker supervisor stop/restart flows and profile-level shutdown helpers (`test/unit/pool/worker_supervisor_test.exs`, `test/unit/worker_profile/worker_profile_stop_worker_test.exs`).

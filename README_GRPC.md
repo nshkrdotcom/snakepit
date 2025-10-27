@@ -161,6 +161,18 @@ Snakepit.execute_in_session_stream(session_id, "train_model", training_data, fn 
 end)
 ```
 
+### State protection & quotas
+
+- SessionStore, ToolRegistry, and ProcessRegistry expose their state through `:protected` ETS tables and keep DETS handles private, so only the owning processes can mutate core metadata.
+- Configurable session/program quotas return tagged errors such as `{:error, :session_quota_exceeded}` or `{:error, {:program_quota_exceeded, session_id}}`, making it easy to surface actionable messages to callers.
+- Regression coverage: `test/unit/bridge/session_store_test.exs` exercises quota paths, while `test/unit/pool/process_registry_security_test.exs` ensures ETS/DETS access stays locked down.
+
+### Logging redaction & diagnostics
+
+- `Snakepit.Logger.Redaction` now collapses sensitive payloads into short summaries before anything hits the log pipeline, preventing credential or large blob leaks during gRPC debugging.
+- Bridge telemetry ties the redaction summaries to execution spans so you still get useful context without sacrificing safety.
+- Guarded by `test/unit/logger/redaction_test.exs`, which asserts both redaction coverage and fallback behaviour.
+
 ## API Reference
 
 ### Basic Execution
