@@ -15,6 +15,8 @@ defmodule Snakepit.Application do
   require Logger
   alias Snakepit.Logger, as: SLog
 
+  @runtime_env Application.compile_env(:snakepit, :environment, :prod)
+
   @impl true
   def start(_type, _args) do
     # Configure threading limits for Python scientific libraries and gRPC
@@ -64,7 +66,7 @@ defmodule Snakepit.Application do
     end
 
     SLog.debug(
-      "Snakepit.Application.start/2: pooling_enabled=#{pooling_enabled}, env=#{Mix.env()}"
+      "Snakepit.Application.start/2: pooling_enabled=#{pooling_enabled}, env=#{@runtime_env}"
     )
 
     # Get gRPC config for the Elixir server

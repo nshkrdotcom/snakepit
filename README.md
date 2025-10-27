@@ -59,6 +59,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
+- [What's New in v0.6.5](#whats-new-in-v065)
 - [What's New in v0.6.4](#whats-new-in-v064)
 - [What's New in v0.6.3](#whats-new-in-v063)
 - [What's New in v0.6.2](#whats-new-in-v062)
@@ -135,6 +136,15 @@ For **non-DSPex users**, if you're using these classes directly:
 **Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
 
 ---
+
+## 🆕 What's New in v0.6.5
+
+**Release safety + lifecycle hardening** – v0.6.5 fixes production boot regressions and closes gaps in worker shutdown so pools behave predictably during restarts.
+
+- **Release-friendly application start** – `Snakepit.Application` no longer calls `Mix.env/0`, letting OTP releases boot without bundling Mix.
+- **Accurate worker teardown** – `Snakepit.Pool.WorkerSupervisor.stop_worker/1` now targets the worker starter supervisor and accepts either worker ids or pids, preventing leaking processes.
+- **Profile parity** – Process and threaded worker profiles resolve worker ids through the registry so lifecycle manager shutdowns succeed regardless of handle type.
+- **Regression coverage** – Added unit suites covering supervisor stop/restart behaviour and profile-level shutdown helpers.
 
 ## 🆕 What's New in v0.6.4
 
@@ -530,7 +540,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-{:snakepit, "~> 0.6.4"}
+{:snakepit, "~> 0.6.5"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,

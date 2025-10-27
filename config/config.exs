@@ -7,6 +7,8 @@ config :snakepit,
   # Options: :debug, :info, :warning, :error, :none
   # Set to :warning or :none for clean output in production
   log_level: :info,
+  # Track current Mix environment for runtime diagnostics without depending on Mix at runtime
+  environment: config_env(),
   # Enable pooling by default
   pooling_enabled: true,
   enable_otlp?: false,
