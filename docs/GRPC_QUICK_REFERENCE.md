@@ -10,10 +10,12 @@ streaming behaviour end-to-end.
   through the gRPC adapter with full session awareness.
 - ✅ `Snakepit.Adapters.GRPCPython` handles request/response and streaming calls
   via `Snakepit.GRPC.Client` with per-worker session IDs.
+- ✅ Workers persist the OS-assigned port and expose their live `GRPC.Stub` so BridgeServer can reuse an existing channel (`test/unit/grpc/grpc_worker_ephemeral_port_test.exs`, `test/snakepit/grpc/bridge_server_test.exs`).
+- ✅ BridgeServer validates JSON payloads up front and emits descriptive `{:invalid_parameter, key, reason}` tuples on malformed input (`test/snakepit/grpc/bridge_server_test.exs`).
 - ✅ Python bridge servers (`priv/python/grpc_server.py` and
   `priv/python/grpc_server_threaded.py`) bridge async generators and synchronous
   iterators into gRPC streams using an `asyncio.Queue`.
-- ✅ Regression coverage lives in `test/snakepit/streaming_regression_test.exs`.
+- ✅ Regression coverage lives in `test/snakepit/streaming_regression_test.exs` with supplemental unit tests for quotas, channel reuse, and logging redaction.
 - ✅ A runnable showcase lives in `examples/stream_progress_demo.exs`.
 
 ## Adapter Entry Points
@@ -79,6 +81,7 @@ inside a `ThreadPoolExecutor`.
 ## Testing & Diagnostics
 
 - Run the regression suite: `mix test test/snakepit/streaming_regression_test.exs`
+- Verify port/channel reuse: `mix test test/unit/grpc/grpc_worker_ephemeral_port_test.exs test/snakepit/grpc/bridge_server_test.exs`
 - Run Python bridge tests (handles venv, PYTHONPATH, and proto generation): `./test_python.sh`
 - Exercise everything interactively:
 
@@ -112,4 +115,6 @@ inside a `ThreadPoolExecutor`.
 ```
 
 Use the `"is_final"` flag to trigger completion handlers without relying on the
-stream returning an empty chunk.
+stream returning an empty chunk. When the bridge cannot decode `ToolChunk.data`
+as JSON it exposes a `"raw_data_base64"` field instead, so you can still inspect
+the payload safely.

@@ -276,11 +276,7 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   defp create_worker_channel(port) do
     try do
-      case GRPC.Stub.connect("localhost:#{port}") do
-        {:ok, channel} -> {:ok, channel}
-        {:error, reason} -> {:error, reason}
-        other -> other
-      end
+      GRPC.Stub.connect("localhost:#{port}")
     rescue
       error -> {:error, "Failed to connect to worker: #{inspect(error)}"}
     end

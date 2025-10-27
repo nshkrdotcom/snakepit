@@ -140,6 +140,12 @@ Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV
     Callback Handler      Connection Mgmt          Stream Handlers
 ```
 
+### Connection lifecycle & channel reuse
+
+- Workers store the OS-negotiated port after `GRPC_READY`, so registry lookups always return the live endpoint even when the adapter requested port `0`.
+- `BridgeServer` first asks the worker for its already-open `GRPC.Stub` and only dials a new channel as a fallback—cutting handshake latency and ensuring sockets are torn down after use.
+- Tests: `test/unit/grpc/grpc_worker_ephemeral_port_test.exs` (port persistence) and `test/snakepit/grpc/bridge_server_test.exs` (channel reuse) guard the behaviour.
+
 ### Session Management
 
 ```elixir
@@ -184,6 +190,12 @@ callback_fn = fn chunk ->
 end
 ```
 
+#### Streaming chunk envelope
+
+- Each callback receives a map built from `ToolChunk`: decoded JSON payload merged with `"is_final"` and optional `_metadata`.
+- Binary responses degrade gracefully to `"raw_data_base64"` so consumers can still inspect results without guessing encodings.
+- Regression coverage: `test/snakepit/streaming_regression_test.exs` asserts ordering/finality while Python fixtures cover metadata propagation.
+
 ### Session-based APIs
 
 ```elixir
@@ -207,10 +219,12 @@ case Snakepit.execute_stream("long_process", %{data: large_data}, callback) do
   {:error, :grpc_unavailable} ->
     IO.puts("gRPC not available, check setup")
     
-  {:error, reason} ->
-    IO.puts("Stream failed: #{inspect(reason)}")
+{:error, reason} ->
+  IO.puts("Stream failed: #{inspect(reason)}")
 end
 ```
+
+> **Invalid payloads**: When a tool parameter is encoded as malformed JSON the bridge returns `{:error, {:invalid_parameter, key, message}}` before contacting the worker. See `test/snakepit/grpc/bridge_server_test.exs` for real examples.
 
 ## Streaming Examples
 

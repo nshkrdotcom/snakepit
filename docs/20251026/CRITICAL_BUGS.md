@@ -1,5 +1,21 @@
 Here’s a focused audit of the “snakepit” repo, calling out **high-impact flaws** first, then other reliability, security, portability, and correctness issues. For each, I give the concrete location/symptom + why it’s a problem + how to fix.
 
+## Status Update · 2025-11-02
+
+✅ All twenty issues called out below were closed for the Snakepit v0.6.6 release.
+
+- #1–#2: gRPC workers persist their negotiated ports and BridgeServer reuses each worker’s seeded channel (`test/unit/grpc/grpc_worker_ephemeral_port_test.exs`, `test/snakepit/grpc/bridge_server_test.exs`).
+- #3, #13: Process registries, capacity tables, and session stores now use `:protected` ETS visibility and opaque DETS handles (`test/unit/pool/process_registry_security_test.exs`).
+- #4, #14–#16: Diagnostics prefer Erlang/Elixir primitives with guarded fallbacks; brittle shell paths were rewritten or wrapped for portability (`test/unit/mix/diagnose_scaling_test.exs`).
+- #5, #7, #8: Worker restart cleanup honours ephemeral ports, bounds cancellation bookkeeping, and short-circuits dead client executions (see `test/unit/pool/worker_supervisor_test.exs` and regression coverage in `test/snakepit/pool_multipool_integration_test.exs`).
+- #6, #18, #19: Bridge parameter decoding now fails fast on malformed JSON and rejects non-JSON payloads with detailed errors (`test/snakepit/grpc/bridge_server_test.exs`).
+- #9, #10: Tool and session registration enforce quotas and metadata validation with explicit error paths (`test/unit/bridge/session_store_test.exs`, `test/unit/bridge/tool_registry_test.exs`).
+- #11: Centralised logging redaction summaries prevent credential dumps and large blob logging (`test/unit/logger/redaction_test.exs`).
+- #12: Streaming execution paths stream progress immediately, reuse negotiated gRPC channels, and document the chunk contract (`test/snakepit/streaming_regression_test.exs`).
+- #17, #20: Streaming capability gaps return structured UNIMPLEMENTED errors with remediation hints, and worker id parsing defers to registry metadata.
+
+The remainder of the document is preserved as the original audit trail.
+
 ---
 
 # 🚨 Critical / correctness bugs

@@ -59,6 +59,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
+- [What's New in v0.6.6](#whats-new-in-v066)
 - [What's New in v0.6.5](#whats-new-in-v065)
 - [What's New in v0.6.4](#whats-new-in-v064)
 - [What's New in v0.6.3](#whats-new-in-v063)
@@ -136,6 +137,16 @@ For **non-DSPex users**, if you're using these classes directly:
 **Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
 
 ---
+
+## 🆕 What's New in v0.6.6
+
+**Bridge resilience + defensive defaults** – v0.6.6 closes the last gaps from the critical bug sweep and documents the new reliability posture across the stack.
+
+- **Persistent worker ports & channel reuse** – gRPC workers now cache the OS-assigned port and BridgeServer reuses the worker-owned channel before dialing a fallback, eliminating connection churn (`test/unit/grpc/grpc_worker_ephemeral_port_test.exs`, `test/snakepit/grpc/bridge_server_test.exs`).
+- **Hardened registries & quotas** – ETS tables ship with `:protected` visibility and DETS handles stay private while SessionStore enforces session/program quotas (`test/unit/pool/process_registry_security_test.exs`, `test/unit/bridge/session_store_test.exs`).
+- **Strict parameter validation** – Tool invocations fail fast with descriptive errors when protobuf payloads contain malformed JSON or unsupported types (`test/snakepit/grpc/bridge_server_test.exs`).
+- **Streaming chunk contract** – The streaming callback now receives consistent `chunk_id`/`data`/`is_final` payloads with metadata fan-out, documented alongside regression coverage (`test/snakepit/streaming_regression_test.exs`).
+- **Redacted diagnostics** – the logger redaction helper now summarises sensitive payloads instead of dumping secrets or large blobs into logs (`test/unit/logger/redaction_test.exs`).
 
 ## 🆕 What's New in v0.6.5
 
@@ -541,7 +552,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-{:snakepit, "~> 0.6.5"}
+    {:snakepit, "~> 0.6.6"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,
@@ -1437,6 +1448,18 @@ end)
 | **Health Checks** | Built-in | Built-in |
 | **Error Handling** | Rich Status | Rich Status |
 
+### 🔄 Connection lifecycle & port persistence
+
+- `Snakepit.GRPCWorker` persists the actual OS-assigned port after handshake, so registry lookups always return a routable endpoint.
+- `Snakepit.GRPC.BridgeServer` asks the worker for its cached `GRPC.Stub`, only dialing a fresh channel if the worker has not yet published one—eliminating per-call socket churn and cleaning up any fallback channel after use.
+- Regression guardrails: `test/unit/grpc/grpc_worker_ephemeral_port_test.exs` ensures the stored port matches the runtime port, and `test/snakepit/grpc/bridge_server_test.exs` verifies BridgeServer prefers the worker-owned channel.
+
+### 🧱 Streaming chunk envelope
+
+- Every callback receives a map with decoded JSON, `"is_final"` flag, and optional `_metadata` fan-out. Binary payloads fall back to Base64 under `"raw_data_base64"`.
+- Chunk IDs and metadata come straight from `ToolChunk`, so you can correlate progress across languages.
+- See `test/snakepit/streaming_regression_test.exs` for ordering guarantees and final chunk assertions.
+
 ### 🎯 **Two gRPC Modes Explained**
 
 #### **Mode 1: gRPC Non-Streaming** 
@@ -2264,6 +2287,13 @@ SessionStore.delete_session("session_123")
 # Get session statistics
 stats = SessionStore.get_stats()
 ```
+
+#### Quotas & limits
+
+- Configure quotas via `:snakepit, :session_store` (`max_sessions`, `max_programs_per_session`, `max_global_programs`); defaults guard against unbounded growth while allowing `:infinity` overrides for trusted deployments.
+- Attempting to exceed a quota returns tagged errors such as `{:error, :session_quota_exceeded}` or `{:error, {:program_quota_exceeded, session_id}}` so callers can surface actionable messages.
+- Session state lives in `:protected` ETS tables owned by the SessionStore process—access it via the public API rather than touching ETS directly.
+- Regression coverage lives in `test/unit/bridge/session_store_test.exs`, which exercises per-session quotas, global quotas, and reuse of existing program slots.
 
 ### Global Program Storage
 

@@ -1027,8 +1027,6 @@ defmodule Snakepit.GRPCWorker do
     end
   end
 
-  defp encode_heartbeat_env(_), do: nil
-
   defp normalize_adapter_env_entries(nil), do: []
 
   defp normalize_adapter_env_entries(env) when is_map(env) do

@@ -99,6 +99,15 @@ The unified gRPC bridge provides a high-performance, protocol-based communicatio
         └────────────────┘
 ```
 
+## Reliability updates (v0.6.6)
+
+- **Worker port persistence** – `Snakepit.GRPCWorker` now replaces the placeholder `0` with the OS-selected port before publishing registry metadata, ensuring BridgeServer can always reach the correct address (`test/unit/grpc/grpc_worker_ephemeral_port_test.exs`).
+- **Channel reuse & cleanup** – BridgeServer asks workers for their cached `GRPC.Stub` and only creates a short-lived channel as a fallback, closing it after each call (`test/snakepit/grpc/bridge_server_test.exs`).
+- **Defensive parameter decoding** – Malformed JSON payloads and unexpected protobuf envelopes now raise `{:error, {:invalid_parameter, key, reason}}` without ever touching the worker.
+- **Protected state stores** – SessionStore, ToolRegistry, and ProcessRegistry expose `:protected` ETS tables and keep DETS handles private, blocking external mutation attempts (`test/unit/pool/process_registry_security_test.exs`).
+- **Session quotas** – Configurable caps on session counts and program storage prevent runaway growth and surface actionable errors (`test/unit/bridge/session_store_test.exs`).
+- **Log redaction helpers** – the new logger redaction summary keeps secrets and large blobs out of logs (`test/unit/logger/redaction_test.exs`).
+
 ## Testing
 
 Comprehensive test coverage across all components:
@@ -110,6 +119,8 @@ Comprehensive test coverage across all components:
 - Property-based tests: `test/snakepit/bridge/property_test.exs`
 - Integration tests: `test/snakepit/bridge/integration_test.exs`
 - Test runner: `test/run_bridge_tests.exs`
+- Worker port/channel regression: `test/unit/grpc/grpc_worker_ephemeral_port_test.exs`, `test/snakepit/grpc/bridge_server_test.exs`
+- Registry hardening & logging: `test/unit/pool/process_registry_security_test.exs`, `test/unit/logger/redaction_test.exs`
 
 ### Running Tests
 ```bash

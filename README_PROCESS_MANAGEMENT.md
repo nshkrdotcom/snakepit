@@ -13,6 +13,7 @@ The ProcessRegistry now uses both ETS (in-memory) and DETS (disk-based) storage 
 - **ETS**: Fast in-memory access for runtime operations
 - **DETS**: Persistent storage that survives BEAM crashes
 - **Location**: Process data is stored in `priv/data/process_registry.dets`
+- **Visibility**: ETS tables are created with `:protected` access and the DETS table reference stays inside ProcessRegistry, preventing accidental or malicious mutation from other processes (`test/unit/pool/process_registry_security_test.exs`).
 
 ### 2. **Automatic Orphan Cleanup**
 
