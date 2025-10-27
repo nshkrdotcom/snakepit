@@ -16,6 +16,35 @@
 [![Last Commit](https://img.shields.io/github/last-commit/nshkrdotcom/snakepit)](https://github.com/nshkrdotcom/snakepit/commits/main)
 [![GitHub Stars](https://img.shields.io/github/stars/nshkrdotcom/snakepit?style=social)](https://github.com/nshkrdotcom/snakepit)
 
+## ⚡ Quick Install
+
+### 1. Add to mix.exs
+```elixir
+{:snakepit, "~> 0.6"}
+```
+
+### 2. Install Elixir deps
+```bash
+mix deps.get
+```
+
+### 3. Install Python deps (ONE command)
+```bash
+./deps/snakepit/scripts/setup_python.sh
+```
+
+That's it! The script auto-detects uv (fast) or pip (fallback) and installs everything.
+
+### Manual Setup (if needed)
+```bash
+cd deps/snakepit/priv/python
+pip install -r requirements.txt
+```
+
+Then run: `mix test` to verify everything works.
+
+---
+
 ## 🚀 What is Snakepit?
 
 Snakepit is a battle-tested Elixir library that provides a robust pooling system for managing external processes (Python, Node.js, Ruby, R, etc.). Born from the need for reliable ML/AI integrations, it offers:
