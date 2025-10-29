@@ -214,3 +214,5 @@ repomix*.xml
 
 # Arsenal repository clone
 /arsenal/
+
+/Citadel/
