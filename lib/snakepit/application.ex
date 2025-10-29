@@ -101,6 +101,9 @@ defmodule Snakepit.Application do
           # Task supervisor for async pool operations
           {Task.Supervisor, name: Snakepit.TaskSupervisor},
 
+          # Telemetry gRPC stream manager (for Python worker telemetry)
+          Snakepit.Telemetry.GrpcStream,
+
           # Registry for worker process registration
           Snakepit.Pool.Registry,
 

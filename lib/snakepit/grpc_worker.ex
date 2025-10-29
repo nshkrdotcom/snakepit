@@ -31,6 +31,7 @@ defmodule Snakepit.GRPCWorker do
 
   use GenServer
   require Logger
+  alias Snakepit.Error
   alias Snakepit.Telemetry.Correlation
   alias Snakepit.Logger.Redaction
   alias Snakepit.Logger, as: SLog
@@ -138,7 +139,8 @@ defmodule Snakepit.GRPCWorker do
         GenServer.call(pid, {:execute, command, args, timeout}, timeout + 1_000)
 
       [] ->
-        {:error, :worker_not_found}
+        {:error,
+         Error.worker_error("Worker not found", %{worker_id: worker_id, command: command})}
     end
   end
 
@@ -161,7 +163,8 @@ defmodule Snakepit.GRPCWorker do
         )
 
       [] ->
-        {:error, :worker_not_found}
+        {:error,
+         Error.worker_error("Worker not found", %{worker_id: worker_id, command: command})}
     end
   end
 
@@ -631,7 +634,10 @@ defmodule Snakepit.GRPCWorker do
     if state.connection do
       {:reply, {:ok, state.connection.channel}, state}
     else
-      {:reply, {:error, :not_connected}, state}
+      {:reply,
+       {:error,
+        Error.grpc_error(:not_connected, "Not connected to gRPC server", %{worker_id: state.id})},
+       state}
     end
   end
 
@@ -776,14 +782,15 @@ defmodule Snakepit.GRPCWorker do
     :ok
   end
 
-  defp notify_pool_ready(nil, _worker_id), do: {:error, :pool_not_found}
+  defp notify_pool_ready(nil, worker_id),
+    do: {:error, Error.pool_error("Pool not found", %{worker_id: worker_id})}
 
   defp notify_pool_ready(pool_pid, worker_id) when is_pid(pool_pid) do
     try do
       GenServer.call(pool_pid, {:worker_ready, worker_id}, 30_000)
     catch
       :exit, {:noproc, _} ->
-        {:error, :pool_not_found}
+        {:error, Error.pool_error("Pool not found", %{worker_id: worker_id, pool_pid: pool_pid})}
 
       :exit, {:shutdown, _} = reason ->
         {:error, reason}
@@ -876,7 +883,11 @@ defmodule Snakepit.GRPCWorker do
             Snakepit.GRPC.Client.heartbeat(channel, session_id, timeout: config[:timeout_ms])
 
           true ->
-            {:error, :no_heartbeat_transport}
+            {:error,
+             Error.grpc_error(:no_heartbeat_transport, "No heartbeat transport available", %{
+               adapter: adapter,
+               session_id: session_id
+             })}
         end
 
       handle_heartbeat_response(self(), timestamp, result)
@@ -1230,8 +1241,12 @@ defmodule Snakepit.GRPCWorker do
       {:ok, health_response} ->
         {:ok, health_response}
 
-      {:error, _reason} ->
-        {:error, :health_check_failed}
+      {:error, reason} ->
+        {:error,
+         Error.grpc_error(:health_check_failed, "Health check failed", %{
+           worker_id: state.id,
+           reason: reason
+         })}
     end
   end
 
