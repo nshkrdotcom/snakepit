@@ -133,90 +133,57 @@ def span(operation: str, metadata: Dict = None):
 
 ### 1. gRPC Backend (Phase 2.1 - INITIAL)
 
-**File:** `snakepit_bridge/telemetry/grpc_backend.py`
+**Files:** `snakepit_bridge/telemetry_stream.py`, `snakepit_bridge/telemetry/grpc_backend.py`
 
 ```python
 """
 gRPC telemetry backend - sends events to Elixir via gRPC stream.
 """
-import asyncio
-import random
 from typing import Dict, Any, Optional
 from ..telemetry import TelemetryBackend
-from .. import snakepit_bridge_pb2 as pb2
+from ..telemetry_stream import TelemetryStream  # wraps BridgeService.StreamTelemetry
 
 
 class GrpcBackend(TelemetryBackend):
     """Sends telemetry via gRPC stream to Elixir."""
 
-    def __init__(self, stub):
-        self.stub = stub
-        self.queue = asyncio.Queue(maxsize=1000)
-        self.sampling_rate = 1.0
-        self._stream_task = None
+    def __init__(self, stream: TelemetryStream):
+        self.stream = stream
 
     async def start(self):
-        """Start the gRPC stream."""
-        self._stream_task = asyncio.create_task(self._stream_loop())
-
-    async def _stream_loop(self):
-        """Consume queue and stream to Elixir."""
-        async def event_generator():
-            while True:
-                event = await self.queue.get()
-                if event is None:
-                    break
-                yield event
-
-        try:
-            async for control in self.stub.StreamTelemetry(event_generator()):
-                if control.HasField('sampling'):
-                    self.sampling_rate = control.sampling.sampling_rate
-        except Exception:
-            pass  # Never crash
+        """No-op: server-side stream is owned by BridgeService."""
+        return None
 
     def emit(self, event_name: str, measurements: Dict[str, Any],
              metadata: Optional[Dict[str, Any]] = None,
              correlation_id: Optional[str] = None):
         """Emit event via gRPC."""
 
-        if random.random() > self.sampling_rate:
-            return
-
-        event = pb2.TelemetryEvent(
-            event_parts=event_name.split('.'),
-            timestamp_ns=time.time_ns(),
-            correlation_id=correlation_id or ""
+        self.stream.emit(
+            event_name,
+            measurements,
+            metadata,
+            correlation_id,
         )
-
-        # Convert measurements to protobuf
-        for key, value in (measurements or {}).items():
-            if isinstance(value, int):
-                event.measurements[key].int_value = value
-            elif isinstance(value, float):
-                event.measurements[key].float_value = value
-
-        # Add metadata
-        for key, value in (metadata or {}).items():
-            event.metadata[key] = str(value)
-
-        # Queue for sending
-        try:
-            self.queue.put_nowait(event)
-        except asyncio.QueueFull:
-            pass  # Drop if full
 ```
 
 **Usage:**
 ```python
 from snakepit_bridge.telemetry import set_backend
 from snakepit_bridge.telemetry.grpc_backend import GrpcBackend
+from snakepit_bridge import telemetry
 
 # During worker initialization
-backend = GrpcBackend(telemetry_stub)
-await backend.start()
+stream = telemetry.TelemetryStream()
+telemetry.install_stream(stream)
+
+backend = GrpcBackend(stream)
 set_backend(backend)
 ```
+
+`TelemetryStream` centralises the gRPC plumbing (queue management, control handling)
+so every backend uses the same atom-safe event conversion path before data reaches
+Elixir.
 
 ---
 
@@ -474,6 +441,7 @@ set_backend(backend)
 
 import os
 from .telemetry import set_backend
+from . import telemetry
 
 def initialize_telemetry():
     """Initialize telemetry with configured backend."""
@@ -481,8 +449,9 @@ def initialize_telemetry():
 
     if backend_type == "grpc":
         from .telemetry.grpc_backend import GrpcBackend
-        backend = GrpcBackend(telemetry_stub)  # Set during gRPC init
-        await backend.start()
+        stream = telemetry.TelemetryStream()
+        telemetry.install_stream(stream)
+        backend = GrpcBackend(stream)
 
     elif backend_type == "otel":
         from .telemetry.otel_backend import OpenTelemetryBackend

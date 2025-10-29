@@ -137,6 +137,10 @@ Core telemetry uses only standard library + `:telemetry`. External integrations 
 ### 5. **Flexible Backends**
 Python workers support pluggable telemetry backends (gRPC, OpenTelemetry, StatsD, stderr) so users can choose what fits their infrastructure.
 
+### 6. **Atom-Safe Conversion**
+Event parts and metadata keys go through the `Snakepit.Telemetry.Naming` and `SafeMetadata`
+guardrails so Python cannot create new atoms at runtime.
+
 ---
 
 ## 📊 Event Layers

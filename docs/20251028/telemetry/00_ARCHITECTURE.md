@@ -225,19 +225,23 @@ defmodule Snakepit.Telemetry.PythonCapture do
   Captures Python telemetry from stderr and re-emits as Elixir telemetry.
   """
 
+  alias Snakepit.Telemetry.{Naming, SafeMetadata}
+
   def parse_and_emit(stderr_line, worker_context) do
     case parse_telemetry_line(stderr_line) do
       {:ok, event, measurements, metadata} ->
-        # Add Elixir context
-        enriched_metadata =
-          metadata
-          |> Map.put(:node, node())
-          |> Map.put(:worker_id, worker_context.worker_id)
-          |> Map.put(:pool_name, worker_context.pool_name)
-
-        # Re-emit as Elixir telemetry
-        event_name = [:snakepit, :python | String.split(event, ".")]
-        :telemetry.execute(event_name, measurements, enriched_metadata)
+        with {:ok, event_name} <- Naming.python_event(event),
+             {:ok, safe_measurements} <- SafeMetadata.measurements(measurements),
+             {:ok, safe_metadata} <- SafeMetadata.merge(metadata, %{
+               node: node(),
+               worker_id: worker_context.worker_id,
+               pool_name: worker_context.pool_name
+             }) do
+          :telemetry.execute(event_name, safe_measurements, safe_metadata)
+        else
+          {:error, reason} ->
+            Logger.debug("Dropping telemetry event #{inspect(event)}: #{inspect(reason)}")
+        end
 
       :not_telemetry ->
         # Regular stderr, pass through to logs
@@ -248,7 +252,7 @@ defmodule Snakepit.Telemetry.PythonCapture do
   defp parse_telemetry_line("TELEMETRY:" <> json) do
     case Jason.decode(json) do
       {:ok, %{"event" => event, "measurements" => m, "metadata" => meta}} ->
-        {:ok, event, atomize_keys(m), atomize_keys(meta)}
+        {:ok, event, m, meta}
       _ ->
         :not_telemetry
     end
@@ -256,6 +260,12 @@ defmodule Snakepit.Telemetry.PythonCapture do
   defp parse_telemetry_line(_), do: :not_telemetry
 end
 ```
+
+`Naming` owns the official event catalog so `python_event/1` only returns atoms that
+were pre-registered during application boot. `SafeMetadata` keeps measurement/metadata
+maps as binaries unless a key is part of the curated allowlist (`:duration`,
+`:node`, etc.), eliminating the risk of exhausting the BEAM atom table even when
+Python emits arbitrary strings.
 
 ---
 

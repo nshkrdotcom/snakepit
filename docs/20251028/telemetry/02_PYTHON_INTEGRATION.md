@@ -15,7 +15,7 @@ Python workers need to emit telemetry, but:
 3. No external dependencies allowed (no StatsD, Prometheus agents, etc.)
 4. Must work with both **Process** and **Thread** modes
 
-**Solution:** Python writes structured telemetry to stderr, Elixir captures and re-emits as `:telemetry` events.
+**Solution:** Python pushes structured telemetry over the gRPC telemetry stream (primary) with a zero-dependency stderr fallback. Elixir captures both transports and re-emits the data as `:telemetry` events.
 
 ---
 
@@ -333,6 +333,7 @@ defmodule Snakepit.Telemetry.PythonCapture do
   """
 
   require Logger
+  alias Snakepit.Telemetry.{Naming, SafeMetadata}
 
   @doc """
   Parse a line from Python stderr and emit telemetry if it's a telemetry line.
@@ -346,7 +347,6 @@ defmodule Snakepit.Telemetry.PythonCapture do
     case parse_telemetry_line(stderr_line) do
       {:ok, event_name, measurements, metadata} ->
         emit_python_event(event_name, measurements, metadata, worker_context)
-        :ok
 
       :not_telemetry ->
         :not_telemetry
@@ -361,10 +361,10 @@ defmodule Snakepit.Telemetry.PythonCapture do
   defp parse_telemetry_line("TELEMETRY:" <> json_string) do
     case Jason.decode(json_string) do
       {:ok, %{"event" => event, "measurements" => m, "metadata" => meta}} ->
-        {:ok, event, atomize_keys(m), atomize_keys(meta)}
+        {:ok, event, m, meta}
 
       {:ok, %{"event" => event, "measurements" => m}} ->
-        {:ok, event, atomize_keys(m), %{}}
+        {:ok, event, m, %{}}
 
       {:error, reason} ->
         {:error, {:json_decode_failed, reason}}
@@ -376,41 +376,29 @@ defmodule Snakepit.Telemetry.PythonCapture do
   # Convert Python event name to Elixir telemetry event name
   # "inference.start" -> [:snakepit, :python, :inference, :start]
   defp emit_python_event(event_name, measurements, python_metadata, worker_context) do
-    event_parts = String.split(event_name, ".")
-    event_name_atoms = [:snakepit, :python | Enum.map(event_parts, &String.to_atom/1)]
-
-    # Enrich with Elixir context
-    enriched_metadata =
-      python_metadata
-      |> Map.put(:node, node())
-      |> Map.put(:worker_id, worker_context.worker_id)
-      |> Map.put(:pool_name, worker_context.pool_name)
-      |> Map.put(:python_pid, worker_context.python_pid)
-
-    # Add correlation_id if present in worker context
-    enriched_metadata =
-      if worker_context[:correlation_id] do
-        Map.put(enriched_metadata, :correlation_id, worker_context.correlation_id)
-      else
-        enriched_metadata
-      end
-
-    # Emit as Elixir telemetry event
-    :telemetry.execute(event_name_atoms, measurements, enriched_metadata)
+    with {:ok, event_name_atoms} <- Naming.python_event(event_name),
+         {:ok, safe_measurements} <- SafeMetadata.measurements(measurements),
+         {:ok, safe_metadata} <-
+           SafeMetadata.merge(python_metadata, %{
+             node: node(),
+             worker_id: worker_context.worker_id,
+             pool_name: worker_context.pool_name,
+             python_pid: worker_context.python_pid,
+             correlation_id: Map.get(worker_context, :correlation_id)
+           }) do
+      :telemetry.execute(event_name_atoms, safe_measurements, safe_metadata)
+    else
+      {:error, reason} ->
+        Logger.debug("Skipping telemetry event #{inspect(event_name)}: #{inspect(reason)}")
+        :not_telemetry
+    end
   end
-
-  # Convert string keys to atoms (safely)
-  defp atomize_keys(map) when is_map(map) do
-    Map.new(map, fn
-      {key, value} when is_binary(key) ->
-        {String.to_atom(key), value}
-      {key, value} ->
-        {key, value}
-    end)
-  end
-  defp atomize_keys(value), do: value
 end
 ```
+
+This keeps runtime-safe conversions centralized: `Naming` validates the event string
+against the catalog (no `String.to_atom/1`), while `SafeMetadata` whitelists known
+atom keys and stores the rest as binaries.
 
 ### Integration with Worker (lib/snakepit/grpc_worker.ex)
 
