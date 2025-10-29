@@ -173,6 +173,11 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         self.server: Optional[grpc.aio.Server] = None
         self.shutdown_event = shutdown_event
 
+        # Initialize telemetry stream (will be integrated in future)
+        # For now, this is a placeholder that prevents gRPC errors
+        # Full implementation will use snakepit_bridge.telemetry.stream.TelemetryStream
+        self.telemetry_stream = None
+
         logger.debug("Creating async channel to %s", elixir_address)
 
         # Create async client channel for async operations (proxying)
@@ -253,7 +258,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         logger.info(f"Proxying InitializeSession for: {request.session_id}")
         metadata = context.invocation_metadata()
 
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/InitializeSession",
             context_metadata=metadata,
             attributes={"snakepit.session_id": request.session_id},
@@ -267,7 +272,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         logger.info(f"Proxying CleanupSession for: {request.session_id}")
         metadata = context.invocation_metadata()
 
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/CleanupSession",
             context_metadata=metadata,
             attributes={"snakepit.session_id": request.session_id},
@@ -283,7 +288,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         logger.debug(f"Proxying GetSession for: {request.session_id}")
         metadata = context.invocation_metadata()
 
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/GetSession",
             context_metadata=metadata,
             attributes={"snakepit.session_id": request.session_id},
@@ -297,7 +302,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         logger.debug(f"Proxying Heartbeat for: {request.session_id}")
         metadata = context.invocation_metadata()
 
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/Heartbeat",
             context_metadata=metadata,
             attributes={"snakepit.session_id": request.session_id},
@@ -309,7 +314,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def RegisterVariable(self, request, context):
         """Register a variable - proxy to Elixir."""
         logger.debug(f"Proxying RegisterVariable: {request.name}")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/RegisterVariable",
             context_metadata=context.invocation_metadata(),
             attributes={"snakepit.variable": request.name},
@@ -319,7 +324,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def GetVariable(self, request, context):
         """Get a variable - proxy to Elixir."""
         logger.debug(f"Proxying GetVariable: {request.variable_identifier}")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/GetVariable",
             context_metadata=context.invocation_metadata(),
             attributes={"snakepit.variable": request.variable_identifier},
@@ -329,7 +334,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def SetVariable(self, request, context):
         """Set a variable - proxy to Elixir."""
         logger.debug(f"Proxying SetVariable: {request.variable_identifier}")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/SetVariable",
             context_metadata=context.invocation_metadata(),
             attributes={"snakepit.variable": request.variable_identifier},
@@ -339,7 +344,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def GetVariables(self, request, context):
         """Get multiple variables - proxy to Elixir."""
         logger.debug(f"Proxying GetVariables for {len(request.variable_identifiers)} variables")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/GetVariables",
             context_metadata=context.invocation_metadata(),
             attributes={"snakepit.variable_count": len(request.variable_identifiers)},
@@ -349,7 +354,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def SetVariables(self, request, context):
         """Set multiple variables - proxy to Elixir."""
         logger.debug(f"Proxying SetVariables for {len(request.updates)} variables")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/SetVariables",
             context_metadata=context.invocation_metadata(),
             attributes={"snakepit.variable_count": len(request.updates)},
@@ -359,7 +364,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def ListVariables(self, request, context):
         """List variables - proxy to Elixir."""
         logger.debug(f"Proxying ListVariables with pattern: {request.pattern}")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/ListVariables",
             context_metadata=context.invocation_metadata(),
             attributes={"snakepit.pattern": request.pattern},
@@ -369,7 +374,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def DeleteVariable(self, request, context):
         """Delete a variable - proxy to Elixir."""
         logger.debug(f"Proxying DeleteVariable: {request.variable_identifier}")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/DeleteVariable",
             context_metadata=context.invocation_metadata(),
             attributes={"snakepit.variable": request.variable_identifier},
@@ -661,7 +666,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def AddDependency(self, request, context):
         """Add dependency - proxy to Elixir when implemented."""
         logger.debug("Proxying AddDependency")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/AddDependency",
             context_metadata=context.invocation_metadata(),
         ):
@@ -670,7 +675,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def StartOptimization(self, request, context):
         """Start optimization - proxy to Elixir when implemented."""
         logger.debug("Proxying StartOptimization")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/StartOptimization",
             context_metadata=context.invocation_metadata(),
         ):
@@ -679,7 +684,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def StopOptimization(self, request, context):
         """Stop optimization - proxy to Elixir when implemented."""
         logger.debug("Proxying StopOptimization")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/StopOptimization",
             context_metadata=context.invocation_metadata(),
         ):
@@ -688,7 +693,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def GetVariableHistory(self, request, context):
         """Get variable history - proxy to Elixir when implemented."""
         logger.debug("Proxying GetVariableHistory")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/GetVariableHistory",
             context_metadata=context.invocation_metadata(),
         ):
@@ -697,12 +702,33 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def RollbackVariable(self, request, context):
         """Rollback variable - proxy to Elixir when implemented."""
         logger.debug("Proxying RollbackVariable")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/RollbackVariable",
             context_metadata=context.invocation_metadata(),
         ):
             return await self._proxy_to_elixir("RollbackVariable", request)
-    
+
+    # Telemetry Stream
+
+    async def StreamTelemetry(self, request_iterator, context):
+        """
+        Telemetry stream handler (placeholder for Phase 2.1).
+
+        This will be fully implemented when telemetry streaming is integrated.
+        For now, this prevents gRPC errors when Elixir attempts to connect.
+        """
+        logger.debug("StreamTelemetry called (placeholder)")
+
+        # Acknowledge the stream but don't emit any events yet
+        # This will be replaced with actual telemetry stream implementation
+        # when the TelemetryStream backend is integrated
+        async for control_message in request_iterator:
+            logger.debug("Received telemetry control message: %s", control_message)
+
+        # Stream stays open until client disconnects
+        return
+        yield  # Make this a generator
+
     def set_server(self, server):
         """Set the server reference for graceful shutdown."""
         self.server = server

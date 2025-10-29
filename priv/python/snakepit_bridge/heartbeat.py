@@ -236,7 +236,7 @@ class HeartbeatClient:
         try:
             attributes = {"snakepit.session_id": self._session_id}
 
-            with telemetry.span(
+            with telemetry.otel_span(
                 "HeartbeatClient/SendPing", attributes=attributes
             ):
                 metadata = telemetry.outgoing_metadata()

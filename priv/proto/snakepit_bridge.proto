@@ -21,6 +21,9 @@ service BridgeService {
   rpc RegisterTools(RegisterToolsRequest) returns (RegisterToolsResponse);
   rpc GetExposedElixirTools(GetExposedElixirToolsRequest) returns (GetExposedElixirToolsResponse);
   rpc ExecuteElixirTool(ExecuteElixirToolRequest) returns (ExecuteElixirToolResponse);
+
+  // Telemetry Stream (bidirectional)
+  rpc StreamTelemetry(stream TelemetryControl) returns (stream TelemetryEvent);
 }
 
 // Core Messages
@@ -170,4 +173,43 @@ message ExecuteElixirToolResponse {
   string error_message = 3;
   map<string, string> metadata = 4;
   int64 execution_time_ms = 5;
+}
+
+// Telemetry Messages
+message TelemetryEvent {
+  repeated string event_parts = 1;               // e.g., ["python", "call", "start"]
+  map<string, TelemetryValue> measurements = 2;  // numeric/categorical values
+  map<string, string> metadata = 3;              // contextual data (string keys)
+  int64 timestamp_ns = 4;                        // unix epoch, nanoseconds
+  string correlation_id = 5;                     // optional tracing correlation
+}
+
+message TelemetryValue {
+  oneof value {
+    int64 int_value = 1;
+    double float_value = 2;
+    string string_value = 3;
+  }
+}
+
+message TelemetryControl {
+  oneof control {
+    TelemetryToggle toggle = 1;
+    TelemetrySamplingUpdate sampling = 2;
+    TelemetryEventFilter filter = 3;
+  }
+}
+
+message TelemetryToggle {
+  bool enabled = 1;
+}
+
+message TelemetrySamplingUpdate {
+  double sampling_rate = 1;               // 0.0 ≤ rate ≤ 1.0
+  repeated string event_patterns = 2;     // glob-style patterns (e.g. "python.*")
+}
+
+message TelemetryEventFilter {
+  repeated string allow = 1;              // explicit whitelist
+  repeated string deny = 2;               // explicit blacklist
 }

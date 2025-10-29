@@ -14,7 +14,7 @@ from snakepit_bridge import telemetry
 def test_span_uses_incoming_correlation_metadata():
     metadata = ("x-snakepit-correlation-id", "cid-123")
 
-    with telemetry.span("test-span", context_metadata=[metadata]):
+    with telemetry.otel_span("test-span", context_metadata=[metadata]):
         assert telemetry.get_correlation_id() == "cid-123"
 
     assert telemetry.get_correlation_id() is None

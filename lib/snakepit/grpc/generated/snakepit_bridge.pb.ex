@@ -428,6 +428,97 @@ defmodule Snakepit.Bridge.ExecuteElixirToolResponse do
   field(:execution_time_ms, 5, type: :int64, json_name: "executionTimeMs")
 end
 
+defmodule Snakepit.Bridge.TelemetryEvent.MeasurementsEntry do
+  @moduledoc false
+
+  use Protobuf, map: true, protoc_gen_elixir_version: "0.15.0", syntax: :proto3
+
+  field(:key, 1, type: :string)
+  field(:value, 2, type: Snakepit.Bridge.TelemetryValue)
+end
+
+defmodule Snakepit.Bridge.TelemetryEvent.MetadataEntry do
+  @moduledoc false
+
+  use Protobuf, map: true, protoc_gen_elixir_version: "0.15.0", syntax: :proto3
+
+  field(:key, 1, type: :string)
+  field(:value, 2, type: :string)
+end
+
+defmodule Snakepit.Bridge.TelemetryEvent do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.15.0", syntax: :proto3
+
+  field(:event_parts, 1, repeated: true, type: :string, json_name: "eventParts")
+
+  field(:measurements, 2,
+    repeated: true,
+    type: Snakepit.Bridge.TelemetryEvent.MeasurementsEntry,
+    map: true
+  )
+
+  field(:metadata, 3,
+    repeated: true,
+    type: Snakepit.Bridge.TelemetryEvent.MetadataEntry,
+    map: true
+  )
+
+  field(:timestamp_ns, 4, type: :int64, json_name: "timestampNs")
+  field(:correlation_id, 5, type: :string, json_name: "correlationId")
+end
+
+defmodule Snakepit.Bridge.TelemetryValue do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.15.0", syntax: :proto3
+
+  oneof(:value, 0)
+
+  field(:int_value, 1, type: :int64, json_name: "intValue", oneof: 0)
+  field(:float_value, 2, type: :double, json_name: "floatValue", oneof: 0)
+  field(:string_value, 3, type: :string, json_name: "stringValue", oneof: 0)
+end
+
+defmodule Snakepit.Bridge.TelemetryControl do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.15.0", syntax: :proto3
+
+  oneof(:control, 0)
+
+  field(:toggle, 1, type: Snakepit.Bridge.TelemetryToggle, oneof: 0)
+  field(:sampling, 2, type: Snakepit.Bridge.TelemetrySamplingUpdate, oneof: 0)
+  field(:filter, 3, type: Snakepit.Bridge.TelemetryEventFilter, oneof: 0)
+end
+
+defmodule Snakepit.Bridge.TelemetryToggle do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.15.0", syntax: :proto3
+
+  field(:enabled, 1, type: :bool)
+end
+
+defmodule Snakepit.Bridge.TelemetrySamplingUpdate do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.15.0", syntax: :proto3
+
+  field(:sampling_rate, 1, type: :double, json_name: "samplingRate")
+  field(:event_patterns, 2, repeated: true, type: :string, json_name: "eventPatterns")
+end
+
+defmodule Snakepit.Bridge.TelemetryEventFilter do
+  @moduledoc false
+
+  use Protobuf, protoc_gen_elixir_version: "0.15.0", syntax: :proto3
+
+  field(:allow, 1, repeated: true, type: :string)
+  field(:deny, 2, repeated: true, type: :string)
+end
+
 defmodule Snakepit.Bridge.BridgeService.Service do
   @moduledoc false
 
@@ -471,6 +562,12 @@ defmodule Snakepit.Bridge.BridgeService.Service do
     :ExecuteElixirTool,
     Snakepit.Bridge.ExecuteElixirToolRequest,
     Snakepit.Bridge.ExecuteElixirToolResponse
+  )
+
+  rpc(
+    :StreamTelemetry,
+    stream(Snakepit.Bridge.TelemetryControl),
+    stream(Snakepit.Bridge.TelemetryEvent)
   )
 end
 

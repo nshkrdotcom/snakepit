@@ -230,7 +230,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         self.safety_monitor.record_access("Ping")
         metadata = context.invocation_metadata()
 
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/Ping",
             context_metadata=metadata,
             attributes={"snakepit.thread": threading.current_thread().name},
@@ -252,7 +252,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         metadata = context.invocation_metadata()
         logger.debug(f"[{threading.current_thread().name}] Proxying InitializeSession: {request.session_id}")
 
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/InitializeSession",
             context_metadata=metadata,
             attributes={"snakepit.session_id": request.session_id},
@@ -265,7 +265,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         metadata = context.invocation_metadata()
         logger.debug(f"[{threading.current_thread().name}] Proxying CleanupSession: {request.session_id}")
 
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/CleanupSession",
             context_metadata=metadata,
             attributes={"snakepit.session_id": request.session_id},
@@ -277,7 +277,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         metadata = context.invocation_metadata()
         logger.debug(f"[{threading.current_thread().name}] Proxying GetSession: {request.session_id}")
 
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/GetSession",
             context_metadata=metadata,
             attributes={"snakepit.session_id": request.session_id},
@@ -287,7 +287,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def Heartbeat(self, request, context):
         """Heartbeat - proxy to Elixir"""
         metadata = context.invocation_metadata()
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/Heartbeat",
             context_metadata=metadata,
             attributes={"snakepit.session_id": request.session_id},
@@ -298,7 +298,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
     async def RegisterVariable(self, request, context):
         metadata = context.invocation_metadata()
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/RegisterVariable",
             context_metadata=metadata,
             attributes={"snakepit.variable": request.name},
@@ -307,7 +307,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
     async def GetVariable(self, request, context):
         metadata = context.invocation_metadata()
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/GetVariable",
             context_metadata=metadata,
             attributes={"snakepit.variable": request.variable_identifier},
@@ -316,7 +316,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
     async def SetVariable(self, request, context):
         metadata = context.invocation_metadata()
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/SetVariable",
             context_metadata=metadata,
             attributes={"snakepit.variable": request.variable_identifier},
@@ -325,7 +325,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
     async def GetVariables(self, request, context):
         metadata = context.invocation_metadata()
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/GetVariables",
             context_metadata=metadata,
             attributes={"snakepit.variable_count": len(request.variable_identifiers)},
@@ -334,7 +334,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
     async def SetVariables(self, request, context):
         metadata = context.invocation_metadata()
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/SetVariables",
             context_metadata=metadata,
             attributes={"snakepit.variable_count": len(request.updates)},
@@ -343,7 +343,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
     async def ListVariables(self, request, context):
         metadata = context.invocation_metadata()
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/ListVariables",
             context_metadata=metadata,
             attributes={"snakepit.pattern": request.pattern},
@@ -352,7 +352,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
     async def DeleteVariable(self, request, context):
         metadata = context.invocation_metadata()
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/DeleteVariable",
             context_metadata=metadata,
             attributes={"snakepit.variable": request.variable_identifier},
@@ -370,7 +370,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         start_time = time.time()
 
         try:
-            with telemetry.span(
+            with telemetry.otel_span(
                 "BridgeService/ExecuteTool",
                 context_metadata=metadata,
                 attributes={
@@ -486,7 +486,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         metadata = context.invocation_metadata()
 
         try:
-            with telemetry.span(
+            with telemetry.otel_span(
                 "BridgeService/ExecuteStreamingTool",
                 context_metadata=metadata,
                 attributes={
@@ -672,7 +672,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def AddDependency(self, request, context):
         metadata = context.invocation_metadata()
         logger.debug("Proxying AddDependency (threaded)")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/AddDependency",
             context_metadata=metadata,
         ):
@@ -681,7 +681,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def StartOptimization(self, request, context):
         metadata = context.invocation_metadata()
         logger.debug("Proxying StartOptimization (threaded)")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/StartOptimization",
             context_metadata=metadata,
         ):
@@ -690,7 +690,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def StopOptimization(self, request, context):
         metadata = context.invocation_metadata()
         logger.debug("Proxying StopOptimization (threaded)")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/StopOptimization",
             context_metadata=metadata,
         ):
@@ -699,7 +699,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def GetVariableHistory(self, request, context):
         metadata = context.invocation_metadata()
         logger.debug("Proxying GetVariableHistory (threaded)")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/GetVariableHistory",
             context_metadata=metadata,
         ):
@@ -708,7 +708,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     async def RollbackVariable(self, request, context):
         metadata = context.invocation_metadata()
         logger.debug("Proxying RollbackVariable (threaded)")
-        with telemetry.span(
+        with telemetry.otel_span(
             "BridgeService/RollbackVariable",
             context_metadata=metadata,
         ):

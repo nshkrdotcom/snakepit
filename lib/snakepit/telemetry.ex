@@ -1,6 +1,31 @@
 defmodule Snakepit.Telemetry do
   @moduledoc """
   Telemetry event definitions for Snakepit.
+
+  This module provides:
+  - Complete event catalog (Layer 1: Infrastructure, Layer 2: Python, Layer 3: gRPC)
+  - Event handler management
+  - Integration with the distributed telemetry system
+
+  See `Snakepit.Telemetry.Naming` for event name validation and atom safety.
+  See `Snakepit.Telemetry.GrpcStream` for Python telemetry folding.
+
+  ## Usage
+
+      # Attach handlers to specific events
+      :telemetry.attach(
+        "my-handler",
+        [:snakepit, :python, :call, :stop],
+        &MyApp.Telemetry.handle_python_call/4,
+        nil
+      )
+
+      # Emit a pool event
+      :telemetry.execute(
+        [:snakepit, :pool, :worker, :spawned],
+        %{duration: 1000, system_time: System.system_time()},
+        %{node: node(), worker_id: "worker_1", pool_name: :default}
+      )
   """
 
   require Logger
@@ -10,11 +35,16 @@ defmodule Snakepit.Telemetry do
   Lists all telemetry events used by Snakepit.
   """
   def events do
-    session_events() ++ program_events() ++ heartbeat_events()
+    session_events() ++
+      program_events() ++
+      heartbeat_events() ++
+      pool_events() ++ python_events() ++ grpc_events()
   end
 
+  ## Layer 0: Session Store & Heartbeat (Legacy)
+
   @doc """
-  Session-related telemetry events.
+  Session-related telemetry events (session store).
   """
   def session_events do
     [
@@ -26,7 +56,7 @@ defmodule Snakepit.Telemetry do
   end
 
   @doc """
-  Program-related telemetry events.
+  Program-related telemetry events (session store).
   """
   def program_events do
     [
@@ -47,6 +77,70 @@ defmodule Snakepit.Telemetry do
       [:snakepit, :heartbeat, :ping_sent],
       [:snakepit, :heartbeat, :pong_received],
       [:snakepit, :heartbeat, :heartbeat_timeout]
+    ]
+  end
+
+  ## Layer 1: Infrastructure Events (Pool, Worker, Session)
+
+  @doc """
+  Pool and worker lifecycle events.
+  """
+  def pool_events do
+    [
+      [:snakepit, :pool, :initialized],
+      [:snakepit, :pool, :status],
+      [:snakepit, :pool, :queue, :enqueued],
+      [:snakepit, :pool, :queue, :dequeued],
+      [:snakepit, :pool, :queue, :timeout],
+      [:snakepit, :pool, :worker, :spawn_started],
+      [:snakepit, :pool, :worker, :spawned],
+      [:snakepit, :pool, :worker, :spawn_failed],
+      [:snakepit, :pool, :worker, :terminated],
+      [:snakepit, :pool, :worker, :restarted],
+      [:snakepit, :session, :created],
+      [:snakepit, :session, :destroyed],
+      [:snakepit, :session, :affinity, :assigned],
+      [:snakepit, :session, :affinity, :broken]
+    ]
+  end
+
+  ## Layer 2: Python Execution Events (Folded from Python)
+
+  @doc """
+  Python worker telemetry events (folded back from Python workers).
+  """
+  def python_events do
+    [
+      [:snakepit, :python, :call, :start],
+      [:snakepit, :python, :call, :stop],
+      [:snakepit, :python, :call, :exception],
+      [:snakepit, :python, :memory, :sampled],
+      [:snakepit, :python, :cpu, :sampled],
+      [:snakepit, :python, :gc, :completed],
+      [:snakepit, :python, :error, :occurred],
+      [:snakepit, :python, :tool, :execution, :start],
+      [:snakepit, :python, :tool, :execution, :stop],
+      [:snakepit, :python, :tool, :execution, :exception],
+      [:snakepit, :python, :tool, :result_size]
+    ]
+  end
+
+  ## Layer 3: gRPC Bridge Events
+
+  @doc """
+  gRPC communication events.
+  """
+  def grpc_events do
+    [
+      [:snakepit, :grpc, :call, :start],
+      [:snakepit, :grpc, :call, :stop],
+      [:snakepit, :grpc, :call, :exception],
+      [:snakepit, :grpc, :stream, :opened],
+      [:snakepit, :grpc, :stream, :message],
+      [:snakepit, :grpc, :stream, :closed],
+      [:snakepit, :grpc, :connection, :established],
+      [:snakepit, :grpc, :connection, :lost],
+      [:snakepit, :grpc, :connection, :reconnected]
     ]
   end
 

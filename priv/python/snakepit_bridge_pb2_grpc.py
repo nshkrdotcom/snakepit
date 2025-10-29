@@ -84,6 +84,11 @@ class BridgeServiceStub(object):
                 request_serializer=snakepit__bridge__pb2.ExecuteElixirToolRequest.SerializeToString,
                 response_deserializer=snakepit__bridge__pb2.ExecuteElixirToolResponse.FromString,
                 _registered_method=True)
+        self.StreamTelemetry = channel.stream_stream(
+                '/snakepit.bridge.BridgeService/StreamTelemetry',
+                request_serializer=snakepit__bridge__pb2.TelemetryControl.SerializeToString,
+                response_deserializer=snakepit__bridge__pb2.TelemetryEvent.FromString,
+                _registered_method=True)
 
 
 class BridgeServiceServicer(object):
@@ -152,6 +157,13 @@ class BridgeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StreamTelemetry(self, request_iterator, context):
+        """Telemetry Stream (bidirectional)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_BridgeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -204,6 +216,11 @@ def add_BridgeServiceServicer_to_server(servicer, server):
                     servicer.ExecuteElixirTool,
                     request_deserializer=snakepit__bridge__pb2.ExecuteElixirToolRequest.FromString,
                     response_serializer=snakepit__bridge__pb2.ExecuteElixirToolResponse.SerializeToString,
+            ),
+            'StreamTelemetry': grpc.stream_stream_rpc_method_handler(
+                    servicer.StreamTelemetry,
+                    request_deserializer=snakepit__bridge__pb2.TelemetryControl.FromString,
+                    response_serializer=snakepit__bridge__pb2.TelemetryEvent.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -476,6 +493,33 @@ class BridgeService(object):
             '/snakepit.bridge.BridgeService/ExecuteElixirTool',
             snakepit__bridge__pb2.ExecuteElixirToolRequest.SerializeToString,
             snakepit__bridge__pb2.ExecuteElixirToolResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StreamTelemetry(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/snakepit.bridge.BridgeService/StreamTelemetry',
+            snakepit__bridge__pb2.TelemetryControl.SerializeToString,
+            snakepit__bridge__pb2.TelemetryEvent.FromString,
             options,
             channel_credentials,
             insecure,
