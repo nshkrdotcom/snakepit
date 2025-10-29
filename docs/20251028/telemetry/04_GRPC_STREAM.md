@@ -243,11 +243,16 @@ processes retain a narrow API.
 ```elixir
 # lib/snakepit/telemetry/control.ex
 defmodule Snakepit.Telemetry.Control do
-  alias Snakepit.Bridge.TelemetryControl
+  alias Snakepit.Bridge.{
+    TelemetryControl,
+    TelemetryEventFilter,
+    TelemetrySamplingUpdate,
+    TelemetryToggle
+  }
 
   def toggle(enabled) do
     %TelemetryControl{
-      control: {:toggle, %TelemetryControl.TelemetryToggle{enabled: enabled}}
+      control: {:toggle, %TelemetryToggle{enabled: enabled}}
     }
   end
 
@@ -255,7 +260,7 @@ defmodule Snakepit.Telemetry.Control do
     %TelemetryControl{
       control:
         {:sampling,
-         %TelemetryControl.TelemetrySamplingUpdate{
+         %TelemetrySamplingUpdate{
            sampling_rate: rate,
            event_patterns: Enum.map(patterns, &to_string/1)
          }}
@@ -266,7 +271,7 @@ defmodule Snakepit.Telemetry.Control do
     %TelemetryControl{
       control:
         {:filter,
-         %TelemetryControl.TelemetryEventFilter{
+         %TelemetryEventFilter{
            allow: Enum.map(allow, &to_string/1),
            deny: Enum.map(deny, &to_string/1)
          }}
@@ -331,10 +336,14 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
   def handle_cast({:update_sampling, worker_id, rate, patterns}, state) do
     with %{stream: stream} <- Map.get(state.streams, worker_id) do
-      _ = GRPC.Stub.send_request(stream, Control.sampling(rate, patterns))
-    end
+      updated_stream = GRPC.Stub.send_request(stream, Control.sampling(rate, patterns))
 
-    {:noreply, state}
+      {:noreply,
+       put_in(state, [:streams, worker_id, :stream], updated_stream)}
+    else
+      _ ->
+        {:noreply, state}
+    end
   end
 
   defp consume(stream, worker_ctx) do
