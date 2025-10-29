@@ -4,7 +4,7 @@ defmodule Snakepit do
 
   Extracted from DSPex V3 pool implementation, Snakepit provides:
   - Concurrent worker initialization and management
-  - Stateless pool system with session affinity 
+  - Stateless pool system with session affinity
   - Generalized adapter pattern for any external process
   - High-performance OTP-based process management
 
@@ -17,7 +17,7 @@ defmodule Snakepit do
 
       # Execute commands on any available worker
       {:ok, result} = Snakepit.execute("ping", %{test: true})
-      
+
       # Session-based execution with worker affinity
       {:ok, result} = Snakepit.execute_in_session("my_session", "command", %{})
 
@@ -31,9 +31,28 @@ defmodule Snakepit do
       )
   """
 
+  # Type definitions
+  @type command :: String.t()
+  @type args :: map()
+  @type result :: term()
+  @type session_id :: String.t()
+  @type callback_fn :: (term() -> any())
+  @type pool_name :: atom() | pid()
+
   @doc """
   Convenience function to execute commands on the pool.
+
+  ## Examples
+
+      {:ok, result} = Snakepit.execute("ping", %{test: true})
+
+  ## Options
+
+    * `:pool` - The pool to use (default: `Snakepit.Pool`)
+    * `:timeout` - Request timeout in ms (default: 60000)
+    * `:session_id` - Execute with session affinity
   """
+  @spec execute(command(), args(), keyword()) :: {:ok, result()} | {:error, Snakepit.Error.t()}
   def execute(command, args, opts \\ []) do
     Snakepit.Pool.execute(command, args, opts)
   end
@@ -48,6 +67,8 @@ defmodule Snakepit do
   Args are passed through unchanged - no domain-specific enhancement.
   For ML/DSP program workflows, use `Snakepit.SessionHelpers.execute_program_command/4`.
   """
+  @spec execute_in_session(session_id(), command(), args(), keyword()) ::
+          {:ok, result()} | {:error, Snakepit.Error.t()}
   def execute_in_session(session_id, command, args, opts \\ []) do
     # Add session_id to opts for session affinity
     opts_with_session = Keyword.put(opts, :session_id, session_id)
@@ -58,14 +79,20 @@ defmodule Snakepit do
 
   @doc """
   Get pool statistics.
+
+  Returns aggregate stats across all pools or stats for a specific pool.
   """
+  @spec get_stats(pool_name()) :: map()
   def get_stats(pool \\ Snakepit.Pool) do
     Snakepit.Pool.get_stats(pool)
   end
 
   @doc """
   List workers from the pool.
+
+  Returns a list of worker IDs.
   """
+  @spec list_workers(pool_name()) :: [String.t()]
   def list_workers(pool \\ Snakepit.Pool) do
     Snakepit.Pool.list_workers(pool)
   end
@@ -87,18 +114,22 @@ defmodule Snakepit do
 
   ## Returns
 
-  Returns `:ok` on success or `{:error, reason}` on failure.
+  Returns `:ok` on success or `{:error, %Snakepit.Error{}}` on failure.
 
   Note: Streaming is only supported with gRPC adapters.
   """
-  @spec execute_stream(String.t(), map(), function(), keyword()) :: :ok | {:error, term()}
+  @spec execute_stream(command(), args(), callback_fn(), keyword()) ::
+          :ok | {:error, Snakepit.Error.t()}
   def execute_stream(command, args \\ %{}, callback_fn, opts \\ []) do
     ensure_started!()
 
     adapter = Application.get_env(:snakepit, :adapter_module)
 
     unless function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
-      {:error, :streaming_not_supported}
+      {:error,
+       Snakepit.Error.validation_error("Streaming not supported by adapter", %{
+         adapter: adapter
+       })}
     else
       Snakepit.Pool.execute_stream(command, args, callback_fn, opts)
     end
@@ -107,15 +138,18 @@ defmodule Snakepit do
   @doc """
   Executes a command in a session with a callback function.
   """
-  @spec execute_in_session_stream(String.t(), String.t(), map(), function(), keyword()) ::
-          :ok | {:error, term()}
+  @spec execute_in_session_stream(session_id(), command(), args(), callback_fn(), keyword()) ::
+          :ok | {:error, Snakepit.Error.t()}
   def execute_in_session_stream(session_id, command, args \\ %{}, callback_fn, opts \\ []) do
     ensure_started!()
 
     adapter = Application.get_env(:snakepit, :adapter_module)
 
     unless function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
-      {:error, :streaming_not_supported}
+      {:error,
+       Snakepit.Error.validation_error("Streaming not supported by adapter", %{
+         adapter: adapter
+       })}
     else
       opts_with_session = Keyword.put(opts, :session_id, session_id)
       Snakepit.Pool.execute_stream(command, args, callback_fn, opts_with_session)
@@ -200,7 +234,7 @@ defmodule Snakepit do
           end
         end
 
-      {:error, :timeout} ->
+      {:error, %Snakepit.Error{category: :timeout}} ->
         IO.puts("[Snakepit] Error: Pool failed to initialize within #{timeout}ms")
         Application.stop(:snakepit)
         {:error, :pool_initialization_timeout}

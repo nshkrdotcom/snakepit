@@ -12,6 +12,7 @@ defmodule Snakepit.Pool do
 
   use GenServer
   require Logger
+  alias Snakepit.Error
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Logger.Redaction
 
@@ -121,7 +122,12 @@ defmodule Snakepit.Pool do
       result
     else
       SLog.error("[Pool] Worker module #{worker_module} does not export execute_stream/5")
-      {:error, :streaming_not_supported_by_worker}
+
+      {:error,
+       Error.worker_error("Streaming not supported by worker", %{
+         worker_module: worker_module,
+         worker_id: worker_id
+       })}
     end
   end
 
@@ -155,14 +161,19 @@ defmodule Snakepit.Pool do
   @doc """
   Waits for the pool to be fully initialized.
 
-  Returns `:ok` when all workers are ready, or `{:error, :timeout}` if
+  Returns `:ok` when all workers are ready, or `{:error, %Snakepit.Error{}}` if
   the pool doesn't initialize within the given timeout.
   """
-  @spec await_ready(atom() | pid(), timeout()) :: :ok | {:error, :timeout}
+  @spec await_ready(atom() | pid(), timeout()) :: :ok | {:error, Error.t()}
   def await_ready(pool \\ __MODULE__, timeout \\ 15_000) do
     GenServer.call(pool, :await_ready, timeout)
   catch
-    :exit, {:timeout, _} -> {:error, :timeout}
+    :exit, {:timeout, _} ->
+      {:error,
+       Error.timeout_error("Pool initialization timed out", %{
+         pool: pool,
+         timeout_ms: timeout
+       })}
   end
 
   # Server Callbacks
