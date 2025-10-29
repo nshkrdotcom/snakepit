@@ -15,6 +15,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
   use GenServer
   require Logger
 
+  alias GRPC.Channel
   alias Snakepit.Bridge.{BridgeService, TelemetryEvent}
   alias Snakepit.Telemetry.{Control, Naming, SafeMetadata}
 
@@ -50,7 +51,18 @@ defmodule Snakepit.Telemetry.GrpcStream do
       :ok
   """
   def register_worker(channel, worker_ctx) do
-    GenServer.cast(__MODULE__, {:register_worker, channel, worker_ctx})
+    if stream_capable_channel?(channel) do
+      GenServer.cast(__MODULE__, {:register_worker, channel, worker_ctx})
+    else
+      Logger.debug(
+        "Skipping telemetry stream registration; channel unsupported",
+        worker_id: worker_ctx.worker_id,
+        pool_name: worker_ctx.pool_name,
+        channel_type: describe_channel(channel)
+      )
+
+      :ok
+    end
   end
 
   @doc """
@@ -95,7 +107,10 @@ defmodule Snakepit.Telemetry.GrpcStream do
   Gets the current state of all registered streams.
   """
   def list_streams do
-    GenServer.call(__MODULE__, :list_streams)
+    case Process.whereis(__MODULE__) do
+      nil -> []
+      pid -> GenServer.call(pid, :list_streams)
+    end
   end
 
   ## Server Callbacks
@@ -162,23 +177,28 @@ defmodule Snakepit.Telemetry.GrpcStream do
       %{stream: stream} ->
         control_msg = Control.sampling(rate, patterns)
 
-        case GRPC.Stub.send_request(stream, control_msg) do
-          {:ok, _} ->
-            Logger.debug("Updated sampling for worker #{worker_id} to #{rate}",
-              worker_id: worker_id,
-              rate: rate,
-              patterns: patterns
-            )
+        new_state =
+          case send_control_request(stream, control_msg) do
+            {:ok, updated_stream} ->
+              Logger.debug("Updated sampling for worker #{worker_id} to #{rate}",
+                worker_id: worker_id,
+                rate: rate,
+                patterns: patterns
+              )
 
-          {:error, reason} ->
-            Logger.warning(
-              "Failed to update sampling for worker #{worker_id}: #{inspect(reason)}",
-              worker_id: worker_id,
-              reason: reason
-            )
-        end
+              put_in(state, [:streams, worker_id, :stream], updated_stream)
 
-        {:noreply, state}
+            {:error, reason} ->
+              Logger.warning(
+                "Failed to update sampling for worker #{worker_id}: #{inspect(reason)}",
+                worker_id: worker_id,
+                reason: reason
+              )
+
+              state
+          end
+
+        {:noreply, new_state}
     end
   end
 
@@ -191,22 +211,27 @@ defmodule Snakepit.Telemetry.GrpcStream do
       %{stream: stream} ->
         control_msg = Control.toggle(enabled)
 
-        case GRPC.Stub.send_request(stream, control_msg) do
-          {:ok, _} ->
-            Logger.debug("Toggled telemetry for worker #{worker_id} to #{enabled}",
-              worker_id: worker_id,
-              enabled: enabled
-            )
+        new_state =
+          case send_control_request(stream, control_msg) do
+            {:ok, updated_stream} ->
+              Logger.debug("Toggled telemetry for worker #{worker_id} to #{enabled}",
+                worker_id: worker_id,
+                enabled: enabled
+              )
 
-          {:error, reason} ->
-            Logger.warning(
-              "Failed to toggle telemetry for worker #{worker_id}: #{inspect(reason)}",
-              worker_id: worker_id,
-              reason: reason
-            )
-        end
+              put_in(state, [:streams, worker_id, :stream], updated_stream)
 
-        {:noreply, state}
+            {:error, reason} ->
+              Logger.warning(
+                "Failed to toggle telemetry for worker #{worker_id}: #{inspect(reason)}",
+                worker_id: worker_id,
+                reason: reason
+              )
+
+              state
+          end
+
+        {:noreply, new_state}
     end
   end
 
@@ -219,19 +244,24 @@ defmodule Snakepit.Telemetry.GrpcStream do
       %{stream: stream} ->
         control_msg = Control.filter(opts)
 
-        case GRPC.Stub.send_request(stream, control_msg) do
-          {:ok, _} ->
-            Logger.debug("Updated filters for worker #{worker_id}", worker_id: worker_id)
+        new_state =
+          case send_control_request(stream, control_msg) do
+            {:ok, updated_stream} ->
+              Logger.debug("Updated filters for worker #{worker_id}", worker_id: worker_id)
 
-          {:error, reason} ->
-            Logger.warning(
-              "Failed to update filters for worker #{worker_id}: #{inspect(reason)}",
-              worker_id: worker_id,
-              reason: reason
-            )
-        end
+              put_in(state, [:streams, worker_id, :stream], updated_stream)
 
-        {:noreply, state}
+            {:error, reason} ->
+              Logger.warning(
+                "Failed to update filters for worker #{worker_id}: #{inspect(reason)}",
+                worker_id: worker_id,
+                reason: reason
+              )
+
+              state
+          end
+
+        {:noreply, new_state}
     end
   end
 
@@ -263,11 +293,52 @@ defmodule Snakepit.Telemetry.GrpcStream do
     {:noreply, state}
   end
 
+  @impl true
+  def handle_info({:gun_response, _pid, _stream_ref, _fin, status, headers}, state) do
+    Logger.debug("Telemetry stream HTTP response received", status: status, headers: headers)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:gun_data, _pid, _stream_ref, _is_fin, _data}, state) do
+    # gRPC data frames are consumed by GRPC.Stub.recv/2; ignore low-level messages.
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:gun_down, _pid, _proto, _reason, _killed_streams, _}, state) do
+    Logger.debug("Telemetry stream HTTP connection closed by gun")
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:gun_error, _pid, _stream_ref, reason}, state) do
+    Logger.debug("Telemetry stream HTTP error from gun", reason: reason)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(_message, state) do
+    {:noreply, state}
+  end
+
   ## Private Helpers
+
+  defp send_control_request(stream, control_msg) do
+    try do
+      {:ok, GRPC.Stub.send_request(stream, control_msg)}
+    rescue
+      error ->
+        {:error, error}
+    catch
+      :exit, reason ->
+        {:error, reason}
+    end
+  end
 
   defp initiate_stream(channel, worker_ctx) do
     # Use longer timeout for stream operations
-    case BridgeService.Stub.stream_telemetry(channel, timeout: :infinity) do
+    case channel |> open_telemetry_stream() |> normalize_stream_response() do
       {:ok, stream} ->
         # Send initial toggle message to enable telemetry
         stream = GRPC.Stub.send_request(stream, Control.toggle(true))
@@ -291,6 +362,20 @@ defmodule Snakepit.Telemetry.GrpcStream do
         {:error, reason}
     end
   end
+
+  defp open_telemetry_stream(channel) do
+    try do
+      BridgeService.Stub.stream_telemetry(channel, timeout: :infinity)
+    rescue
+      exception ->
+        {:error, {:invalid_channel, exception}}
+    end
+  end
+
+  defp normalize_stream_response({:ok, %GRPC.Client.Stream{} = stream}), do: {:ok, stream}
+  defp normalize_stream_response(%GRPC.Client.Stream{} = stream), do: {:ok, stream}
+  defp normalize_stream_response({:error, _reason} = error), do: error
+  defp normalize_stream_response(other), do: {:error, {:unexpected_stream_response, other}}
 
   defp consume_stream(stream, worker_ctx) do
     case GRPC.Stub.recv(stream, timeout: :infinity) do
@@ -324,6 +409,23 @@ defmodule Snakepit.Telemetry.GrpcStream do
         )
     end
   end
+
+  defp stream_capable_channel?(%Channel{}), do: true
+
+  defp stream_capable_channel?(%{__struct__: module}) when is_atom(module) do
+    String.starts_with?(Atom.to_string(module), "GRPC.")
+  end
+
+  defp stream_capable_channel?(_), do: false
+
+  defp describe_channel(%Channel{}), do: "GRPC.Channel"
+  defp describe_channel(%{__struct__: module}) when is_atom(module), do: Atom.to_string(module)
+  defp describe_channel(channel) when is_reference(channel), do: "reference"
+  defp describe_channel(channel) when is_pid(channel), do: "pid"
+  defp describe_channel(channel) when is_map(channel), do: "map"
+  defp describe_channel(channel) when is_binary(channel), do: "binary"
+  defp describe_channel(channel) when is_list(channel), do: "list"
+  defp describe_channel(channel), do: inspect(channel)
 
   defp translate_and_emit(event, worker_ctx) do
     with {:ok, event_name} <- Naming.from_parts(event.event_parts),

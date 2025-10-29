@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 - **New `TELEMETRY.md`**: Complete user guide for the distributed telemetry system with usage examples, integration patterns for Prometheus/StatsD/OpenTelemetry, and troubleshooting guidance (320 lines).
 - **Telemetry design docs**: 9 comprehensive design documents covering architecture, event catalog, Python integration, client guide, gRPC implementation, and backend architecture (`docs/20251028/telemetry/`).
+- **New examples**: 5 comprehensive examples demonstrating v0.6.7 features with ~50KB of production-ready code:
+  - `examples/telemetry_basic.exs` - Introduction to telemetry handlers and Python telemetry API
+  - `examples/telemetry_advanced.exs` - Correlation tracking, performance monitoring, runtime control
+  - `examples/telemetry_monitoring.exs` - Production monitoring patterns with real-time dashboard
+  - `examples/telemetry_metrics_integration.exs` - Prometheus/StatsD integration patterns
+  - `examples/structured_errors.exs` - New `Snakepit.Error` struct usage and pattern matching
+- **Updated `examples/README.md`**: Comprehensive guide to all examples with clear learning paths and troubleshooting.
 - Updated README.md with v0.6.7 release notes highlighting type system improvements, performance gains, and telemetry system.
 - Updated mix.exs version to 0.6.7 with `TELEMETRY.md` in package files and docs extras.
 - Added comprehensive test coverage for structured error types (12 new tests in `test/unit/error_test.exs`).

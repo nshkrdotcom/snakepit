@@ -1462,10 +1462,8 @@ defmodule Snakepit.Pool do
   end
 
   defp module_atom?(atom) when is_atom(atom) do
-    Atom.to_string(atom) |> String.starts_with?("Elixir.")
+    atom |> Atom.to_string() |> String.starts_with?("Elixir.")
   end
-
-  defp module_atom?(_), do: false
 
   defp infer_pool_from_id(worker_id) do
     case String.split(worker_id, "_worker_", parts: 2) do
