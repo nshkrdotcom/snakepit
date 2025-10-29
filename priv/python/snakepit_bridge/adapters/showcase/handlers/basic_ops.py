@@ -4,6 +4,7 @@ import time
 from typing import Dict, Any
 from datetime import datetime
 from ..tool import Tool
+from snakepit_bridge import telemetry
 
 
 class BasicOpsHandler:
@@ -17,6 +18,7 @@ class BasicOpsHandler:
             "add": Tool(self.add),
             "error_demo": Tool(self.error_demo),
             "adapter_info": Tool(self.adapter_info),
+            "telemetry_demo": Tool(self.telemetry_demo),
         }
     
     def ping(self, ctx, message: str = "pong") -> Dict[str, str]:
@@ -59,4 +61,50 @@ class BasicOpsHandler:
                 "ConcurrentOpsHandler",
                 "MLWorkflowHandler"
             ]
+        }
+
+    def telemetry_demo(self, ctx, operation: str = "compute", delay_ms: int = 100) -> Dict[str, Any]:
+        """
+        Demonstrate telemetry emission from Python.
+
+        This tool shows how to use the telemetry API to emit events that are
+        captured by Elixir and made available to :telemetry handlers.
+
+        Args:
+            ctx: Session context
+            operation: Name of the operation to simulate
+            delay_ms: How long to simulate work (milliseconds)
+
+        Returns:
+            Dict with operation results and telemetry info
+        """
+        correlation_id = telemetry.get_correlation_id()
+
+        # Example 1: Manual event emission
+        telemetry.emit(
+            "tool.execution.start",
+            {"system_time": time.time_ns()},
+            {"tool": "telemetry_demo", "operation": operation},
+            correlation_id=correlation_id
+        )
+
+        # Example 2: Using span context manager (automatic timing)
+        with telemetry.span("tool.execution", {"tool": "telemetry_demo", "operation": operation}, correlation_id):
+            # Simulate some work
+            time.sleep(delay_ms / 1000.0)
+
+            # Emit a custom metric during the span
+            telemetry.emit(
+                "tool.result_size",
+                {"bytes": 42},
+                {"tool": "telemetry_demo"},
+                correlation_id=correlation_id
+            )
+
+        return {
+            "operation": operation,
+            "delay_ms": delay_ms,
+            "telemetry_enabled": telemetry.is_enabled(),
+            "correlation_id": correlation_id,
+            "message": "Telemetry events emitted successfully! Check Elixir :telemetry handlers."
         }

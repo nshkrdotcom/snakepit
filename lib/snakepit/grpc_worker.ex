@@ -475,6 +475,29 @@ defmodule Snakepit.GRPCWorker do
 
                   maybe_initialize_session(connection, state.session_id)
 
+                  # Register worker for telemetry streaming
+                  register_telemetry_stream(connection, state)
+
+                  # Emit worker spawned telemetry event
+                  start_time = Map.get(state.stats, :start_time, System.monotonic_time())
+
+                  :telemetry.execute(
+                    [:snakepit, :pool, :worker, :spawned],
+                    %{
+                      duration: System.monotonic_time() - start_time,
+                      system_time: System.system_time()
+                    },
+                    %{
+                      node: node(),
+                      pool_name: state.pool_name,
+                      worker_id: state.id,
+                      worker_pid: self(),
+                      python_port: actual_port,
+                      python_pid: state.process_pid,
+                      mode: :process
+                    }
+                  )
+
                   new_state =
                     state
                     |> Map.put(:connection, connection)
@@ -723,6 +746,26 @@ defmodule Snakepit.GRPCWorker do
 
     SLog.debug("gRPC worker #{state.id} terminating: #{inspect(reason)}")
 
+    # Emit worker terminated telemetry event
+    start_time = Map.get(state.stats, :start_time, 0)
+    total_commands = Map.get(state.stats, :requests, 0)
+
+    :telemetry.execute(
+      [:snakepit, :pool, :worker, :terminated],
+      %{
+        lifetime: System.monotonic_time() - start_time,
+        total_commands: total_commands
+      },
+      %{
+        node: node(),
+        pool_name: state.pool_name,
+        worker_id: state.id,
+        worker_pid: self(),
+        reason: reason,
+        planned: reason in [:shutdown, :normal]
+      }
+    )
+
     maybe_stop_heartbeat_monitor(state.heartbeat_monitor)
     maybe_notify_test_pid(state.heartbeat_config, {:heartbeat_monitor_stopped, state.id, reason})
 
@@ -775,6 +818,9 @@ defmodule Snakepit.GRPCWorker do
     if state.server_port do
       safe_close_port(state.server_port)
     end
+
+    # Unregister from telemetry stream
+    Snakepit.Telemetry.GrpcStream.unregister_worker(state.id)
 
     # *** CRITICAL: Unregister from ProcessRegistry as the very last step ***
     Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
@@ -918,6 +964,41 @@ defmodule Snakepit.GRPCWorker do
           :error
       end
     else
+      :error
+    end
+  end
+
+  defp register_telemetry_stream(connection, state) do
+    channel = connection && Map.get(connection, :channel)
+
+    if channel do
+      try do
+        worker_ctx = %{
+          worker_id: state.id,
+          pool_name: state.pool_name,
+          python_pid: state.process_pid
+        }
+
+        Snakepit.Telemetry.GrpcStream.register_worker(channel, worker_ctx)
+        SLog.debug("Registered telemetry stream for worker #{state.id}")
+        :ok
+      rescue
+        exception ->
+          SLog.warning(
+            "Failed to register telemetry stream for worker #{state.id}: #{inspect(exception)}"
+          )
+
+          :error
+      catch
+        :exit, reason ->
+          SLog.warning(
+            "Telemetry stream registration exited for worker #{state.id}: #{inspect(reason)}"
+          )
+
+          :error
+      end
+    else
+      SLog.debug("No channel available for telemetry stream registration")
       :error
     end
   end

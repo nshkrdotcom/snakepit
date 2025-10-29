@@ -27,6 +27,8 @@ from snakepit_bridge.session_context import SessionContext
 from snakepit_bridge.heartbeat import HeartbeatClient, HeartbeatConfig
 from snakepit_bridge.serialization import TypeSerializer
 from snakepit_bridge import telemetry
+from snakepit_bridge.telemetry.stream import TelemetryStream
+from snakepit_bridge.telemetry.backends.grpc import GrpcBackend
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf import any_pb2
 import json
@@ -173,10 +175,13 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         self.server: Optional[grpc.aio.Server] = None
         self.shutdown_event = shutdown_event
 
-        # Initialize telemetry stream (will be integrated in future)
-        # For now, this is a placeholder that prevents gRPC errors
-        # Full implementation will use snakepit_bridge.telemetry.stream.TelemetryStream
-        self.telemetry_stream = None
+        # Initialize telemetry stream
+        logger.debug("Initializing telemetry stream")
+        self.telemetry_stream = TelemetryStream(max_buffer=1024)
+
+        # Set the gRPC backend as the active telemetry backend
+        telemetry.set_backend(GrpcBackend(self.telemetry_stream))
+        logger.info("Telemetry backend initialized (gRPC stream)")
 
         logger.debug("Creating async channel to %s", elixir_address)
 
@@ -226,7 +231,15 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
     
     async def close(self):
         """Clean up resources."""
+        # Stop telemetry stream
+        if self.telemetry_stream:
+            logger.debug("Closing telemetry stream")
+            self.telemetry_stream.close()
+
+        # Stop heartbeat clients
         await self._stop_all_heartbeat_clients()
+
+        # Close gRPC channels
         if self.elixir_channel:
             await self.elixir_channel.close()
         if self.sync_elixir_channel:
@@ -712,22 +725,24 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
     async def StreamTelemetry(self, request_iterator, context):
         """
-        Telemetry stream handler (placeholder for Phase 2.1).
+        Bidirectional telemetry stream handler.
 
-        This will be fully implemented when telemetry streaming is integrated.
-        For now, this prevents gRPC errors when Elixir attempts to connect.
+        Receives control messages from Elixir (sampling, filtering, toggle)
+        and yields telemetry events from Python back to Elixir.
         """
-        logger.debug("StreamTelemetry called (placeholder)")
+        logger.debug("StreamTelemetry stream opened")
 
-        # Acknowledge the stream but don't emit any events yet
-        # This will be replaced with actual telemetry stream implementation
-        # when the TelemetryStream backend is integrated
-        async for control_message in request_iterator:
-            logger.debug("Received telemetry control message: %s", control_message)
+        try:
+            # Delegate to the TelemetryStream's stream handler
+            # This handles control message consumption and event yielding
+            async for event in self.telemetry_stream.stream(request_iterator, context):
+                yield event
 
-        # Stream stays open until client disconnects
-        return
-        yield  # Make this a generator
+            logger.debug("StreamTelemetry stream completed normally")
+
+        except Exception as e:
+            logger.error("StreamTelemetry stream error: %s", e, exc_info=True)
+            raise
 
     def set_server(self, server):
         """Set the server reference for graceful shutdown."""

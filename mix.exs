@@ -69,6 +69,7 @@ defmodule Snakepit.MixProject do
         "Online documentation" => "https://hexdocs.pm/snakepit",
         "Architecture Guide" => "https://hexdocs.pm/snakepit/ARCHITECTURE.html",
         "gRPC Streaming Guide" => "https://hexdocs.pm/snakepit/README_GRPC.html",
+        "Telemetry Guide" => "https://hexdocs.pm/snakepit/TELEMETRY.html",
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
       },
       files: [
@@ -99,6 +100,7 @@ defmodule Snakepit.MixProject do
         "README_TESTING.md",
         "README_UNIFIED_GRPC_BRIDGE.md",
         "ARCHITECTURE.md",
+        "TELEMETRY.md",
         "DIAGS.md",
         "DIAGS2.md",
         "LICENSE*",
@@ -156,6 +158,7 @@ defmodule Snakepit.MixProject do
         {"README_PROCESS_MANAGEMENT.md", title: "Process Management"},
         {"README_UNIFIED_GRPC_BRIDGE.md", title: "Unified gRPC Bridge"},
         {"README_TESTING.md", title: "Testing Guide"},
+        {"TELEMETRY.md", title: "Telemetry & Observability"},
 
         # Reference documentation
         {"docs/GRPC_QUICK_REFERENCE.md", title: "gRPC Quick Reference"},
@@ -190,7 +193,8 @@ defmodule Snakepit.MixProject do
           "README_GRPC.md",
           "README_BIDIRECTIONAL_TOOL_BRIDGE.md",
           "README_PROCESS_MANAGEMENT.md",
-          "README_UNIFIED_GRPC_BRIDGE.md"
+          "README_UNIFIED_GRPC_BRIDGE.md",
+          "TELEMETRY.md"
         ],
         Architecture: [
           "ARCHITECTURE.md",
@@ -253,8 +257,16 @@ defmodule Snakepit.MixProject do
           Snakepit.GRPC.Endpoint,
           Snakepit.Bridge.ToolRegistry
         ],
-        Utilities: [
+        Telemetry: [
           Snakepit.Telemetry,
+          Snakepit.Telemetry.GrpcStream,
+          Snakepit.Telemetry.Naming,
+          Snakepit.Telemetry.SafeMetadata,
+          Snakepit.Telemetry.Control,
+          Snakepit.Telemetry.Correlation,
+          Snakepit.TelemetryMetrics
+        ],
+        Utilities: [
           Snakepit.Utils,
           Snakepit.RunID
         ]
