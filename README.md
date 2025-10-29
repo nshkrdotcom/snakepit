@@ -141,12 +141,24 @@ For **non-DSPex users**, if you're using these classes directly:
 
 ## 🆕 What's New in v0.6.7
 
-**Type system + performance boost** – v0.6.7 introduces Phase 1 of the type system improvements: structured errors, complete type specifications, and 4-6x JSON performance boost.
+**Type system + performance + distributed telemetry** – v0.6.7 delivers two major enhancements: Phase 1 of the type system improvements with 6x performance boost, and a complete distributed telemetry system for full observability across Elixir clusters and Python workers.
 
+### Phase 1: Type System MVP + Performance
 - **6x JSON performance** – Python bridge now uses `orjson` for serialization, delivering 4-6x speedup for raw JSON operations and 1.5x improvement for large payloads with full backward compatibility (`priv/python/tests/test_orjson_integration.py`).
 - **Structured error types** – New `Snakepit.Error` struct provides detailed context for debugging with fields like `category`, `message`, `details`, `python_traceback`, and `grpc_status` (`lib/snakepit/error.ex`, `test/unit/error_test.exs`).
 - **Complete type specifications** – All public API functions in `Snakepit` module now have `@spec` annotations with structured error return types for better IDE support and Dialyzer analysis.
-- **Zero breaking changes** – All 235 existing tests pass; full backward compatibility maintained while adding new functionality.
+
+### Phase 2: Distributed Telemetry System
+- **Bidirectional telemetry streaming** – Python workers emit events via gRPC that are re-emitted as Elixir `:telemetry` events for unified observability across your entire stack.
+- **43 telemetry events** – Complete event catalog across 3 layers (Infrastructure, Python Execution, gRPC Bridge) with atom-safe event names.
+- **Python telemetry API** – High-level API with `telemetry.emit()` and `telemetry.span()` for automatic timing, plus correlation ID propagation.
+- **Runtime control** – Adjust sampling rates, enable/disable telemetry, and filter events for individual workers without restarts.
+- **Integration ready** – Works seamlessly with Prometheus, StatsD, OpenTelemetry, and other monitoring tools via `:telemetry.attach()`.
+- **High performance** – <10μs overhead per event, <1% CPU impact at 100% sampling, with bounded queues and graceful degradation.
+
+See [`TELEMETRY.md`](TELEMETRY.md) for the complete telemetry guide with usage examples and integration patterns.
+
+**Zero breaking changes** – All 235+ existing tests pass; full backward compatibility maintained while adding new functionality.
 
 ---
 
@@ -2324,56 +2336,67 @@ stats = SessionStore.get_stats()
 
 ## 📊 Monitoring & Telemetry
 
-### Available Events
+Snakepit provides a comprehensive **distributed telemetry system** that enables full observability across your Elixir cluster and Python workers. All events flow through Elixir's standard `:telemetry` library.
+
+**📖 See [TELEMETRY.md](TELEMETRY.md) for complete documentation.**
+
+### Quick Example
 
 ```elixir
-# Worker request completed
-[:snakepit, :worker, :request]
-# Measurements: %{duration: milliseconds}
-# Metadata: %{result: :ok | :error}
-
-# Worker initialized
-[:snakepit, :worker, :initialized]
-# Measurements: %{initialization_time: seconds}
-# Metadata: %{worker_id: string}
-```
-
-### Setting Up Monitoring
-
-```elixir
-# In your application startup
-:telemetry.attach_many(
-  "snakepit-metrics",
-  [
-    [:snakepit, :worker, :request],
-    [:snakepit, :worker, :initialized]
-  ],
-  &MyApp.Metrics.handle_event/4,
-  %{}
-)
-
-defmodule MyApp.Metrics do
-  require Logger
-  
-  def handle_event([:snakepit, :worker, :request], measurements, metadata, _config) do
-    # Log slow requests
-    if measurements.duration > 5000 do
-      Logger.warning("Slow request: #{measurements.duration}ms")
-    end
-    
-    # Send to StatsD/Prometheus/DataDog
-    MyApp.Metrics.Client.histogram(
-      "snakepit.request.duration",
-      measurements.duration,
-      tags: ["result:#{metadata.result}"]
+# Monitor Python tool execution
+:telemetry.attach(
+  "my-app-monitor",
+  [:snakepit, :python, :call, :stop],
+  fn _event, %{duration: duration}, metadata, _ ->
+    duration_ms = duration / 1_000_000
+    Logger.info("Python call completed",
+      command: metadata.command,
+      duration_ms: duration_ms,
+      worker_id: metadata.worker_id
     )
-  end
-  
-  def handle_event([:snakepit, :worker, :initialized], measurements, metadata, _config) do
-    Logger.info("Worker #{metadata.worker_id} started in #{measurements.initialization_time}s")
-  end
-end
+  end,
+  nil
+)
 ```
+
+### Event Catalog (40+ events)
+
+**Infrastructure Events:**
+- `[:snakepit, :pool, :worker, :spawned]` - Worker ready and connected
+- `[:snakepit, :pool, :worker, :terminated]` - Worker terminated
+- `[:snakepit, :pool, :status]` - Periodic pool status
+- `[:snakepit, :session, :created|destroyed]` - Session lifecycle
+
+**Python Execution Events (folded from Python):**
+- `[:snakepit, :python, :call, :start|stop|exception]` - Command execution
+- `[:snakepit, :python, :tool, :execution, :*]` - Tool execution
+- `[:snakepit, :python, :memory, :sampled]` - Resource metrics
+
+**gRPC Bridge Events:**
+- `[:snakepit, :grpc, :call, :start|stop|exception]` - gRPC calls
+- `[:snakepit, :grpc, :stream, :*]` - Streaming operations
+- `[:snakepit, :grpc, :connection, :*]` - Connection health
+
+### Python API
+
+```python
+from snakepit_bridge import telemetry
+
+# Automatic timing with span
+with telemetry.span("tool.execution", {"tool": "my_tool"}):
+    result = expensive_operation()
+
+# Custom metrics
+telemetry.emit("tool.result_size", {"bytes": len(result)})
+```
+
+### Integration with Metrics Systems
+
+Works seamlessly with:
+- **Prometheus** - `telemetry_metrics_prometheus`
+- **StatsD** - `telemetry_metrics_statsd`
+- **OpenTelemetry** - `opentelemetry_telemetry`
+- **Custom handlers** - Your own GenServer aggregators
 
 ### Pool Statistics
 
@@ -2672,7 +2695,8 @@ Logger.configure(level: :debug)
 
 ## 📚 Additional Documentation
 
-- [Testing Guide](README_TESTING.md) - How to run and write tests  
+- [Telemetry & Observability](TELEMETRY.md) - Comprehensive telemetry system guide
+- [Testing Guide](README_TESTING.md) - How to run and write tests
 - [Unified gRPC Bridge](README_UNIFIED_GRPC_BRIDGE.md) - Stage 0, 1, and 2 implementation details
 - [Bidirectional Tool Bridge](README_BIDIRECTIONAL_TOOL_BRIDGE.md) - Cross-language function execution between Elixir and Python
 - [Process Management](README_PROCESS_MANAGEMENT.md) - Persistent tracking and orphan cleanup
@@ -2760,6 +2784,7 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 - [API Documentation](https://hexdocs.pm/snakepit)
 - [GitHub Repository](https://github.com/nshkrdotcom/snakepit)
 - [Example Projects](https://github.com/nshkrdotcom/snakepit/tree/main/examples)
+- [Telemetry & Observability Guide](TELEMETRY.md)
 - [gRPC Bridge Documentation](README_GRPC.md)
 - Python Bridge Documentation - See sections above
 
