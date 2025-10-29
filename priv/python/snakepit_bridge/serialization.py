@@ -5,7 +5,14 @@ Supports both JSON and binary serialization for efficient handling
 of large numerical data like tensors and embeddings.
 """
 
-import json
+# Try to import orjson for 6x performance boost, fallback to stdlib json
+try:
+    import orjson
+    _use_orjson = True
+except ImportError:
+    import json
+    _use_orjson = False
+
 import pickle
 import numpy as np
 from typing import Any, Dict, Union, Tuple, Optional
@@ -76,7 +83,7 @@ class TypeSerializer:
 
             # Decode JSON
             json_str = any_msg.value.decode('utf-8')
-            value = json.loads(json_str)
+            value = TypeSerializer._deserialize_json(json_str)
 
             # Convert to appropriate Python type
             return TypeSerializer._deserialize_value(value, var_type)
@@ -133,17 +140,49 @@ class TypeSerializer:
     
     @staticmethod
     def _serialize_value(value: Any, var_type: str) -> str:
-        """Serialize normalized value to JSON string."""
+        """
+        Serialize normalized value to JSON string.
+
+        Uses orjson for 6x performance boost if available,
+        falls back to stdlib json otherwise.
+        """
         # Handle special float values
         if var_type == 'float':
             if isinstance(value, float):
                 if np.isnan(value):
-                    return json.dumps("NaN")
+                    value_to_serialize = "NaN"
                 elif np.isinf(value):
-                    return json.dumps("Infinity" if value > 0 else "-Infinity")
-        
-        return json.dumps(value)
+                    value_to_serialize = "Infinity" if value > 0 else "-Infinity"
+                else:
+                    value_to_serialize = value
+            else:
+                value_to_serialize = value
+        else:
+            value_to_serialize = value
+
+        # Use orjson if available, otherwise stdlib json
+        if _use_orjson:
+            # orjson returns bytes, must decode to str
+            return orjson.dumps(value_to_serialize).decode('utf-8')
+        else:
+            import json
+            return json.dumps(value_to_serialize)
     
+    @staticmethod
+    def _deserialize_json(json_str: str) -> Any:
+        """
+        Deserialize JSON string to Python value.
+
+        Uses orjson for 6x performance boost if available,
+        falls back to stdlib json otherwise.
+        """
+        if _use_orjson:
+            # orjson.loads accepts str or bytes
+            return orjson.loads(json_str)
+        else:
+            import json
+            return json.loads(json_str)
+
     @staticmethod
     def _deserialize_value(value: Any, var_type: str) -> Any:
         """Convert JSON-decoded value to appropriate Python type."""
@@ -253,7 +292,7 @@ class TypeSerializer:
             # Create Any message with metadata
             any_msg = any_pb2.Any()
             any_msg.type_url = f"type.googleapis.com/snakepit.{var_type}.binary"
-            any_msg.value = json.dumps(metadata).encode('utf-8')
+            any_msg.value = TypeSerializer._serialize_value(metadata, 'string').encode('utf-8')
             
             # Serialize data as binary
             binary_data = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
@@ -272,7 +311,7 @@ class TypeSerializer:
             # Create Any message with metadata
             any_msg = any_pb2.Any()
             any_msg.type_url = f"type.googleapis.com/snakepit.{var_type}.binary"
-            any_msg.value = json.dumps(metadata).encode('utf-8')
+            any_msg.value = TypeSerializer._serialize_value(metadata, 'string').encode('utf-8')
             
             # Serialize data as binary
             binary_data = pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
@@ -290,7 +329,7 @@ class TypeSerializer:
         var_type = type_parts[-2]  # Get type before .binary
         
         # Decode metadata
-        metadata = json.loads(any_msg.value.decode('utf-8'))
+        metadata = TypeSerializer._deserialize_json(any_msg.value.decode('utf-8'))
         
         # Deserialize binary data
         data = pickle.loads(binary_data)

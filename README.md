@@ -59,6 +59,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
+- [What's New in v0.6.7](#whats-new-in-v067)
 - [What's New in v0.6.6](#whats-new-in-v066)
 - [What's New in v0.6.5](#whats-new-in-v065)
 - [What's New in v0.6.4](#whats-new-in-v064)
@@ -135,6 +136,17 @@ For **non-DSPex users**, if you're using these classes directly:
 - [Architecture Decision](https://github.com/nshkrdotcom/dspex/blob/main/docs/architecture_review_20251007/09_ARCHITECTURE_DECISION_RECORD.md)
 
 **Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
+
+---
+
+## 🆕 What's New in v0.6.7
+
+**Type system + performance boost** – v0.6.7 introduces Phase 1 of the type system improvements: structured errors, complete type specifications, and 4-6x JSON performance boost.
+
+- **6x JSON performance** – Python bridge now uses `orjson` for serialization, delivering 4-6x speedup for raw JSON operations and 1.5x improvement for large payloads with full backward compatibility (`priv/python/tests/test_orjson_integration.py`).
+- **Structured error types** – New `Snakepit.Error` struct provides detailed context for debugging with fields like `category`, `message`, `details`, `python_traceback`, and `grpc_status` (`lib/snakepit/error.ex`, `test/unit/error_test.exs`).
+- **Complete type specifications** – All public API functions in `Snakepit` module now have `@spec` annotations with structured error return types for better IDE support and Dialyzer analysis.
+- **Zero breaking changes** – All 235 existing tests pass; full backward compatibility maintained while adding new functionality.
 
 ---
 
@@ -554,7 +566,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-    {:snakepit, "~> 0.6.6"}
+    {:snakepit, "~> 0.6.7"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,

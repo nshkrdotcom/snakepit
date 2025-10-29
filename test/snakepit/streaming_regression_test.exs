@@ -62,7 +62,8 @@ defmodule Snakepit.StreamingRegressionTest do
 
     Application.put_env(:snakepit, :adapter_module, NoStreamAdapter)
 
-    assert {:error, :streaming_not_supported} =
+    assert {:error,
+            %Snakepit.Error{category: :validation, message: "Streaming not supported by adapter"}} =
              Snakepit.execute_stream("stream_progress", %{}, fn _ -> :ok end)
   end
 end
