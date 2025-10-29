@@ -85,11 +85,13 @@ defmodule Snakepit.SessionHelpers do
   end
 
   # Store program data after creation
-  defp store_program_data_after_creation(session_id, _create_args, create_response) do
-    if session_id != nil and session_id != "anonymous" do
-      program_id = Map.get(create_response, "program_id")
+  defp store_program_data_after_creation(session_id, _create_args, create_response)
+       when is_binary(session_id) and session_id != "anonymous" do
+    case Map.get(create_response, "program_id") do
+      nil ->
+        :ok
 
-      if program_id do
+      program_id ->
         # Extract complete serializable program data from external process response
         program_data = %{
           program_id: program_id,
@@ -106,30 +108,30 @@ defmodule Snakepit.SessionHelpers do
         }
 
         store_program_in_session(session_id, program_id, program_data)
-      end
     end
   end
+
+  defp store_program_data_after_creation(_session_id, _create_args, _create_response), do: :ok
 
   # Store program in SessionStore
-  defp store_program_in_session(session_id, program_id, program_data) do
-    if session_id != nil and session_id != "anonymous" do
-      case Snakepit.Bridge.SessionStore.get_session(session_id) do
-        {:ok, _session} ->
-          # Update existing session
-          Snakepit.Bridge.SessionStore.store_program(session_id, program_id, program_data)
+  defp store_program_in_session(session_id, program_id, program_data)
+       when is_binary(session_id) and session_id != "anonymous" do
+    case Snakepit.Bridge.SessionStore.get_session(session_id) do
+      {:ok, _session} ->
+        # Update existing session
+        Snakepit.Bridge.SessionStore.store_program(session_id, program_id, program_data)
 
-        {:error, :not_found} ->
-          # Create new session with program
-          case Snakepit.Bridge.SessionStore.create_session(session_id) do
-            {:ok, _session} ->
-              Snakepit.Bridge.SessionStore.store_program(session_id, program_id, program_data)
+      {:error, :not_found} ->
+        # Create new session with program
+        case Snakepit.Bridge.SessionStore.create_session(session_id) do
+          {:ok, _session} ->
+            Snakepit.Bridge.SessionStore.store_program(session_id, program_id, program_data)
 
-            error ->
-              error
-          end
-      end
-    else
-      :ok
+          error ->
+            error
+        end
     end
   end
+
+  defp store_program_in_session(_session_id, _program_id, _program_data), do: :ok
 end
