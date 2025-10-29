@@ -21,7 +21,21 @@ How Python workers support multiple telemetry backends.
 
 ## Backend Architecture
 
-### Abstract Base (snakepit_bridge/telemetry.py)
+### Module Layout
+
+```
+snakepit_bridge/telemetry/
+├── __init__.py          # emit/span helpers, re-export manager APIs
+├── manager.py           # TelemetryManager (sets active backend)
+├── backends/
+│   ├── base.py          # TelemetryBackend abstract base
+│   ├── grpc.py          # gRPC implementation (Phase 2.1)
+│   ├── stderr.py        # stderr fallback
+│   └── otel.py          # future OpenTelemetry backend
+└── stream.py            # TelemetryStream used by gRPC backend
+```
+
+### Abstract Base (`telemetry/backends/base.py`)
 
 ```python
 """
@@ -111,19 +125,19 @@ class TelemetryManager:
             return nullcontext()
 
 
-# Global manager
+# Global singleton (in telemetry/manager.py)
 _manager = TelemetryManager()
 
 def set_backend(backend: TelemetryBackend):
-    """Set the active telemetry backend."""
     _manager.set_backend(backend)
 
+def get_backend() -> Optional[TelemetryBackend]:
+    return _manager.backend
+
 def emit(event: str, measurements: Dict, metadata: Dict = None, correlation_id: str = None):
-    """Convenience: emit via active backend."""
     _manager.emit(event, measurements, metadata, correlation_id)
 
 def span(operation: str, metadata: Dict = None):
-    """Convenience: create span via active backend."""
     return _manager.span(operation, metadata)
 ```
 
@@ -133,15 +147,15 @@ def span(operation: str, metadata: Dict = None):
 
 ### 1. gRPC Backend (Phase 2.1 - INITIAL)
 
-**Files:** `snakepit_bridge/telemetry_stream.py`, `snakepit_bridge/telemetry/grpc_backend.py`
+**Files:** `snakepit_bridge/telemetry/stream.py`, `snakepit_bridge/telemetry/backends/grpc.py`
 
 ```python
 """
 gRPC telemetry backend - sends events to Elixir via gRPC stream.
 """
 from typing import Dict, Any, Optional
-from ..telemetry import TelemetryBackend
-from ..telemetry_stream import TelemetryStream  # wraps BridgeService.StreamTelemetry
+from .base import TelemetryBackend
+from ..stream import TelemetryStream  # wraps BridgeService.StreamTelemetry
 
 
 class GrpcBackend(TelemetryBackend):
@@ -169,16 +183,12 @@ class GrpcBackend(TelemetryBackend):
 
 **Usage:**
 ```python
-from snakepit_bridge.telemetry import set_backend
-from snakepit_bridge.telemetry.grpc_backend import GrpcBackend
 from snakepit_bridge import telemetry
+from snakepit_bridge.telemetry.backends.grpc import GrpcBackend
+from snakepit_bridge.telemetry.stream import TelemetryStream
 
-# During worker initialization
-stream = telemetry.TelemetryStream()
-telemetry.install_stream(stream)
-
-backend = GrpcBackend(stream)
-set_backend(backend)
+stream = TelemetryStream()
+telemetry.set_backend(GrpcBackend(stream))
 ```
 
 `TelemetryStream` centralises the gRPC plumbing (queue management, control handling)
@@ -189,7 +199,7 @@ Elixir.
 
 ### 2. OpenTelemetry Backend (Phase 2.2 - FUTURE)
 
-**File:** `snakepit_bridge/telemetry/otel_backend.py`
+**File:** `snakepit_bridge/telemetry/backends/otel.py`
 
 ```python
 """
@@ -197,11 +207,13 @@ OpenTelemetry backend - uses OpenTelemetry Python SDK.
 """
 from opentelemetry import trace, metrics
 from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 
-from ..telemetry import TelemetryBackend
+from .base import TelemetryBackend
 
 
 class OpenTelemetryBackend(TelemetryBackend):
@@ -277,7 +289,7 @@ class OpenTelemetryBackend(TelemetryBackend):
 **Usage:**
 ```python
 from snakepit_bridge.telemetry import set_backend
-from snakepit_bridge.telemetry.otel_backend import OpenTelemetryBackend
+from snakepit_bridge.telemetry.backends.otel import OpenTelemetryBackend
 
 # During worker initialization
 backend = OpenTelemetryBackend(service_name="my-app-python-worker")
@@ -294,7 +306,7 @@ set_backend(backend)
 
 ### 3. StatsD Backend (Phase 2.3 - FUTURE)
 
-**File:** `snakepit_bridge/telemetry/statsd_backend.py`
+**File:** `snakepit_bridge/telemetry/backends/statsd.py`
 
 ```python
 """
@@ -302,7 +314,7 @@ StatsD backend - sends metrics via UDP.
 """
 import socket
 from typing import Dict, Any, Optional
-from ..telemetry import TelemetryBackend
+from .base import TelemetryBackend
 
 
 class StatsDBackend(TelemetryBackend):
@@ -367,7 +379,7 @@ class StatsDBackend(TelemetryBackend):
 **Usage:**
 ```python
 from snakepit_bridge.telemetry import set_backend
-from snakepit_bridge.telemetry.statsd_backend import StatsDBackend
+from snakepit_bridge.telemetry.backends.statsd import StatsDBackend
 
 # During worker initialization
 backend = StatsDBackend(host="statsd.local", port=8125)
@@ -378,7 +390,7 @@ set_backend(backend)
 
 ### 4. stderr Backend (Fallback)
 
-**File:** `snakepit_bridge/telemetry/stderr_backend.py`
+**File:** `snakepit_bridge/telemetry/backends/stderr.py`
 
 ```python
 """
@@ -393,7 +405,7 @@ import sys
 import json
 import time
 from typing import Dict, Any, Optional
-from ..telemetry import TelemetryBackend
+from .base import TelemetryBackend
 
 
 class StderrBackend(TelemetryBackend):
@@ -423,7 +435,7 @@ class StderrBackend(TelemetryBackend):
 **Usage:**
 ```python
 from snakepit_bridge.telemetry import set_backend
-from snakepit_bridge.telemetry.stderr_backend import StderrBackend
+from snakepit_bridge.telemetry.backends.stderr import StderrBackend
 
 # Simplest mode
 backend = StderrBackend()
@@ -441,38 +453,40 @@ set_backend(backend)
 
 import os
 from .telemetry import set_backend
-from . import telemetry
+from .telemetry.backends.grpc import GrpcBackend
+from .telemetry.backends.otel import OpenTelemetryBackend
+from .telemetry.backends.statsd import StatsDBackend
+from .telemetry.backends.stderr import StderrBackend
+from .telemetry.stream import TelemetryStream
 
 def initialize_telemetry():
     """Initialize telemetry with configured backend."""
     backend_type = os.getenv("SNAKEPIT_TELEMETRY_BACKEND", "grpc")
 
+    stream = None
+
     if backend_type == "grpc":
-        from .telemetry.grpc_backend import GrpcBackend
-        stream = telemetry.TelemetryStream()
-        telemetry.install_stream(stream)
+        stream = TelemetryStream()
         backend = GrpcBackend(stream)
 
     elif backend_type == "otel":
-        from .telemetry.otel_backend import OpenTelemetryBackend
         service_name = os.getenv("SNAKEPIT_SERVICE_NAME", "snakepit-worker")
         backend = OpenTelemetryBackend(service_name)
 
     elif backend_type == "statsd":
-        from .telemetry.statsd_backend import StatsDBackend
         host = os.getenv("STATSD_HOST", "localhost")
         port = int(os.getenv("STATSD_PORT", "8125"))
         backend = StatsDBackend(host, port)
 
     elif backend_type == "stderr":
-        from .telemetry.stderr_backend import StderrBackend
         backend = StderrBackend()
 
     else:
         # No telemetry
-        return
+        return None
 
     set_backend(backend)
+    return stream
 ```
 
 ### Elixir Configuration
@@ -560,17 +574,22 @@ end
 Could support **multiple backends simultaneously**:
 
 ```python
-from snakepit_bridge.telemetry import TelemetryManager
+from snakepit_bridge.telemetry import set_backend
+from snakepit_bridge.telemetry.backends.composite import CompositeBackend
 
-manager = TelemetryManager()
+composite = CompositeBackend([
+    GrpcBackend(stream),
+    OpenTelemetryBackend(service_name="snakepit-worker"),
+])
 
-# Send to both gRPC (for Elixir) AND OpenTelemetry (for tracing)
-manager.add_backend(GrpcBackend(stub))
-manager.add_backend(OpenTelemetryBackend())
+set_backend(composite)
 
-# Events emitted to both backends
-telemetry.emit("inference.start", {...})
+# A single emit now fans out to both backends
+telemetry.emit("inference.start", {"system_time": time.time_ns()})
 ```
+
+`CompositeBackend` is a future extension that simply forwards calls to each
+wrapped backend and collects non-fatal errors for logging.
 
 ---
 

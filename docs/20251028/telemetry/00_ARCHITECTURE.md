@@ -67,16 +67,15 @@ Python workers emit telemetry that gets captured and re-emitted by Elixir:
 **Primary: gRPC Stream (Phase 2.1 - INITIAL IMPLEMENTATION)**
 ```protobuf
 service SnakepitBridge {
-  rpc StreamTelemetry(stream TelemetryEvent) returns (stream TelemetryControl);
+  rpc StreamTelemetry(stream TelemetryControl) returns (stream TelemetryEvent);
 }
 ```
 ```python
-# Python sends via gRPC stream
-telemetry.emit("inference.start", {"duration": 123}, ...)
-# → protobuf message on gRPC stream
+# Python worker yields events when Elixir opens StreamTelemetry
+telemetry.emit("inference.start", {"duration": 123}, {...})
 ```
 ```elixir
-# Elixir receives from gRPC stream, re-emits
+# Elixir client re-emits the received event
 :telemetry.execute([:snakepit, :python, :inference, :start], %{duration: 123}, ...)
 ```
 
