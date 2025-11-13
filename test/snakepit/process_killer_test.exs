@@ -169,6 +169,46 @@ defmodule Snakepit.ProcessKillerTest do
       assert {:ok, 0} = Snakepit.ProcessKiller.kill_by_run_id(fake_run_id)
     end
 
+    test "kills only processes that match the provided run_id" do
+      run_id = Snakepit.RunID.generate()
+      python = python_executable()
+
+      rogue_port =
+        Port.open({:spawn_executable, python}, [
+          :binary,
+          :exit_status,
+          args: ["-c", "import time; time.sleep(30)"]
+        ])
+
+      target_port =
+        Port.open({:spawn_executable, python}, [
+          :binary,
+          :exit_status,
+          args: [
+            "-c",
+            "import time; time.sleep(30)",
+            "grpc_server.py",
+            "--snakepit-run-id",
+            run_id
+          ]
+        ])
+
+      {:os_pid, rogue_pid} = Port.info(rogue_port, :os_pid)
+      {:os_pid, target_pid} = Port.info(target_port, :os_pid)
+
+      assert Snakepit.ProcessKiller.process_alive?(target_pid)
+      assert Snakepit.ProcessKiller.process_alive?(rogue_pid)
+
+      assert {:ok, killed} = Snakepit.ProcessKiller.kill_by_run_id(run_id)
+      assert killed >= 1
+
+      assert wait_for_death(target_pid, 5_000)
+      assert Snakepit.ProcessKiller.process_alive?(rogue_pid)
+
+      Port.close(rogue_port)
+      Port.close(target_port)
+    end
+
     @tag :skip
     @tag timeout: 10_000
     test "kills processes matching run_id" do
@@ -208,5 +248,11 @@ defmodule Snakepit.ProcessKillerTest do
       # Wait for it to die
       assert wait_for_death(pid, 2000), "Process #{pid} should have died"
     end
+  end
+
+  defp python_executable do
+    System.find_executable("python3") ||
+      System.find_executable("python") ||
+      flunk("python executable not found on PATH")
   end
 end

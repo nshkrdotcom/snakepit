@@ -33,6 +33,44 @@ defmodule Snakepit.MultiPoolExecutionTest do
   defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
   defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
 
+  describe "pool failure isolation" do
+    test "broken pool does not stop healthy pools from serving traffic" do
+      Application.put_env(:snakepit, :pooling_enabled, true)
+
+      Application.put_env(:snakepit, :pools, [
+        %{
+          name: :default,
+          worker_profile: :process,
+          pool_size: 1,
+          adapter_module: Snakepit.TestAdapters.MockGRPCAdapter
+        },
+        %{
+          name: :broken_pool,
+          worker_profile: :process,
+          pool_size: 1,
+          adapter_module: Snakepit.TestAdapters.FailingAdapter
+        }
+      ])
+
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.list_workers()
+          |> Enum.count() >= 1
+        end,
+        timeout: 10_000,
+        interval: 200
+      )
+
+      assert {:ok, result} = Snakepit.execute("ping", %{}, pool_name: :default)
+      assert is_map(result)
+
+      assert {:error, :pool_not_initialized} =
+               Snakepit.execute("ping", %{}, pool_name: :broken_pool)
+    end
+  end
+
   describe "CRITICAL: Two pools running simultaneously" do
     test "starts two pools with different names and executes on both" do
       # THIS WILL FAIL - Pool only supports single pool (uses first pool only)

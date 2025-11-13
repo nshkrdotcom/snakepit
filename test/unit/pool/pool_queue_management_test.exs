@@ -172,3 +172,136 @@ defmodule Snakepit.Pool.QueueManagementTest do
     end
   end
 end
+
+defmodule Snakepit.Pool.QueueSaturationRuntimeTest do
+  @moduledoc false
+  use ExUnit.Case, async: false
+  @moduletag capture_log: true
+  import Snakepit.TestHelpers
+  import ExUnit.CaptureLog
+  require Logger
+
+  alias Snakepit.TestAdapters.QueueProbeAdapter
+  alias MapSet
+
+  setup do
+    original_level = Logger.level()
+    Logger.configure(level: :error)
+
+    prev_env = capture_env()
+
+    Application.stop(:snakepit)
+    configure_queue_env()
+    {:ok, _} = Application.ensure_all_started(:snakepit)
+    assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 30_000)
+
+    {:ok, counter} = Agent.start_link(fn -> %{count: 0, ids: MapSet.new()} end)
+    QueueProbeAdapter.configure(counter: counter, delay: 500)
+
+    on_exit(fn ->
+      QueueProbeAdapter.reset!()
+      if Process.alive?(counter), do: Agent.stop(counter)
+      Application.stop(:snakepit)
+      restore_env(prev_env)
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+      Logger.configure(level: original_level)
+    end)
+
+    {:ok, counter: counter}
+  end
+
+  test "requests that time out in queue never execute and queue saturations emit stats",
+       %{counter: counter} do
+    capture_log(fn ->
+      results =
+        Task.async_stream(
+          1..20,
+          fn idx ->
+            Snakepit.execute("slow_probe", %{"request_id" => idx})
+          end,
+          max_concurrency: 20,
+          timeout: 15_000
+        )
+        |> Enum.with_index(1)
+        |> Enum.reduce(%{success: [], timeouts: [], saturated: []}, fn
+          {{:ok, {:ok, _}}, id}, acc ->
+            Map.update!(acc, :success, &[id | &1])
+
+          {{:ok, {:error, :queue_timeout}}, id}, acc ->
+            Map.update!(acc, :timeouts, &[id | &1])
+
+          {{:ok, {:error, :pool_saturated}}, id}, acc ->
+            Map.update!(acc, :saturated, &[id | &1])
+
+          {{:exit, reason}, id}, _acc ->
+            flunk("Request #{id} crashed with #{inspect(reason)}")
+        end)
+
+      assert results.timeouts != []
+      assert results.saturated != []
+
+      executed_ids =
+        counter
+        |> Agent.get(&Map.get(&1, :ids))
+        |> MapSet.new()
+
+      Enum.each(results.timeouts, fn id ->
+        refute MapSet.member?(executed_ids, id),
+               "Timed out request #{id} should not have been executed"
+      end)
+
+      stats = Snakepit.Pool.get_stats()
+      assert stats.queue_timeouts == length(results.timeouts)
+      assert stats.pool_saturated >= length(results.saturated)
+
+      # Cancelled requests table must stay bounded after the queue drains.
+      assert_eventually(
+        fn ->
+          state = :sys.get_state(Snakepit.Pool)
+          pool = Map.fetch!(state.pools, state.default_pool)
+          map_size(pool.cancelled_requests) <= 2
+        end,
+        timeout: 5_000,
+        interval: 100
+      )
+    end)
+  end
+
+  defp configure_queue_env do
+    Application.put_env(:snakepit, :pooling_enabled, true)
+    Application.put_env(:snakepit, :pool_queue_timeout, 100)
+    Application.put_env(:snakepit, :pool_max_queue_size, 5)
+    Application.put_env(:snakepit, :pool_config, %{pool_size: 1})
+    Application.put_env(:snakepit, :heartbeat, %{enabled: false})
+
+    Application.put_env(:snakepit, :pools, [
+      %{
+        name: :default,
+        worker_profile: :process,
+        pool_size: 1,
+        adapter_module: QueueProbeAdapter
+      }
+    ])
+
+    Application.put_env(:snakepit, :adapter_module, QueueProbeAdapter)
+  end
+
+  defp capture_env do
+    %{
+      pooling_enabled: Application.get_env(:snakepit, :pooling_enabled),
+      pools: Application.get_env(:snakepit, :pools),
+      pool_config: Application.get_env(:snakepit, :pool_config),
+      pool_queue_timeout: Application.get_env(:snakepit, :pool_queue_timeout),
+      pool_max_queue_size: Application.get_env(:snakepit, :pool_max_queue_size),
+      adapter_module: Application.get_env(:snakepit, :adapter_module),
+      heartbeat: Application.get_env(:snakepit, :heartbeat)
+    }
+  end
+
+  defp restore_env(env) do
+    Enum.each(env, fn
+      {key, nil} -> Application.delete_env(:snakepit, key)
+      {key, value} -> Application.put_env(:snakepit, key, value)
+    end)
+  end
+end

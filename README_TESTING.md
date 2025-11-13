@@ -44,6 +44,19 @@ mix test test/unit/logger/redaction_test.exs                          # Log reda
 - `test/unit/logger/redaction_test.exs` – exercises the redaction summaries that keep secrets out of logs.
 - `test/unit/bridge/session_store_test.exs` – covers per-session and global quotas plus safe reuse of existing program slots.
 
+### Fail-fast Experiment Suites
+
+The following suites exercise the new failure-mode experiments described in `AGENTS.md`:
+
+- `test/integration/orphan_cleanup_stress_test.exs` – boots the pool with the Python adapter, issues load, crashes BEAM, and proves DETS + ProcessKiller remove stale workers across restarts.
+- `test/performance/worker_crash_storm_test.exs` – continuously kills workers while requests stream through the mock adapter and asserts the pool size, registry stats, and OS processes recover.
+- `test/unit/config/startup_fail_fast_test.exs` – verifies `Snakepit.Application` aborts early for missing executables, invalid pool profiles, and gRPC port binding conflicts.
+- `test/snakepit/grpc/heartbeat_failfast_test.exs` – covers dependent vs. independent heartbeat monitors using telemetry plus `ProcessRegistry` assertions.
+- `test/snakepit/streaming_regression_test.exs` – streaming cancellation regression to ensure workers are checked back into the pool and telemetry marks the request complete.
+- `test/unit/pool/pool_queue_management_test.exs` – includes a runtime saturation scenario driven by `Snakepit.TestAdapters.QueueProbeAdapter` to prove queue timeouts never execute.
+- `test/snakepit/multi_pool_execution_test.exs` – multi-pool isolation: broken pools stay quarantined while healthy pools keep serving.
+- `test/snakepit/process_killer_test.exs` – spawns fake Python processes to validate `ProcessKiller.kill_by_run_id/1` only kills matching run IDs.
+
 ### Test Modes
 
 The test suite runs in different modes based on tags:
