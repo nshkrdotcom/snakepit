@@ -92,13 +92,20 @@ defmodule Snakepit.Pool.Registry do
              current when is_map(current) -> Map.merge(current, sanitized)
              _ -> sanitized
            end) do
-        {:ok, _metadata} ->
+        {_, _} ->
           :ok
+
+        :error ->
+          Logger.debug(
+            "Pool.Registry.put_metadata/2 attempted to update #{inspect(worker_id)} before registration"
+          )
+
+          {:error, :not_registered}
       end
     rescue
-      error in [ArgumentError, CaseClauseError] ->
-        Logger.warning(
-          "Pool.Registry.put_metadata/2 attempted to update #{inspect(worker_id)} before registration (#{inspect(error.__struct__)})"
+      ArgumentError ->
+        Logger.debug(
+          "Pool.Registry.put_metadata/2 attempted to update #{inspect(worker_id)} before registration"
         )
 
         {:error, :not_registered}

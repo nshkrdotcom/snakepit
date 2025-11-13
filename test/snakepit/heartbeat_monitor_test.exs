@@ -126,7 +126,7 @@ defmodule Snakepit.HeartbeatMonitorTest do
         timeout_ms: 20,
         max_missed_heartbeats: 1,
         dependent: false,
-        ping_fun: fn _timestamp -> {:error, :simulated_failure} end
+        ping_fun: fn _timestamp -> :ok end
       )
 
     # Allow a couple of failure cycles
@@ -136,6 +136,8 @@ defmodule Snakepit.HeartbeatMonitorTest do
 
     status = HeartbeatMonitor.get_status(monitor)
     assert status.dependent == false
+    assert status.stats.timeouts >= 1
+    assert status.missed_heartbeats >= 1
     assert Process.alive?(worker_pid)
     assert Process.alive?(monitor)
 

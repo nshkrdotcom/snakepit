@@ -7,10 +7,13 @@ defmodule Snakepit.GRPCWorkerHeartbeatDependencyTest do
 
   alias Snakepit.GRPCWorker
 
-  test "dependent heartbeat kills the worker on repeated ping failures" do
+  setup do
     previous_flag = Process.flag(:trap_exit, true)
     on_exit(fn -> Process.flag(:trap_exit, previous_flag) end)
+    :ok
+  end
 
+  test "dependent heartbeat kills the worker on repeated ping failures" do
     worker_id = "grpc_dep_#{System.unique_integer([:positive])}"
 
     case start_worker_catching_exit(fn ->

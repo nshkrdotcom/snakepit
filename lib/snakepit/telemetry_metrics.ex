@@ -74,7 +74,7 @@ defmodule Snakepit.TelemetryMetrics do
       ),
       summary("snakepit.worker.memory_mb",
         event_name: [:snakepit, :worker, :recycled],
-        measurement: :memory_mb,
+        measurement: &Map.get(&1, :memory_mb),
         unit: :megabyte,
         tags: [:pool]
       )
