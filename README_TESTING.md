@@ -25,7 +25,7 @@ mix snakepit.doctor     # verifies python executable, grpc import, health probe,
 
 ### Basic Test Execution
 ```bash
-# Run all fast tests (excludes :performance and :python_integration)
+# Run all fast tests (excludes :performance, :python_integration, :slow)
 mix test
 
 # Run tests with specific tags
@@ -34,6 +34,10 @@ mix test --only performance      # Run only performance tests
 
 # Run Python-backed Elixir tests (requires make bootstrap + mix snakepit.doctor)
 mix test --only python_integration
+
+# Run slow integration suites (application restarts, OS process probes, TTL waits)
+mix test --include slow
+mix test --only slow
 
 # Run specific test files
 mix test test/snakepit/bridge/session_store_test.exs
@@ -72,9 +76,10 @@ The following suites exercise the new failure-mode experiments described in `AGE
 ### Test Modes
 
 The test suite runs in different modes based on tags:
-- **Default**: Unit and integration tests (excludes `:performance` and `:python_integration`)
+- **Default**: Unit and integration tests (excludes `:performance`, `:python_integration`, and `:slow`)
 - **Python Integration**: Elixir ↔ Python flows (run with `mix test --only python_integration`)
 - **Performance**: Benchmarks and latency tests (use `--only performance`)
+- **Slow Integration**: Full application restarts, OS process cleanup verification, queue saturation, and TTL-dependent flows. These are tagged `@tag :slow` (or `@moduletag :slow`) and run with `mix test --include slow` when you need the exhaustive coverage.
 
 ## Understanding Test Output
 

@@ -112,6 +112,7 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
       end
     end
 
+    @tag :slow
     test "probes requested port when worker bound to a fixed port" do
       worker_id = unique_worker_id()
       assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 5_000)

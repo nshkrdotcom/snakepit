@@ -4,6 +4,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
   These tests MUST FAIL if workers orphan their Python processes.
   """
   use ExUnit.Case, async: false
+  @moduletag :slow
   import Snakepit.TestHelpers
 
   alias Snakepit.Pool.ProcessRegistry

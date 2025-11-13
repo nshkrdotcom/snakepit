@@ -77,7 +77,7 @@ Application.put_env(:snakepit, :env_doctor_module, Snakepit.Test.FakeDoctor)
 Snakepit.Test.FakeDoctor.reset()
 
 # Start ExUnit with performance tests excluded by default
-ExUnit.start(exclude: [:performance, :python_integration])
+ExUnit.start(exclude: [:performance, :python_integration, :slow])
 
 # CRITICAL: Start the application ONCE for all tests
 # This prevents test contamination and port conflicts from async start/stop

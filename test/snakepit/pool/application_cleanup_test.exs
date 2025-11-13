@@ -11,6 +11,7 @@ defmodule Snakepit.Pool.ApplicationCleanupTest do
   import Snakepit.TestHelpers
 
   @moduletag :skip_ci
+  @moduletag :slow
 
   alias Snakepit.Pool.ProcessRegistry
 

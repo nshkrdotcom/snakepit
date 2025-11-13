@@ -402,11 +402,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
         )
 
       {:error, reason} ->
-        Logger.warning(
-          "Telemetry stream closed for worker #{worker_ctx.worker_id}: #{inspect(reason)}",
-          worker_id: worker_ctx.worker_id,
-          reason: reason
-        )
+        log_stream_closed(worker_ctx, reason)
     end
   end
 
@@ -426,6 +422,30 @@ defmodule Snakepit.Telemetry.GrpcStream do
   defp describe_channel(channel) when is_binary(channel), do: "binary"
   defp describe_channel(channel) when is_list(channel), do: "list"
   defp describe_channel(channel), do: inspect(channel)
+
+  defp log_stream_closed(worker_ctx, reason) do
+    log_fun =
+      if shutdown_reason?(reason), do: &Logger.debug/2, else: &Logger.warning/2
+
+    log_fun.(
+      "Telemetry stream closed for worker #{worker_ctx.worker_id}: #{inspect(reason)}",
+      worker_id: worker_ctx.worker_id,
+      reason: reason
+    )
+  end
+
+  defp shutdown_reason?(%GRPC.RPCError{message: message}) when is_binary(message) do
+    message
+    |> String.downcase()
+    |> String.contains?("shutdown")
+  end
+
+  defp shutdown_reason?(%GRPC.RPCError{}), do: false
+  defp shutdown_reason?(:shutdown), do: true
+  defp shutdown_reason?({:shutdown, _}), do: true
+  defp shutdown_reason?({:down, :shutdown}), do: true
+  defp shutdown_reason?({:error, reason}), do: shutdown_reason?(reason)
+  defp shutdown_reason?(_), do: false
 
   defp translate_and_emit(event, worker_ctx) do
     with {:ok, event_name} <- Naming.from_parts(event.event_parts),

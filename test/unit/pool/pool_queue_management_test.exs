@@ -176,6 +176,7 @@ end
 defmodule Snakepit.Pool.QueueSaturationRuntimeTest do
   @moduledoc false
   use ExUnit.Case, async: false
+  @moduletag :slow
   @moduletag capture_log: true
   import ExUnit.CaptureLog
   require Logger

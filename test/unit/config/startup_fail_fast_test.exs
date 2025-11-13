@@ -5,6 +5,7 @@ defmodule Snakepit.Config.StartupFailFastTest do
   """
   use ExUnit.Case, async: false
   @moduletag capture_log: true
+  @moduletag :slow
   require Logger
   import ExUnit.CaptureLog
 

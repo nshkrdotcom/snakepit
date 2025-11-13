@@ -60,6 +60,7 @@ defmodule Snakepit.Bridge.PythonSessionContextTest do
                end)
     end
 
+    @tag :slow
     test "session expires after TTL", %{session_id: _session_id} do
       # Create session with 1 second TTL
       short_ttl_session_id = "short_ttl_#{:erlang.unique_integer([:positive])}"

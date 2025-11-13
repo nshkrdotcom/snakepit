@@ -71,6 +71,7 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
     :ok = GenServer.stop(worker)
   end
 
+  @tag :slow
   test "does not start heartbeat monitor when disabled", %{pool: pool_pid} = _context do
     test_pid = self()
 
