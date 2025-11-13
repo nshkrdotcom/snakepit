@@ -7,6 +7,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
   import Snakepit.TestHelpers
 
   alias Snakepit.Pool.ProcessRegistry
+  alias Snakepit.Worker.LifecycleConfig
 
   defmodule TestLifecycleWorker do
     use GenServer
@@ -17,6 +18,10 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
 
     def set_memory(pid, bytes) when is_pid(pid) do
       GenServer.cast(pid, {:set_memory, bytes})
+    end
+
+    def fail_memory_probe(pid) when is_pid(pid) do
+      GenServer.cast(pid, :fail_memory_probe)
     end
 
     @impl true
@@ -34,6 +39,10 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
     end
 
     @impl true
+    def handle_call(:get_memory_usage, _from, %{memory_bytes: {:fail, reason}} = state) do
+      {:reply, {:error, reason}, state}
+    end
+
     def handle_call(:get_memory_usage, _from, state) do
       {:reply, {:ok, state.memory_bytes}, state}
     end
@@ -41,6 +50,10 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
     @impl true
     def handle_cast({:set_memory, bytes}, state) when is_integer(bytes) do
       {:noreply, %{state | memory_bytes: bytes}}
+    end
+
+    def handle_cast(:fail_memory_probe, state) do
+      {:noreply, %{state | memory_bytes: {:fail, :forced_failure}}}
     end
 
     @impl true
@@ -308,5 +321,90 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
       send(new_worker_pid, :stop)
       assert_receive {:worker_terminated, ^new_worker_id, ^new_worker_pid}, 5_000
     end
+
+    test "logs when memory probe fails and skips recycling" do
+      manager = Process.whereis(Snakepit.Worker.LifecycleManager)
+      worker_id = "mem_probe_fail_#{System.unique_integer([:positive])}"
+
+      {:ok, worker_pid} =
+        TestProfile.start_worker(%{
+          worker_id: worker_id,
+          test_pid: self()
+        })
+
+      assert_receive {:profile_started, ^worker_id, ^worker_pid, _initial_config}, 1_000
+
+      config = %{
+        worker_profile: TestProfile,
+        pool_name: :test_pool,
+        worker_module: Snakepit.GRPCWorker,
+        adapter_module: Snakepit.TestAdapters.MockGRPCAdapter,
+        memory_threshold_mb: 1,
+        test_pid: self()
+      }
+
+      Snakepit.Worker.LifecycleManager.track_worker(:test_pool, worker_id, worker_pid, config)
+      TestLifecycleWorker.fail_memory_probe(worker_pid)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send(manager, :lifecycle_check)
+          Process.sleep(50)
+        end)
+
+      assert log =~ "Memory probe for #{worker_id} failed"
+
+      refute_receive {:worker_terminated, ^worker_id, ^worker_pid}, 200
+
+      Snakepit.Worker.LifecycleManager.untrack_worker(worker_id)
+      send(worker_pid, :stop)
+      assert_receive {:worker_terminated, ^worker_id, ^worker_pid}, 5_000
+    end
+  end
+
+  test "track_worker stores lifecycle config struct in manager state" do
+    worker_id = "config_struct_#{System.unique_integer([:positive])}"
+
+    {:ok, worker_pid} =
+      TestProfile.start_worker(%{
+        worker_id: worker_id,
+        test_pid: self()
+      })
+
+    assert_receive {:profile_started, ^worker_id, ^worker_pid, _}, 1_000
+
+    config = %{
+      worker_profile: TestProfile,
+      pool_name: :test_pool,
+      worker_module: Snakepit.GRPCWorker,
+      adapter_module: Snakepit.TestAdapters.MockGRPCAdapter,
+      adapter_args: ["--demo"],
+      adapter_env: [],
+      worker_ttl: {1, :hours},
+      worker_max_requests: 10,
+      memory_threshold_mb: 1,
+      test_pid: self()
+    }
+
+    Snakepit.Worker.LifecycleManager.track_worker(:test_pool, worker_id, worker_pid, config)
+
+    %{workers: workers} = :sys.get_state(Snakepit.Worker.LifecycleManager)
+
+    assert %{
+             ^worker_id => %{
+               config: %LifecycleConfig{
+                 worker_profile: TestProfile,
+                 worker_module: Snakepit.GRPCWorker,
+                 adapter_module: Snakepit.TestAdapters.MockGRPCAdapter,
+                 worker_ttl_seconds: 3600,
+                 worker_max_requests: 10,
+                 memory_threshold_mb: 1
+               }
+             }
+           } = Map.take(workers, [worker_id])
+
+    Snakepit.Worker.LifecycleManager.untrack_worker(worker_id)
+    send(worker_pid, :stop)
+    assert_receive {:worker_terminated, ^worker_id, ^worker_pid}, 5_000
   end
 end

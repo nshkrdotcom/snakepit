@@ -485,6 +485,7 @@ The 10KB threshold ensures optimal performance:
 - The Elixir bridge decodes the regular `parameters` map as before.
 - Binary entries show up in local Elixir tools as `{:binary, payload}` so handlers can pattern-match without guessing.
 - Remote executions forward the **original** binary map to Python workers via gRPC. The helper `Snakepit.GRPC.Client.execute_tool/5` accepts `binary_parameters: %{ "blob" => <<...>> }` in the options list to make this explicit.
+- Supplying a non-binary value (such as an integer or map) will raise an `invalid_binary_parameter` error before the request reaches any tool, preventing silent truncation.
 
 Keep binary keys distinct from JSON keys to avoid confusion, and continue to prefer JSON for human-readable inputs.
 

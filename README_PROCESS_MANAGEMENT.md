@@ -32,6 +32,17 @@ config :snakepit, :rogue_cleanup, enabled: false
 
 Disabling cleanup means you must manually remove stale `grpc_server.py` processes when upgrading or restarting the BEAM VM.
 
+You can further tighten or extend the matching rules by overriding the scripts and markers that qualify a process as "Snakepit owned":
+
+```elixir
+config :snakepit, :rogue_cleanup,
+  enabled: true,
+  scripts: ["grpc_server.py", "grpc_server_threaded.py"],
+  run_markers: ["--snakepit-run-id", "--run-id"]
+```
+
+Only processes whose command line contains one of the `scripts` *and* at least one of the `run_markers` are eligible for cleanup. This makes the cleanup pass explicit and keeps shared hosts safe even when other teams run their own Python entrypoints.
+
 ### 3. **BEAM Run Identification**
 
 Each BEAM instance gets a unique run ID:

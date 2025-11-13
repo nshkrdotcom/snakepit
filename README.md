@@ -20,7 +20,7 @@
 
 ### 1. Add to mix.exs
 ```elixir
-{:snakepit, "~> 0.6.8"}
+{:snakepit, "~> 0.6.9"}
 ```
 
 ### 2. Install Elixir deps
@@ -2602,6 +2602,8 @@ The following fields support binary data:
 
 Tools on the Elixir side receive binary entries as tuples: `params["payload"] == {:binary, <<...>>}` so handlers can keep JSON shape handling separate from opaque blobs. Remote Python workers receive the original proto map untouched; callers can use `Snakepit.GRPC.Client.execute_tool/5` with `binary_parameters: %{ "payload" => <<0, 1, 2>> }` to make the intent explicit.
 
+All entries must be binaries. If a client sends anything else (for example an integer or map) the bridge immediately returns `{:error, {:invalid_binary_parameter, key}}` so that tools never have to defend against malformed payloads.
+
 ### Best Practices
 
 1. **Variable Types**: Always use proper types (`tensor`, `embedding`) for large numerical data
@@ -2760,6 +2762,13 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 - Inspired by the need for reliable ML/AI integrations in Elixir
 - Built on battle-tested OTP principles
 - Special thanks to the Elixir community
+
+## 🚀 What's New (v0.6.9)
+
+- **Canonical worker metadata** – New `Snakepit.Pool.Registry.fetch_worker/1` powers the pool, bridge server, diagnostics, and worker profiles so `worker_module`, `pool_identifier`, and `pool_name` come from a single, tested source.
+- **Binary parameter guardrails** – The gRPC bridge now rejects non-binary entries before tools run, keeping local Elixir handlers on the documented `{:binary, payload}` contract while still forwarding raw bytes to Python workers.
+- **Lifecycle transparency** – Memory-threshold recycling logs whenever a worker can’t answer `:get_memory_usage`, catching misconfigured adapters before they silently drift.
+- **Safer rogue cleanup** – Startup cleanup only targets commands that match configurable script + run-id markers (defaulting to the Snakepit gRPC servers), making shared-host deployments predictable.
 
 ## 📊 Development Status
 

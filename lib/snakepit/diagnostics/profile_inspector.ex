@@ -32,6 +32,7 @@ defmodule Snakepit.Diagnostics.ProfileInspector do
 
   require Logger
   alias Snakepit.Config
+  alias Snakepit.Pool.Registry, as: PoolRegistry
 
   @type pool_name :: atom()
   @type pool_stats :: %{
@@ -318,8 +319,8 @@ defmodule Snakepit.Diagnostics.ProfileInspector do
 
   defp get_worker_stats(worker_id, profile_module) do
     # Look up worker PID from registry
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [{pid, _metadata}] ->
+    case PoolRegistry.fetch_worker(worker_id) do
+      {:ok, pid, _metadata} ->
         # Get profile-specific information
         {:ok, metadata} = profile_module.get_metadata(worker_id)
         capacity = profile_module.get_capacity(worker_id)
@@ -346,7 +347,7 @@ defmodule Snakepit.Diagnostics.ProfileInspector do
           status: status
         }
 
-      [] ->
+      {:error, _} ->
         nil
     end
   end

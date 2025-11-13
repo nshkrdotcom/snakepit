@@ -35,6 +35,7 @@ defmodule Snakepit.GRPCWorker do
   alias Snakepit.Telemetry.Correlation
   alias Snakepit.Logger.Redaction
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Pool.Registry, as: PoolRegistry
   require OpenTelemetry.Tracer, as: Tracer
 
   def child_spec(opts) when is_list(opts) do
@@ -139,11 +140,11 @@ defmodule Snakepit.GRPCWorker do
   def execute(worker, command, args, timeout \\ 30_000)
 
   def execute(worker_id, command, args, timeout) when is_binary(worker_id) do
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [{pid, _}] ->
+    case PoolRegistry.get_worker_pid(worker_id) do
+      {:ok, pid} ->
         GenServer.call(pid, {:execute, command, args, timeout}, timeout + 1_000)
 
-      [] ->
+      {:error, _} ->
         {:error,
          Error.worker_error("Worker not found", %{worker_id: worker_id, command: command})}
     end
@@ -159,15 +160,15 @@ defmodule Snakepit.GRPCWorker do
   def execute_stream(worker, command, args, callback_fn, timeout \\ 300_000)
 
   def execute_stream(worker_id, command, args, callback_fn, timeout) when is_binary(worker_id) do
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [{pid, _}] ->
+    case PoolRegistry.get_worker_pid(worker_id) do
+      {:ok, pid} ->
         GenServer.call(
           pid,
           {:execute_stream, command, args, callback_fn, timeout},
           timeout + 1_000
         )
 
-      [] ->
+      {:error, _} ->
         {:error,
          Error.worker_error("Worker not found", %{worker_id: worker_id, command: command})}
     end
@@ -238,7 +239,14 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp maybe_attach_registry_metadata(worker_id, metadata) when is_binary(worker_id) do
-    Snakepit.Pool.Registry.put_metadata(worker_id, metadata)
+    case PoolRegistry.put_metadata(worker_id, metadata) do
+      :ok ->
+        :ok
+
+      {:error, :not_registered} ->
+        SLog.debug("Pool.Registry missing entry for #{worker_id} while attaching metadata")
+        :ok
+    end
   rescue
     _ -> :ok
   end

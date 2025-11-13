@@ -304,5 +304,16 @@ defmodule Snakepit.ProcessKillerTest do
                "new"
              )
     end
+
+    test "custom scripts and markers can be supplied" do
+      command = "python custom_bridge.py --snakepit-run-id old"
+
+      refute ProcessRegistry.cleanup_candidate?(command, "new")
+
+      assert ProcessRegistry.cleanup_candidate?(command, "new",
+               scripts: ["custom_bridge.py"],
+               run_markers: ["--snakepit-run-id"]
+             )
+    end
   end
 end

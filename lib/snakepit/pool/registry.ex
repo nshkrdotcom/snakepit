@@ -8,6 +8,8 @@ defmodule Snakepit.Pool.Registry do
   - Helper functions for worker lookup
   """
 
+  require Logger
+
   @registry_name __MODULE__
 
   @doc """
@@ -43,19 +45,15 @@ defmodule Snakepit.Pool.Registry do
   Checks if a worker is registered.
   """
   def worker_exists?(worker_id) do
-    case Registry.lookup(@registry_name, worker_id) do
-      [] -> false
-      _ -> true
-    end
+    match?({:ok, _pid, _meta}, fetch_worker(worker_id))
   end
 
   @doc """
   Gets the PID for a worker ID.
   """
   def get_worker_pid(worker_id) do
-    case Registry.lookup(@registry_name, worker_id) do
-      [{pid, _}] -> {:ok, pid}
-      [] -> {:error, :not_found}
+    with {:ok, pid, _metadata} <- fetch_worker(worker_id) do
+      {:ok, pid}
     end
   end
 
@@ -84,13 +82,61 @@ defmodule Snakepit.Pool.Registry do
   replaces it with the provided map. Future updates merge with the existing map.
   """
   def put_metadata(worker_id, metadata) when is_binary(worker_id) and is_map(metadata) do
-    Registry.update_value(@registry_name, worker_id, fn
-      current when is_map(current) -> Map.merge(current, metadata)
-      _ -> metadata
-    end)
+    sanitized = normalize_metadata(metadata)
+
+    try do
+      update_result =
+        Registry.update_value(@registry_name, worker_id, fn
+          current when is_map(current) -> Map.merge(current, sanitized)
+          _ -> sanitized
+        end)
+
+      case update_result do
+        :error ->
+          Logger.warning(
+            "Pool.Registry.put_metadata/2 attempted to update #{inspect(worker_id)} before registration"
+          )
+
+          {:error, :not_registered}
+
+        _ ->
+          :ok
+      end
+    rescue
+      ArgumentError ->
+        Logger.warning(
+          "Pool.Registry.put_metadata/2 attempted to update #{inspect(worker_id)} before registration"
+        )
+
+        {:error, :not_registered}
+    end
   end
 
   def put_metadata(_worker_id, _metadata), do: :ok
+
+  @doc """
+  Returns `{pid, metadata}` for a registered worker.
+  """
+  def fetch_worker(worker_id) when is_binary(worker_id) do
+    case Registry.lookup(@registry_name, worker_id) do
+      [{pid, metadata}] ->
+        {:ok, pid, normalize_metadata(metadata)}
+
+      [] ->
+        {:error, :not_found}
+    end
+  end
+
+  def fetch_worker(_worker_id), do: {:error, :invalid_worker_id}
+
+  @doc """
+  Returns only the metadata for a worker.
+  """
+  def get_worker_metadata(worker_id) do
+    with {:ok, _pid, metadata} <- fetch_worker(worker_id) do
+      {:ok, metadata}
+    end
+  end
 
   @doc """
   Get worker_id from PID for O(1) lookups in :DOWN messages.
@@ -102,4 +148,7 @@ defmodule Snakepit.Pool.Registry do
       [] -> {:error, :not_found}
     end
   end
+
+  defp normalize_metadata(metadata) when is_map(metadata), do: metadata
+  defp normalize_metadata(_metadata), do: %{}
 end

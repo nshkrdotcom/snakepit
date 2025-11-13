@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.6.9] - 2025-11-13
+
+### Added
+- **Registry helpers**: Introduced `Snakepit.Pool.Registry.fetch_worker/1` plus metadata helpers used throughout the pool, bridge server, worker profiles, and diagnostics so `worker_module`, `pool_identifier`, and `pool_name` are always looked up in a single, tested place.
+- **Binary parameter validation**: `Snakepit.GRPC.BridgeServer` now rejects non-binary entries in `ExecuteToolRequest.binary_parameters`, guaranteeing local tools only ever see `{:binary, payload}` tuples while remote workers still receive the untouched proto map.
+- **Lifecycle observability**: Memory-based recycling now logs a warning whenever a worker cannot answer the `:get_memory_usage` probe, preventing silent configuration drift.
+- **Rogue cleanup controls**: Operators can configure the exact script names and run-id markers that qualify Python processes for startup cleanup, with defaults matching `grpc_server.py`/`grpc_server_threaded.py`.
+
+### Changed
+- **GRPC worker lookups**: GRPCWorker, ToolRegistry clients, pool helpers, and worker profiles call the new Registry helpers instead of `Registry.lookup/2`, ensuring metadata stays normalized and reverse lookups never crash when metadata is missing.
+- **Bridge test coverage**: Added binary-parameter regression tests that prove malformed payloads are rejected before reaching Elixir tools, plus lifecycle tests that simulate failing memory probes.
+- **Process killer tests**: Rogue cleanup unit tests now cover the customizable scripts/markers path so changes to the configuration surface immediately.
+
+### Fixed
+- **Registry metadata race**: `Pool.Registry.put_metadata/2` now reports `{:error, :not_registered}` when clients attempt to attach metadata before the worker is registered, eliminating silent successes that previously returned `:ok`.
+- **Docs parity**: README, README_GRPC, README_PROCESS_MANAGEMENT, and ARCHITECTURE now describe the binary parameter contract, registry helper usage, lifecycle behavior, and rogue cleanup assumptions introduced in this release.
+
 ## [0.6.8] - 2025-11-12
 
 This release also rolls up the previously undocumented fail-fast docs/tests work from 074f2260f703d16ccfecf937c10af905165419f0 (heartbeat fail-fast suites, orphan cleanup stress tests, queue probe adapter, and config fail-fast coverage).

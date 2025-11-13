@@ -701,6 +701,9 @@ defmodule Snakepit.Pool.ProcessRegistry do
       SLog.info("Skipping rogue process cleanup (disabled via :rogue_cleanup config)")
       0
     else
+      scripts = Map.get(cleanup_config, :scripts, default_cleanup_scripts())
+      run_markers = Map.get(cleanup_config, :run_markers, default_run_markers())
+
       python_commands =
         Snakepit.ProcessKiller.find_python_processes()
         |> Enum.reduce([], fn pid, acc ->
@@ -712,7 +715,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
       owned_processes =
         Enum.filter(python_commands, fn {_pid, cmd} ->
-          snakepit_command?(cmd) and has_run_marker?(cmd)
+          snakepit_command?(cmd, scripts) and has_run_marker?(cmd, run_markers)
         end)
 
       SLog.info(
@@ -721,7 +724,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
       rogue_processes =
         Enum.filter(owned_processes, fn {_pid, cmd} ->
-          cleanup_candidate?(cmd, current_beam_run_id)
+          cleanup_candidate?(cmd, current_beam_run_id,
+            scripts: scripts,
+            run_markers: run_markers
+          )
         end)
 
       if rogue_processes != [] do
@@ -749,35 +755,48 @@ defmodule Snakepit.Pool.ProcessRegistry do
     end
   end
 
-  @grpc_scripts ["grpc_server.py", "grpc_server_threaded.py"]
-  @run_markers ["--snakepit-run-id", "--run-id"]
-
   @doc false
-  def cleanup_candidate?(command, current_run_id) when is_binary(command) do
-    snakepit_command?(command) and has_run_marker?(command) and
-      not has_run_id?(command, current_run_id)
+  def cleanup_candidate?(command, current_run_id, opts \\ []) when is_binary(command) do
+    scripts = Keyword.get(opts, :scripts, default_cleanup_scripts())
+    markers = Keyword.get(opts, :run_markers, default_run_markers())
+
+    snakepit_command?(command, scripts) and has_run_marker?(command, markers) and
+      not has_run_id?(command, current_run_id, markers)
   end
 
-  defp snakepit_command?(command) do
-    Enum.any?(@grpc_scripts, &String.contains?(command, &1))
+  defp snakepit_command?(command, scripts) do
+    Enum.any?(scripts, &String.contains?(command, &1))
   end
 
-  defp has_run_marker?(command) do
-    Enum.any?(@run_markers, &String.contains?(command, &1))
+  defp has_run_marker?(command, markers) do
+    Enum.any?(markers, &String.contains?(command, &1))
   end
 
-  defp has_run_id?(command, run_id) when is_binary(run_id) do
-    Enum.any?(@run_markers, fn marker ->
+  defp has_run_id?(command, run_id, markers) when is_binary(run_id) do
+    Enum.any?(markers, fn marker ->
       String.contains?(command, "#{marker} #{run_id}")
     end)
   end
 
-  defp normalize_cleanup_config(%{} = config), do: Map.put_new(config, :enabled, true)
+  defp normalize_cleanup_config(%{} = config) do
+    config
+    |> Map.put_new(:enabled, true)
+    |> Map.put_new(:scripts, default_cleanup_scripts())
+    |> Map.put_new(:run_markers, default_run_markers())
+  end
 
   defp normalize_cleanup_config(config) when is_list(config),
     do: Enum.into(config, %{}) |> normalize_cleanup_config()
 
-  defp normalize_cleanup_config(_), do: %{enabled: true}
+  defp normalize_cleanup_config(_),
+    do: %{
+      enabled: true,
+      scripts: default_cleanup_scripts(),
+      run_markers: default_run_markers()
+    }
+
+  defp default_cleanup_scripts, do: ["grpc_server.py", "grpc_server_threaded.py"]
+  defp default_run_markers, do: ["--snakepit-run-id", "--run-id"]
 
   defp load_current_run_processes(dets_table, ets_table, beam_run_id) do
     # Load only processes from current BEAM run into ETS

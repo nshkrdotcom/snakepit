@@ -105,7 +105,7 @@ defmodule Snakepit.Pool.RegistryLookupTest do
       {:ok, worker_id: worker_id, worker: worker, pool: pool_pid}
     end
 
-    test "stores metadata for registry lookups", %{worker_id: worker_id} do
+    test "stores metadata for registry lookups", %{worker_id: worker_id, pool: pool_pid} do
       assert_eventually(fn -> match?({:ok, _}, PoolRegistry.get_worker_pid(worker_id)) end,
         timeout: 5_000,
         interval: 25
@@ -120,7 +120,15 @@ defmodule Snakepit.Pool.RegistryLookupTest do
       assert Pool.extract_pool_name_from_worker_id(worker_id) == :analytics_pool
 
       assert {:ok, ^worker_id} = PoolRegistry.get_worker_id_by_pid(pid)
+
+      assert {:ok, ^pid, metadata} = PoolRegistry.fetch_worker(worker_id)
+      assert metadata.pool_name == pool_pid
     end
+  end
+
+  test "put_metadata returns error when worker is not registered" do
+    assert {:error, :not_registered} =
+             PoolRegistry.put_metadata("ghost-worker", %{worker_module: Snakepit.GRPCWorker})
   end
 
   defp ensure_started(child_spec) do

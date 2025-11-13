@@ -98,11 +98,11 @@ defmodule Snakepit.WorkerProfile.Process do
 
   def execute_request(worker_id, request, timeout) when is_binary(worker_id) do
     # Lookup PID from worker_id
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [{pid, _}] ->
+    case PoolRegistry.get_worker_pid(worker_id) do
+      {:ok, pid} ->
         execute_request(pid, request, timeout)
 
-      [] ->
+      {:error, _} ->
         {:error, :worker_not_found}
     end
   end
@@ -133,11 +133,11 @@ defmodule Snakepit.WorkerProfile.Process do
   end
 
   def health_check(worker_id) when is_binary(worker_id) do
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [{pid, _}] ->
+    case PoolRegistry.get_worker_pid(worker_id) do
+      {:ok, pid} ->
         health_check(pid)
 
-      [] ->
+      {:error, _} ->
         {:error, :worker_not_found}
     end
   end
@@ -213,8 +213,8 @@ defmodule Snakepit.WorkerProfile.Process do
   defp get_worker_module(worker_pid) do
     with {:ok, worker_id} <-
            Snakepit.Pool.Registry.get_worker_id_by_pid(worker_pid),
-         [{_pid, %{worker_module: module}}] <-
-           Registry.lookup(Snakepit.Pool.Registry, worker_id) do
+         {:ok, _pid, %{worker_module: module}} <-
+           PoolRegistry.fetch_worker(worker_id) do
       module
     else
       _ ->

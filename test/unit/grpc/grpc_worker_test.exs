@@ -82,6 +82,12 @@ defmodule Snakepit.GRPCWorkerTest do
       assert result["status"] == "pong"
     end
 
+    test "worker reports its BEAM memory usage", %{worker: worker} do
+      assert {:ok, bytes} = GenServer.call(worker, :get_memory_usage)
+      assert is_integer(bytes)
+      assert bytes > 0
+    end
+
     test "worker survives adapter errors", %{worker: worker} do
       # Capture logs during error handling to trap warnings/errors
       log =
@@ -183,7 +189,7 @@ defmodule Snakepit.GRPCWorkerTest do
           GenServer.stop(worker)
 
           # Worker should be unregistered
-          assert Registry.lookup(Snakepit.Pool.Registry, worker_id) == []
+          assert match?({:error, :not_found}, Snakepit.Pool.Registry.get_worker_pid(worker_id))
         end)
 
       # Assert no warnings about unregistering unknown workers

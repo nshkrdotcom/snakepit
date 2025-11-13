@@ -85,6 +85,10 @@ defmodule Snakepit.Test.MockGRPCWorker do
     {:reply, state.stats, state}
   end
 
+  def handle_call(:get_memory_usage, _from, state) do
+    {:reply, {:ok, current_process_memory_bytes()}, state}
+  end
+
   # Note: __supertester_sync__ handler is automatically injected by TestableGenServer
 
   @impl true
@@ -107,5 +111,12 @@ defmodule Snakepit.Test.MockGRPCWorker do
     Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
 
     :ok
+  end
+
+  defp current_process_memory_bytes do
+    case Process.info(self(), :memory) do
+      {:memory, bytes} when is_integer(bytes) and bytes >= 0 -> bytes
+      _ -> 0
+    end
   end
 end

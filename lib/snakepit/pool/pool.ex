@@ -15,6 +15,7 @@ defmodule Snakepit.Pool do
   alias Snakepit.Error
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Logger.Redaction
+  alias Snakepit.Pool.Registry, as: PoolRegistry
 
   @default_size System.schedulers_online() * 2
   @default_startup_timeout 10_000
@@ -1318,8 +1319,8 @@ defmodule Snakepit.Pool do
 
   defp get_worker_module(worker_id) do
     # Try to determine the worker module from registry or configuration
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [{_pid, %{worker_module: module}}] ->
+    case PoolRegistry.fetch_worker(worker_id) do
+      {:ok, _pid, %{worker_module: module}} when is_atom(module) ->
         module
 
       _ ->
@@ -1436,21 +1437,16 @@ defmodule Snakepit.Pool do
   end
 
   defp lookup_pool_from_registry(worker_id) do
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [{pid, metadata}] ->
-        metadata
-        |> ensure_map()
-        |> extract_pool_from_metadata(pid)
+    case PoolRegistry.fetch_worker(worker_id) do
+      {:ok, pid, metadata} ->
+        extract_pool_from_metadata(metadata, pid)
 
-      [] ->
-        {:error, :worker_not_registered}
+      {:error, reason} ->
+        {:error, reason}
     end
   rescue
     _ -> {:error, :registry_lookup_failed}
   end
-
-  defp ensure_map(metadata) when is_map(metadata), do: metadata
-  defp ensure_map(_), do: %{}
 
   defp extract_pool_from_metadata(metadata, pid) do
     case Map.get(metadata, :pool_identifier) do

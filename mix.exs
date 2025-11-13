@@ -1,7 +1,7 @@
 defmodule Snakepit.MixProject do
   use Mix.Project
 
-  @version "0.6.8"
+  @version "0.6.9"
   @source_url "https://github.com/nshkrdotcom/snakepit"
 
   def project do

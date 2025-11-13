@@ -340,6 +340,36 @@ defmodule Snakepit.GRPC.BridgeServerTest do
 
       assert opts[:binary_parameters] == %{"blob" => blob}
     end
+
+    test "rejects binary parameters that are not binaries", %{session_id: session_id} do
+      ensure_tool_registry_started()
+      {:ok, _session} = SessionStore.create_session(session_id)
+
+      parent = self()
+
+      :ok =
+        ToolRegistry.register_elixir_tool(session_id, "binary_tool", fn _params ->
+          send(parent, :should_not_run)
+          {:ok, :ok}
+        end)
+
+      request = %ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: "binary_tool",
+        parameters: %{},
+        binary_parameters: %{"blob" => 123}
+      }
+
+      response = BridgeServer.execute_tool(request, nil)
+      assert %ExecuteToolResponse{success: false, error_message: message} = response
+      assert message =~ "Invalid parameter blob"
+      assert message =~ "not_binary"
+
+      refute_received :should_not_run
+
+      ToolRegistry.cleanup_session(session_id)
+      SessionStore.delete_session(session_id)
+    end
   end
 
   defp ensure_started(child_spec) do

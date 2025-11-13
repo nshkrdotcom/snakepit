@@ -59,6 +59,7 @@ Python processes are launched by each GRPCWorker and connect back to the BEAM gR
 - Provide O(1) lookup for worker routing, track external OS PIDs/run IDs, and ensure cleanup routines can map resources back to the current BEAM instance.
 - `ProcessRegistry` uses ETS to store run IDs so `Snakepit.ProcessKiller` and `Snakepit.Pool.ApplicationCleanup` can reap orphans deterministically.
 - `Pool.Registry` now keeps authoritative metadata (`worker_module`, `pool_identifier`, `pool_name`) for every worker. `Snakepit.GRPCWorker` updates the registry as soon as it boots so callers such as `Pool.extract_pool_name_from_worker_id/1` and reverse lookups never have to guess based on worker ID formats.
+- Helper APIs like `Pool.Registry.fetch_worker/1` centralize `pid + metadata` lookups so higher layers (pool, bridge server, worker profiles) no longer reach into the raw `Registry` tables. This ensures metadata stays normalized and ready for diagnostics.
 
 ### `Snakepit.Pool`
 - GenServer request router with queueing, session affinity, and Task.Supervisor integration.

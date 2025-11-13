@@ -11,6 +11,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   alias Snakepit.Bridge.ToolRegistry
   alias Snakepit.GRPCWorker
   alias Snakepit.GRPC.Client, as: GRPCClient
+  alias Snakepit.Pool.Registry, as: PoolRegistry
 
   alias Snakepit.Bridge.{
     PingRequest,
@@ -218,7 +219,7 @@ defmodule Snakepit.GRPC.BridgeServer do
 
     case decoded do
       {:ok, acc} ->
-        {:ok, merge_binary_parameters(acc, binary_params || %{})}
+        merge_binary_parameters(acc, binary_params || %{})
 
       other ->
         other
@@ -249,19 +250,21 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   defp merge_binary_parameters(decoded, binary_params) when map_size(binary_params) == 0,
-    do: decoded
+    do: {:ok, decoded}
 
   defp merge_binary_parameters(decoded, binary_params) when is_map(binary_params) do
-    Enum.reduce(binary_params, decoded, fn {key, value}, acc ->
-      case value do
-        bin when is_binary(bin) ->
-          Map.put(acc, normalize_param_key(key), {:binary, bin})
+    Enum.reduce_while(binary_params, {:ok, decoded}, fn {key, value}, {:ok, acc} ->
+      cond do
+        is_binary(value) ->
+          {:cont, {:ok, Map.put(acc, normalize_param_key(key), {:binary, value})}}
 
-        _ ->
-          acc
+        true ->
+          {:halt, {:error, {:invalid_parameter, normalize_param_key(key), :not_binary}}}
       end
     end)
   end
+
+  defp merge_binary_parameters(decoded, _binary_params), do: {:ok, decoded}
 
   defp normalize_param_key(key) when is_atom(key), do: Atom.to_string(key)
   defp normalize_param_key(key) when is_binary(key), do: key
@@ -282,10 +285,8 @@ defmodule Snakepit.GRPC.BridgeServer do
   # Helper functions for remote tool execution
 
   defp get_worker_port(worker_id) do
-    # For now, try to get from the worker registry
-    # In a production implementation, this would be stored in a registry
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [{pid, _}] when is_pid(pid) ->
+    case PoolRegistry.get_worker_pid(worker_id) do
+      {:ok, pid} when is_pid(pid) ->
         # Try to get port from worker state - this is a simplified approach
         try do
           case GenServer.call(pid, :get_port, 1000) do
@@ -296,7 +297,7 @@ defmodule Snakepit.GRPC.BridgeServer do
           _exit, _reason -> {:error, "Worker not responding"}
         end
 
-      [] ->
+      {:error, _reason} ->
         {:error, "Worker not found: #{worker_id}"}
     end
   end
@@ -384,8 +385,8 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   defp get_existing_worker_channel(worker_id) do
-    case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
-      [{pid, metadata}] when is_pid(pid) ->
+    case PoolRegistry.fetch_worker(worker_id) do
+      {:ok, pid, metadata} when is_pid(pid) ->
         case Map.get(metadata, :worker_module, GRPCWorker) do
           module when module == GRPCWorker ->
             case GRPCWorker.get_channel(pid) do
@@ -397,7 +398,7 @@ defmodule Snakepit.GRPC.BridgeServer do
             {:error, :unsupported_worker_module}
         end
 
-      [] ->
+      {:error, _} ->
         {:error, "Worker not found: #{worker_id}"}
     end
   rescue

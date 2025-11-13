@@ -371,8 +371,15 @@ defmodule Snakepit.Worker.LifecycleManager do
       threshold_mb ->
         # Get current memory usage (if available)
         case get_worker_memory_mb(worker_state.pid) do
-          {:ok, memory_mb} -> memory_mb >= threshold_mb
-          _ -> false
+          {:ok, memory_mb} ->
+            memory_mb >= threshold_mb
+
+          {:error, reason} ->
+            SLog.warning(
+              "Memory probe for #{worker_state.worker_id} failed: #{inspect(reason)} (threshold #{threshold_mb} MB)"
+            )
+
+            false
         end
     end
   end
