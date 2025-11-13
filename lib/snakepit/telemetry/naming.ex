@@ -5,6 +5,14 @@ defmodule Snakepit.Telemetry.Naming do
   This module ensures atom safety by maintaining a curated catalog of all
   valid telemetry events and measurement keys. Python-originated events
   must pass through this module to prevent arbitrary atom creation.
+
+  ## Python Event Catalog
+
+  `python_event_catalog/0` lists the event strings emitted by `snakepit_bridge`
+  and the measurement keys they are expected to use. When adding a new Python
+  telemetry event, update that catalog and the allowlist in
+  `snakepit_bridge.telemetry.stream` together so both languages agree on the
+  schema.
   """
 
   # Layer 1: Infrastructure Events (Elixir-originated)
@@ -50,6 +58,64 @@ defmodule Snakepit.Telemetry.Naming do
     :connection_established,
     :connection_lost,
     :connection_reconnected
+  ]
+
+  @python_event_catalog [
+    %{
+      name: "python.call.start",
+      event: [:snakepit, :python, :call, :start],
+      measurements: [:count]
+    },
+    %{
+      name: "python.call.stop",
+      event: [:snakepit, :python, :call, :stop],
+      measurements: [:duration, :count]
+    },
+    %{
+      name: "python.call.exception",
+      event: [:snakepit, :python, :call, :exception],
+      measurements: [:count]
+    },
+    %{
+      name: "python.memory.sampled",
+      event: [:snakepit, :python, :memory, :sampled],
+      measurements: [:rss_bytes, :vms_bytes]
+    },
+    %{
+      name: "python.cpu.sampled",
+      event: [:snakepit, :python, :cpu, :sampled],
+      measurements: [:cpu_percent]
+    },
+    %{
+      name: "python.gc.completed",
+      event: [:snakepit, :python, :gc, :completed],
+      measurements: [:count, :generation]
+    },
+    %{
+      name: "python.error.occurred",
+      event: [:snakepit, :python, :error, :occurred],
+      measurements: [:count]
+    },
+    %{
+      name: "tool.execution.start",
+      event: [:snakepit, :python, :tool, :execution, :start],
+      measurements: [:count]
+    },
+    %{
+      name: "tool.execution.stop",
+      event: [:snakepit, :python, :tool, :execution, :stop],
+      measurements: [:duration, :count]
+    },
+    %{
+      name: "tool.execution.exception",
+      event: [:snakepit, :python, :tool, :execution, :exception],
+      measurements: [:count]
+    },
+    %{
+      name: "tool.result_size",
+      event: [:snakepit, :python, :tool, :result_size],
+      measurements: [:message_size]
+    }
   ]
 
   # Valid measurement keys (atom-safe)
@@ -185,6 +251,11 @@ defmodule Snakepit.Telemetry.Naming do
   Get all valid Python events.
   """
   def python_events, do: @python_events
+
+  @doc """
+  Return the catalog describing Python event names, their telemetry atoms, and expected measurements.
+  """
+  def python_event_catalog, do: @python_event_catalog
 
   @doc """
   Get all valid gRPC events.

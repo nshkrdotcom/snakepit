@@ -6,11 +6,24 @@ defmodule Snakepit.Pool.Registry do
   - Consistent naming for worker processes
   - Easy migration path to distributed registry (Horde)
   - Helper functions for worker lookup
+
+  ## Canonical Metadata
+
+  All workers store a metadata map containing the following canonical keys:
+
+  * `:worker_module` – module that owns the worker implementation (usually `Snakepit.GRPCWorker`)
+  * `:pool_name` – atom name of the logical pool (e.g. `:default`)
+  * `:pool_identifier` – optional human-friendly identifier used in docs/metrics
+  * `:adapter_module` – adapter used to launch the Python worker
+
+  Higher-level helpers (pool, diagnostics, worker profiles) should prefer
+  `Snakepit.Pool.Registry.fetch_worker/1` so these keys stay authoritative.
   """
 
   require Logger
 
   @registry_name __MODULE__
+  @metadata_keys [:worker_module, :pool_name, :pool_identifier, :adapter_module]
 
   @doc """
   Returns the child spec for the registry.
@@ -63,6 +76,11 @@ defmodule Snakepit.Pool.Registry do
   def worker_count do
     Registry.count(@registry_name)
   end
+
+  @doc """
+  Returns the list of canonical metadata keys maintained for each worker.
+  """
+  def metadata_keys, do: @metadata_keys
 
   @doc """
   Register a worker with metadata for O(1) reverse lookups.

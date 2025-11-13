@@ -179,17 +179,16 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
     def _validate_adapter_thread_safety(self):
         """Validate that the adapter declares thread safety"""
-        if not hasattr(self.adapter_class, '__thread_safe__'):
-            logger.warning(
-                f"⚠️  Adapter {self.adapter_class.__name__} does not declare thread safety. "
-                f"Set __thread_safe__ = True if thread-safe, or use process mode instead."
-            )
-        elif not self.adapter_class.__thread_safe__:
+        if not getattr(self.adapter_class, '__thread_safe__', False):
             logger.error(
-                f"❌ Adapter {self.adapter_class.__name__} explicitly declares it is NOT thread-safe! "
-                f"Use --mode process instead of --mode threaded."
+                "Adapter %s must declare __thread_safe__ = True to use grpc_server_threaded. "
+                "Falling back to process mode is safer than running an unsafe adapter in threads.",
+                self.adapter_class.__name__,
             )
-            raise ValueError(f"Adapter {self.adapter_class.__name__} is not thread-safe")
+            raise ValueError(
+                f"Adapter {self.adapter_class.__name__} is not marked thread-safe; "
+                "set __thread_safe__ = True or use process mode."
+            )
 
     def _record_request_start(self):
         """Thread-safe request start tracking"""

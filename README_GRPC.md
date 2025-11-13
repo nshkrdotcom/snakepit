@@ -496,6 +496,11 @@ Every `Snakepit.GRPCWorker` starts a `Snakepit.HeartbeatMonitor` unless you disa
 environment variable so both sides agree on intervals, timeout, and whether the worker
 should die on failures.
 
+- **Authority:** The Elixir monitor is always the source of truth for recycling. Python's
+  optional heartbeat client treats the Elixir process as a liveness hint and will only
+  stop the Python runtime when it can no longer reach BEAM for an extended period. Never
+  rely on Python heartbeats to keep an unhealthy worker alive—set `dependent: false` on
+  the Elixir side instead.
 - `dependent: true` (default) &rarr; missed heartbeats or ping failures terminate the
   worker and the supervisor restarts a fresh capsule. Use this for production pools.
 - `dependent: false` &rarr; the monitor logs failures and keeps retrying without killing

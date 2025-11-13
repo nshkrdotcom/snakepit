@@ -61,12 +61,48 @@ defmodule Snakepit.Config do
   - `worker_ttl` - Time-to-live (`:infinity` or `{value, :seconds/:minutes/:hours}`)
   - `worker_max_requests` - Max requests before recycling (`:infinity` or integer)
 
+  Heartbeat options are mirrored in `snakepit_bridge.heartbeat.HeartbeatConfig`,
+  so any new keys added here must be added to the Python struct and documented
+  in the heartbeat guides to keep both sides in sync.
+
+  ## Normalized Shape
+
+  `Snakepit.Config.normalize_pool_config/1` converts user input into a canonical
+  map that downstream components rely on. The resulting structure (documented
+  under `t:normalized_pool_config/0`) always includes heartbeat defaults,
+  adapter metadata, and profile-specific knobs so pool, worker supervisor, and
+  diagnostics modules never have to pattern-match on partial user input.
+
   """
 
   require Logger
   alias Snakepit.Logger, as: SLog
 
+  @typedoc """
+  Normalized pool configuration returned by `normalize_pool_config/1`.
+
+  ```
+  %{
+    name: atom(),
+    worker_profile: :process | :thread,
+    pool_size: pos_integer(),
+    adapter_module: module(),
+    adapter_args: list(),
+    adapter_env: list(),
+    pool_identifier: atom() | nil,
+    worker_ttl: :infinity | {integer(), :seconds | :minutes | :hours},
+    worker_max_requests: :infinity | pos_integer(),
+    heartbeat: map(),
+    # Profile-specific fields:
+    startup_batch_size: pos_integer(),
+    startup_batch_delay_ms: non_neg_integer(),
+    threads_per_worker: pos_integer(),
+    thread_safety_checks: boolean()
+  }
+  ```
+  """
   @type pool_config :: map()
+  @type normalized_pool_config :: map()
   @type validation_result :: {:ok, [pool_config()]} | {:error, term()}
 
   @default_pool_size System.schedulers_online() * 2
@@ -254,6 +290,9 @@ defmodule Snakepit.Config do
 
   @doc """
   Returns the normalized default heartbeat configuration, merged with application env overrides.
+
+  This shape is shared with `snakepit_bridge.heartbeat.HeartbeatConfig`. When adding new keys,
+  update both modules to keep the cross-language schema aligned.
   """
   @spec heartbeat_defaults() :: map()
   def heartbeat_defaults do

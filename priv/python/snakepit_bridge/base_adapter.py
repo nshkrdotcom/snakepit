@@ -8,6 +8,7 @@ import inspect
 from typing import List, Dict, Any, Callable, Optional
 from dataclasses import dataclass
 import logging
+import asyncio
 
 from snakepit_bridge_pb2 import ToolRegistration, ParameterSpec
 import snakepit_bridge_pb2 as pb2
@@ -193,19 +194,8 @@ class BaseAdapter:
         )
         
         try:
-            response = stub.RegisterTools(request)
-            # Handle async stub returning UnaryUnaryCall - properly invoke it
-            if hasattr(response, '__await__') or hasattr(response, 'result'):
-                # This is a UnaryUnaryCall object, get the actual result
-                try:
-                    response = response.result()
-                except AttributeError:
-                    # Try calling it directly if it's a callable
-                    if callable(response):
-                        response = response()
-                    else:
-                        logger.warning("RegisterTools returned UnaryUnaryCall but couldn't extract result")
-                        return []
+            raw_response = stub.RegisterTools(request)
+            response = self._coerce_stub_response(raw_response)
             if response.success:
                 logger.info(f"Registered {len(tools)} tools for session {session_id}")
                 return list(response.tool_ids.keys())
@@ -215,3 +205,30 @@ class BaseAdapter:
         except Exception as e:
             logger.error(f"Error registering tools: {e}")
             return []
+
+    def _coerce_stub_response(self, response):
+        """
+        Handle the different response shapes returned by gRPC stubs.
+
+        gRPC Python may return:
+        - Plain protobuf responses
+        - UnaryUnaryCall objects with .result()
+        - Awaitable coroutines (aio stubs)
+        - Callables that lazily fetch the result
+        """
+        if inspect.isawaitable(response):
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            return loop.run_until_complete(response)
+
+        result_attr = getattr(response, "result", None)
+        if callable(result_attr):
+            return result_attr()
+
+        if callable(response):
+            return response()
+
+        return response

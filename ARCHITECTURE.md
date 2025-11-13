@@ -100,6 +100,7 @@ Python processes are launched by each GRPCWorker and connect back to the BEAM gR
 - Periodically invokes a ping callback (usually a gRPC health RPC) and tracks missed responses.
 - Signals the WorkerStarter (by exiting the worker) when thresholds are breached, allowing the supervisor to restart the capsule.
 - `dependent: true` (default) means heartbeat failures terminate the worker; `dependent: false` keeps the worker alive and simply logs/retries so you can debug without killing the Python process.
+- The BEAM heartbeat monitor is authoritative. Python's heartbeat client only exits when it cannot reach the BEAM control-plane for an extended period, so always change the Elixir `dependent` flag rather than relying on Python behaviour to keep a capsule running.
 - Heartbeat settings are shipped to Python via the `SNAKEPIT_HEARTBEAT_CONFIG` environment variable. Python workers treat it as hints (ping interval, timeout, dependent flag) so both sides agree on policy. Today this is a push-style ping from Elixir into Python; future control-plane work will layer richer distributed health signals on top.
 
 ### `Snakepit.ProcessKiller`
@@ -119,7 +120,7 @@ Python processes are launched by each GRPCWorker and connect back to the BEAM gR
 ## Python Bridge
 
 - `priv/python/grpc_server.py`: Stateless gRPC service that exposes Snakepit functionality to user adapters. It forwards session operations to Elixir and defers telemetry to the BEAM.
-- `priv/python/snakepit_bridge/session_context.py`: Client helper that caches variables locally with TTL invalidation and knows how to signal heartbeats back to Elixir (in progress for the heartbeat workstream).
+- `priv/python/snakepit_bridge/session_context.py`: Client helper that caches variables locally with TTL invalidation. Heartbeat configuration is passed via `SNAKEPIT_HEARTBEAT_CONFIG`, so any schema changes must be made in both Elixir (`Snakepit.Config`) and Python (`snakepit_bridge.heartbeat.HeartbeatConfig`).
 - `priv/python/snakepit_bridge/adapters/*`: User-defined logic; receives a `SessionContext` and uses generated stubs from `snakepit_bridge.proto`.
 - Python code is bundled with the release; regeneration happens via `make proto-python` or `priv/python/generate_grpc.sh`.
 

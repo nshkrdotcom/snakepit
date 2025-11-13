@@ -691,7 +691,14 @@ defmodule Snakepit.Pool do
                 {:reply, {:error, :pool_saturated}, %{state | pools: updated_pools}}
               else
                 # Queue the request
-                request = {from, command, args, opts, System.monotonic_time()}
+                timer_ref =
+                  Process.send_after(
+                    self(),
+                    {:queue_timeout, pool_name, from},
+                    pool_state.queue_timeout
+                  )
+
+                request = {from, command, args, opts, System.monotonic_time(), timer_ref}
                 new_queue = :queue.in(request, pool_state.request_queue)
 
                 # Update stats
@@ -705,13 +712,6 @@ defmodule Snakepit.Pool do
                   | request_queue: new_queue,
                     stats: updated_stats
                 }
-
-                # Set queue timeout
-                Process.send_after(
-                  self(),
-                  {:queue_timeout, pool_name, from},
-                  pool_state.queue_timeout
-                )
 
                 updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
                 {:noreply, %{state | pools: updated_pools}}
@@ -737,8 +737,9 @@ defmodule Snakepit.Pool do
           prune_cancelled_requests(pool_state.cancelled_requests, now, retention_ms)
 
         case :queue.out(pool_state.request_queue) do
-          {{:value, {queued_from, command, args, opts, _queued_at}}, new_queue} ->
+          {{:value, {queued_from, command, args, opts, _queued_at, timer_ref}}, new_queue} ->
             if Map.has_key?(pruned_cancelled, queued_from) do
+              cancel_queue_timer(timer_ref)
               SLog.debug("Skipping cancelled request from #{inspect(queued_from)}")
               new_cancelled = drop_cancelled_request(pruned_cancelled, queued_from)
 
@@ -752,6 +753,7 @@ defmodule Snakepit.Pool do
               updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
               {:noreply, %{state | pools: updated_pools}}
             else
+              cancel_queue_timer(timer_ref)
               {client_pid, _tag} = queued_from
 
               if Process.alive?(client_pid) do
@@ -826,7 +828,6 @@ defmodule Snakepit.Pool do
         {:noreply, state}
 
       pool_state ->
-        GenServer.reply(from, {:error, :queue_timeout})
         now = System.monotonic_time(:millisecond)
         retention_ms = cancellation_retention_ms(pool_state.queue_timeout)
 
@@ -834,23 +835,30 @@ defmodule Snakepit.Pool do
           drop_request_from_queue(pool_state.request_queue, from)
 
         if dropped? do
+          GenServer.reply(from, {:error, :queue_timeout})
           SLog.debug("Removed timed out request #{inspect(from)} from queue in pool #{pool_name}")
+
+          new_cancelled =
+            record_cancelled_request(pool_state.cancelled_requests, from, now, retention_ms)
+
+          updated_stats = Map.update!(pool_state.stats, :queue_timeouts, &(&1 + 1))
+
+          updated_pool_state = %{
+            pool_state
+            | request_queue: pruned_queue,
+              cancelled_requests: new_cancelled,
+              stats: updated_stats
+          }
+
+          updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+          {:noreply, %{state | pools: updated_pools}}
+        else
+          SLog.debug(
+            "Queue timeout fired for #{inspect(from)} in pool #{pool_name} after request was already handled"
+          )
+
+          {:noreply, state}
         end
-
-        new_cancelled =
-          record_cancelled_request(pool_state.cancelled_requests, from, now, retention_ms)
-
-        updated_stats = Map.update!(pool_state.stats, :queue_timeouts, &(&1 + 1))
-
-        updated_pool_state = %{
-          pool_state
-          | request_queue: pruned_queue,
-            cancelled_requests: new_cancelled,
-            stats: updated_stats
-        }
-
-        updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-        {:noreply, %{state | pools: updated_pools}}
     end
   end
 
@@ -969,12 +977,15 @@ defmodule Snakepit.Pool do
       queue
       |> :queue.to_list()
       |> Enum.reduce({[], pruned_cancelled}, fn
-        {from, _command, _args, _opts, _queued_at} = request, {acc, current_cancelled} ->
+        {from, _command, _args, _opts, _queued_at, timer_ref} = request,
+        {acc, current_cancelled} ->
           cond do
             Map.has_key?(current_cancelled, from) ->
+              cancel_queue_timer(timer_ref)
               {acc, drop_cancelled_request(current_cancelled, from)}
 
             not alive_from?(from) ->
+              cancel_queue_timer(timer_ref)
               {acc, drop_cancelled_request(current_cancelled, from)}
 
             true ->
@@ -995,7 +1006,9 @@ defmodule Snakepit.Pool do
       queue
       |> :queue.to_list()
       |> Enum.reduce({[], false}, fn
-        {queued_from, _command, _args, _opts, _queued_at}, {acc, _} when queued_from == from ->
+        {queued_from, _command, _args, _opts, _queued_at, timer_ref}, {acc, _}
+        when queued_from == from ->
+          cancel_queue_timer(timer_ref)
           {acc, true}
 
         request, {acc, dropped?} ->
@@ -1045,6 +1058,13 @@ defmodule Snakepit.Pool do
 
   defp drop_cancelled_request(cancelled_requests, from) do
     Map.delete(cancelled_requests, from)
+  end
+
+  defp cancel_queue_timer(nil), do: :ok
+
+  defp cancel_queue_timer(timer_ref) do
+    Process.cancel_timer(timer_ref, async: true, info: false)
+    :ok
   end
 
   defp trim_cancelled_requests(cancelled_requests) do

@@ -61,6 +61,14 @@ defmodule Snakepit.Pool.QueueManagementTest do
       Enum.reduce(1..iterations, original_state, fn _, state ->
         from = {self(), make_ref()}
         tag = elem(from, 1)
+        request = {from, "command", %{}, %{}, System.monotonic_time(), nil}
+
+        pool_state = state.pools.queue_pool
+
+        updated_pool =
+          %{pool_state | request_queue: :queue.in(request, pool_state.request_queue)}
+
+        state = %{state | pools: Map.put(state.pools, :queue_pool, updated_pool)}
 
         {:noreply, new_state} = Pool.handle_info({:queue_timeout, :queue_pool, from}, state)
         assert_receive {^tag, {:error, :queue_timeout}}
@@ -74,7 +82,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
   test "queue timeout removes request from the in-memory queue", %{state: state} do
     from = {self(), make_ref()}
     tag = elem(from, 1)
-    request = {from, "command", %{}, %{}, System.monotonic_time()}
+    request = {from, "command", %{}, %{}, System.monotonic_time(), nil}
 
     pool_state = %{
       state.pools.queue_pool
@@ -88,6 +96,25 @@ defmodule Snakepit.Pool.QueueManagementTest do
 
     assert :queue.is_empty(new_state.pools.queue_pool.request_queue)
     assert Map.has_key?(new_state.pools.queue_pool.cancelled_requests, from)
+  end
+
+  test "queue timeout message is ignored once the request has been dequeued", %{state: state} do
+    from = {self(), make_ref()}
+    tag = elem(from, 1)
+    request = {from, "command", %{}, %{}, System.monotonic_time(), nil}
+
+    pool_state = state.pools.queue_pool
+    queued_state = %{pool_state | request_queue: :queue.in(request, pool_state.request_queue)}
+    state = %{state | pools: Map.put(state.pools, :queue_pool, queued_state)}
+
+    emptied_pool = %{queued_state | request_queue: :queue.new()}
+    state = %{state | pools: Map.put(state.pools, :queue_pool, emptied_pool)}
+    stats_before = state.pools.queue_pool.stats.queue_timeouts
+
+    {:noreply, new_state} = Pool.handle_info({:queue_timeout, :queue_pool, from}, state)
+
+    refute_receive {^tag, {:error, :queue_timeout}}, 50
+    assert new_state.pools.queue_pool.stats.queue_timeouts == stats_before
   end
 
   test "stale cancelled entries are pruned on worker checkin", %{state: state} do
@@ -108,7 +135,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
 
   test "cancelled queue entries are dropped on checkin", %{state: state} do
     queued_from = {self(), make_ref()}
-    request = {queued_from, "command", %{}, %{}, System.monotonic_time()}
+    request = {queued_from, "command", %{}, %{}, System.monotonic_time(), nil}
 
     pool_state = %{
       state.pools.queue_pool
@@ -136,8 +163,8 @@ defmodule Snakepit.Pool.QueueManagementTest do
     now_ms = System.monotonic_time(:millisecond)
 
     {from_a, from_b} = {{self(), make_ref()}, {self(), make_ref()}}
-    request_a = {from_a, "command_a", %{}, %{}, System.monotonic_time()}
-    request_b = {from_b, "command_b", %{}, %{}, System.monotonic_time()}
+    request_a = {from_a, "command_a", %{}, %{}, System.monotonic_time(), nil}
+    request_b = {from_b, "command_b", %{}, %{}, System.monotonic_time(), nil}
 
     queue = :queue.from_list([request_a, request_b])
 
@@ -160,7 +187,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
 
     queue_after = new_state.pools.queue_pool.request_queue |> :queue.to_list()
     assert length(queue_after) == 1
-    assert Enum.map(queue_after, fn {queued_from, _, _, _, _} -> queued_from end) == [from_new]
+    assert Enum.map(queue_after, fn {queued_from, _, _, _, _, _} -> queued_from end) == [from_new]
     assert new_state.pools.queue_pool.cancelled_requests == %{}
 
     # Drain any queue timeout messages scheduled during the enqueue

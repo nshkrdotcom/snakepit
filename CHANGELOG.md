@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.10] - 2025-11-13
+
+### Added
+- **Canonical worker metadata** – `Snakepit.Pool.Registry.metadata_keys/0` exposes the authoritative metadata keys (`:worker_module`, `:pool_name`, `:pool_identifier`, `:adapter_module`) and the surrounding docs call out how pool helpers, diagnostics, and worker profiles should treat that map as the single source of truth.
+- **Telemetry catalog + filters** – `Snakepit.Telemetry.Naming.python_event_catalog/0` now documents the full event/measurement schema emitted by `snakepit_bridge`, while the Python telemetry stream implements glob-style allow/deny filters pushed from Elixir so noisy adapters can be muted without redeploying workers.
+
+### Changed
+- **Queue timeout enforcement** – Queued requests now carry their timer reference, the pool cancels those timers as soon as the request is dequeued or dropped, and statistics/logging happen in one place, preventing runaway timers when pools churn.
+- **Threaded adapter guardrails** – `priv/python/grpc_server_threaded.py` refuses to boot adapters that don’t set `__thread_safe__ = True`, logging a clear remediation path and forcing unsafe adapters back to process mode.
+- **Tool registration resilience** – `snakepit_bridge.base_adapter.BaseAdapter` wraps gRPC stub responses in `_coerce_stub_response/1`, unwrapping awaitables, `UnaryUnaryCall` structs, or lazy callables before checking `response.success`, which stabilizes adapters that mix sync and async gRPC stubs.
+- **Heartbeat/schema documentation** – `Snakepit.Config` now ships typedocs for the normalized pool/heartbeat map shared with Python, and the architecture plus gRPC guides emphasize that BEAM is the authoritative heartbeat monitor with `SNAKEPIT_HEARTBEAT_CONFIG` kept in sync across languages.
+
+### Fixed
+- **Stale queue timeouts** – Queue timeout messages that arrive after a request has already been serviced are ignored, and clients now receive `{:error, :queue_timeout}` exactly once when their request is actually dropped.
+
 ## [0.6.9] - 2025-11-13
 
 ### Added

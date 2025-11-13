@@ -10,6 +10,7 @@ import asyncio
 import random
 import time
 from typing import Any, AsyncIterable, Dict, Optional
+import fnmatch
 
 import snakepit_bridge_pb2 as pb
 
@@ -24,6 +25,7 @@ class TelemetryStream:
     Attributes:
         enabled: Whether telemetry is currently enabled
         sampling_rate: Fraction of events to emit (0.0 to 1.0)
+        allow/deny filters: glob-style patterns controlled by Elixir
     """
 
     def __init__(self, max_buffer: int = 1024) -> None:
@@ -38,6 +40,8 @@ class TelemetryStream:
             maxsize=max_buffer
         )
         self._dropped_count = 0
+        self._allow_patterns: list[str] = []
+        self._deny_patterns: list[str] = []
 
     async def stream(
         self,
@@ -111,6 +115,9 @@ class TelemetryStream:
         if self.sampling_rate < 1.0 and random.random() > self.sampling_rate:
             return
 
+        if not self._event_allowed(event_name):
+            return
+
         # Build protobuf event
         event = pb.TelemetryEvent(
             event_parts=event_name.split("."),
@@ -161,9 +168,8 @@ class TelemetryStream:
             self.sampling_rate = max(0.0, min(control.sampling.sampling_rate, 1.0))
 
         elif which == "filter":
-            # TODO: Implement filtering in Phase 2.2
-            # For now, filters are acknowledged but not applied
-            pass
+            self._allow_patterns = list(control.filter.allow)
+            self._deny_patterns = list(control.filter.deny)
 
     def close(self) -> None:
         """Close the telemetry stream gracefully.
@@ -184,3 +190,15 @@ class TelemetryStream:
             Number of dropped events
         """
         return self._dropped_count
+
+    def _event_allowed(self, event_name: str) -> bool:
+        """Determine whether an event should be forwarded based on filters."""
+        if self._deny_patterns and any(
+            fnmatch.fnmatch(event_name, pattern) for pattern in self._deny_patterns
+        ):
+            return False
+
+        if not self._allow_patterns:
+            return True
+
+        return any(fnmatch.fnmatch(event_name, pattern) for pattern in self._allow_patterns)

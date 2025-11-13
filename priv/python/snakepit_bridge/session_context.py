@@ -3,7 +3,9 @@ Minimal session context for Python adapters.
 
 Provides lightweight session tracking and optional Elixir tool proxy.
 The Elixir SessionStore handles all stateful session management (programs, metadata, TTL).
-Python adapters just need the session_id to participate in stateful workflows.
+Python adapters just need the session_id to participate in stateful workflows. Cleanup is
+always best-effort—Elixir TTLs ultimately own session lifecycle—so deleting a session from
+Python should be treated as a hint rather than an authoritative command.
 """
 
 import logging

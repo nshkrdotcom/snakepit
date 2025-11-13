@@ -20,7 +20,7 @@
 
 ### 1. Add to mix.exs
 ```elixir
-{:snakepit, "~> 0.6.9"}
+{:snakepit, "~> 0.6.10"}
 ```
 
 ### 2. Install Elixir deps
@@ -141,15 +141,15 @@ For **non-DSPex users**, if you're using these classes directly:
 
 ---
 
-## 🆕 What's New in v0.6.9
+## 🆕 What's New in v0.6.10
 
-**Metadata guardrails + telemetry clarity** – Released 2025-11-13, v0.6.9 centralizes worker metadata lookups, enforces binary-parameter contracts, and documents the slow-test workflow so operators can reason about lifecycle behaviour without spelunking logs.
+**Queue timers + bridge schema clarity** – Released 2025-11-13, v0.6.10 locks down queue timeout handling, codifies the shared heartbeat/config schema, and tightens telemetry plus Python bridge guardrails so Elixir and Python stay in sync.
 
-- **Registry helpers everywhere** – New `Snakepit.Pool.Registry.fetch_worker/1` and metadata helpers now power the pool, bridge server, diagnostics, worker profiles, and mix tasks so `worker_module`, `pool_identifier`, and `pool_name` are always sourced from one tested place.
-- **Binary parameter guardrails** – `Snakepit.GRPC.BridgeServer` rejects non-binary entries in `ExecuteToolRequest.binary_parameters`, ensuring Elixir tools only see `{:binary, payload}` tuples while Python workers can still inspect the untouched proto map; regression tests cover both paths.
-- **Lifecycle observability + telemetry** – Memory recycling now warns when workers can’t answer the `:get_memory_usage` probe, emits `[:snakepit, :worker, :recycled]` telemetry with `memory_mb` / `memory_threshold_mb`, and surfaces new Prometheus counters plus diagnostics/CLI totals.
-- **Slow-test workflow + docs** – Slow suites are tagged with `@tag :slow`, default `mix test` skips them, and README_TESTING plus `docs/20251113/slow-test-report.md` explain how to enable, troubleshoot, and inventory the long-running coverage.
-- **Configurable rogue cleanup** – Startup cleanup accepts configurable script names and run-id markers (defaulting to `grpc_server.py` / `grpc_server_threaded.py`) with matching unit tests, preventing accidental termination of unrelated Python processes.
+- **Deterministic queue timeouts** – `Snakepit.Pool` now stores timer refs with each queued request, cancels them when a client is dequeued or dropped, and ignores stale timeout messages so callers only get `{:error, :queue_timeout}` when their request actually expired.
+- **Telemetry allow/deny filters** – `snakepit_bridge.telemetry.stream` implements glob-style allowlists/denylists controlled by Elixir, and `Snakepit.Telemetry.Naming.python_event_catalog/0` documents every approved Python event/measurement pair to keep both languages’ schemas aligned.
+- **Heartbeat schema documentation** – `Snakepit.Config` ships typedocs for the normalized pool + heartbeat map shared with `snakepit_bridge.heartbeat.HeartbeatConfig`, while ARCHITECTURE and README_GRPC reiterate that BEAM is the authoritative heartbeat monitor with `SNAKEPIT_HEARTBEAT_CONFIG` kept in lockstep.
+- **Threaded adapter guardrails** – `priv/python/grpc_server_threaded.py` now errors when adapters omit `__thread_safe__ = True`, forcing unsafe adapters to run via the process bridge instead of silently continuing in threads.
+- **Tool registration coercion** – `snakepit_bridge.base_adapter.BaseAdapter` unwraps awaitables, `UnaryUnaryCall` handles, and lazy callables via `_coerce_stub_response/1`, guaranteeing consistent logging and error handling whether adapters use sync or async gRPC stubs.
 
 ---
 
