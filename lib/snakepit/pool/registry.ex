@@ -80,32 +80,25 @@ defmodule Snakepit.Pool.Registry do
   Accepts maps to keep metadata consistent across callers. When `Registry`
   has `nil` metadata (the default when using `:via` tuples), this function
   replaces it with the provided map. Future updates merge with the existing map.
+
+  Returns `:ok` on success or `{:error, :not_registered}` if the worker has
+  not been registered yet (best-effort semantics).
   """
   def put_metadata(worker_id, metadata) when is_binary(worker_id) and is_map(metadata) do
     sanitized = normalize_metadata(metadata)
 
     try do
-      update_result =
-        Registry.update_value(@registry_name, worker_id, fn
-          current when is_map(current) -> Map.merge(current, sanitized)
-          _ -> sanitized
-        end)
-
-      case update_result do
-        :error ->
-          Logger.warning(
-            "Pool.Registry.put_metadata/2 attempted to update #{inspect(worker_id)} before registration"
-          )
-
-          {:error, :not_registered}
-
-        _ ->
+      case Registry.update_value(@registry_name, worker_id, fn
+             current when is_map(current) -> Map.merge(current, sanitized)
+             _ -> sanitized
+           end) do
+        {:ok, _metadata} ->
           :ok
       end
     rescue
-      ArgumentError ->
+      error in [ArgumentError, CaseClauseError] ->
         Logger.warning(
-          "Pool.Registry.put_metadata/2 attempted to update #{inspect(worker_id)} before registration"
+          "Pool.Registry.put_metadata/2 attempted to update #{inspect(worker_id)} before registration (#{inspect(error.__struct__)})"
         )
 
         {:error, :not_registered}

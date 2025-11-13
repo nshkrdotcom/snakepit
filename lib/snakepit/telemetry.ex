@@ -97,6 +97,7 @@ defmodule Snakepit.Telemetry do
       [:snakepit, :pool, :worker, :spawn_failed],
       [:snakepit, :pool, :worker, :terminated],
       [:snakepit, :pool, :worker, :restarted],
+      [:snakepit, :worker, :recycled],
       [:snakepit, :session, :created],
       [:snakepit, :session, :destroyed],
       [:snakepit, :session, :affinity, :assigned],

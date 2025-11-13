@@ -489,6 +489,22 @@ The 10KB threshold ensures optimal performance:
 
 Keep binary keys distinct from JSON keys to avoid confusion, and continue to prefer JSON for human-readable inputs.
 
+### Heartbeat Modes
+
+Every `Snakepit.GRPCWorker` starts a `Snakepit.HeartbeatMonitor` unless you disable it in
+`worker_config`. Heartbeat settings flow to Python via the `SNAKEPIT_HEARTBEAT_CONFIG`
+environment variable so both sides agree on intervals, timeout, and whether the worker
+should die on failures.
+
+- `dependent: true` (default) &rarr; missed heartbeats or ping failures terminate the
+  worker and the supervisor restarts a fresh capsule. Use this for production pools.
+- `dependent: false` &rarr; the monitor logs failures and keeps retrying without killing
+  the worker. This is useful when debugging flaky networks or when you want Python to
+  stay alive even if the BEAM cannot reach it temporarily.
+
+You can also override the heartbeat `ping_fun` in tests or custom pools; otherwise the
+monitor falls back to `Snakepit.GRPC.Client.heartbeat/3` for push-style pings.
+
 ### Benchmarks
 
 ```bash

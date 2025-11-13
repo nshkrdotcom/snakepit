@@ -5,7 +5,7 @@ defmodule Snakepit.Worker.LifecycleManager do
   Manages worker lifecycle events:
   - **TTL-based recycling**: Recycle workers after configured time
   - **Request-count recycling**: Recycle after N requests
-  - **Memory monitoring**: Recycle if memory exceeds threshold (optional)
+  - **Memory monitoring**: Recycle when the BEAM worker process exceeds a configurable threshold (optional)
   - **Health checks**: Monitor worker health and restart if needed
 
   ## Why Worker Recycling?
@@ -16,7 +16,9 @@ defmodule Snakepit.Worker.LifecycleManager do
   - Subtle memory leaks in C libraries
   - ML model weight accumulation
 
-  Automatic recycling prevents these issues from impacting production.
+  Automatic recycling prevents these issues from impacting production. The current
+  implementation samples the BEAM `Snakepit.GRPCWorker` process memory via
+  `:get_memory_usage`; Python child process memory is not yet measured directly.
 
   ## Configuration
 
@@ -63,7 +65,8 @@ defmodule Snakepit.Worker.LifecycleManager do
   defstruct [
     :workers,
     :check_ref,
-    :health_ref
+    :health_ref,
+    :memory_recycle_counts
   ]
 
   # Client API
@@ -114,6 +117,14 @@ defmodule Snakepit.Worker.LifecycleManager do
     GenServer.call(__MODULE__, :get_stats)
   end
 
+  @doc """
+  Returns a map of pools to the number of memory-threshold-based recycles observed
+  since the lifecycle manager started.
+  """
+  def memory_recycle_counts do
+    GenServer.call(__MODULE__, :memory_recycle_counts)
+  end
+
   # Server Callbacks
 
   @impl true
@@ -125,7 +136,8 @@ defmodule Snakepit.Worker.LifecycleManager do
     state = %__MODULE__{
       workers: %{},
       check_ref: check_ref,
-      health_ref: health_ref
+      health_ref: health_ref,
+      memory_recycle_counts: %{}
     }
 
     SLog.info("Worker LifecycleManager started")
@@ -257,10 +269,16 @@ defmodule Snakepit.Worker.LifecycleManager do
         |> Enum.map(fn {_id, worker} -> worker.request_count end)
         |> Enum.sum(),
       workers_near_ttl: count_workers_near_ttl(state.workers),
-      workers_near_max_requests: count_workers_near_max_requests(state.workers)
+      workers_near_max_requests: count_workers_near_max_requests(state.workers),
+      memory_recycles_by_pool: state.memory_recycle_counts
     }
 
     {:reply, stats, state}
+  end
+
+  @impl true
+  def handle_call(:memory_recycle_counts, _from, state) do
+    {:reply, state.memory_recycle_counts, state}
   end
 
   @impl true
@@ -268,30 +286,21 @@ defmodule Snakepit.Worker.LifecycleManager do
     now = System.monotonic_time(:second)
 
     # Check all workers for recycling conditions
-    recycled_workers =
-      Enum.reduce(state.workers, [], fn {worker_id, worker_state}, acc ->
-        cond do
-          should_recycle_ttl?(worker_state, now) ->
-            SLog.info("Worker #{worker_id} TTL expired, recycling...")
-            emit_recycle_telemetry(worker_state, :ttl_expired)
-            do_recycle_worker(worker_state)
-            [worker_id | acc]
+    {recycled_workers, memory_recycle_counts} =
+      Enum.reduce(state.workers, {[], state.memory_recycle_counts}, fn
+        {worker_id, worker_state}, {acc, memory_counts} ->
+          case recycle_decision(worker_state, now) do
+            {:recycle, reason, extra_metadata} ->
+              log_recycle_reason(worker_id, reason, extra_metadata)
+              emit_recycle_telemetry(worker_state, reason, extra_metadata)
+              do_recycle_worker(worker_state)
 
-          should_recycle_requests?(worker_state) ->
-            SLog.info("Worker #{worker_id} reached max requests, recycling...")
-            emit_recycle_telemetry(worker_state, :max_requests)
-            do_recycle_worker(worker_state)
-            [worker_id | acc]
+              new_counts = maybe_track_memory_recycle(memory_counts, worker_state.pool, reason)
+              {[worker_id | acc], new_counts}
 
-          should_recycle_memory?(worker_state) ->
-            SLog.info("Worker #{worker_id} exceeded memory threshold, recycling...")
-            emit_recycle_telemetry(worker_state, :memory_threshold)
-            do_recycle_worker(worker_state)
-            [worker_id | acc]
-
-          true ->
-            acc
-        end
+            :keep ->
+              {acc, memory_counts}
+          end
       end)
 
     # Remove recycled workers from tracking
@@ -303,7 +312,13 @@ defmodule Snakepit.Worker.LifecycleManager do
     # Schedule next check
     check_ref = schedule_lifecycle_check()
 
-    {:noreply, %{state | workers: new_workers, check_ref: check_ref}}
+    {:noreply,
+     %{
+       state
+       | workers: new_workers,
+         check_ref: check_ref,
+         memory_recycle_counts: memory_recycle_counts
+     }}
   end
 
   @impl true
@@ -349,6 +364,22 @@ defmodule Snakepit.Worker.LifecycleManager do
     Process.send_after(self(), :health_check, @health_check_interval)
   end
 
+  defp recycle_decision(worker_state, now) do
+    cond do
+      should_recycle_ttl?(worker_state, now) ->
+        {:recycle, :ttl_expired, %{}}
+
+      should_recycle_requests?(worker_state) ->
+        {:recycle, :max_requests, %{}}
+
+      true ->
+        case memory_recycle_decision(worker_state) do
+          nil -> :keep
+          extra -> {:recycle, :memory_threshold, extra}
+        end
+    end
+  end
+
   defp should_recycle_ttl?(worker_state, now) do
     case worker_state.ttl do
       :infinity -> false
@@ -363,25 +394,55 @@ defmodule Snakepit.Worker.LifecycleManager do
     end
   end
 
-  defp should_recycle_memory?(worker_state) do
+  defp memory_recycle_decision(worker_state) do
     case worker_state.memory_threshold do
       nil ->
-        false
+        nil
 
       threshold_mb ->
-        # Get current memory usage (if available)
         case get_worker_memory_mb(worker_state.pid) do
-          {:ok, memory_mb} ->
-            memory_mb >= threshold_mb
+          {:ok, memory_mb} when memory_mb >= threshold_mb ->
+            %{memory_mb: memory_mb, memory_threshold_mb: threshold_mb}
+
+          {:ok, _memory_mb} ->
+            nil
 
           {:error, reason} ->
             SLog.warning(
               "Memory probe for #{worker_state.worker_id} failed: #{inspect(reason)} (threshold #{threshold_mb} MB)"
             )
 
-            false
+            nil
         end
     end
+  end
+
+  defp log_recycle_reason(worker_id, :ttl_expired, _extra) do
+    SLog.info("Worker #{worker_id} TTL expired, recycling...")
+  end
+
+  defp log_recycle_reason(worker_id, :max_requests, _extra) do
+    SLog.info("Worker #{worker_id} reached max requests, recycling...")
+  end
+
+  defp log_recycle_reason(worker_id, :memory_threshold, %{
+         memory_mb: memory_mb,
+         memory_threshold_mb: threshold_mb
+       }) do
+    SLog.info(
+      "Worker #{worker_id} exceeded memory threshold (#{memory_mb} MB >= #{threshold_mb} MB), recycling..."
+    )
+  end
+
+  defp log_recycle_reason(worker_id, other_reason, _extra) do
+    SLog.info("Worker #{worker_id} recycling due to #{inspect(other_reason)}")
+  end
+
+  defp maybe_track_memory_recycle(counts, _pool, reason) when reason != :memory_threshold,
+    do: counts
+
+  defp maybe_track_memory_recycle(counts, pool, :memory_threshold) do
+    Map.update(counts, pool, 1, &(&1 + 1))
   end
 
   defp do_recycle_worker(worker_state) do
@@ -511,10 +572,14 @@ defmodule Snakepit.Worker.LifecycleManager do
     end)
   end
 
-  defp emit_recycle_telemetry(worker_state, reason) do
-    :telemetry.execute(
-      [:snakepit, :worker, :recycled],
-      %{count: 1},
+  defp emit_recycle_telemetry(worker_state, reason, extra_metadata \\ %{}) do
+    measurements =
+      case Map.get(extra_metadata, :memory_mb) do
+        nil -> %{count: 1}
+        memory_mb -> %{count: 1, memory_mb: memory_mb}
+      end
+
+    metadata =
       %{
         worker_id: worker_state.worker_id,
         pool: worker_state.pool,
@@ -522,7 +587,10 @@ defmodule Snakepit.Worker.LifecycleManager do
         uptime_seconds: System.monotonic_time(:second) - worker_state.started_at,
         request_count: worker_state.request_count
       }
-    )
+      |> maybe_put_metadata(:memory_threshold_mb, Map.get(extra_metadata, :memory_threshold_mb))
+      |> maybe_put_metadata(:memory_mb, Map.get(extra_metadata, :memory_mb))
+
+    :telemetry.execute([:snakepit, :worker, :recycled], measurements, metadata)
   end
 
   defp lifecycle_profile_module(%LifecycleConfig{profile_module: module}), do: module
@@ -534,4 +602,7 @@ defmodule Snakepit.Worker.LifecycleManager do
       module when is_atom(module) -> module
     end
   end
+
+  defp maybe_put_metadata(map, _key, nil), do: map
+  defp maybe_put_metadata(map, key, value), do: Map.put(map, key, value)
 end

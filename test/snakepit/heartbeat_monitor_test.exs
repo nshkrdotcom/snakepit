@@ -113,4 +113,55 @@ defmodule Snakepit.HeartbeatMonitorTest do
     :ok = GenServer.stop(monitor)
     send(worker_pid, :halt)
   end
+
+  test "independent monitors suppress worker termination on repeated failures" do
+    worker_pid = spawn_worker()
+    worker_ref = Process.monitor(worker_pid)
+
+    {:ok, monitor} =
+      HeartbeatMonitor.start_link(
+        worker_pid: worker_pid,
+        worker_id: "worker-independent",
+        ping_interval_ms: 10,
+        timeout_ms: 20,
+        max_missed_heartbeats: 1,
+        dependent: false,
+        ping_fun: fn _timestamp -> {:error, :simulated_failure} end
+      )
+
+    # Allow a couple of failure cycles
+    Process.sleep(200)
+
+    refute_received {:DOWN, ^worker_ref, :process, ^worker_pid, _}
+
+    status = HeartbeatMonitor.get_status(monitor)
+    assert status.dependent == false
+    assert Process.alive?(worker_pid)
+    assert Process.alive?(monitor)
+
+    :ok = GenServer.stop(monitor)
+    send(worker_pid, :halt)
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _}, 500
+  end
+
+  test "dependent monitors terminate workers when ping failures persist" do
+    worker_pid = spawn_worker()
+    worker_ref = Process.monitor(worker_pid)
+
+    {:ok, monitor} =
+      HeartbeatMonitor.start_link(
+        worker_pid: worker_pid,
+        worker_id: "worker-dependent",
+        ping_interval_ms: 10,
+        timeout_ms: 20,
+        max_missed_heartbeats: 1,
+        dependent: true,
+        ping_fun: fn _timestamp -> {:error, :simulated_failure} end
+      )
+
+    monitor_ref = Process.monitor(monitor)
+
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, {:shutdown, :ping_failed}}, 1_000
+    assert_receive {:DOWN, ^monitor_ref, :process, ^monitor, {:shutdown, :ping_failed}}, 1_000
+  end
 end

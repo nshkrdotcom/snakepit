@@ -14,11 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Binary parameter validation**: `Snakepit.GRPC.BridgeServer` now rejects non-binary entries in `ExecuteToolRequest.binary_parameters`, guaranteeing local tools only ever see `{:binary, payload}` tuples while remote workers still receive the untouched proto map.
 - **Lifecycle observability**: Memory-based recycling now logs a warning whenever a worker cannot answer the `:get_memory_usage` probe, preventing silent configuration drift.
 - **Rogue cleanup controls**: Operators can configure the exact script names and run-id markers that qualify Python processes for startup cleanup, with defaults matching `grpc_server.py`/`grpc_server_threaded.py`.
+- **Memory recycle telemetry & diagnostics**: `[:snakepit, :worker, :recycled]` now emits `memory_mb`/`memory_threshold_mb`, Prometheus metrics expose `snakepit.worker.recycled` counters, and both `Snakepit.Diagnostics.ProfileInspector` plus `mix snakepit.profile_inspector` show per-pool “Memory Recycles” totals for operators.
 
 ### Changed
 - **GRPC worker lookups**: GRPCWorker, ToolRegistry clients, pool helpers, and worker profiles call the new Registry helpers instead of `Registry.lookup/2`, ensuring metadata stays normalized and reverse lookups never crash when metadata is missing.
 - **Bridge test coverage**: Added binary-parameter regression tests that prove malformed payloads are rejected before reaching Elixir tools, plus lifecycle tests that simulate failing memory probes.
 - **Process killer tests**: Rogue cleanup unit tests now cover the customizable scripts/markers path so changes to the configuration surface immediately.
+- **Heartbeat contract clarity**: Documented what `dependent: true|false` means, exported `SNAKEPIT_HEARTBEAT_CONFIG` expectations, and added both HeartbeatMonitor- and GRPCWorker-level regression tests so fail-fast vs independent behavior stays well defined.
 
 ### Fixed
 - **Registry metadata race**: `Pool.Registry.put_metadata/2` now reports `{:error, :not_registered}` when clients attempt to attach metadata before the worker is registered, eliminating silent successes that previously returned `:ok`.

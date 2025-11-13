@@ -283,6 +283,25 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
     test "recycles workers when memory threshold exceeded and preserves config" do
       manager = Process.whereis(Snakepit.Worker.LifecycleManager)
       worker_id = "mem_recycle_#{System.unique_integer([:positive])}"
+      pool_name = :"test_pool_#{System.unique_integer([:positive])}"
+      initial_counts = Snakepit.Worker.LifecycleManager.memory_recycle_counts()
+      initial_pool_count = Map.get(initial_counts, pool_name, 0)
+
+      handler_id = "memory-recycle-test-#{System.unique_integer([:positive])}"
+
+      test_pid = self()
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:snakepit, :worker, :recycled],
+          fn event_name, measurements, metadata, listener ->
+            send(listener, {:recycle_event, event_name, measurements, metadata})
+          end,
+          test_pid
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
 
       {:ok, worker_pid} =
         TestProfile.start_worker(%{
@@ -294,7 +313,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
 
       config = %{
         worker_profile: TestProfile,
-        pool_name: :test_pool,
+        pool_name: pool_name,
         worker_module: Snakepit.GRPCWorker,
         adapter_module: Snakepit.TestAdapters.MockGRPCAdapter,
         adapter_args: ["--demo"],
@@ -303,11 +322,19 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
         test_pid: self()
       }
 
-      Snakepit.Worker.LifecycleManager.track_worker(:test_pool, worker_id, worker_pid, config)
+      Snakepit.Worker.LifecycleManager.track_worker(pool_name, worker_id, worker_pid, config)
 
       TestLifecycleWorker.set_memory(worker_pid, 3 * 1_048_576)
 
       send(manager, :lifecycle_check)
+
+      assert_receive {:recycle_event, [:snakepit, :worker, :recycled], measurements, metadata},
+                     1_000
+
+      assert metadata.reason == :memory_threshold
+      assert metadata.pool == pool_name
+      assert metadata.memory_threshold_mb == 1
+      assert measurements.memory_mb >= 1
 
       assert_receive {:worker_terminated, ^worker_id, ^worker_pid}, 5_000
 
@@ -316,6 +343,9 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
       assert started_config.adapter_args == ["--demo"]
       assert started_config.worker_profile == TestProfile
       assert started_config.test_pid == self()
+
+      counts = Snakepit.Worker.LifecycleManager.memory_recycle_counts()
+      assert Map.get(counts, pool_name) == initial_pool_count + 1
 
       Snakepit.Worker.LifecycleManager.untrack_worker(new_worker_id)
       send(new_worker_pid, :stop)

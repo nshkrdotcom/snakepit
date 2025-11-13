@@ -58,6 +58,16 @@ For short-lived scripts and demos, use `Snakepit.run_as_script/2`:
 - Guarantees proper cleanup of all processes on exit
 - No orphaned processes after script completion
 
+### 5. **BEAM Worker Memory Recycling**
+
+`memory_threshold_mb` is enforced on the BEAM-side `Snakepit.GRPCWorker` process.
+When the worker process (not the Python child) reports memory usage above the
+threshold, the lifecycle manager recycles it and emits `[:snakepit, :worker, :recycled]`
+telemetry with `reason: :memory_threshold`, `memory_mb`, and `memory_threshold_mb`.
+These events feed the `Memory Recycles` counter in the profile inspector so
+operators can see when BEAM memory pressure is triggering restarts. Python-side
+memory sampling will be layered on via telemetry in a future release.
+
 ## Architecture
 
 ```

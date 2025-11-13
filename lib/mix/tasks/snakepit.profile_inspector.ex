@@ -4,7 +4,10 @@ defmodule Mix.Tasks.Snakepit.ProfileInspector do
 
   This task provides detailed information about pool configurations,
   worker profiles (process vs thread), capacity utilization, memory usage,
-  and performance recommendations.
+  and performance recommendations. It also surfaces how many times pools
+  recycled BEAM gRPC workers because `memory_threshold_mb` was exceeded
+  (the `Memory Recycles` field in the output), so operators know when
+  BEAM-side memory pressure is triggering restarts.
 
   ## Usage
 
@@ -248,6 +251,7 @@ defmodule Mix.Tasks.Snakepit.ProfileInspector do
     IO.puts("  Total Capacity:   #{stats.capacity_total}")
     IO.puts("  Used Capacity:    #{stats.capacity_used}")
     IO.puts("  Available:        #{stats.capacity_available}")
+    IO.puts("  Memory Recycles:  #{stats.memory_recycles}")
 
     # Color-coded utilization
     utilization_str = format_utilization(stats.utilization_percent)

@@ -66,6 +66,17 @@ defmodule Snakepit.TelemetryMetrics do
         measurement: :duration_ms,
         unit: :millisecond,
         tags: [:worker_id, :command]
+      ),
+      counter("snakepit.worker.recycled",
+        event_name: [:snakepit, :worker, :recycled],
+        measurement: :count,
+        tags: [:pool, :reason]
+      ),
+      summary("snakepit.worker.memory_mb",
+        event_name: [:snakepit, :worker, :recycled],
+        measurement: :memory_mb,
+        unit: :megabyte,
+        tags: [:pool]
       )
     ]
   end

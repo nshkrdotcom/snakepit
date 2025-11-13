@@ -315,5 +315,34 @@ defmodule Snakepit.ProcessKillerTest do
                run_markers: ["--snakepit-run-id"]
              )
     end
+
+    test "foreign, current, and stale processes behave as expected" do
+      run_id = "current"
+      opts = [scripts: ["grpc_server.py"], run_markers: ["--snakepit-run-id"]]
+
+      refute ProcessRegistry.cleanup_candidate?(
+               "python other_server.py --snakepit-run-id stale",
+               run_id,
+               opts
+             )
+
+      refute ProcessRegistry.cleanup_candidate?(
+               "python grpc_server.py",
+               run_id,
+               opts
+             )
+
+      refute ProcessRegistry.cleanup_candidate?(
+               "python grpc_server.py --snakepit-run-id current",
+               run_id,
+               opts
+             )
+
+      assert ProcessRegistry.cleanup_candidate?(
+               "python grpc_server.py --snakepit-run-id stale",
+               run_id,
+               opts
+             )
+    end
   end
 end

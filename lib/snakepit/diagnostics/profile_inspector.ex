@@ -13,6 +13,7 @@ defmodule Snakepit.Diagnostics.ProfileInspector do
   - Capacity utilization metrics
   - Memory usage per worker
   - Thread usage for thread profile pools
+  - Memory-threshold recycle counters per pool
   - Performance statistics
 
   ## Examples
@@ -33,6 +34,7 @@ defmodule Snakepit.Diagnostics.ProfileInspector do
   require Logger
   alias Snakepit.Config
   alias Snakepit.Pool.Registry, as: PoolRegistry
+  alias Snakepit.Worker.LifecycleManager
 
   @type pool_name :: atom()
   @type pool_stats :: %{
@@ -43,6 +45,7 @@ defmodule Snakepit.Diagnostics.ProfileInspector do
           capacity_used: non_neg_integer(),
           capacity_available: non_neg_integer(),
           utilization_percent: float(),
+          memory_recycles: non_neg_integer(),
           workers: [worker_stats()]
         }
 
@@ -125,6 +128,8 @@ defmodule Snakepit.Diagnostics.ProfileInspector do
           0.0
         end
 
+      memory_recycle_counts = LifecycleManager.memory_recycle_counts()
+
       stats = %{
         pool_name: pool_name,
         profile: profile,
@@ -133,6 +138,7 @@ defmodule Snakepit.Diagnostics.ProfileInspector do
         capacity_used: used_capacity,
         capacity_available: available_capacity,
         utilization_percent: Float.round(utilization, 2),
+        memory_recycles: Map.get(memory_recycle_counts, pool_name, 0),
         workers: worker_stats
       }
 

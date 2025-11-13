@@ -69,7 +69,7 @@ Python processes are launched by each GRPCWorker and connect back to the BEAM gR
 ### `Snakepit.Worker.LifecycleManager`
 - Tracks worker TTLs, request counts, and optional memory thresholds.
 - Builds a `%Snakepit.Worker.LifecycleConfig{}` for every worker so adapter modules, env overrides, and profile selection are explicit. Replacement workers inherit the exact same spec (minus worker_id) which prevents subtle drift during recycling.
-- Monitors worker pids and triggers graceful recycling via the pool when budgets are exceeded. Memory recycling asks the worker for `:get_memory_usage` (implemented by `Snakepit.GRPCWorker`) and compares the result to `memory_threshold_mb`.
+- Monitors worker pids and triggers graceful recycling via the pool when budgets are exceeded. Memory recycling samples the BEAM `Snakepit.GRPCWorker` process via `:get_memory_usage` (not the Python child) and compares the result to `memory_threshold_mb`, emitting `[:snakepit, :worker, :recycled]` telemetry with the measured MB.
 - Coordinates periodic health checks across the pool and emits telemetry (`[:snakepit, :worker, :recycled]`, etc.) for dashboards.
 
 ### `Snakepit.Pool.ApplicationCleanup`
@@ -99,6 +99,8 @@ Python processes are launched by each GRPCWorker and connect back to the BEAM gR
 - Optional GenServer started per worker based on pool configuration.
 - Periodically invokes a ping callback (usually a gRPC health RPC) and tracks missed responses.
 - Signals the WorkerStarter (by exiting the worker) when thresholds are breached, allowing the supervisor to restart the capsule.
+- `dependent: true` (default) means heartbeat failures terminate the worker; `dependent: false` keeps the worker alive and simply logs/retries so you can debug without killing the Python process.
+- Heartbeat settings are shipped to Python via the `SNAKEPIT_HEARTBEAT_CONFIG` environment variable. Python workers treat it as hints (ping interval, timeout, dependent flag) so both sides agree on policy. Today this is a push-style ping from Elixir into Python; future control-plane work will layer richer distributed health signals on top.
 
 ### `Snakepit.ProcessKiller`
 - Utility module for POSIX-compliant termination of external processes.
