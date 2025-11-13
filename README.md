@@ -2714,11 +2714,20 @@ We welcome contributions! Please see our [Contributing Guide](https://github.com
 git clone https://github.com/nshkrdotcom/snakepit.git
 cd snakepit
 
-# Install dependencies
-mix deps.get
+# Bootstrap Elixir, Python, and gRPC stubs
+make bootstrap
 
-# Run tests
+# (Optional) run the same sequence through Mix
+mix snakepit.setup
+
+# Verify the environment (Python interpreters, grpc import, ports)
+mix snakepit.doctor
+
+# Default test suite (Python integration tests are excluded by default)
 mix test
+
+# Run Python-backed tests once you have the bridge available
+mix test --only python_integration
 
 # Run example scripts
 elixir examples/v2/session_based_demo.exs
@@ -2729,10 +2738,16 @@ mix format --check-formatted
 mix dialyzer
 ```
 
+The automation commands above are now the canonical workflow:
+
+- `make bootstrap` provisions Mix deps, Python virtualenvs (`.venv` + `.venv-py313`), and regenerates gRPC stubs in one shot.
+- `mix snakepit.setup` runs the same bootstrap sequence entirely within Mix (useful on CI providers without `make`).
+- `mix snakepit.doctor` fails fast when the configured Python interpreter, `grpc` import, gRPC health probe, or worker port range are misconfigured. Run it before test suites or when onboarding a new machine.
+
 ### Running Tests
 
 ```bash
-# All tests
+# All fast tests (python_integration excluded)
 mix test
 
 # With coverage
@@ -2740,6 +2755,9 @@ mix test --cover
 
 # Specific test
 mix test test/snakepit_test.exs:42
+
+# Python bridge tests (require make bootstrap + mix snakepit.doctor)
+mix test --only python_integration
 ```
 
 ## 📄 License

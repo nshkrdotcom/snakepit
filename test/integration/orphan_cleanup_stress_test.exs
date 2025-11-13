@@ -11,6 +11,7 @@ defmodule Snakepit.Integration.OrphanCleanupStressTest do
 
   @moduletag :integration
   @moduletag timeout: 120_000
+  @moduletag :python_integration
 
   @pool_size 8
 

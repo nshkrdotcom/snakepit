@@ -126,6 +126,15 @@ defmodule Snakepit.ProcessKillerTest do
     end
   end
 
+  defp safe_close_port(port) when is_port(port) do
+    try do
+      Port.close(port)
+    catch
+      :exit, _ -> :ok
+      :error, _ -> :ok
+    end
+  end
+
   describe "kill_with_escalation/2" do
     test "kills process gracefully with SIGTERM" do
       # Spawn a sleep process
@@ -205,8 +214,8 @@ defmodule Snakepit.ProcessKillerTest do
       assert wait_for_death(target_pid, 5_000)
       assert Snakepit.ProcessKiller.process_alive?(rogue_pid)
 
-      Port.close(rogue_port)
-      Port.close(target_port)
+      safe_close_port(rogue_port)
+      safe_close_port(target_port)
     end
 
     @tag :skip

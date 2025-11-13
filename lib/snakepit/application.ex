@@ -55,6 +55,10 @@ defmodule Snakepit.Application do
     # Check if pooling is enabled (default: false to prevent auto-start issues)
     pooling_enabled = Application.get_env(:snakepit, :pooling_enabled, false)
 
+    if pooling_enabled do
+      ensure_python_ready()
+    end
+
     if Application.get_env(:snakepit, :enable_otlp?, false) do
       SLog.info("OTLP telemetry enabled (SNAKEPIT_ENABLE_OTLP=true)")
       Snakepit.Telemetry.OpenTelemetry.setup()
@@ -146,5 +150,13 @@ defmodule Snakepit.Application do
   def stop(_state) do
     SLog.debug("Snakepit.Application.stop/1 called at: #{System.monotonic_time(:millisecond)}")
     :ok
+  end
+
+  defp ensure_python_ready do
+    doctor = Application.get_env(:snakepit, :env_doctor_module, Snakepit.EnvDoctor)
+    doctor.ensure_python!()
+  rescue
+    error ->
+      reraise error, __STACKTRACE__
   end
 end

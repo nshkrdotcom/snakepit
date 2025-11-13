@@ -14,14 +14,26 @@ Snakepit contains comprehensive test coverage for:
 
 ## Running Tests
 
+Before running any Elixir tests make sure the local toolchain is bootstrapped and healthy:
+
+```bash
+make bootstrap          # installs Mix deps, creates .venv/.venv-py313, regenerates gRPC stubs
+mix snakepit.doctor     # verifies python executable, grpc import, health probe, and port availability
+```
+
+(`mix snakepit.setup` runs the same bootstrap sequence from inside Mix if `make` is unavailable.)
+
 ### Basic Test Execution
 ```bash
-# Run all tests
+# Run all fast tests (excludes :performance and :python_integration)
 mix test
 
 # Run tests with specific tags
 mix test --exclude performance  # Default: excludes performance tests
 mix test --only performance      # Run only performance tests
+
+# Run Python-backed Elixir tests (requires make bootstrap + mix snakepit.doctor)
+mix test --only python_integration
 
 # Run specific test files
 mix test test/snakepit/bridge/session_store_test.exs
@@ -31,7 +43,7 @@ mix test test/snakepit/grpc/bridge_server_test.exs                    # Channel 
 mix test test/unit/pool/process_registry_security_test.exs            # DETS/ETS access control
 mix test test/unit/logger/redaction_test.exs                          # Log redaction summaries
 
-# Run Python bridge tests (auto-activates .venv, regenerates protos, sets PYTHONPATH)
+# Run Python pytest suites only (auto-activates .venv, regenerates protos, sets PYTHONPATH)
 ./test_python.sh
 ./test_python.sh -k streaming  # Any args are forwarded to pytest
 ```
@@ -60,7 +72,8 @@ The following suites exercise the new failure-mode experiments described in `AGE
 ### Test Modes
 
 The test suite runs in different modes based on tags:
-- **Default**: Unit and integration tests (excludes `:performance` tag)
+- **Default**: Unit and integration tests (excludes `:performance` and `:python_integration`)
+- **Python Integration**: Elixir ↔ Python flows (run with `mix test --only python_integration`)
 - **Performance**: Benchmarks and latency tests (use `--only performance`)
 
 ## Understanding Test Output
