@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Registry helpers**: Introduced `Snakepit.Pool.Registry.fetch_worker/1` plus metadata helpers used throughout the pool, bridge server, worker profiles, and diagnostics so `worker_module`, `pool_identifier`, and `pool_name` are always looked up in a single, tested place.
 - **Binary parameter validation**: `Snakepit.GRPC.BridgeServer` now rejects non-binary entries in `ExecuteToolRequest.binary_parameters`, guaranteeing local tools only ever see `{:binary, payload}` tuples while remote workers still receive the untouched proto map.
+- **Slow-test workflow**: Tagged the long-running suites with `@tag :slow`, defaulted `mix test` to skip them, and documented the opt-in commands plus the 2025-11-13 slow-test inventory in `README_TESTING` and `docs/20251113/slow-test-report.md`.
 - **Lifecycle observability**: Memory-based recycling now logs a warning whenever a worker cannot answer the `:get_memory_usage` probe, preventing silent configuration drift.
 - **Rogue cleanup controls**: Operators can configure the exact script names and run-id markers that qualify Python processes for startup cleanup, with defaults matching `grpc_server.py`/`grpc_server_threaded.py`.
 - **Memory recycle telemetry & diagnostics**: `[:snakepit, :worker, :recycled]` now emits `memory_mb`/`memory_threshold_mb`, Prometheus metrics expose `snakepit.worker.recycled` counters, and both `Snakepit.Diagnostics.ProfileInspector` plus `mix snakepit.profile_inspector` show per-pool “Memory Recycles” totals for operators.
@@ -21,9 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bridge test coverage**: Added binary-parameter regression tests that prove malformed payloads are rejected before reaching Elixir tools, plus lifecycle tests that simulate failing memory probes.
 - **Process killer tests**: Rogue cleanup unit tests now cover the customizable scripts/markers path so changes to the configuration surface immediately.
 - **Heartbeat contract clarity**: Documented what `dependent: true|false` means, exported `SNAKEPIT_HEARTBEAT_CONFIG` expectations, and added both HeartbeatMonitor- and GRPCWorker-level regression tests so fail-fast vs independent behavior stays well defined.
+- **Telemetry stream shutdown noise**: gRPC telemetry stream shutdowns that report `:normal` or `:shutdown` now log at debug level, eliminating the warning spam that buried actionable failures during slow-test runs.
 
 ### Fixed
-- **Registry metadata race**: `Pool.Registry.put_metadata/2` now reports `{:error, :not_registered}` when clients attempt to attach metadata before the worker is registered, eliminating silent successes that previously returned `:ok`.
+- **Registry metadata race**: `Pool.Registry.put_metadata/2` now reports `{:error, :not_registered}` when clients attempt to attach metadata before the worker is registered and downgrades those expected attempts to debug logs, eliminating silent successes that previously returned `:ok`.
+- **Heartbeat metrics stability**: The `snakepit.worker.memory_mb` summary now pulls values via `Map.get/2` and non-dependent monitors retain timeout/missed-heartbeat counters, so Telemetry/Prometheus exporters stop crashing when measurements arrive as maps and status checks reflect the real failure budget.
 - **Docs parity**: README, README_GRPC, README_PROCESS_MANAGEMENT, and ARCHITECTURE now describe the binary parameter contract, registry helper usage, lifecycle behavior, and rogue cleanup assumptions introduced in this release.
 
 ## [0.6.8] - 2025-11-12

@@ -59,7 +59,9 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
+- [What's New in v0.6.9](#whats-new-in-v069)
 - [What's New in v0.6.8](#whats-new-in-v068)
+- [What's New in v0.6.7](#whats-new-in-v067)
 - [What's New in v0.6.6](#whats-new-in-v066)
 - [What's New in v0.6.5](#whats-new-in-v065)
 - [What's New in v0.6.4](#whats-new-in-v064)
@@ -139,6 +141,18 @@ For **non-DSPex users**, if you're using these classes directly:
 
 ---
 
+## 🆕 What's New in v0.6.9
+
+**Metadata guardrails + telemetry clarity** – Released 2025-11-13, v0.6.9 centralizes worker metadata lookups, enforces binary-parameter contracts, and documents the slow-test workflow so operators can reason about lifecycle behaviour without spelunking logs.
+
+- **Registry helpers everywhere** – New `Snakepit.Pool.Registry.fetch_worker/1` and metadata helpers now power the pool, bridge server, diagnostics, worker profiles, and mix tasks so `worker_module`, `pool_identifier`, and `pool_name` are always sourced from one tested place.
+- **Binary parameter guardrails** – `Snakepit.GRPC.BridgeServer` rejects non-binary entries in `ExecuteToolRequest.binary_parameters`, ensuring Elixir tools only see `{:binary, payload}` tuples while Python workers can still inspect the untouched proto map; regression tests cover both paths.
+- **Lifecycle observability + telemetry** – Memory recycling now warns when workers can’t answer the `:get_memory_usage` probe, emits `[:snakepit, :worker, :recycled]` telemetry with `memory_mb` / `memory_threshold_mb`, and surfaces new Prometheus counters plus diagnostics/CLI totals.
+- **Slow-test workflow + docs** – Slow suites are tagged with `@tag :slow`, default `mix test` skips them, and README_TESTING plus `docs/20251113/slow-test-report.md` explain how to enable, troubleshoot, and inventory the long-running coverage.
+- **Configurable rogue cleanup** – Startup cleanup accepts configurable script names and run-id markers (defaulting to `grpc_server.py` / `grpc_server_threaded.py`) with matching unit tests, preventing accidental termination of unrelated Python processes.
+
+---
+
 ## 🆕 What's New in v0.6.8
 
 **Bootstrap + doctor + guardrails** – v0.6.8 adds first-class environment automation (`make bootstrap` / `mix snakepit.setup`), a proactive `mix snakepit.doctor`, runtime Python guardrails, python-integration test tagging, and CI/documentation updates so the bridge can be provisioned and verified deterministically. (Released 2025-11-12.)
@@ -162,6 +176,18 @@ For **non-DSPex users**, if you're using these classes directly:
 - **Metadata-driven pool routing** – Worker registry entries publish pool identifiers so the pool manager resolves ownership without brittle string parsing; fallbacks log once for malformed IDs (`test/unit/pool/pool_registry_lookup_test.exs`).
 - **Streaming chunk contract** – The streaming callback now receives consistent `chunk_id`/`data`/`is_final` payloads with metadata fan-out, documented alongside regression coverage (`test/snakepit/streaming_regression_test.exs`).
 - **Redacted diagnostics** – the logger redaction helper now summarises sensitive payloads instead of dumping secrets or large blobs into logs (`test/unit/logger/redaction_test.exs`).
+
+---
+
+## 🆕 What's New in v0.6.6
+
+**Streaming clarity + hardened registries** – Released 2025-10-27, v0.6.6 locks down the worker startup handshake, tightens parameter validation, and documents the streaming envelope so routing bugs stay fixed.
+
+- **Reliable worker bootstrap** – Worker startup waits for the negotiated gRPC port before publishing metadata, and BridgeServer reuses worker-owned channels before dialing temporary fallbacks that are closed after each invocation.
+- **Persistent ports + registry safety** – `Snakepit.GRPCWorker` now persists the OS-assigned port, process registry ETS tables run as `:protected`, DETS handles stay private, and pool-name inference prefers published metadata with a single logged fallback.
+- **Tagged quotas + redaction helper** – Configurable session/program quotas raise tagged errors with regression coverage, and a logger redaction helper lets adapters log troubleshooting details without leaking sensitive payloads.
+- **Strict parameter surfaces** – `Snakepit.GRPC.ClientImpl` returns structured `{:error, {:invalid_parameter, :json_encode_failed, ...}}` tuples when JSON encoding fails, and BridgeServer rejects malformed protobuf payloads before they crash calling processes.
+- **Streaming contract + docs refresh** – Streaming helpers now document the chunk envelope, `execute_streaming_tool/2` responds with `UNIMPLEMENTED` when streaming is disabled, and README/gRPC/testing guides highlight channel reuse, quota enforcement, registry protections, and the expanded regression suite.
 
 ## 🆕 What's New in v0.6.5
 
@@ -567,7 +593,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-    {:snakepit, "~> 0.6.8"}
+    {:snakepit, "~> 0.6.9"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,
@@ -2762,13 +2788,6 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 - Inspired by the need for reliable ML/AI integrations in Elixir
 - Built on battle-tested OTP principles
 - Special thanks to the Elixir community
-
-## 🚀 What's New (v0.6.9)
-
-- **Canonical worker metadata** – New `Snakepit.Pool.Registry.fetch_worker/1` powers the pool, bridge server, diagnostics, and worker profiles so `worker_module`, `pool_identifier`, and `pool_name` come from a single, tested source.
-- **Binary parameter guardrails** – The gRPC bridge now rejects non-binary entries before tools run, keeping local Elixir handlers on the documented `{:binary, payload}` contract while still forwarding raw bytes to Python workers.
-- **Lifecycle transparency** – Memory-threshold recycling logs whenever a worker can’t answer `:get_memory_usage`, catching misconfigured adapters before they silently drift.
-- **Safer rogue cleanup** – Startup cleanup only targets commands that match configurable script + run-id markers (defaulting to the Snakepit gRPC servers), making shared-host deployments predictable.
 
 ## 📊 Development Status
 
