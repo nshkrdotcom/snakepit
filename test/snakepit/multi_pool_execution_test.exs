@@ -3,6 +3,7 @@ defmodule Snakepit.MultiPoolExecutionTest do
   import Snakepit.TestHelpers
 
   @moduletag :multi_pool
+  @moduletag :python_integration
   @moduletag timeout: 120_000
 
   setup do

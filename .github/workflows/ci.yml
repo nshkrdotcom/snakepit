@@ -51,11 +51,11 @@ jobs:
           ${{ runner.os }}-mix-pip-
           ${{ runner.os }}-mix-
 
-    - name: Install dependencies
-      run: mix deps.get
+    - name: Bootstrap environment
+      run: make bootstrap
 
-    - name: Setup Python test environments
-      run: ./scripts/setup_test_pythons.sh
+    - name: Run environment doctor
+      run: mix snakepit.doctor
 
     - name: Check formatting
       run: mix format --check-formatted
@@ -65,6 +65,9 @@ jobs:
 
     - name: Run tests
       run: mix test --exclude skip_ci
+
+    - name: Run python integration tests
+      run: mix test --only python_integration --exclude skip_ci --color
 
     - name: Restore PLT cache
       uses: actions/cache@v4

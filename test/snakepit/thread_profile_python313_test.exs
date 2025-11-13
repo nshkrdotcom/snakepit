@@ -4,44 +4,45 @@ defmodule Snakepit.ThreadProfilePython313Test do
 
   @moduletag :python313
   @moduletag :thread_profile
+  @moduletag :python_integration
   @moduletag timeout: 120_000
+
+  setup_all do
+    case Snakepit.Test.PythonEnv.skip_unless_python_313(%{}) do
+      :ok ->
+        Snakepit.Test.PythonEnv.reset_python_config()
+        :ok
+
+      other ->
+        other
+    end
+  end
 
   setup do
     prev_pools = Application.get_env(:snakepit, :pools)
     prev_pooling = Application.get_env(:snakepit, :pooling_enabled)
+    python313_path = Snakepit.Test.PythonEnv.python_313_path()
 
-    # Configure to use Python 3.13
-    python313_path = Path.expand(".venv-py313/bin/python3")
+    Application.stop(:snakepit)
+    Application.load(:snakepit)
+    Snakepit.Test.PythonEnv.configure_for_python(python313_path)
 
-    unless File.exists?(python313_path) do
-      {:skip, "Python 3.13 venv not available (run: ./scripts/setup_test_pythons.sh)"}
-    else
-      # Stop any running Snakepit
+    on_exit(fn ->
       Application.stop(:snakepit)
-      Application.load(:snakepit)
+      Snakepit.Test.PythonEnv.reset_python_config()
+      restore_env(:pools, prev_pools)
+      restore_env(:pooling_enabled, prev_pooling)
 
-      # Configure for Python 3.13
-      System.put_env("SNAKEPIT_PYTHON", python313_path)
-      Application.put_env(:snakepit, :python_executable, python313_path)
+      assert_eventually(
+        fn ->
+          Process.whereis(Snakepit.Pool) == nil
+        end,
+        timeout: 5_000,
+        interval: 100
+      )
+    end)
 
-      on_exit(fn ->
-        Application.stop(:snakepit)
-        System.delete_env("SNAKEPIT_PYTHON")
-        Application.delete_env(:snakepit, :python_executable)
-        restore_env(:pools, prev_pools)
-        restore_env(:pooling_enabled, prev_pooling)
-        # Wait for processes to actually stop
-        assert_eventually(
-          fn ->
-            Process.whereis(Snakepit.Pool) == nil
-          end,
-          timeout: 5_000,
-          interval: 100
-        )
-      end)
-
-      {:ok, python_path: python313_path}
-    end
+    {:ok, python_path: python313_path}
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)

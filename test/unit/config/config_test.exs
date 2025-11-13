@@ -200,6 +200,7 @@ defmodule Snakepit.ConfigTest do
       on_exit(fn -> Application.delete_env(:snakepit, :pools) end)
 
       assert {:error, {:validation_failed, errors}} = Config.get_pool_configs()
+
       assert Enum.any?(errors, fn
                {:error, {:invalid_profile, :unknown, _}} -> true
                _ -> false

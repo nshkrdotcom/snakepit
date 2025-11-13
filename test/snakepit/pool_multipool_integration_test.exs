@@ -4,6 +4,7 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
 
   @moduletag :integration
   @moduletag timeout: 60_000
+  @moduletag :python_integration
 
   setup do
     prev_pools = Application.get_env(:snakepit, :pools)

@@ -20,10 +20,12 @@ defmodule Snakepit.Config.StartupFailFastTest do
       pool_config: Application.get_env(:snakepit, :pool_config),
       adapter_module: Application.get_env(:snakepit, :adapter_module),
       python_executable: Application.get_env(:snakepit, :python_executable),
-      grpc_port: Application.get_env(:snakepit, :grpc_port)
+      grpc_port: Application.get_env(:snakepit, :grpc_port),
+      env_doctor_module: Application.get_env(:snakepit, :env_doctor_module)
     }
 
     on_exit(fn ->
+      Snakepit.Test.FakeDoctor.reset()
       Application.stop(:snakepit)
       restore_env(prev_env)
       {:ok, _} = Application.ensure_all_started(:snakepit)
@@ -41,13 +43,17 @@ defmodule Snakepit.Config.StartupFailFastTest do
 
       Application.put_env(:snakepit, :pooling_enabled, true)
       Application.put_env(:snakepit, :pool_config, %{pool_size: 1})
+      Application.put_env(:snakepit, :env_doctor_module, Snakepit.EnvDoctor)
+
+      adapter = Snakepit.TestAdapters.MockGRPCAdapter
+      Application.put_env(:snakepit, :adapter_module, adapter)
 
       Application.put_env(:snakepit, :pools, [
         %{
           name: :default,
           worker_profile: :process,
           pool_size: 1,
-          adapter_module: Snakepit.Adapters.GRPCPython
+          adapter_module: adapter
         }
       ])
 
@@ -111,12 +117,15 @@ defmodule Snakepit.Config.StartupFailFastTest do
       Application.put_env(:snakepit, :pooling_enabled, true)
       Application.put_env(:snakepit, :pool_config, %{pool_size: 1})
 
+      adapter = Snakepit.TestAdapters.MockGRPCAdapter
+      Application.put_env(:snakepit, :adapter_module, adapter)
+
       Application.put_env(:snakepit, :pools, [
         %{
           name: :default,
           worker_profile: :process,
           pool_size: 1,
-          adapter_module: Snakepit.Adapters.GRPCPython
+          adapter_module: adapter
         }
       ])
 
@@ -127,6 +136,56 @@ defmodule Snakepit.Config.StartupFailFastTest do
 
       assert_no_active_grpc_servers()
       :gen_tcp.close(socket)
+    end)
+  end
+
+  test "env doctor is invoked before pools boot" do
+    capture_log(fn ->
+      Application.stop(:snakepit)
+
+      Snakepit.Test.FakeDoctor.reset()
+      Snakepit.Test.FakeDoctor.configure(pid: self())
+
+      Application.put_env(:snakepit, :env_doctor_module, Snakepit.Test.FakeDoctor)
+      Application.put_env(:snakepit, :pooling_enabled, true)
+
+      Application.put_env(:snakepit, :pools, [
+        %{
+          name: :default,
+          worker_profile: :process,
+          pool_size: 1,
+          adapter_module: Snakepit.Adapters.GRPCPython
+        }
+      ])
+
+      _ = Application.ensure_all_started(:snakepit)
+
+      assert_received {:env_doctor_called, _}
+    end)
+  end
+
+  test "env doctor failure aborts startup" do
+    capture_log(fn ->
+      Application.stop(:snakepit)
+
+      Snakepit.Test.FakeDoctor.reset()
+      Snakepit.Test.FakeDoctor.configure(pid: self(), action: {:raise, "doctor failure"})
+
+      Application.put_env(:snakepit, :env_doctor_module, Snakepit.Test.FakeDoctor)
+      Application.put_env(:snakepit, :pooling_enabled, true)
+
+      Application.put_env(:snakepit, :pools, [
+        %{
+          name: :default,
+          worker_profile: :process,
+          pool_size: 1,
+          adapter_module: Snakepit.Adapters.GRPCPython
+        }
+      ])
+
+      assert match?({:error, _}, Application.ensure_all_started(:snakepit))
+      assert_received {:env_doctor_called, _}
+      assert Process.whereis(Snakepit.Pool) == nil
     end)
   end
 

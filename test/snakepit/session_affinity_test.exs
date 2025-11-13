@@ -4,6 +4,7 @@ defmodule Snakepit.SessionAffinityTest do
 
   @moduletag :integration
   @moduletag timeout: 60_000
+  @moduletag :python_integration
 
   setup do
     # Ensure clean state

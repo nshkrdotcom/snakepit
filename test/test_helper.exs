@@ -72,8 +72,12 @@ defmodule TestHelperShutdown do
   end
 end
 
+# Ensure env doctor is stubbed for tests (real doctor exercised via dedicated tests)
+Application.put_env(:snakepit, :env_doctor_module, Snakepit.Test.FakeDoctor)
+Snakepit.Test.FakeDoctor.reset()
+
 # Start ExUnit with performance tests excluded by default
-ExUnit.start(exclude: [:performance])
+ExUnit.start(exclude: [:performance, :python_integration])
 
 # CRITICAL: Start the application ONCE for all tests
 # This prevents test contamination and port conflicts from async start/stop

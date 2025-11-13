@@ -15,6 +15,7 @@ import sys
 import time
 import inspect
 import os
+import importlib
 from concurrent import futures
 from typing import Any, Dict, Mapping, Optional
 
@@ -48,6 +49,20 @@ logger.addFilter(_log_filter)
 logging.getLogger().addFilter(_log_filter)
 
 logger.info("Loaded grpc_server.py from %s", __file__)
+
+
+def run_health_check(adapter_path: str):
+    """Basic dependency check for Mix doctor."""
+    try:
+        module_name, _, class_name = adapter_path.rpartition(".")
+        adapter_module = importlib.import_module(module_name)
+        getattr(adapter_module, class_name)
+    except Exception as exc:
+        print(f"[health-check] Failed to import adapter '{adapter_path}': {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    print("[health-check] Python gRPC dependencies loaded successfully.")
+    sys.exit(0)
 
 
 def _resolve_heartbeat_options(cli_options: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -1065,9 +1080,9 @@ def main():
     parser = argparse.ArgumentParser(description='DSPex gRPC Bridge Server')
     parser.add_argument('--port', type=int, default=0,
                         help='Port to listen on (0 for dynamic allocation)')
-    parser.add_argument('--adapter', type=str, required=True,
+    parser.add_argument('--adapter', type=str, required=False,
                         help='Python module path to adapter class')
-    parser.add_argument('--elixir-address', type=str, required=True,
+    parser.add_argument('--elixir-address', type=str, required=False,
                         help='Address of the Elixir gRPC server (e.g., localhost:50051)')
     parser.add_argument('--snakepit-run-id', type=str, default='',
                         help='Snakepit run ID for process cleanup')
@@ -1094,8 +1109,24 @@ def main():
         help='Keep running even when Elixir heartbeat is lost'
     )
     parser.set_defaults(heartbeat_dependent=None)
+    parser.add_argument(
+        '--health-check',
+        action='store_true',
+        help='Verify dependencies and exit without starting the server'
+    )
 
     args = parser.parse_args()
+
+    if args.health_check:
+        adapter_path = args.adapter or "snakepit_bridge.adapters.showcase.ShowcaseAdapter"
+        run_health_check(adapter_path)
+        return
+
+    if not args.adapter:
+        parser.error("--adapter is required (try --adapter snakepit_bridge.adapters.showcase.ShowcaseAdapter)")
+
+    if not args.elixir_address:
+        parser.error("--elixir-address is required (e.g., localhost:50051)")
 
     heartbeat_overrides: Dict[str, Any] = {}
 

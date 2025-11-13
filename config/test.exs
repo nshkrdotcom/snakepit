@@ -4,6 +4,7 @@ import Config
 config :snakepit,
   # Enable pooling for tests
   pooling_enabled: true,
+  env_doctor_module: Snakepit.Test.FakeDoctor,
 
   # Use smaller pool size for tests
   pool_config: %{

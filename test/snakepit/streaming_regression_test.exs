@@ -2,6 +2,8 @@ defmodule Snakepit.StreamingRegressionTest do
   use ExUnit.Case, async: false
   import Snakepit.TestHelpers
 
+  @moduletag :python_integration
+
   defmodule NoStreamAdapter do
     @behaviour Snakepit.Adapter
 

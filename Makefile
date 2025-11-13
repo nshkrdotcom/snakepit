@@ -11,7 +11,7 @@ PROTO_FILE = $(PROTO_DIR)/snakepit_bridge.proto
 # Python gRPC files
 PYTHON_GRPC_FILES = $(PYTHON_OUT_DIR)/snakepit_bridge_pb2.py $(PYTHON_OUT_DIR)/snakepit_bridge_pb2_grpc.py
 
-.PHONY: all clean proto-python proto-elixir install-dev test help
+.PHONY: all clean proto-python proto-elixir install-dev test help bootstrap
 
 # Python interpreter (prefer local virtualenv, fallback to python3/python)
 PYTHON ?= $(shell if [ -x ".venv/bin/python" ]; then echo "./.venv/bin/python"; elif command -v python3 >/dev/null 2>&1; then echo "python3"; else echo "python"; fi)
@@ -62,6 +62,9 @@ test:
 	@echo "Running tests..."
 	PYTHONPATH=priv/python $(PYTHON) -m pytest priv/python/tests
 	mix test --color
+
+bootstrap:
+	@mix snakepit.setup
 
 # Show help
 help:
