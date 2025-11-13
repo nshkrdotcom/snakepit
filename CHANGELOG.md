@@ -19,6 +19,7 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - **Lifecycle config & memory recycling**: Added `%Snakepit.Worker.LifecycleConfig{}` to capture adapter/profile/env data for every worker, wired `Snakepit.GRPCWorker` to answer `:get_memory_usage`, and extended lifecycle tests so TTL/request/memory recycling use the same canonical config.
 - **Binary tool parameters**: `Snakepit.GRPC.BridgeServer`, `Snakepit.GRPC.Client`, and `Snakepit.GRPC.ClientImpl` now decode/forward `ExecuteToolRequest.binary_parameters`, exposing binaries to local tools as `{:binary, payload}` while sending the untouched map to Python workers. README.md and README_GRPC.md document the contract.
 - **Worker-flow integration test**: New `Snakepit.Pool.WorkerFlowIntegrationTest` exercises the WorkerSupervisor → MockGRPCWorker path, ensuring registry/process tracking stays consistent after execution and crash/restart flows.
+- **Randomized worker stress test**: `Snakepit.Pool.RandomWorkerFlowTest` throws randomized execute/kill sequences at pools to ensure Registry ↔ ProcessRegistry invariants hold under churn.
 
 ### Changed
 - **Test gating**: Default `mix test` excludes `:python_integration` while Python-heavy suites (thread profile, session affinity, streaming regression, etc.) carry the tag; `test/unit/exunit_configuration_test.exs` locks the config in place.
@@ -30,6 +31,7 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - **LifecycleManager internals**: Tracking records store lifecycle structs instead of ad-hoc maps so replacement workers inherit adapter args/env, and memory thresholds now exercise the worker call path in tests.
 - **Process cleanup safety**: Rogue process cleanup only targets commands containing `grpc_server.py`/`grpc_server_threaded.py` with `--snakepit-run-id/--run-id` flags, and operators can disable the sweep with `config :snakepit, :rogue_cleanup, enabled: false`. Docs explain the ownership contract.
 - **Pool integration coverage**: Replaced the unstable `test/snakepit/pool/high_risk_flow_test.exs` harness with targeted unit-level integration coverage (WorkerSupervisor + MockGRPCWorker), keeping the suite reliable while still covering the critical registry/ProcessRegistry chain.
+- **Worker profile metadata lookup**: Process/thread profiles now resolve worker modules via `Pool.Registry.get_worker_id_by_pid/1` + metadata lookup, so non-GRPC workers can be supported and Dialyzer warnings are gone.
 
 ### Fixed
 - Shell instrumentation around bootstrap (reporting command start/finish and verbose pip output) prevents "silent hangs" and surfaced the root causes of previous provisioning confusion.

@@ -401,10 +401,12 @@ defmodule Snakepit.WorkerProfile.Thread do
   end
 
   defp get_worker_module(worker_pid) do
-    case Registry.lookup(Snakepit.Pool.Registry, worker_pid) do
-      [{_pid, %{worker_module: module}}] ->
-        module
-
+    with {:ok, worker_id} <-
+           Snakepit.Pool.Registry.get_worker_id_by_pid(worker_pid),
+         [{_pid, %{worker_module: module}}] <-
+           Registry.lookup(Snakepit.Pool.Registry, worker_id) do
+      module
+    else
       _ ->
         # Default to GRPCWorker
         Snakepit.GRPCWorker

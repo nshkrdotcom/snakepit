@@ -138,7 +138,6 @@ defmodule Snakepit.Bootstrap do
 
   defp describe_step(:setup_pythons), do: "scripts/setup_test_pythons.sh"
   defp describe_step(:generate_grpc), do: "priv/python/generate_grpc.sh"
-  defp describe_step(step), do: to_string(step)
 
   defp print_python_summary do
     python = Snakepit.Adapters.GRPCPython.executable_path()
