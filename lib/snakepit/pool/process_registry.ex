@@ -693,70 +693,91 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   defp cleanup_rogue_processes(current_beam_run_id) do
-    # Find ALL Python grpc_server processes on the system
-    python_pids = Snakepit.ProcessKiller.find_python_processes()
+    cleanup_config =
+      Application.get_env(:snakepit, :rogue_cleanup, enabled: true)
+      |> normalize_cleanup_config()
 
-    # Filter for grpc_server.py processes
-    grpc_pids =
-      python_pids
-      |> Enum.filter(fn pid ->
-        case Snakepit.ProcessKiller.get_process_command(pid) do
-          {:ok, cmd} -> String.contains?(cmd, "grpc_server.py")
-          _ -> false
-        end
-      end)
+    if cleanup_config[:enabled] == false do
+      SLog.info("Skipping rogue process cleanup (disabled via :rogue_cleanup config)")
+      0
+    else
+      python_commands =
+        Snakepit.ProcessKiller.find_python_processes()
+        |> Enum.reduce([], fn pid, acc ->
+          case Snakepit.ProcessKiller.get_process_command(pid) do
+            {:ok, cmd} -> [{pid, cmd} | acc]
+            _ -> acc
+          end
+        end)
 
-    SLog.info("Found #{length(grpc_pids)} total grpc_server processes on system")
+      owned_processes =
+        Enum.filter(python_commands, fn {_pid, cmd} ->
+          snakepit_command?(cmd) and has_run_marker?(cmd)
+        end)
 
-    # Kill any that DON'T have our current run_id
-    rogue_pids =
-      grpc_pids
-      |> Enum.filter(fn pid ->
-        case Snakepit.ProcessKiller.get_process_command(pid) do
-          {:ok, cmd} ->
-            # Check if it has OUR run_id (support both old and new format)
-            has_old_format = String.contains?(cmd, "--snakepit-run-id #{current_beam_run_id}")
-            has_new_format = String.contains?(cmd, "--run-id #{current_beam_run_id}")
-            has_our_run_id = has_old_format or has_new_format
-            # If it doesn't have our run_id, it's a rogue
-            not has_our_run_id
-
-          _ ->
-            false
-        end
-      end)
-
-    if length(rogue_pids) > 0 do
-      SLog.warning(
-        "Found #{length(rogue_pids)} rogue grpc_server processes not belonging to current run"
+      SLog.info(
+        "Found #{length(owned_processes)} snakepit grpc_server processes with run markers"
       )
 
-      SLog.warning("Rogue PIDs: #{inspect(rogue_pids)}")
-    end
+      rogue_processes =
+        Enum.filter(owned_processes, fn {_pid, cmd} ->
+          cleanup_candidate?(cmd, current_beam_run_id)
+        end)
 
-    # Kill rogue processes
-    killed_count =
-      Enum.reduce(rogue_pids, 0, fn pid, acc ->
-        case Snakepit.ProcessKiller.get_process_command(pid) do
-          {:ok, cmd} ->
-            SLog.warning("Killing rogue process #{pid}: #{String.trim(cmd)}")
+      if rogue_processes != [] do
+        rogue_pids = Enum.map(rogue_processes, fn {pid, _cmd} -> pid end)
 
-            case Snakepit.ProcessKiller.kill_with_escalation(pid) do
-              :ok ->
-                acc + 1
+        SLog.warning(
+          "Found #{length(rogue_processes)} rogue grpc_server processes not belonging to current run"
+        )
 
-              {:error, reason} ->
-                SLog.error("Failed to kill rogue process #{pid}: #{inspect(reason)}")
-                acc
-            end
+        SLog.warning("Rogue PIDs: #{inspect(rogue_pids)}")
+      end
 
-          _ ->
+      Enum.reduce(rogue_processes, 0, fn {pid, cmd}, acc ->
+        SLog.warning("Killing rogue process #{pid}: #{String.trim(cmd)}")
+
+        case Snakepit.ProcessKiller.kill_with_escalation(pid) do
+          :ok ->
+            acc + 1
+
+          {:error, reason} ->
+            SLog.error("Failed to kill rogue process #{pid}: #{inspect(reason)}")
             acc
         end
       end)
-
-    killed_count
+    end
   end
+
+  @grpc_scripts ["grpc_server.py", "grpc_server_threaded.py"]
+  @run_markers ["--snakepit-run-id", "--run-id"]
+
+  @doc false
+  def cleanup_candidate?(command, current_run_id) when is_binary(command) do
+    snakepit_command?(command) and has_run_marker?(command) and
+      not has_run_id?(command, current_run_id)
+  end
+
+  defp snakepit_command?(command) do
+    Enum.any?(@grpc_scripts, &String.contains?(command, &1))
+  end
+
+  defp has_run_marker?(command) do
+    Enum.any?(@run_markers, &String.contains?(command, &1))
+  end
+
+  defp has_run_id?(command, run_id) when is_binary(run_id) do
+    Enum.any?(@run_markers, fn marker ->
+      String.contains?(command, "#{marker} #{run_id}")
+    end)
+  end
+
+  defp normalize_cleanup_config(%{} = config), do: Map.put_new(config, :enabled, true)
+
+  defp normalize_cleanup_config(config) when is_list(config),
+    do: Enum.into(config, %{}) |> normalize_cleanup_config()
+
+  defp normalize_cleanup_config(_), do: %{enabled: true}
 
   defp load_current_run_processes(dets_table, ets_table, beam_run_id) do
     # Load only processes from current BEAM run into ETS

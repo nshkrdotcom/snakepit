@@ -23,5 +23,18 @@ defmodule Snakepit.GRPC.ClientImplTest do
       assert is_binary(message)
       assert String.contains?(message, "Jason.Encoder")
     end
+
+    test "rejects non-binary entries in binary_parameters" do
+      result =
+        ClientImpl.execute_tool(
+          %{},
+          "session-123",
+          "noop",
+          %{},
+          binary_parameters: %{"blob" => 123}
+        )
+
+      assert {:error, {:invalid_parameter, "blob", :not_binary}} = result
+    end
   end
 end

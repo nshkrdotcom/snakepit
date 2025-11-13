@@ -157,13 +157,11 @@ defmodule Snakepit.GRPC.ClientImpl do
 
   def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     parameters = sanitize_parameters(parameters)
+    binary_params = Keyword.get(opts, :binary_parameters, %{})
 
-    with {:ok, proto_params} <- encode_parameters(parameters) do
-      request = %Bridge.ExecuteToolRequest{
-        session_id: session_id,
-        tool_name: tool_name,
-        parameters: proto_params
-      }
+    with {:ok, proto_params} <- encode_parameters(parameters),
+         {:ok, encoded_binary} <- encode_binary_parameters(binary_params) do
+      request = build_execute_tool_request(session_id, tool_name, proto_params, encoded_binary)
 
       timeout = opts[:timeout] || @default_timeout
       call_opts = [timeout: timeout]
@@ -180,14 +178,13 @@ defmodule Snakepit.GRPC.ClientImpl do
 
   def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     parameters = sanitize_parameters(parameters)
+    binary_params = Keyword.get(opts, :binary_parameters, %{})
 
-    with {:ok, proto_params} <- encode_parameters(parameters) do
-      request = %Bridge.ExecuteToolRequest{
-        session_id: session_id,
-        tool_name: tool_name,
-        parameters: proto_params,
-        stream: true
-      }
+    with {:ok, proto_params} <- encode_parameters(parameters),
+         {:ok, encoded_binary} <- encode_binary_parameters(binary_params) do
+      request =
+        build_execute_tool_request(session_id, tool_name, proto_params, encoded_binary)
+        |> Map.put(:stream, true)
 
       timeout = opts[:timeout] || 300_000
       call_opts = [timeout: timeout]
@@ -256,6 +253,15 @@ defmodule Snakepit.GRPC.ClientImpl do
     {:error, error}
   end
 
+  defp build_execute_tool_request(session_id, tool_name, proto_params, binary_params) do
+    %Bridge.ExecuteToolRequest{
+      session_id: session_id,
+      tool_name: tool_name,
+      parameters: proto_params,
+      binary_parameters: binary_params
+    }
+  end
+
   defp encode_parameters(parameters) do
     Enum.reduce_while(parameters, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
       case infer_and_encode_any(v) do
@@ -284,4 +290,20 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   defp sanitize_parameters(parameters), do: parameters
+
+  defp encode_binary_parameters(nil), do: {:ok, %{}}
+
+  defp encode_binary_parameters(binary_params) when is_map(binary_params) do
+    Enum.reduce_while(binary_params, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
+      cond do
+        not is_binary(value) ->
+          {:halt, {:error, {:invalid_parameter, key, :not_binary}}}
+
+        true ->
+          {:cont, {:ok, Map.put(acc, to_string(key), value)}}
+      end
+    end)
+  end
+
+  defp encode_binary_parameters(_), do: {:ok, %{}}
 end

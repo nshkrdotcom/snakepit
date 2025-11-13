@@ -8,12 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ## [0.6.8] - 2025-11-12
 
+This release also rolls up the previously undocumented fail-fast docs/tests work from 074f2260f703d16ccfecf937c10af905165419f0 (heartbeat fail-fast suites, orphan cleanup stress tests, queue probe adapter, and config fail-fast coverage).
+
 ### Added
 - **Bootstrap automation**: Introduced `Snakepit.Bootstrap`, `mix snakepit.setup`, and a `make bootstrap` target to install Mix deps, provision `.venv`/`.venv-py313`, install Python requirements, run `scripts/setup_test_pythons.sh`, and regenerate gRPC stubs with fully instrumented logging.
 - **Environment doctor**: New `Snakepit.EnvDoctor` module plus `mix snakepit.doctor` task verify interpreter availability, `grpc` import, `.venv`/`.venv-py313`, `priv/python/grpc_server.py --health-check`, and worker port availability with actionable remediation messages.
 - **Runtime guardrails**: `Snakepit.Application` now invokes `Snakepit.EnvDoctor.ensure_python!/0` before pools start, failing fast when Python prerequisites are missing. Test helpers (`test/support/fake_doctor.ex`, `test/support/bootstrap_runner.ex`, `test/support/command_runner.ex`) enable deterministic unit coverage for the bootstrap/doctor path.
 - **Python-aware CI**: GitHub Actions workflow now runs bootstrap, doctor, the default suite, and `mix test --only python_integration` so bridge coverage is validated when the doctor passes.
 - **New documentation**: README + README_TESTING describe the `make bootstrap → mix snakepit.doctor → mix test` workflow, explain how to run python integration tests, and highlight the new Mix tasks.
+- **Lifecycle config & memory recycling**: Added `%Snakepit.Worker.LifecycleConfig{}` to capture adapter/profile/env data for every worker, wired `Snakepit.GRPCWorker` to answer `:get_memory_usage`, and extended lifecycle tests so TTL/request/memory recycling use the same canonical config.
+- **Binary tool parameters**: `Snakepit.GRPC.BridgeServer`, `Snakepit.GRPC.Client`, and `Snakepit.GRPC.ClientImpl` now decode/forward `ExecuteToolRequest.binary_parameters`, exposing binaries to local tools as `{:binary, payload}` while sending the untouched map to Python workers. README.md and README_GRPC.md document the contract.
+- **Worker-flow integration test**: New `Snakepit.Pool.WorkerFlowIntegrationTest` exercises the WorkerSupervisor → MockGRPCWorker path, ensuring registry/process tracking stays consistent after execution and crash/restart flows.
 
 ### Changed
 - **Test gating**: Default `mix test` excludes `:python_integration` while Python-heavy suites (thread profile, session affinity, streaming regression, etc.) carry the tag; `test/unit/exunit_configuration_test.exs` locks the config in place.
@@ -21,10 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Process killer regression**: Ports spawned during `kill_by_run_id/1` tests close via `safe_close_port/1`, eliminating `:port_close` race exceptions.
 - **Queue saturation regression**: `Snakepit.Pool.QueueSaturationRuntimeTest` focuses on stats + agent tracking instead of brittle global ETS assertions, removing a common source of flaky failures.
 - **gRPC generation script**: `priv/python/generate_grpc.sh` now prefers `.venv/bin/python3`, falling back to system `python3/python` only when the virtualenv is missing, and emits helpful logs when no interpreter is found.
+- **Registry metadata semantics**: `Snakepit.GRPCWorker` now writes canonical metadata (`worker_module`, `pool_name`, `pool_identifier`) via `Snakepit.Pool.Registry.put_metadata/2`, unblocking pool-name extraction and worker-module discovery without parsing IDs. Tests cover PID→worker lookups.
+- **LifecycleManager internals**: Tracking records store lifecycle structs instead of ad-hoc maps so replacement workers inherit adapter args/env, and memory thresholds now exercise the worker call path in tests.
+- **Process cleanup safety**: Rogue process cleanup only targets commands containing `grpc_server.py`/`grpc_server_threaded.py` with `--snakepit-run-id/--run-id` flags, and operators can disable the sweep with `config :snakepit, :rogue_cleanup, enabled: false`. Docs explain the ownership contract.
+- **Pool integration coverage**: Replaced the unstable `test/snakepit/pool/high_risk_flow_test.exs` harness with targeted unit-level integration coverage (WorkerSupervisor + MockGRPCWorker), keeping the suite reliable while still covering the critical registry/ProcessRegistry chain.
 
 ### Fixed
 - Shell instrumentation around bootstrap (reporting command start/finish and verbose pip output) prevents "silent hangs" and surfaced the root causes of previous provisioning confusion.
 - `scripts/setup_test_pythons.sh` now runs under `set -x`, streaming its progress during bootstrap.
+- Rogue cleanup tests verify we no longer kill unrelated Python processes, and docs call out the run-id requirements so multi-tenant hosts stay safe.
 
 
 ## [0.6.7] - 2025-10-28

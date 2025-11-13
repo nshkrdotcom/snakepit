@@ -24,6 +24,14 @@ When Snakepit starts, it automatically:
 3. Force kills (SIGKILL) any processes that don't respond
 4. Cleans up stale registry entries
 
+Only "owned" processes are considered rogue. The command line must contain one of the Snakepit scripts (`grpc_server.py` or `grpc_server_threaded.py`) and the run-id markers (`--snakepit-run-id` or `--run-id`). This guarantees we never touch arbitrary Python jobs running on the same host. Do **not** reuse those filenames for other services, and if you need to opt out (e.g., co-hosting with an older stack), set:
+
+```elixir
+config :snakepit, :rogue_cleanup, enabled: false
+```
+
+Disabling cleanup means you must manually remove stale `grpc_server.py` processes when upgrading or restarting the BEAM VM.
+
 ### 3. **BEAM Run Identification**
 
 Each BEAM instance gets a unique run ID:

@@ -30,6 +30,20 @@ defmodule Snakepit.WorkerProfileStopWorkerTest do
     assert_worker_shutdown(worker_id, worker_pid)
   end
 
+  test "workers expose lifecycle config metadata" do
+    worker_id = unique_worker_id()
+    assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 5_000)
+    {_starter_pid, worker_pid} = start_mock_worker(worker_id)
+
+    state = :sys.get_state(worker_pid)
+
+    assert state.worker_config.worker_module == Snakepit.GRPCWorker
+    assert state.worker_config.adapter_module == MockGRPCAdapter
+    assert state.worker_config.pool_name == Snakepit.Pool
+
+    :ok = GenServer.stop(worker_pid)
+  end
+
   defp start_mock_worker(worker_id) do
     worker_config = %{
       test_pid: self(),

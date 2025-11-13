@@ -478,6 +478,16 @@ The 10KB threshold ensures optimal performance:
 - Small data remains human-readable (JSON)
 - Large data gets maximum performance (binary)
 
+#### Binary Tool Parameters
+
+`ExecuteToolRequest` also exposes a `binary_parameters` map for payloads that should never be JSON encoded (for example, pickled tensors or zipped archives). When a client sends both maps:
+
+- The Elixir bridge decodes the regular `parameters` map as before.
+- Binary entries show up in local Elixir tools as `{:binary, payload}` so handlers can pattern-match without guessing.
+- Remote executions forward the **original** binary map to Python workers via gRPC. The helper `Snakepit.GRPC.Client.execute_tool/5` accepts `binary_parameters: %{ "blob" => <<...>> }` in the options list to make this explicit.
+
+Keep binary keys distinct from JSON keys to avoid confusion, and continue to prefer JSON for human-readable inputs.
+
 ### Benchmarks
 
 ```bash

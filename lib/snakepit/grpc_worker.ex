@@ -117,14 +117,19 @@ defmodule Snakepit.GRPCWorker do
       %{worker_module: __MODULE__, pool_name: pool_name}
       |> maybe_put_pool_identifier(pool_identifier)
 
+    opts_with_metadata =
+      opts
+      |> Keyword.put(:registry_metadata, metadata)
+      |> maybe_put_pool_identifier_opt(pool_identifier)
+
     name =
       if worker_id do
-        {:via, Registry, {Snakepit.Pool.Registry, worker_id, metadata}}
+        {:via, Registry, {Snakepit.Pool.Registry, worker_id}}
       else
         nil
       end
 
-    GenServer.start_link(__MODULE__, opts, name: name)
+    GenServer.start_link(__MODULE__, opts_with_metadata, name: name)
   end
 
   @doc """
@@ -220,6 +225,41 @@ defmodule Snakepit.GRPCWorker do
   defp maybe_put_pool_identifier(metadata, identifier),
     do: Map.put(metadata, :pool_identifier, identifier)
 
+  defp maybe_put_pool_identifier_opt(opts, nil), do: opts
+
+  defp maybe_put_pool_identifier_opt(opts, identifier),
+    do: Keyword.put(opts, :pool_identifier, identifier)
+
+  defp ensure_registry_metadata(metadata, pool_name, pool_identifier) do
+    metadata
+    |> Map.put(:worker_module, __MODULE__)
+    |> Map.put(:pool_name, pool_name)
+    |> maybe_put_pool_identifier(pool_identifier)
+  end
+
+  defp maybe_attach_registry_metadata(worker_id, metadata) when is_binary(worker_id) do
+    Snakepit.Pool.Registry.put_metadata(worker_id, metadata)
+  rescue
+    _ -> :ok
+  end
+
+  defp maybe_attach_registry_metadata(_worker_id, _metadata), do: :ok
+
+  defp normalize_worker_config(config, pool_name, adapter_module, pool_identifier) do
+    config
+    |> Map.put(:worker_module, __MODULE__)
+    |> Map.put_new(:adapter_module, adapter_module)
+    |> Map.put(:pool_name, pool_name)
+    |> maybe_put_pool_identifier(pool_identifier)
+  end
+
+  defp current_process_memory_bytes do
+    case Process.info(self(), :memory) do
+      {:memory, bytes} when is_integer(bytes) and bytes >= 0 -> bytes
+      _ -> 0
+    end
+  end
+
   # Server callbacks
 
   @impl true
@@ -233,7 +273,15 @@ defmodule Snakepit.GRPCWorker do
     # CRITICAL FIX: Get pool_name from opts so worker knows which pool to notify
     # This can be an atom (registered name) or a PID
     pool_name = Keyword.get(opts, :pool_name, Snakepit.Pool)
+    pool_identifier = Keyword.get(opts, :pool_identifier)
     port = adapter.get_port()
+
+    metadata =
+      opts
+      |> Keyword.get(:registry_metadata, %{})
+      |> ensure_registry_metadata(pool_name, pool_identifier)
+
+    maybe_attach_registry_metadata(worker_id, metadata)
 
     # CRITICAL: Reserve the worker slot BEFORE spawning the process
     # This ensures we can track the process even if we crash during spawn
@@ -250,7 +298,10 @@ defmodule Snakepit.GRPCWorker do
         elixir_address = "#{elixir_grpc_host}:#{elixir_grpc_port}"
 
         # CRITICAL: Get worker_config FIRST to use per-worker adapter settings
-        worker_config = Keyword.get(opts, :worker_config, %{})
+        worker_config =
+          opts
+          |> Keyword.get(:worker_config, %{})
+          |> normalize_worker_config(pool_name, adapter, pool_identifier)
 
         heartbeat_config =
           worker_config
@@ -667,6 +718,10 @@ defmodule Snakepit.GRPCWorker do
   @impl true
   def handle_call(:get_session_id, _from, state) do
     {:reply, {:ok, state.session_id}, state}
+  end
+
+  def handle_call(:get_memory_usage, _from, state) do
+    {:reply, {:ok, current_process_memory_bytes()}, state}
   end
 
   @impl true

@@ -58,6 +58,7 @@ Python processes are launched by each GRPCWorker and connect back to the BEAM gR
 ### Registries (`Snakepit.Pool.Registry`, `Snakepit.Pool.ProcessRegistry`, `Snakepit.Pool.Worker.StarterRegistry`)
 - Provide O(1) lookup for worker routing, track external OS PIDs/run IDs, and ensure cleanup routines can map resources back to the current BEAM instance.
 - `ProcessRegistry` uses ETS to store run IDs so `Snakepit.ProcessKiller` and `Snakepit.Pool.ApplicationCleanup` can reap orphans deterministically.
+- `Pool.Registry` now keeps authoritative metadata (`worker_module`, `pool_identifier`, `pool_name`) for every worker. `Snakepit.GRPCWorker` updates the registry as soon as it boots so callers such as `Pool.extract_pool_name_from_worker_id/1` and reverse lookups never have to guess based on worker ID formats.
 
 ### `Snakepit.Pool`
 - GenServer request router with queueing, session affinity, and Task.Supervisor integration.
@@ -66,7 +67,8 @@ Python processes are launched by each GRPCWorker and connect back to the BEAM gR
 
 ### `Snakepit.Worker.LifecycleManager`
 - Tracks worker TTLs, request counts, and optional memory thresholds.
-- Monitors worker pids and triggers graceful recycling via the pool when budgets are exceeded.
+- Builds a `%Snakepit.Worker.LifecycleConfig{}` for every worker so adapter modules, env overrides, and profile selection are explicit. Replacement workers inherit the exact same spec (minus worker_id) which prevents subtle drift during recycling.
+- Monitors worker pids and triggers graceful recycling via the pool when budgets are exceeded. Memory recycling asks the worker for `:get_memory_usage` (implemented by `Snakepit.GRPCWorker`) and compares the result to `memory_threshold_mb`.
 - Coordinates periodic health checks across the pool and emits telemetry (`[:snakepit, :worker, :recycled]`, etc.) for dashboards.
 
 ### `Snakepit.Pool.ApplicationCleanup`
@@ -101,6 +103,15 @@ Python processes are launched by each GRPCWorker and connect back to the BEAM gR
 - Utility module for POSIX-compliant termination of external processes.
 - Provides `kill_with_escalation/1` semantics (SIGTERM → SIGKILL) and discovery helpers (`kill_by_run_id/1`).
 - Used by ApplicationCleanup, LifecycleManager, and GRPCWorker terminate callbacks.
+- Rogue cleanup is intentionally scoped: only commands containing `grpc_server.py` or `grpc_server_threaded.py` **and** a `--snakepit-run-id/--run-id` marker are eligible. Operators can disable the startup sweep via `config :snakepit, :rogue_cleanup, enabled: false` when sharing hosts with third-party services.
+
+### Kill Chain Summary
+
+1. `Snakepit.Pool` enqueues the client request and picks a worker.
+2. `Snakepit.GRPCWorker` executes the adapter call, keeps registry metadata fresh, and reports lifecycle stats.
+3. `Snakepit.Worker.LifecycleManager` watches TTL/request/memory budgets and asks the appropriate profile to recycle workers when necessary.
+4. `Snakepit.Pool.ProcessRegistry` persists run IDs + OS PIDs so BEAM restarts can see orphaned Python processes.
+5. `Snakepit.ProcessKiller` and `Snakepit.Pool.ApplicationCleanup` reap any remaining processes that belong to older run IDs before the VM exits.
 
 ## Python Bridge
 
