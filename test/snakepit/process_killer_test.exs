@@ -2,6 +2,8 @@ defmodule Snakepit.ProcessKillerTest do
   use ExUnit.Case
   require Logger
 
+  alias Snakepit.Pool.ProcessRegistry
+
   @moduletag :integration
 
   describe "process_alive?/1" do
@@ -263,5 +265,44 @@ defmodule Snakepit.ProcessKillerTest do
     System.find_executable("python3") ||
       System.find_executable("python") ||
       flunk("python executable not found on PATH")
+  end
+
+  describe "rogue cleanup filter" do
+    test "ignores python processes without snakepit markers" do
+      refute ProcessRegistry.cleanup_candidate?(
+               "python3 other_server.py --snakepit-run-id 123",
+               "abc"
+             )
+    end
+
+    test "ignores commands without run markers" do
+      refute ProcessRegistry.cleanup_candidate?("python grpc_server.py", "abc")
+    end
+
+    test "detects commands with different run_id" do
+      assert ProcessRegistry.cleanup_candidate?(
+               "python grpc_server.py --snakepit-run-id other",
+               "abc"
+             )
+    end
+
+    test "ignores commands with current run_id" do
+      refute ProcessRegistry.cleanup_candidate?(
+               "python grpc_server.py --snakepit-run-id abc",
+               "abc"
+             )
+    end
+
+    test "supports legacy --run-id marker" do
+      assert ProcessRegistry.cleanup_candidate?(
+               "python grpc_server_threaded.py --run-id old",
+               "new"
+             )
+
+      refute ProcessRegistry.cleanup_candidate?(
+               "python grpc_server_threaded.py --run-id new",
+               "new"
+             )
+    end
   end
 end

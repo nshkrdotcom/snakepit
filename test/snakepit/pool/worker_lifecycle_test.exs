@@ -8,6 +8,81 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
 
   alias Snakepit.Pool.ProcessRegistry
 
+  defmodule TestLifecycleWorker do
+    use GenServer
+
+    def start_link(opts) do
+      GenServer.start_link(__MODULE__, opts)
+    end
+
+    def set_memory(pid, bytes) when is_pid(pid) do
+      GenServer.cast(pid, {:set_memory, bytes})
+    end
+
+    @impl true
+    def init(opts) do
+      owner = Keyword.fetch!(opts, :owner)
+      worker_id = Keyword.get(opts, :worker_id)
+
+      state = %{
+        memory_bytes: Keyword.get(opts, :initial_memory_bytes, 0),
+        owner: owner,
+        worker_id: worker_id
+      }
+
+      {:ok, state}
+    end
+
+    @impl true
+    def handle_call(:get_memory_usage, _from, state) do
+      {:reply, {:ok, state.memory_bytes}, state}
+    end
+
+    @impl true
+    def handle_cast({:set_memory, bytes}, state) when is_integer(bytes) do
+      {:noreply, %{state | memory_bytes: bytes}}
+    end
+
+    @impl true
+    def handle_info(:stop, state), do: {:stop, :normal, state}
+
+    @impl true
+    def terminate(_reason, %{owner: owner, worker_id: worker_id}) do
+      send(owner, {:worker_terminated, worker_id, self()})
+      :ok
+    end
+  end
+
+  defmodule TestProfile do
+    @behaviour Snakepit.WorkerProfile
+
+    def start_worker(config) do
+      worker_id = Map.fetch!(config, :worker_id)
+      test_pid = Map.fetch!(config, :test_pid)
+
+      {:ok, pid} =
+        TestLifecycleWorker.start_link(
+          owner: test_pid,
+          worker_id: worker_id,
+          initial_memory_bytes: Map.get(config, :initial_memory_bytes, 0)
+        )
+
+      send(test_pid, {:profile_started, worker_id, pid, config})
+      {:ok, pid}
+    end
+
+    def stop_worker(pid) when is_pid(pid) do
+      send(pid, :stop)
+      :ok
+    end
+
+    def execute_request(_worker, _request, _timeout), do: {:ok, %{}}
+    def get_capacity(_worker), do: 1
+    def get_load(_worker), do: 0
+    def health_check(_worker), do: :ok
+    def get_metadata(_worker), do: {:ok, %{profile: :test}}
+  end
+
   setup do
     # Ensure application is running (in case a previous test stopped it)
     case Application.ensure_all_started(:snakepit) do
@@ -188,6 +263,50 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
       {"", 1} -> 0
       {output, 0} -> output |> String.split("\n", trim: true) |> length()
       _ -> 0
+    end
+  end
+
+  describe "memory recycling" do
+    test "recycles workers when memory threshold exceeded and preserves config" do
+      manager = Process.whereis(Snakepit.Worker.LifecycleManager)
+      worker_id = "mem_recycle_#{System.unique_integer([:positive])}"
+
+      {:ok, worker_pid} =
+        TestProfile.start_worker(%{
+          worker_id: worker_id,
+          test_pid: self()
+        })
+
+      assert_receive {:profile_started, ^worker_id, ^worker_pid, _initial_config}, 1_000
+
+      config = %{
+        worker_profile: TestProfile,
+        pool_name: :test_pool,
+        worker_module: Snakepit.GRPCWorker,
+        adapter_module: Snakepit.TestAdapters.MockGRPCAdapter,
+        adapter_args: ["--demo"],
+        adapter_env: [{"FOO", "1"}],
+        memory_threshold_mb: 1,
+        test_pid: self()
+      }
+
+      Snakepit.Worker.LifecycleManager.track_worker(:test_pool, worker_id, worker_pid, config)
+
+      TestLifecycleWorker.set_memory(worker_pid, 3 * 1_048_576)
+
+      send(manager, :lifecycle_check)
+
+      assert_receive {:worker_terminated, ^worker_id, ^worker_pid}, 5_000
+
+      assert_receive {:profile_started, new_worker_id, new_worker_pid, started_config}, 5_000
+      refute new_worker_id == worker_id
+      assert started_config.adapter_args == ["--demo"]
+      assert started_config.worker_profile == TestProfile
+      assert started_config.test_pid == self()
+
+      Snakepit.Worker.LifecycleManager.untrack_worker(new_worker_id)
+      send(new_worker_pid, :stop)
+      assert_receive {:worker_terminated, ^new_worker_id, ^new_worker_pid}, 5_000
     end
   end
 end

@@ -20,7 +20,7 @@
 
 ### 1. Add to mix.exs
 ```elixir
-{:snakepit, "~> 0.6"}
+{:snakepit, "~> 0.6.8"}
 ```
 
 ### 2. Install Elixir deps
@@ -2599,6 +2599,8 @@ The following fields support binary data:
 - `RegisterVariableRequest.initial_binary_value`: Initial binary value
 - `BatchSetVariablesRequest.binary_updates`: Batch binary updates
 - `ExecuteToolRequest.binary_parameters`: Binary tool parameters
+
+Tools on the Elixir side receive binary entries as tuples: `params["payload"] == {:binary, <<...>>}` so handlers can keep JSON shape handling separate from opaque blobs. Remote Python workers receive the original proto map untouched; callers can use `Snakepit.GRPC.Client.execute_tool/5` with `binary_parameters: %{ "payload" => <<0, 1, 2>> }` to make the intent explicit.
 
 ### Best Practices
 

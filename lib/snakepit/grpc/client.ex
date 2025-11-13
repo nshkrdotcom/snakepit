@@ -47,7 +47,10 @@ defmodule Snakepit.GRPC.Client do
     if not Map.get(channel, :mock, false) do
       Snakepit.GRPC.ClientImpl.execute_tool(channel, session_id, tool_name, parameters, opts)
     else
-      # Mock implementation for testing
+      if test_pid = Map.get(channel, :test_pid) do
+        send(test_pid, {:grpc_client_execute_tool, session_id, tool_name, parameters, opts})
+      end
+
       {:ok, %{success: true, result: %{}, error_message: ""}}
     end
   end
@@ -62,6 +65,13 @@ defmodule Snakepit.GRPC.Client do
         opts
       )
     else
+      if test_pid = Map.get(channel, :test_pid) do
+        send(
+          test_pid,
+          {:grpc_client_execute_streaming_tool, session_id, tool_name, parameters, opts}
+        )
+      end
+
       # Mock implementation for testing - return a simple stream
       stream =
         Stream.iterate(1, &(&1 + 1))

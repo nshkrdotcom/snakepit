@@ -101,6 +101,27 @@ defmodule Snakepit.GRPC.BridgeServerTest do
     end
   end
 
+  defmodule ChannelWorker do
+    use GenServer
+
+    def start_link({test_pid, worker_id}) do
+      GenServer.start_link(__MODULE__, {test_pid, worker_id})
+    end
+
+    @impl true
+    def init({test_pid, worker_id}) do
+      Registry.register(Snakepit.Pool.Registry, worker_id, %{worker_module: Snakepit.GRPCWorker})
+      {:ok, %{test_pid: test_pid}}
+    end
+
+    @impl true
+    def handle_call(:get_channel, _from, state) do
+      {:reply, {:ok, %{mock: true, test_pid: state.test_pid}}, state}
+    end
+
+    def handle_call(:get_port, _from, state), do: {:reply, {:ok, 0}, state}
+  end
+
   describe "execute_tool/2 with remote workers" do
     setup %{session_id: session_id} do
       ensure_tool_registry_started()
@@ -239,6 +260,85 @@ defmodule Snakepit.GRPC.BridgeServerTest do
 
       {:error, {:already_started, _pid}} ->
         :ok
+    end
+  end
+
+  describe "binary parameters" do
+    test "local tools receive decoded binary payloads", %{session_id: session_id} do
+      ensure_tool_registry_started()
+
+      {:ok, _session} = SessionStore.create_session(session_id)
+
+      parent = self()
+
+      :ok =
+        ToolRegistry.register_elixir_tool(session_id, "binary_tool", fn params ->
+          send(parent, {:tool_params, params})
+          {:ok, :ok}
+        end)
+
+      binary_payload = :erlang.term_to_binary(%{payload: "opaque"})
+
+      request = %ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: "binary_tool",
+        parameters: %{
+          "count" => %Any{
+            type_url: "type.googleapis.com/google.protobuf.StringValue",
+            value: Jason.encode!(1)
+          }
+        },
+        binary_parameters: %{"blob" => binary_payload}
+      }
+
+      response = BridgeServer.execute_tool(request, nil)
+      assert %ExecuteToolResponse{success: true} = response
+
+      assert_receive {:tool_params, params}, 1_000
+      assert params["count"] == 1
+      assert params["blob"] == {:binary, binary_payload}
+
+      ToolRegistry.cleanup_session(session_id)
+    end
+
+    test "remote execution forwards binary parameters to the worker", %{session_id: session_id} do
+      ensure_tool_registry_started()
+      ensure_started(Snakepit.Pool.Registry)
+
+      {:ok, _session} = SessionStore.create_session(session_id)
+      worker_id = "binary_remote_#{System.unique_integer([:positive])}"
+
+      {:ok, worker_pid} = start_supervised({ChannelWorker, {self(), worker_id}})
+
+      on_exit(fn ->
+        ToolRegistry.cleanup_session(session_id)
+        if Process.alive?(worker_pid), do: GenServer.stop(worker_pid, :normal)
+      end)
+
+      :ok =
+        ToolRegistry.register_python_tool(
+          session_id,
+          "remote_binary_tool",
+          worker_id,
+          %{}
+        )
+
+      blob = <<0, 1, 2, 3>>
+
+      request = %ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: "remote_binary_tool",
+        parameters: %{},
+        binary_parameters: %{"blob" => blob}
+      }
+
+      response = BridgeServer.execute_tool(request, nil)
+      assert %ExecuteToolResponse{success: true} = response
+
+      assert_receive {:grpc_client_execute_tool, ^session_id, "remote_binary_tool", %{}, opts},
+                     1_000
+
+      assert opts[:binary_parameters] == %{"blob" => blob}
     end
   end
 

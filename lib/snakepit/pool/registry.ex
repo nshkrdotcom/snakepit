@@ -77,6 +77,22 @@ defmodule Snakepit.Pool.Registry do
   end
 
   @doc """
+  Adds or updates metadata for a registered worker.
+
+  Accepts maps to keep metadata consistent across callers. When `Registry`
+  has `nil` metadata (the default when using `:via` tuples), this function
+  replaces it with the provided map. Future updates merge with the existing map.
+  """
+  def put_metadata(worker_id, metadata) when is_binary(worker_id) and is_map(metadata) do
+    Registry.update_value(@registry_name, worker_id, fn
+      current when is_map(current) -> Map.merge(current, metadata)
+      _ -> metadata
+    end)
+  end
+
+  def put_metadata(_worker_id, _metadata), do: :ok
+
+  @doc """
   Get worker_id from PID for O(1) lookups in :DOWN messages.
   """
   def get_worker_id_by_pid(pid) do

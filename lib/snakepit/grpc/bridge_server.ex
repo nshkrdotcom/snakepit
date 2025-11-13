@@ -163,7 +163,7 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   defp execute_tool_handler(%{type: :local} = tool, request, session_id) do
     # Execute local Elixir tool
-    case decode_tool_parameters(request.parameters) do
+    case decode_tool_parameters(request.parameters, request.binary_parameters) do
       {:ok, params} ->
         ToolRegistry.execute_local_tool(session_id, tool.name, params)
 
@@ -176,7 +176,7 @@ defmodule Snakepit.GRPC.BridgeServer do
     # Forward to Python worker
     SLog.debug("Executing remote tool #{tool.name} on worker #{tool.worker_id}")
 
-    with {:ok, params} <- decode_tool_parameters(request.parameters),
+    with {:ok, params} <- decode_tool_parameters(request.parameters, request.binary_parameters),
          {:ok, channel, cleanup} <- ensure_worker_channel(tool.worker_id) do
       result =
         try do
@@ -203,19 +203,29 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  defp decode_tool_parameters(params) when is_map(params) do
-    Enum.reduce_while(params, {:ok, %{}}, fn {key, any_value}, {:ok, acc} ->
-      case decode_any_value(any_value) do
-        {:ok, decoded} ->
-          {:cont, {:ok, Map.put(acc, key, decoded)}}
+  defp decode_tool_parameters(params, binary_params)
+       when is_map(params) and (is_map(binary_params) or is_nil(binary_params)) do
+    decoded =
+      Enum.reduce_while(params, {:ok, %{}}, fn {key, any_value}, {:ok, acc} ->
+        case decode_any_value(any_value) do
+          {:ok, decoded} ->
+            {:cont, {:ok, Map.put(acc, key, decoded)}}
 
-        {:error, reason} ->
-          {:halt, {:error, {:invalid_parameter, key, reason}}}
-      end
-    end)
+          {:error, reason} ->
+            {:halt, {:error, {:invalid_parameter, key, reason}}}
+        end
+      end)
+
+    case decoded do
+      {:ok, acc} ->
+        {:ok, merge_binary_parameters(acc, binary_params || %{})}
+
+      other ->
+        other
+    end
   end
 
-  defp decode_tool_parameters(_), do: {:ok, %{}}
+  defp decode_tool_parameters(_, _), do: {:ok, %{}}
 
   defp decode_any_value(%Any{
          type_url: "type.googleapis.com/google.protobuf.StringValue",
@@ -238,7 +248,24 @@ defmodule Snakepit.GRPC.BridgeServer do
     {:ok, value}
   end
 
-  defp decode_any_value(value), do: {:ok, value}
+  defp merge_binary_parameters(decoded, binary_params) when map_size(binary_params) == 0,
+    do: decoded
+
+  defp merge_binary_parameters(decoded, binary_params) when is_map(binary_params) do
+    Enum.reduce(binary_params, decoded, fn {key, value}, acc ->
+      case value do
+        bin when is_binary(bin) ->
+          Map.put(acc, normalize_param_key(key), {:binary, bin})
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  defp normalize_param_key(key) when is_atom(key), do: Atom.to_string(key)
+  defp normalize_param_key(key) when is_binary(key), do: key
+  defp normalize_param_key(key), do: to_string(key)
 
   defp decode_json(value) when is_binary(value) do
     case Jason.decode(value) do
@@ -288,10 +315,16 @@ defmodule Snakepit.GRPC.BridgeServer do
       session_id: session_id,
       tool_name: request.tool_name,
       parameters: request.parameters,
-      metadata: request.metadata
+      metadata: request.metadata,
+      binary_parameters: request.binary_parameters
     }
 
-    opts = tool_call_options(worker_request.metadata)
+    binary_params = worker_request.binary_parameters || %{}
+
+    opts =
+      worker_request.metadata
+      |> tool_call_options()
+      |> Keyword.put(:binary_parameters, binary_params)
 
     case GRPCClient.execute_tool(
            channel,
@@ -525,7 +558,7 @@ defmodule Snakepit.GRPC.BridgeServer do
     with {:ok, _session} <- SessionStore.get_session(request.session_id),
          {:ok, tool} <- ToolRegistry.get_tool(request.session_id, request.tool_name),
          :local <- tool.type,
-         {:ok, params} <- decode_tool_parameters(request.parameters),
+         {:ok, params} <- decode_tool_parameters(request.parameters, %{}),
          {:ok, result} <-
            ToolRegistry.execute_local_tool(request.session_id, request.tool_name, params) do
       execution_time = System.monotonic_time(:millisecond) - start_time

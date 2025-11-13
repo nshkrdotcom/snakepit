@@ -53,6 +53,7 @@ defmodule Snakepit.Worker.LifecycleManager do
   use GenServer
   require Logger
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Worker.LifecycleConfig
 
   # Check every 60 seconds
   @check_interval 60_000
@@ -133,10 +134,12 @@ defmodule Snakepit.Worker.LifecycleManager do
 
   @impl true
   def handle_cast({:track, pool_name, worker_id, worker_pid, config}, state) do
-    # Extract lifecycle configuration
-    ttl = parse_ttl(config[:worker_ttl] || :infinity)
-    max_requests = config[:worker_max_requests] || :infinity
-    memory_threshold = config[:memory_threshold_mb]
+    lifecycle_config =
+      LifecycleConfig.ensure(pool_name, config, worker_module: Snakepit.GRPCWorker)
+
+    ttl = lifecycle_config.worker_ttl_seconds
+    max_requests = lifecycle_config.worker_max_requests
+    memory_threshold = lifecycle_config.memory_threshold_mb
 
     worker_state = %{
       pool: pool_name,
@@ -147,7 +150,7 @@ defmodule Snakepit.Worker.LifecycleManager do
       ttl: ttl,
       max_requests: max_requests,
       memory_threshold: memory_threshold,
-      config: config
+      config: lifecycle_config
     }
 
     # Monitor the worker process
@@ -382,7 +385,7 @@ defmodule Snakepit.Worker.LifecycleManager do
     SLog.debug("Stopping worker #{worker_id} for recycling...")
 
     # Get the profile module for this worker
-    profile_module = get_profile_module(worker_state.config)
+    profile_module = lifecycle_profile_module(worker_state.config)
 
     # Stop via profile
     case profile_module.stop_worker(worker_state.pid) do
@@ -407,18 +410,14 @@ defmodule Snakepit.Worker.LifecycleManager do
     end
   end
 
-  defp start_replacement_worker(pool_name, config) do
+  defp start_replacement_worker(pool_name, %LifecycleConfig{} = config) do
     # Generate new worker ID
     worker_id = "pool_worker_#{:erlang.unique_integer([:positive])}"
 
-    # Get profile module
-    profile_module = get_profile_module(config)
+    profile_module = config.profile_module
 
     # Build config for new worker
-    worker_config =
-      config
-      |> Map.put(:worker_id, worker_id)
-      |> Map.put(:pool_name, pool_name)
+    worker_config = LifecycleConfig.to_worker_config(config, worker_id)
 
     # Start via profile
     case profile_module.start_worker(worker_config) do
@@ -432,15 +431,13 @@ defmodule Snakepit.Worker.LifecycleManager do
     end
   end
 
-  defp get_profile_module(config) do
-    case Map.get(config, :worker_profile, :process) do
-      :process -> Snakepit.WorkerProfile.Process
-      :thread -> Snakepit.WorkerProfile.Thread
-    end
+  defp start_replacement_worker(pool_name, config) when is_map(config) do
+    lifecycle_config = LifecycleConfig.ensure(pool_name, config)
+    start_replacement_worker(pool_name, lifecycle_config)
   end
 
   defp check_worker_health(worker_id, worker_state) do
-    profile_module = get_profile_module(worker_state.config)
+    profile_module = lifecycle_profile_module(worker_state.config)
 
     case profile_module.health_check(worker_state.pid) do
       :ok ->
@@ -521,10 +518,13 @@ defmodule Snakepit.Worker.LifecycleManager do
     )
   end
 
-  defp parse_ttl(:infinity), do: :infinity
-  defp parse_ttl({value, :seconds}), do: value
-  defp parse_ttl({value, :minutes}), do: value * 60
-  defp parse_ttl({value, :hours}), do: value * 3600
-  defp parse_ttl({value, :days}), do: value * 86400
-  defp parse_ttl(value) when is_integer(value), do: value
+  defp lifecycle_profile_module(%LifecycleConfig{profile_module: module}), do: module
+
+  defp lifecycle_profile_module(config) when is_map(config) do
+    case Map.get(config, :worker_profile, :process) do
+      :process -> Snakepit.WorkerProfile.Process
+      :thread -> Snakepit.WorkerProfile.Thread
+      module when is_atom(module) -> module
+    end
+  end
 end
