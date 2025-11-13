@@ -81,20 +81,26 @@ defmodule Snakepit.Pool do
   def execute_stream(command, args, callback_fn, opts \\ []) do
     pool = opts[:pool] || __MODULE__
     timeout = opts[:timeout] || 300_000
+    pool_identifier = opts[:pool_name] || pool
     SLog.debug("[Pool] execute_stream #{command} with #{Redaction.describe(args)}")
 
     case checkout_worker_for_stream(pool, opts) do
       {:ok, worker_id} ->
         SLog.debug("[Pool] Checked out worker #{worker_id} for streaming")
 
-        # CRITICAL FIX: Use try/after to guarantee worker checkin even if execution crashes
-        try do
-          execute_on_worker_stream(worker_id, command, args, callback_fn, timeout)
-        after
-          # This block ALWAYS executes, preventing worker leaks on crashes
-          SLog.debug("[Pool] Checking in worker #{worker_id} after stream execution")
-          checkin_worker(pool, worker_id)
-        end
+        start_time = System.monotonic_time(:microsecond)
+
+        result =
+          try do
+            execute_on_worker_stream(worker_id, command, args, callback_fn, timeout)
+          after
+            # This block ALWAYS executes, preventing worker leaks on crashes
+            SLog.debug("[Pool] Checking in worker #{worker_id} after stream execution")
+            checkin_worker(pool, worker_id)
+          end
+
+        emit_stream_telemetry(pool_identifier, worker_id, command, result, start_time)
+        result
 
       {:error, reason} ->
         SLog.error("[Pool] Failed to checkout worker for streaming: #{inspect(reason)}")
@@ -129,6 +135,22 @@ defmodule Snakepit.Pool do
          worker_id: worker_id
        })}
     end
+  end
+
+  defp emit_stream_telemetry(pool_identifier, worker_id, command, result, start_time) do
+    duration_us = System.monotonic_time(:microsecond) - start_time
+
+    :telemetry.execute(
+      [:snakepit, :request, :executed],
+      %{duration_us: duration_us},
+      %{
+        pool: pool_identifier,
+        worker_id: worker_id,
+        command: command,
+        success: result == :ok,
+        streaming: true
+      }
+    )
   end
 
   @doc """
@@ -183,98 +205,87 @@ defmodule Snakepit.Pool do
     # CRITICAL: Trap exits to ensure terminate/2 is called
     Process.flag(:trap_exit, true)
 
-    # v0.6.0: Get ALL pool configurations from Config system
-    pool_configs =
-      case Snakepit.Config.get_pool_configs() do
-        {:ok, configs} when is_list(configs) and length(configs) > 0 ->
-          SLog.info("Initializing #{length(configs)} pool(s)")
-          configs
+    with {:ok, pool_configs} <- resolve_pool_configs() do
+      # PERFORMANCE FIX: Create ETS cache for session affinity to eliminate
+      # GenServer bottleneck on SessionStore. This provides ~100x faster lookups.
+      # Shared across ALL pools
+      affinity_cache =
+        :ets.new(:worker_affinity_cache, [
+          :set,
+          :public,
+          {:read_concurrency, true}
+        ])
 
-        {:ok, []} ->
-          SLog.warning("No pool configs found, using legacy defaults")
-          [%{name: :default}]
+      # Create initial pool states (not yet initialized with workers)
+      pools =
+        Enum.reduce(pool_configs, %{}, fn pool_config, acc ->
+          pool_name = Map.get(pool_config, :name, :default)
 
-        {:error, reason} ->
-          SLog.warning("Config system error (#{inspect(reason)}), using legacy defaults")
-          [%{name: :default}]
-      end
+          # Extract pool settings with backward-compatible fallbacks
+          size = opts[:size] || Map.get(pool_config, :pool_size, @default_size)
 
-    # PERFORMANCE FIX: Create ETS cache for session affinity to eliminate
-    # GenServer bottleneck on SessionStore. This provides ~100x faster lookups.
-    # Shared across ALL pools
-    affinity_cache =
-      :ets.new(:worker_affinity_cache, [
-        :set,
-        :public,
-        {:read_concurrency, true}
-      ])
+          startup_timeout =
+            Application.get_env(:snakepit, :pool_startup_timeout, @default_startup_timeout)
 
-    # Create initial pool states (not yet initialized with workers)
-    pools =
-      Enum.reduce(pool_configs, %{}, fn pool_config, acc ->
-        pool_name = Map.get(pool_config, :name, :default)
+          queue_timeout =
+            Application.get_env(:snakepit, :pool_queue_timeout, @default_queue_timeout)
 
-        # Extract pool settings with backward-compatible fallbacks
-        size = opts[:size] || Map.get(pool_config, :pool_size, @default_size)
+          max_queue_size =
+            Application.get_env(:snakepit, :pool_max_queue_size, @default_max_queue_size)
 
-        startup_timeout =
-          Application.get_env(:snakepit, :pool_startup_timeout, @default_startup_timeout)
+          worker_module = opts[:worker_module] || Snakepit.GRPCWorker
 
-        queue_timeout =
-          Application.get_env(:snakepit, :pool_queue_timeout, @default_queue_timeout)
+          adapter_module =
+            opts[:adapter_module] ||
+              Map.get(pool_config, :adapter_module) ||
+              Application.get_env(:snakepit, :adapter_module)
 
-        max_queue_size =
-          Application.get_env(:snakepit, :pool_max_queue_size, @default_max_queue_size)
+          pool_state = %PoolState{
+            name: pool_name,
+            size: size,
+            workers: [],
+            available: MapSet.new(),
+            busy: %{},
+            request_queue: :queue.new(),
+            cancelled_requests: %{},
+            stats: %{
+              requests: 0,
+              queued: 0,
+              errors: 0,
+              queue_timeouts: 0,
+              pool_saturated: 0
+            },
+            initialized: false,
+            startup_timeout: startup_timeout,
+            queue_timeout: queue_timeout,
+            max_queue_size: max_queue_size,
+            worker_module: worker_module,
+            adapter_module: adapter_module,
+            pool_config: pool_config
+          }
 
-        worker_module = opts[:worker_module] || Snakepit.GRPCWorker
+          Map.put(acc, pool_name, pool_state)
+        end)
 
-        adapter_module =
-          opts[:adapter_module] ||
-            Map.get(pool_config, :adapter_module) ||
-            Application.get_env(:snakepit, :adapter_module)
+      # Determine default pool (first pool or :default)
+      default_pool =
+        case pool_configs do
+          [first | _] -> Map.get(first, :name, :default)
+          [] -> :default
+        end
 
-        pool_state = %PoolState{
-          name: pool_name,
-          size: size,
-          workers: [],
-          available: MapSet.new(),
-          busy: %{},
-          request_queue: :queue.new(),
-          cancelled_requests: %{},
-          stats: %{
-            requests: 0,
-            queued: 0,
-            errors: 0,
-            queue_timeouts: 0,
-            pool_saturated: 0
-          },
-          initialized: false,
-          startup_timeout: startup_timeout,
-          queue_timeout: queue_timeout,
-          max_queue_size: max_queue_size,
-          worker_module: worker_module,
-          adapter_module: adapter_module,
-          pool_config: pool_config
-        }
+      state = %__MODULE__{
+        pools: pools,
+        affinity_cache: affinity_cache,
+        default_pool: default_pool
+      }
 
-        Map.put(acc, pool_name, pool_state)
-      end)
-
-    # Determine default pool (first pool or :default)
-    default_pool =
-      case pool_configs do
-        [first | _] -> Map.get(first, :name, :default)
-        [] -> :default
-      end
-
-    state = %__MODULE__{
-      pools: pools,
-      affinity_cache: affinity_cache,
-      default_pool: default_pool
-    }
-
-    # Start concurrent worker initialization for ALL pools
-    {:ok, state, {:continue, :initialize_workers}}
+      # Start concurrent worker initialization for ALL pools
+      {:ok, state, {:continue, :initialize_workers}}
+    else
+      {:error, reason} ->
+        {:stop, reason}
+    end
   end
 
   @impl true
@@ -336,11 +347,26 @@ defmodule Snakepit.Pool do
     SLog.info("✅ All pools initialized in #{elapsed}ms")
     SLog.info("📊 Resource usage delta: #{inspect(resource_delta)}")
 
+    failed_pools =
+      Enum.filter(updated_pools, fn {_name, pool} -> length(pool.workers) == 0 end)
+
+    failed_pool_names = Enum.map(failed_pools, &elem(&1, 0))
+
+    if failed_pools != [] do
+      SLog.warning(
+        "⚠️ Pools with zero initialized workers: #{Enum.map_join(failed_pool_names, ", ", &to_string/1)}"
+      )
+    end
+
     # Check if any pool successfully started
     any_workers_started? =
       Enum.any?(updated_pools, fn {_name, pool} -> length(pool.workers) > 0 end)
 
     if not any_workers_started? do
+      SLog.error(
+        "❌ All configured pools failed to start workers (#{Enum.map_join(failed_pool_names, ", ", &to_string/1)})."
+      )
+
       {:stop, :no_workers_started, state}
     else
       new_state = %{state | pools: updated_pools}
@@ -1031,6 +1057,22 @@ defmodule Snakepit.Pool do
       |> Enum.sort_by(fn {_from, recorded_at} -> recorded_at end)
       |> Enum.drop(drop_count)
       |> Map.new()
+    end
+  end
+
+  defp resolve_pool_configs do
+    case Snakepit.Config.get_pool_configs() do
+      {:ok, configs} when is_list(configs) and length(configs) > 0 ->
+        SLog.info("Initializing #{length(configs)} pool(s)")
+        {:ok, configs}
+
+      {:ok, []} ->
+        SLog.warning("No pool configs found, using legacy defaults")
+        {:ok, [%{name: :default}]}
+
+      {:error, reason} ->
+        SLog.error("Pool configuration error: #{inspect(reason)}")
+        {:error, {:invalid_pool_config, reason}}
     end
   end
 

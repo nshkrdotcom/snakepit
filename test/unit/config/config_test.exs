@@ -190,4 +190,20 @@ defmodule Snakepit.ConfigTest do
       assert defaults.max_missed_heartbeats == 3
     end
   end
+
+  describe "get_pool_configs/0" do
+    test "fails fast on invalid worker profile" do
+      Application.put_env(:snakepit, :pools, [
+        %{name: :broken, worker_profile: :unknown}
+      ])
+
+      on_exit(fn -> Application.delete_env(:snakepit, :pools) end)
+
+      assert {:error, {:validation_failed, errors}} = Config.get_pool_configs()
+      assert Enum.any?(errors, fn
+               {:error, {:invalid_profile, :unknown, _}} -> true
+               _ -> false
+             end)
+    end
+  end
 end
