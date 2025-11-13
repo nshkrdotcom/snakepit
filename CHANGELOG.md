@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## [0.6.8] - 2025-11-12
+
+### Added
+- **Bootstrap automation**: Introduced `Snakepit.Bootstrap`, `mix snakepit.setup`, and a `make bootstrap` target to install Mix deps, provision `.venv`/`.venv-py313`, install Python requirements, run `scripts/setup_test_pythons.sh`, and regenerate gRPC stubs with fully instrumented logging.
+- **Environment doctor**: New `Snakepit.EnvDoctor` module plus `mix snakepit.doctor` task verify interpreter availability, `grpc` import, `.venv`/`.venv-py313`, `priv/python/grpc_server.py --health-check`, and worker port availability with actionable remediation messages.
+- **Runtime guardrails**: `Snakepit.Application` now invokes `Snakepit.EnvDoctor.ensure_python!/0` before pools start, failing fast when Python prerequisites are missing. Test helpers (`test/support/fake_doctor.ex`, `test/support/bootstrap_runner.ex`, `test/support/command_runner.ex`) enable deterministic unit coverage for the bootstrap/doctor path.
+- **Python-aware CI**: GitHub Actions workflow now runs bootstrap, doctor, the default suite, and `mix test --only python_integration` so bridge coverage is validated when the doctor passes.
+- **New documentation**: README + README_TESTING describe the `make bootstrap → mix snakepit.doctor → mix test` workflow, explain how to run python integration tests, and highlight the new Mix tasks.
+
+### Changed
+- **Test gating**: Default `mix test` excludes `:python_integration` while Python-heavy suites (thread profile, session affinity, streaming regression, etc.) carry the tag; `test/unit/exunit_configuration_test.exs` locks the config in place.
+- **Thread-profile test harness**: `Snakepit.ThreadProfilePython313Test` now uses `Snakepit.Test.PythonEnv.skip_unless_python_313/1` to skip cleanly when `.venv-py313` is unavailable.
+- **Process killer regression**: Ports spawned during `kill_by_run_id/1` tests close via `safe_close_port/1`, eliminating `:port_close` race exceptions.
+- **Queue saturation regression**: `Snakepit.Pool.QueueSaturationRuntimeTest` focuses on stats + agent tracking instead of brittle global ETS assertions, removing a common source of flaky failures.
+- **gRPC generation script**: `priv/python/generate_grpc.sh` now prefers `.venv/bin/python3`, falling back to system `python3/python` only when the virtualenv is missing, and emits helpful logs when no interpreter is found.
+
+### Fixed
+- Shell instrumentation around bootstrap (reporting command start/finish and verbose pip output) prevents "silent hangs" and surfaced the root causes of previous provisioning confusion.
+- `scripts/setup_test_pythons.sh` now runs under `set -x`, streaming its progress during bootstrap.
+
 
 ## [0.6.7] - 2025-10-28
 
@@ -902,6 +922,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
+[0.6.8]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.8
+[0.6.7]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.7
 [0.5.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.5.1
 [0.5.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.5.0
 [0.4.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.3

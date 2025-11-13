@@ -59,7 +59,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
-- [What's New in v0.6.7](#whats-new-in-v067)
+- [What's New in v0.6.8](#whats-new-in-v068)
 - [What's New in v0.6.6](#whats-new-in-v066)
 - [What's New in v0.6.5](#whats-new-in-v065)
 - [What's New in v0.6.4](#whats-new-in-v064)
@@ -139,30 +139,19 @@ For **non-DSPex users**, if you're using these classes directly:
 
 ---
 
-## 🆕 What's New in v0.6.7
+## 🆕 What's New in v0.6.8
 
-**Type system + performance + distributed telemetry** – v0.6.7 delivers two major enhancements: Phase 1 of the type system improvements with 6x performance boost, and a complete distributed telemetry system for full observability across Elixir clusters and Python workers.
+**Bootstrap + doctor + guardrails** – v0.6.8 adds first-class environment automation (`make bootstrap` / `mix snakepit.setup`), a proactive `mix snakepit.doctor`, runtime Python guardrails, python-integration test tagging, and CI/documentation updates so the bridge can be provisioned and verified deterministically. (Released 2025-11-12.)
 
-### Phase 1: Type System MVP + Performance
-- **6x JSON performance** – Python bridge now uses `orjson` for serialization, delivering 4-6x speedup for raw JSON operations and 1.5x improvement for large payloads with full backward compatibility (`priv/python/tests/test_orjson_integration.py`).
-- **Structured error types** – New `Snakepit.Error` struct provides detailed context for debugging with fields like `category`, `message`, `details`, `python_traceback`, and `grpc_status` (`lib/snakepit/error.ex`, `test/unit/error_test.exs`).
-- **Complete type specifications** – All public API functions in `Snakepit` module now have `@spec` annotations with structured error return types for better IDE support and Dialyzer analysis.
-
-### Phase 2: Distributed Telemetry System
-- **Bidirectional telemetry streaming** – Python workers emit events via gRPC that are re-emitted as Elixir `:telemetry` events for unified observability across your entire stack.
-- **43 telemetry events** – Complete event catalog across 3 layers (Infrastructure, Python Execution, gRPC Bridge) with atom-safe event names.
-- **Python telemetry API** – High-level API with `telemetry.emit()` and `telemetry.span()` for automatic timing, plus correlation ID propagation.
-- **Runtime control** – Adjust sampling rates, enable/disable telemetry, and filter events for individual workers without restarts.
-- **Integration ready** – Works seamlessly with Prometheus, StatsD, OpenTelemetry, and other monitoring tools via `:telemetry.attach()`.
-- **High performance** – <10μs overhead per event, <1% CPU impact at 100% sampling, with bounded queues and graceful degradation.
-
-See [`TELEMETRY.md`](TELEMETRY.md) for the complete telemetry guide with usage examples and integration patterns.
-
-**Zero breaking changes** – All 235+ existing tests pass; full backward compatibility maintained while adding new functionality.
+- **One-command provisioning** – `make bootstrap` (or `mix snakepit.setup`) now installs Mix deps, creates `.venv`/`.venv-py313`, installs Python requirements, runs `scripts/setup_test_pythons.sh`, and regenerates gRPC stubs with verbose logging and command instrumentation.
+- **Environment doctor + runtime guard** – `mix snakepit.doctor` checks the configured interpreter, `grpc` import, `.venv`/`.venv-py313`, `priv/python/grpc_server.py --health-check`, and port availability; `Snakepit.Application` calls `Snakepit.EnvDoctor.ensure_python!/0` before pools start so missing Python fails fast with actionable messages.
+- **Test gating + CI** – Default `mix test` excludes `:python_integration`; python-heavy suites are tagged and can be run via `mix test --only python_integration`. CI now runs bootstrap, the doctor, the default suite, and `mix test --only python_integration` so bridge coverage is opt in but enforced when the doctor passes.
+- **Docs & developer UX** – README + README_TESTING document the new workflow (bootstrap → doctor → tests) and explain the new Mix tasks. Shell scripts (`scripts/setup_test_pythons.sh`, bootstrap runner) emit detailed progress so developers aren’t debugging silent hangs.
+- **v0.6.8 highlights** affect: `.github/workflows/ci.yml`, Makefile, mix tasks, `Snakepit.Bootstrap`, `Snakepit.EnvDoctor`, `Snakepit.Application`, docs, test infrastructure (`test/support/*`), runtime guard tests, queue saturation regression, and gRPC generation script now honoring `.venv/bin/python3`.
 
 ---
 
-## 🆕 What's New in v0.6.6
+## 🆕 What's New in v0.6.7
 
 **Bridge resilience + defensive defaults** – v0.6.6 closes the last gaps from the critical bug sweep and documents the new reliability posture across the stack.
 
@@ -578,7 +567,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-    {:snakepit, "~> 0.6.7"}
+    {:snakepit, "~> 0.6.8"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,
