@@ -345,3 +345,73 @@ class ExecuteElixirToolResponse(_message.Message):
     metadata: _containers.ScalarMap[str, str]
     execution_time_ms: int
     def __init__(self, success: bool = ..., result: _Optional[_Union[_any_pb2.Any, _Mapping]] = ..., error_message: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., execution_time_ms: _Optional[int] = ...) -> None: ...
+
+class TelemetryEvent(_message.Message):
+    __slots__ = ("event_parts", "measurements", "metadata", "timestamp_ns", "correlation_id")
+    class MeasurementsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: TelemetryValue
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[TelemetryValue, _Mapping]] = ...) -> None: ...
+    class MetadataEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    EVENT_PARTS_FIELD_NUMBER: _ClassVar[int]
+    MEASUREMENTS_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    TIMESTAMP_NS_FIELD_NUMBER: _ClassVar[int]
+    CORRELATION_ID_FIELD_NUMBER: _ClassVar[int]
+    event_parts: _containers.RepeatedScalarFieldContainer[str]
+    measurements: _containers.MessageMap[str, TelemetryValue]
+    metadata: _containers.ScalarMap[str, str]
+    timestamp_ns: int
+    correlation_id: str
+    def __init__(self, event_parts: _Optional[_Iterable[str]] = ..., measurements: _Optional[_Mapping[str, TelemetryValue]] = ..., metadata: _Optional[_Mapping[str, str]] = ..., timestamp_ns: _Optional[int] = ..., correlation_id: _Optional[str] = ...) -> None: ...
+
+class TelemetryValue(_message.Message):
+    __slots__ = ("int_value", "float_value", "string_value")
+    INT_VALUE_FIELD_NUMBER: _ClassVar[int]
+    FLOAT_VALUE_FIELD_NUMBER: _ClassVar[int]
+    STRING_VALUE_FIELD_NUMBER: _ClassVar[int]
+    int_value: int
+    float_value: float
+    string_value: str
+    def __init__(self, int_value: _Optional[int] = ..., float_value: _Optional[float] = ..., string_value: _Optional[str] = ...) -> None: ...
+
+class TelemetryControl(_message.Message):
+    __slots__ = ("toggle", "sampling", "filter")
+    TOGGLE_FIELD_NUMBER: _ClassVar[int]
+    SAMPLING_FIELD_NUMBER: _ClassVar[int]
+    FILTER_FIELD_NUMBER: _ClassVar[int]
+    toggle: TelemetryToggle
+    sampling: TelemetrySamplingUpdate
+    filter: TelemetryEventFilter
+    def __init__(self, toggle: _Optional[_Union[TelemetryToggle, _Mapping]] = ..., sampling: _Optional[_Union[TelemetrySamplingUpdate, _Mapping]] = ..., filter: _Optional[_Union[TelemetryEventFilter, _Mapping]] = ...) -> None: ...
+
+class TelemetryToggle(_message.Message):
+    __slots__ = ("enabled",)
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    def __init__(self, enabled: bool = ...) -> None: ...
+
+class TelemetrySamplingUpdate(_message.Message):
+    __slots__ = ("sampling_rate", "event_patterns")
+    SAMPLING_RATE_FIELD_NUMBER: _ClassVar[int]
+    EVENT_PATTERNS_FIELD_NUMBER: _ClassVar[int]
+    sampling_rate: float
+    event_patterns: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, sampling_rate: _Optional[float] = ..., event_patterns: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class TelemetryEventFilter(_message.Message):
+    __slots__ = ("allow", "deny")
+    ALLOW_FIELD_NUMBER: _ClassVar[int]
+    DENY_FIELD_NUMBER: _ClassVar[int]
+    allow: _containers.RepeatedScalarFieldContainer[str]
+    deny: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, allow: _Optional[_Iterable[str]] = ..., deny: _Optional[_Iterable[str]] = ...) -> None: ...
