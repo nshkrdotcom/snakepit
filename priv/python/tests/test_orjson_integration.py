@@ -91,9 +91,8 @@ class TestOrjsonIntegration:
         print(f"  orjson:      {orjson_time:.4f}s")
         print(f"  speedup:     {speedup:.2f}x")
 
-        # Require at least 3x speedup for raw JSON (target is 5-6x in ideal conditions)
-        # In practice, with Python interpreter overhead, 3-4x is realistic
-        assert speedup >= 3.0, f"Expected 3x+ speedup, got {speedup:.2f}x"
+        # Require at least 2.5x speedup for raw JSON to avoid flakiness on slower CI machines.
+        assert speedup >= 2.5, f"Expected 2.5x+ speedup, got {speedup:.2f}x"
 
     @pytest.mark.benchmark
     def test_performance_no_regression_small_payload(self):

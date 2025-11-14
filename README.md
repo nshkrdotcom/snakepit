@@ -28,20 +28,30 @@
 mix deps.get
 ```
 
-### 3. Install Python deps (ONE command)
+### 3. Run the test suite (auto-bootstraps Python on Linux/WSL)
+```bash
+mix test
+```
+
+The first `mix test` run provisions the Python virtualenv (via uv or pip) and installs bridge
+dependencies automatically when you're on Linux/WSL—the same path our CI uses.
+
+Need to exercise the Python bridge in isolation? Use:
+
+```bash
+./test_python.sh          # auto-creates/updates .venv, installs deps, runs pytest
+./test_python.sh -k grpc  # pass args straight to pytest
+```
+
+### Manual Setup (macOS/Windows or custom Python envs)
+If you're not on Linux/WSL (or you prefer to manage Python yourself), run:
+
 ```bash
 ./deps/snakepit/scripts/setup_python.sh
 ```
 
-That's it! The script auto-detects uv (fast) or pip (fallback) and installs everything.
-
-### Manual Setup (if needed)
-```bash
-cd deps/snakepit/priv/python
-pip install -r requirements.txt
-```
-
-Then run: `mix test` to verify everything works.
+The script auto-detects uv (fast) or pip (fallback). Afterwards, `mix test` will reuse the
+prepared virtualenv.
 
 ---
 
@@ -150,6 +160,7 @@ For **non-DSPex users**, if you're using these classes directly:
 - **Heartbeat schema documentation** – `Snakepit.Config` ships typedocs for the normalized pool + heartbeat map shared with `snakepit_bridge.heartbeat.HeartbeatConfig`, while ARCHITECTURE and README_GRPC reiterate that BEAM is the authoritative heartbeat monitor with `SNAKEPIT_HEARTBEAT_CONFIG` kept in lockstep.
 - **Threaded adapter guardrails** – `priv/python/grpc_server_threaded.py` now errors when adapters omit `__thread_safe__ = True`, forcing unsafe adapters to run via the process bridge instead of silently continuing in threads.
 - **Tool registration coercion** – `snakepit_bridge.base_adapter.BaseAdapter` unwraps awaitables, `UnaryUnaryCall` handles, and lazy callables via `_coerce_stub_response/1`, guaranteeing consistent logging and error handling whether adapters use sync or async gRPC stubs.
+- **Async-friendly tool registration** – BaseAdapter now exposes `register_with_session_async/2`, so adapters running under asyncio/aio stubs can register tools without blocking the event loop while the classic `register_with_session/2` helper continues to serve synchronous bridges.
 
 ---
 
@@ -1840,6 +1851,20 @@ Snakepit supports transparent cross-language function execution between Elixir a
 ```
 
 For comprehensive documentation on the bidirectional tool bridge, see **[README_BIDIRECTIONAL_TOOL_BRIDGE.md](README_BIDIRECTIONAL_TOOL_BRIDGE.md)**.
+
+Adapters built on `snakepit_bridge.base_adapter.BaseAdapter` can register their tool surfaces
+either synchronously or asynchronously depending on which gRPC stub they're using:
+
+```python
+adapter = MyAdapter()
+# Synchronous stubs (default gRPC server / threaded server)
+adapter.register_with_session(session_id, stub)
+
+# Asyncio/aio stubs
+await adapter.register_with_session_async(session_id, aio_stub)
+```
+
+Use the async variant whenever you're inside an event loop so the Python bridge never blocks.
 
 ## 🔌 Built-in Adapters
 

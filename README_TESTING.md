@@ -47,9 +47,11 @@ mix test test/snakepit/grpc/bridge_server_test.exs                    # Channel 
 mix test test/unit/pool/process_registry_security_test.exs            # DETS/ETS access control
 mix test test/unit/logger/redaction_test.exs                          # Log redaction summaries
 
-# Run Python pytest suites only (auto-activates .venv, regenerates protos, sets PYTHONPATH)
+# Run Python pytest suites only (auto-manages .venv, installs/updates deps, regenerates protos)
 ./test_python.sh
 ./test_python.sh -k streaming  # Any args are forwarded to pytest
+# The Python requirements now include pytest-asyncio so coroutine-based tests (e.g., heartbeat client)
+# run without extra configuration.
 ```
 
 ### Reliability Regression Targets (v0.6.6)

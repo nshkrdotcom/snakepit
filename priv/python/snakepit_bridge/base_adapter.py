@@ -171,8 +171,12 @@ class BaseAdapter:
     
     def register_with_session(self, session_id: str, stub) -> List[str]:
         """
-        Register all tools from this adapter with the Elixir session.
-        
+        Register adapter tools with the Elixir session (synchronous helpers).
+
+        Use this variant when calling from synchronous contexts. For asyncio-based
+        adapters or aio stubs, call `await register_with_session_async(...)` instead
+        so the event loop is never blocked.
+
         Args:
             session_id: The session ID to register tools with
             stub: The gRPC stub to use for registration
@@ -206,6 +210,46 @@ class BaseAdapter:
             logger.error(f"Error registering tools: {e}")
             return []
 
+    async def register_with_session_async(self, session_id: str, stub) -> List[str]:
+        """
+        Async variant of register_with_session for asyncio-based stubs/adapters.
+
+        This helper never blocks the running event loop: native awaitables are awaited,
+        and blocking UnaryUnaryCall/callable responses run inside the default executor.
+
+        Args:
+            session_id: The session ID to register tools with
+            stub: The (possibly-async) gRPC stub to use for registration
+
+        Returns:
+            List of registered tool names
+        """
+        tools = self.get_tools()
+
+        if not tools:
+            logger.warning(f"No tools found in adapter {self.__class__.__name__}")
+            return []
+
+        request = pb2.RegisterToolsRequest(
+            session_id=session_id,
+            tools=tools,
+            worker_id=f"python-{id(self)}"
+        )
+
+        try:
+            raw_response = stub.RegisterTools(request)
+            response = await self._await_stub_response(raw_response)
+
+            if response.success:
+                logger.info(f"Registered {len(tools)} tools for session {session_id}")
+                return list(response.tool_ids.keys())
+
+            logger.error(f"Failed to register tools: {response.error_message}")
+            return []
+        except Exception as e:
+            logger.error(f"Error registering tools (async): {e}")
+            return []
+
     def _coerce_stub_response(self, response):
         """
         Handle the different response shapes returned by gRPC stubs.
@@ -218,11 +262,15 @@ class BaseAdapter:
         """
         if inspect.isawaitable(response):
             try:
-                loop = asyncio.get_event_loop()
+                asyncio.get_running_loop()
             except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            return loop.run_until_complete(response)
+                return asyncio.run(response)
+
+            raise RuntimeError(
+                "Cannot synchronously wait for an async RegisterTools response while an event "
+                "loop is already running. Call register_with_session from synchronous code or "
+                "await the stub response yourself before invoking this helper."
+            )
 
         result_attr = getattr(response, "result", None)
         if callable(result_attr):
@@ -230,5 +278,23 @@ class BaseAdapter:
 
         if callable(response):
             return response()
+
+        return response
+
+    async def _await_stub_response(self, response):
+        """
+        Await the different response shapes returned by gRPC stubs without blocking.
+        """
+        if inspect.isawaitable(response):
+            return await response
+
+        result_attr = getattr(response, "result", None)
+        if callable(result_attr):
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, result_attr)
+
+        if callable(response):
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, response)
 
         return response

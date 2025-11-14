@@ -96,6 +96,8 @@ class MyAdapter(BaseAdapter):
 # Register with session (happens automatically in grpc_server.py)
 adapter = MyAdapter()
 adapter.register_with_session(session_id, stub)
+# If you're using an asyncio stub, call:
+# await adapter.register_with_session_async(session_id, aio_stub)
 ```
 
 ### 4. Call Python Functions from Elixir
