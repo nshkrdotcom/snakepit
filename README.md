@@ -161,6 +161,7 @@ For **non-DSPex users**, if you're using these classes directly:
 - **Threaded adapter guardrails** – `priv/python/grpc_server_threaded.py` now errors when adapters omit `__thread_safe__ = True`, forcing unsafe adapters to run via the process bridge instead of silently continuing in threads.
 - **Tool registration coercion** – `snakepit_bridge.base_adapter.BaseAdapter` unwraps awaitables, `UnaryUnaryCall` handles, and lazy callables via `_coerce_stub_response/1`, guaranteeing consistent logging and error handling whether adapters use sync or async gRPC stubs.
 - **Async-friendly tool registration** – BaseAdapter now exposes `register_with_session_async/2`, so adapters running under asyncio/aio stubs can register tools without blocking the event loop while the classic `register_with_session/2` helper continues to serve synchronous bridges.
+- **Self-managing Python tests** – `./test_python.sh` bootstraps `.venv`, hashes `priv/python/requirements.txt`, installs/upgrades deps, regenerates protobuf stubs when needed, and configures OTEL silencing so `./test_python.sh [-k ...]` is now a zero-prep pytest entrypoint.
 
 ---
 
