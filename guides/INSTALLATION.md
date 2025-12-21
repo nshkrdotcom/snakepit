@@ -36,6 +36,15 @@ Complete installation instructions for all platforms with troubleshooting tips.
 
 ---
 
+## Same-Node Requirement
+
+Snakepit spawns Python workers as local OS processes via `Port.open/2`. That means
+Python must be installed on the same host as the BEAM node running Snakepit, and
+workers connect back over `grpc_host:grpc_port`. Remote Python workers are not
+supported yet.
+
+---
+
 ## Quick Start
 
 ### 1. Add Snakepit to Your Project
@@ -45,7 +54,7 @@ Complete installation instructions for all platforms with troubleshooting tips.
 # mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.4.1"}
+    {:snakepit, "~> 0.6.11"}
   ]
 end
 ```
@@ -65,36 +74,55 @@ mix deps.get
 mix compile
 ```
 
-### 2. Install Python Dependencies
+### 2. Prepare Python + gRPC
 
-**Using pip**:
+If Snakepit is a dependency in your app, install the bridge requirements from the
+dependency and point Snakepit at your interpreter:
+
 ```bash
-# Navigate to your deps directory
-cd deps/snakepit/priv/python
-
-# Install required packages
-pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/pip install -r deps/snakepit/priv/python/requirements.txt
+export SNAKEPIT_PYTHON="$PWD/.venv/bin/python3"
 ```
 
-**Or install globally**:
+You can also set `config :snakepit, :python_executable, "/path/to/python"` if you prefer config over env vars.
+
+If you're working in the Snakepit repo (tests/examples), run:
+
 ```bash
-pip install grpcio>=1.60.0 grpcio-tools>=1.60.0 protobuf>=4.25.0 numpy>=1.21.0
+mix snakepit.setup
+mix snakepit.doctor
 ```
+
+`mix snakepit.setup` provisions `.venv` and `.venv-py313`, installs Python
+requirements, and regenerates gRPC stubs. `mix snakepit.doctor` validates the
+interpreter, gRPC import, adapter health checks, and the Elixir gRPC port.
 
 ### 3. Verify Installation
 
-```bash
-# Test Python dependencies
-python3 -c "import grpc; print('gRPC:', grpc.__version__)"
+Repo checkout:
 
-# Run Snakepit tests
-cd ../../..  # Back to your project root
-mix test
+```bash
+mix run --no-start examples/grpc_basic.exs
+```
+
+App usage:
+
+```bash
+iex -S mix
+iex> Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+iex> Application.put_env(:snakepit, :grpc_port, 50051)
+iex> Application.put_env(:snakepit, :grpc_host, "localhost")
+iex> {:ok, _} = Application.ensure_all_started(:snakepit)
+iex> Snakepit.execute("ping", %{})
 ```
 
 ---
 
 ## Platform-Specific Installation
+
+If you already ran `mix snakepit.setup`, you can skip the manual venv/pip steps
+below. They are provided for teams that need to manage Python environments by hand.
 
 ### Ubuntu/Debian
 
@@ -343,7 +371,7 @@ services:
     build: .
     ports:
       - "4000:4000"
-      - "50051-50151:50051-50151"
+      - "50051:50051"
     environment:
       - MIX_ENV=prod
       - SNAKEPIT_GRPC_PORT=50051
@@ -355,6 +383,20 @@ services:
 ---
 
 ## Python Environment Setup
+
+### Option 0: Mix Bootstrap (Recommended)
+
+```bash
+mix snakepit.setup
+mix snakepit.doctor
+```
+
+This provisions `.venv` and `.venv-py313`, installs Python requirements, and
+regenerates gRPC stubs. Use the manual options below only if you need a custom
+Python environment.
+
+To point Snakepit at a custom interpreter, set `SNAKEPIT_PYTHON=/path/to/python`
+or configure `config :snakepit, :python_executable, "/path/to/python"`.
 
 ### Option 1: Virtual Environment (Recommended)
 
@@ -450,32 +492,11 @@ Generated snakepit app
 ### 2. Verify Python Dependencies
 
 ```bash
-python3 << 'EOF'
-import sys
-import grpc
-import grpc_tools
-import google.protobuf
-import numpy
-
-print("✅ Python version:", sys.version)
-print("✅ gRPC version:", grpc.__version__)
-print("✅ gRPC tools version:", grpc_tools.__version__)
-print("✅ Protobuf version:", google.protobuf.__version__)
-print("✅ NumPy version:", numpy.__version__)
-print("\n🎉 All Python dependencies are installed correctly!")
-EOF
+mix snakepit.doctor
 ```
 
-**Expected output**:
-```
-✅ Python version: 3.11.8 (main, ...)
-✅ gRPC version: 1.62.1
-✅ gRPC tools version: 1.62.1
-✅ Protobuf version: 4.25.3
-✅ NumPy version: 1.26.4
-
-🎉 All Python dependencies are installed correctly!
-```
+The doctor checks the configured interpreter, gRPC import, adapter health, and
+the Elixir gRPC port.
 
 ### 3. Run Tests
 
@@ -497,7 +518,7 @@ Finished in X.X seconds
 
 ```bash
 # Simple example (requires Python gRPC)
-elixir examples/grpc_basic.exs
+mix run --no-start examples/grpc_basic.exs
 ```
 
 **Expected output**:
@@ -527,13 +548,19 @@ ModuleNotFoundError: No module named 'grpc'
 
 **Solutions**:
 
-1. **Check Python path**:
+1. **Re-run bootstrap**:
+   ```bash
+   mix snakepit.setup
+   mix snakepit.doctor
+   ```
+
+2. **Check Python path**:
    ```bash
    which python3
    python3 -m pip list | grep grpc
    ```
 
-2. **Install in correct environment**:
+3. **Install in correct environment**:
    ```bash
    # If using venv
    source .venv/bin/activate
@@ -597,14 +624,13 @@ pip install --only-binary :all: grpcio grpcio-tools
    pkill -f grpc_server.py
    ```
 
-3. **Change port range** in config:
+3. **Change the Elixir gRPC port** in config:
    ```elixir
    config :snakepit,
-     grpc_config: %{
-       base_port: 60051,  # Use different port range
-       port_range: 100
-     }
+     grpc_port: 60051
    ```
+
+Worker ports are OS-assigned, so only the Elixir gRPC server port needs to be free.
 
 ### Issue: Worker Startup Timeouts
 
@@ -629,11 +655,9 @@ pip install --only-binary :all: grpcio grpcio-tools
      }
    ```
 
-3. **Check Python server startup**:
+3. **Check Python bridge health**:
    ```bash
-   # Test Python server manually
-   cd deps/snakepit/priv/python
-   python3 grpc_server.py --port 50051
+   mix snakepit.doctor
    ```
 
 ### Issue: Elixir/Erlang Version Mismatch

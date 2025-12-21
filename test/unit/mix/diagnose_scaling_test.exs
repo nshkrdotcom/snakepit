@@ -89,18 +89,26 @@ defmodule MixDiagnoseScalingTest do
         end
       end)
 
-      Process.sleep(100)
-
-      {:ok, after_connect} = Scaling.native_tcp_connection_count()
-      assert after_connect >= before + 1
+      TestHelpers.assert_eventually(
+        fn ->
+          case Scaling.native_tcp_connection_count() do
+            {:ok, count} -> count >= before + 1
+            _ -> false
+          end
+        end,
+        timeout: 1_000,
+        interval: 25
+      )
 
       :gen_tcp.close(client)
       Task.await(server_task, 500)
       :gen_tcp.close(listener)
 
-      Process.sleep(50)
-
-      assert {:ok, _} = Scaling.native_tcp_connection_count()
+      TestHelpers.assert_eventually(
+        fn -> match?({:ok, _}, Scaling.native_tcp_connection_count()) end,
+        timeout: 1_000,
+        interval: 25
+      )
     end
   end
 

@@ -20,7 +20,7 @@
 
 ### 1. Add to mix.exs
 ```elixir
-{:snakepit, "~> 0.6.10"}
+{:snakepit, "~> 0.6.11"}
 ```
 
 ### 2. Install Elixir deps
@@ -28,13 +28,14 @@
 mix deps.get
 ```
 
-### 3. Run the test suite (auto-bootstraps Python on Linux/WSL)
+### 3. Bootstrap Python + gRPC tooling (Snakepit repo/tests/examples)
 ```bash
-mix test
+mix snakepit.setup
+mix snakepit.doctor
 ```
 
-The first `mix test` run provisions the Python virtualenv (via uv or pip) and installs bridge
-dependencies automatically when you're on Linux/WSL—the same path our CI uses.
+This provisions `.venv`, `.venv-py313`, and regenerates gRPC stubs using the same automation as CI.
+If you're integrating Snakepit as a dependency, skip this step and follow the Quick Setup section for app-level Python deps.
 
 Need to exercise the Python bridge in isolation? Use:
 
@@ -43,15 +44,14 @@ Need to exercise the Python bridge in isolation? Use:
 ./test_python.sh -k grpc  # pass args straight to pytest
 ```
 
-### Manual Setup (macOS/Windows or custom Python envs)
-If you're not on Linux/WSL (or you prefer to manage Python yourself), run:
+### Manual Setup (custom Python envs, repo checkout)
+If you need to manage Python yourself, run:
 
 ```bash
-./deps/snakepit/scripts/setup_python.sh
+./scripts/setup_python.sh
 ```
 
-The script auto-detects uv (fast) or pip (fallback). Afterwards, `mix test` will reuse the
-prepared virtualenv.
+The script auto-detects uv (fast) or pip (fallback) and defers to `mix snakepit.setup` when available.
 
 ---
 
@@ -62,13 +62,15 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 - **Lightning-fast concurrent initialization** - 1000x faster than sequential approaches
 - **Session-based execution** with automatic worker affinity
 - **gRPC-based communication** - Modern HTTP/2 protocol with streaming support
-- **Native streaming support** - Real-time progress updates and progressive results (gRPC)
+- **Streaming support (Elixir -> Python)** - `execute_stream` works for Python tools; Python -> Elixir streaming is still UNIMPLEMENTED
 - **Adapter pattern** for any external language/runtime
 - **Built on OTP primitives** - DynamicSupervisor, Registry, GenServer
 - **Production-ready** with telemetry, health checks, and graceful shutdowns
 
 ## 📋 Table of Contents
 
+- [What's New in v0.6.11](#whats-new-in-v0611)
+- [What's New in v0.6.10](#whats-new-in-v0610)
 - [What's New in v0.6.9](#whats-new-in-v069)
 - [What's New in v0.6.8](#whats-new-in-v068)
 - [What's New in v0.6.7](#whats-new-in-v067)
@@ -151,6 +153,18 @@ For **non-DSPex users**, if you're using these classes directly:
 
 ---
 
+## 🆕 What's New in v0.6.11
+
+**Python worker UX consolidation** – Released 2025-12-20, v0.6.11 standardizes the same-node bootstrap flow, adds adapter health checks, and improves gRPC payload handling.
+
+- **Bootstrap + docs alignment** – Example scripts now run via `mix run` with `examples/mix_bootstrap.exs`, and scripts/docs consistently point to `mix snakepit.setup` + `mix snakepit.doctor`.
+- **Adapter import validation** – `Snakepit.EnvDoctor` inspects per-pool `adapter_args`, runs `grpc_server.py --health-check --adapter ...`, and validates `grpc_port` availability.
+- **New Mix tasks** – `mix snakepit.status` reports pool sizes and queue stats, while `mix snakepit.gen.adapter` scaffolds a Python adapter under `priv/python`.
+- **Binary gRPC results** – BridgeServer and ClientImpl now support `binary_result` with `{:binary, payload[, metadata]}` tuples for large outputs.
+- **Threaded server loop fix** – `grpc_server_threaded.py` ensures a running event loop to avoid asyncio deprecation warnings.
+
+---
+
 ## 🆕 What's New in v0.6.10
 
 **Queue timers + bridge schema clarity** – Released 2025-11-13, v0.6.10 locks down queue timeout handling, codifies the shared heartbeat/config schema, and tightens telemetry plus Python bridge guardrails so Elixir and Python stay in sync.
@@ -170,7 +184,7 @@ For **non-DSPex users**, if you're using these classes directly:
 **Bootstrap + doctor + guardrails** – v0.6.8 adds first-class environment automation (`make bootstrap` / `mix snakepit.setup`), a proactive `mix snakepit.doctor`, runtime Python guardrails, python-integration test tagging, and CI/documentation updates so the bridge can be provisioned and verified deterministically. (Released 2025-11-12.)
 
 - **One-command provisioning** – `make bootstrap` (or `mix snakepit.setup`) now installs Mix deps, creates `.venv`/`.venv-py313`, installs Python requirements, runs `scripts/setup_test_pythons.sh`, and regenerates gRPC stubs with verbose logging and command instrumentation.
-- **Environment doctor + runtime guard** – `mix snakepit.doctor` checks the configured interpreter, `grpc` import, `.venv`/`.venv-py313`, `priv/python/grpc_server.py --health-check`, and port availability; `Snakepit.Application` calls `Snakepit.EnvDoctor.ensure_python!/0` before pools start so missing Python fails fast with actionable messages.
+- **Environment doctor + runtime guard** – `mix snakepit.doctor` checks the configured interpreter, `grpc` import, `.venv`/`.venv-py313`, `priv/python/grpc_server.py --health-check`, and Elixir gRPC port availability; `Snakepit.Application` calls `Snakepit.EnvDoctor.ensure_python!/0` before pools start so missing Python fails fast with actionable messages.
 - **Test gating + CI** – Default `mix test` excludes `:python_integration`; python-heavy suites are tagged and can be run via `mix test --only python_integration`. CI now runs bootstrap, the doctor, the default suite, and `mix test --only python_integration` so bridge coverage is opt in but enforced when the doctor passes.
 - **Docs & developer UX** – README + README_TESTING document the new workflow (bootstrap → doctor → tests) and explain the new Mix tasks. Shell scripts (`scripts/setup_test_pythons.sh`, bootstrap runner) emit detailed progress so developers aren’t debugging silent hangs.
 - **v0.6.8 highlights** affect: `.github/workflows/ci.yml`, Makefile, mix tasks, `Snakepit.Bootstrap`, `Snakepit.EnvDoctor`, `Snakepit.Application`, docs, test infrastructure (`test/support/*`), runtime guard tests, queue saturation regression, and gRPC generation script now honoring `.venv/bin/python3`.
@@ -394,6 +408,9 @@ Production-grade observability for your worker pools:
 
 #### Real-Time Pool Inspection
 ```bash
+# Quick pool status (counts + queue stats)
+mix snakepit.status
+
 # Interactive pool inspection
 mix snakepit.profile_inspector
 
@@ -605,7 +622,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-    {:snakepit, "~> 0.6.9"}
+    {:snakepit, "~> 0.6.11"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,
@@ -703,7 +720,7 @@ config :snakepit,
 ### Configuration Improvements
 - **Aggressive thread limiting** - Set `OPENBLAS_NUM_THREADS=1`, `OMP_NUM_THREADS=1`, `MKL_NUM_THREADS=1` for optimal pool-level parallelism
 - **Batched startup configuration** - `startup_batch_size: 8`, `startup_batch_delay_ms: 750`
-- **Increased resource limits** - Extended `port_range: 1000`, GRPC backlog: 512, worker timeout: 30s
+- **Increased resource limits** - Extended legacy `port_range: 1000` defaults (now ignored; workers use OS-assigned ports), GRPC backlog: 512, worker timeout: 30s
 - **Explicit port range constraints** - Added configuration documentation and validation
 
 ### Performance & Reliability
@@ -806,6 +823,7 @@ config :snakepit,
 - See [Process Management Documentation](README_PROCESS_MANAGEMENT.md) for details
 
 ### 👋 **Native gRPC Streaming**
+> Status: Elixir -> Python streaming is supported via `execute_stream/4`. Python -> Elixir streaming (`BridgeService.ExecuteStreamingTool`) still returns `UNIMPLEMENTED`.
 - **Real-time progress updates** for long-running operations
 - **HTTP/2 multiplexing** for concurrent requests
 - **Cancellable operations** with graceful stream termination
@@ -836,6 +854,12 @@ config :snakepit,
 - **Console script integration** for deployment flexibility
 - **Type checking support** with proper py.typed markers
 
+### 🧩 **Same-Node Model**
+- **Local-only workers** – Python workers are spawned as child processes on the same host via `Port.open/2`.
+- **Elixir-owned lifecycle** – The BEAM supervises startup, health, and shutdown for every worker.
+- **Local gRPC loopback** – Python connects back to `grpc_host:grpc_port`; worker ports are OS-assigned.
+- **Remote workers not yet supported** – Same-node is the current production model.
+
 ### 🔄 **Bridge Migration & Compatibility**
 - **Deprecated V1 Python bridge** in favor of V2 architecture
 - **Updated demo implementations** using latest best practices
@@ -855,17 +879,15 @@ config :snakepit,
 # In your mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.5.1"}
+    {:snakepit, "~> 0.6.11"}
   ]
 end
 
 # Configure with gRPC adapter
 Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-Application.put_env(:snakepit, :grpc_config, %{
-  base_port: 50051,
-  port_range: 100
-})
+Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_host, "localhost")
 Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
 
 {:ok, _} = Application.ensure_all_started(:snakepit)
@@ -890,7 +912,7 @@ end)
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.5.1"}
+    {:snakepit, "~> 0.6.11"}
   ]
 end
 ```
@@ -915,50 +937,34 @@ end
 
 ## 🔧 Quick Setup
 
-### Step 1: Install Python Dependencies
+### Step 1: Prepare Python Environment (app usage)
 
-For Python/gRPC integration (recommended):
+If Snakepit is a dependency in your app, create a virtualenv and install the bridge
+requirements from the dependency:
 
 ```bash
-# Using uv (recommended - faster and more reliable)
-uv pip install grpcio grpcio-tools protobuf numpy
-
-# Or use pip as fallback
-pip install grpcio grpcio-tools protobuf numpy
-
-# Using requirements file with uv
-cd deps/snakepit/priv/python
-uv pip install -r requirements.txt
-
-# Or with pip
-pip install -r requirements.txt
-```
-
-**Automated Setup (Recommended)**:
-```bash
-# Use the setup script (detects uv/pip automatically)
-./scripts/setup_python.sh
-```
-
-**Manual Setup**:
-```bash
-# Create venv and install with uv (fastest)
 python3 -m venv .venv
-source .venv/bin/activate
-uv pip install -r deps/snakepit/priv/python/requirements.txt
-
-# Or with pip
-pip install -r deps/snakepit/priv/python/requirements.txt
+.venv/bin/pip install -r deps/snakepit/priv/python/requirements.txt
+export SNAKEPIT_PYTHON="$PWD/.venv/bin/python3"
 ```
 
-### Step 2: Generate Protocol Buffers
+If you prefer `uv`, replace the `pip` command with:
 
 ```bash
-# Generate Python gRPC code
-make proto-python
-
-# This creates the necessary gRPC stubs in priv/python/
+uv pip install -r deps/snakepit/priv/python/requirements.txt
 ```
+
+You can also set `config :snakepit, :python_executable, "/path/to/python"` if you prefer config over env vars.
+
+### Step 2: Bootstrap Python + gRPC (Snakepit repo/tests/examples)
+
+```bash
+mix snakepit.setup
+mix snakepit.doctor
+```
+
+Run this from the Snakepit repo root; it provisions `.venv`, `.venv-py313`, and regenerates
+gRPC stubs. `./scripts/setup_python.sh` defers to this when available.
 
 ### Step 3: Configure Your Application
 
@@ -979,12 +985,10 @@ config :snakepit,
     max_queue_size: 1000
   },
   
-  # gRPC configuration
-  grpc_config: %{
-    base_port: 50051,
-    port_range: 100,
-    connect_timeout: 5_000
-  },
+  # Elixir gRPC server for state (Python workers connect back here)
+  grpc_port: 50051,
+  grpc_host: "localhost",
+  # Worker ports are OS-assigned (ephemeral)
   
   # Session configuration
   session_config: %{
@@ -1029,7 +1033,7 @@ python3 -c "import grpc; print('gRPC installed:', grpc.__version__)"
 mix test
 
 # Try an example
-elixir examples/grpc_basic.exs
+mix run --no-start examples/grpc_basic.exs
 ```
 
 **Expected output**: Should see gRPC connections and successful command execution.
@@ -1038,7 +1042,7 @@ elixir examples/grpc_basic.exs
 
 ### Step 6: Create a Custom Adapter (Optional)
 
-For custom Python functionality:
+For custom Python functionality (or run `mix snakepit.gen.adapter my_adapter` to scaffold):
 
 ```python
 # priv/python/my_adapter.py
@@ -1061,7 +1065,9 @@ Configure it:
 # config/config.exs
 config :snakepit,
   adapter_module: Snakepit.Adapters.GRPCPython,
-  python_adapter: "my_adapter:MyAdapter"
+  pool_config: %{
+    adapter_args: ["--adapter", "my_adapter.MyAdapter"]
+  }
 ```
 
 ### Step 7: Verify Installation
@@ -1117,10 +1123,8 @@ config :snakepit,
   # Set to :warning or :none for clean output in production/demos
   log_level: :info,  # Default (balanced verbosity)
 
-  grpc_config: %{
-    base_port: 50051,    # Starting port for gRPC servers
-    port_range: 100      # Port range for worker allocation
-  },
+  grpc_port: 50051,    # Elixir gRPC server (Python workers connect back here)
+  grpc_host: "localhost",
   pool_config: %{
     pool_size: 8  # Default: System.schedulers_online() * 2
   }
@@ -1138,15 +1142,12 @@ config :logger,
 ```elixir
 # gRPC-specific configuration
 config :snakepit,
-  grpc_config: %{
-    base_port: 50051,       # Starting port for gRPC servers
-    port_range: 100,        # Port range for worker allocation
-    connect_timeout: 5000,  # Connection timeout in ms
-    request_timeout: 30000  # Default request timeout in ms
-  }
+  grpc_port: 50051,         # Elixir gRPC server
+  grpc_host: "localhost"
 ```
 
-The gRPC adapter automatically assigns unique ports to each worker within the specified range, ensuring isolation and parallel operation.
+The gRPC adapter binds each worker to an OS-assigned port (port 0) and publishes the
+actual port back to the pool, so you only need to expose `grpc_port` for the Elixir server.
 
 ### Advanced Configuration
 
@@ -1189,35 +1190,38 @@ Application.start(:snakepit)
 
 ### Running the Examples
 
-Most examples use `elixir` directly (with Mix.install), but some v0.6.0 demos require the compiled project and use `mix run`:
+Examples are designed to run from the project root with `mix run --no-start` so
+each script can set `:grpc_port` and `:pooling_enabled` before the app starts.
+Each script loads `examples/mix_bootstrap.exs` so it can fall back to
+`Mix.install` when executed outside a Mix project.
 
 #### Quick Reference
 
 ```bash
-# Basic gRPC examples (use elixir)
-elixir examples/grpc_basic.exs                 # Simple ping, echo, add operations
-elixir examples/grpc_sessions.exs              # Session management patterns
-elixir examples/grpc_streaming.exs             # Streaming data operations
-elixir examples/grpc_concurrent.exs            # Concurrent execution (default: 4 workers)
-elixir examples/grpc_advanced.exs              # Advanced error handling
-elixir examples/grpc_streaming_demo.exs        # Real-time streaming demo
+# Basic gRPC examples
+mix run --no-start examples/grpc_basic.exs                 # Simple ping, echo, add operations
+mix run --no-start examples/grpc_sessions.exs              # Session management patterns
+mix run --no-start examples/grpc_streaming.exs             # Streaming data operations
+mix run --no-start examples/grpc_concurrent.exs            # Concurrent execution (default: 4 workers)
+mix run --no-start examples/grpc_advanced.exs              # Advanced error handling
+mix run --no-start examples/grpc_streaming_demo.exs        # Real-time streaming demo
 
-# Bidirectional tool bridge (use elixir)
-elixir examples/bidirectional_tools_demo.exs       # Interactive demo
-elixir examples/bidirectional_tools_demo_auto.exs  # Auto-run server version
+# Bidirectional tool bridge
+mix run --no-start examples/bidirectional_tools_demo.exs       # Interactive demo
+mix run --no-start examples/bidirectional_tools_demo_auto.exs  # Auto-run server version
 
-# v0.6.0 demos using compiled modules (use mix run)
-mix run examples/threaded_profile_demo.exs                      # Thread profile config
-mix run examples/dual_mode/process_vs_thread_comparison.exs    # Profile comparison
-mix run examples/dual_mode/hybrid_pools.exs                    # Multiple pool profiles
-mix run examples/dual_mode/gil_aware_selection.exs             # Auto Python version detection
-mix run examples/lifecycle/ttl_recycling_demo.exs              # TTL worker recycling
-mix run examples/monitoring/telemetry_integration.exs          # Telemetry setup
+# v0.6.0+ demos using compiled modules
+mix run --no-start examples/threaded_profile_demo.exs                      # Thread profile config
+mix run --no-start examples/dual_mode/process_vs_thread_comparison.exs    # Profile comparison
+mix run --no-start examples/dual_mode/hybrid_pools.exs                    # Multiple pool profiles
+mix run --no-start examples/dual_mode/gil_aware_selection.exs             # Auto Python version detection
+mix run --no-start examples/lifecycle/ttl_recycling_demo.exs              # TTL worker recycling
+mix run --no-start examples/monitoring/telemetry_integration.exs          # Telemetry setup
 ```
 
-**Status**: 159/159 tests passing (100%) with default Python! All examples are production-ready.
+**Status**: See `docs/TEST_AND_EXAMPLE_STATUS.md` for the latest verified example/test runs.
 
-**Note**: v0.6.0 feature demos access compiled Snakepit modules (`Snakepit.PythonVersion`, `Snakepit.Compatibility`, etc.) and require `mix run` to work properly.
+**Note**: v0.6.0 feature demos access compiled Snakepit modules (`Snakepit.PythonVersion`, `Snakepit.Compatibility`, etc.) and should be run with `mix run --no-start`.
 
 ---
 
@@ -1227,16 +1231,16 @@ These examples work out-of-the-box with the default ShowcaseAdapter:
 
 ```bash
 # Basic gRPC operations (ping, echo, add)
-elixir examples/grpc_basic.exs
+mix run --no-start examples/grpc_basic.exs
 
 # Concurrent execution and pool utilization (default: 4 workers)
-elixir examples/grpc_concurrent.exs
+mix run --no-start examples/grpc_concurrent.exs
 
 # High-concurrency stress test (100 workers)
-elixir examples/grpc_concurrent.exs 100
+mix run --no-start examples/grpc_concurrent.exs 100
 
 # Bidirectional tool bridge (Elixir ↔ Python tools)
-elixir examples/bidirectional_tools_demo.exs
+mix run --no-start examples/bidirectional_tools_demo.exs
 ```
 
 **Performance**: 1400-1500 ops/sec, 100 workers in ~3 seconds
@@ -1249,18 +1253,18 @@ All v0.6.0 examples showcase configuration patterns and best practices:
 
 ```bash
 # Dual-mode architecture
-elixir examples/dual_mode/process_vs_thread_comparison.exs    # Side-by-side comparison
-elixir examples/dual_mode/hybrid_pools.exs                    # Multiple pools with different profiles
-elixir examples/dual_mode/gil_aware_selection.exs             # Automatic Python 3.13+ detection
+mix run --no-start examples/dual_mode/process_vs_thread_comparison.exs    # Side-by-side comparison
+mix run --no-start examples/dual_mode/hybrid_pools.exs                    # Multiple pools with different profiles
+mix run --no-start examples/dual_mode/gil_aware_selection.exs             # Automatic Python 3.13+ detection
 
 # Worker lifecycle management
-elixir examples/lifecycle/ttl_recycling_demo.exs              # TTL-based automatic recycling
+mix run --no-start examples/lifecycle/ttl_recycling_demo.exs              # TTL-based automatic recycling
 
 # Monitoring & telemetry
-elixir examples/monitoring/telemetry_integration.exs          # Telemetry events setup
+mix run --no-start examples/monitoring/telemetry_integration.exs          # Telemetry events setup
 
 # Thread profile (Python 3.13+ free-threading)
-elixir examples/threaded_profile_demo.exs                     # Thread profile configuration patterns
+mix run --no-start examples/threaded_profile_demo.exs                     # Thread profile configuration patterns
 ```
 
 ---
@@ -1271,14 +1275,14 @@ These examples demonstrate advanced features requiring additional tool implement
 
 ```bash
 # Session management patterns
-elixir examples/grpc_sessions.exs
+mix run --no-start examples/grpc_sessions.exs
 
 # Streaming operations
-elixir examples/grpc_streaming.exs
-elixir examples/grpc_streaming_demo.exs
+mix run --no-start examples/grpc_streaming.exs
+mix run --no-start examples/grpc_streaming_demo.exs
 
 # Advanced error handling
-elixir examples/grpc_advanced.exs
+mix run --no-start examples/grpc_advanced.exs
 ```
 
 **Note**: Some advanced examples may require custom adapter tools. See [Creating Custom Adapters](#creating-custom-adapters) for implementation details.
@@ -1410,12 +1414,10 @@ program_id = response["program_id"]
 ```elixir
 # Configure gRPC adapter for streaming workloads
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-Application.put_env(:snakepit, :grpc_config, %{
-  base_port: 50051,
-  port_range: 100
-})
+Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_host, "localhost")
 
-# Process large datasets with streaming
+# Process large datasets with streaming (Elixir -> Python)
 Snakepit.execute_stream("process_dataset", %{
   file_path: "/data/large_dataset.csv",
   chunk_size: 1000
@@ -1459,24 +1461,22 @@ Snakepit supports modern gRPC-based communication for advanced streaming capabil
 
 #### Upgrade to gRPC (3 Steps):
 ```bash
-# Step 1: Install gRPC dependencies
-make install-grpc
+# Step 1: Bootstrap toolchain (Mix + Python + gRPC stubs)
+mix snakepit.setup
 
-# Step 2: Generate protocol buffer code
-make proto-python
+# Step 2: Verify environment
+mix snakepit.doctor
 
 # Step 3: Test the upgrade
-elixir examples/grpc_non_streaming_demo.exs
+mix run --no-start examples/grpc_basic.exs
 ```
 
 #### New Configuration (gRPC):
 ```elixir
 # Replace your adapter configuration with this:
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-Application.put_env(:snakepit, :grpc_config, %{
-  base_port: 50051,
-  port_range: 100
-})
+Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_host, "localhost")
 
 # ALL your existing API calls work EXACTLY the same
 {:ok, result} = Snakepit.execute("ping", %{})
@@ -1565,17 +1565,15 @@ end)
 
 #### Install gRPC Dependencies
 ```bash
-# Install gRPC dependencies
-make install-grpc
-
-# Generate protocol buffer code
-make proto-python
+# Bootstrap toolchain (Mix + Python + gRPC stubs)
+mix snakepit.setup
+mix snakepit.doctor
 
 # Verify with non-streaming demo (same as your existing API)
-elixir examples/grpc_non_streaming_demo.exs
+mix run --no-start examples/grpc_basic.exs
 
-# Try new streaming capabilities
-elixir examples/grpc_streaming_demo.exs
+# Try the streaming demo (Elixir -> Python)
+mix run --no-start examples/grpc_streaming_demo.exs
 ```
 
 ### 📄 **Complete Examples**
@@ -1584,7 +1582,8 @@ elixir examples/grpc_streaming_demo.exs
 ```elixir
 # Configure gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-Application.put_env(:snakepit, :grpc_config, %{base_port: 50051, port_range: 100})
+Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_host, "localhost")
 
 # All your existing code works unchanged
 {:ok, result} = Snakepit.execute("ping", %{})
@@ -1594,7 +1593,7 @@ Application.put_env(:snakepit, :grpc_config, %{base_port: 50051, port_range: 100
 # Sessions work exactly the same
 {:ok, result} = Snakepit.execute_in_session("session_123", "echo", %{message: "hello"})
 
-# Try it: elixir examples/grpc_non_streaming_demo.exs
+# Try it: mix run --no-start examples/grpc_basic.exs
 ```
 
 #### **Streaming Examples (New Capability)**
@@ -1650,7 +1649,7 @@ Snakepit.execute_in_session_stream(session_id, "distributed_training", %{
   end
 end)
 
-# Try it: elixir examples/grpc_streaming_demo.exs
+# Try it: mix run --no-start examples/grpc_streaming_demo.exs
 ```
 
 ### 🚀 **Performance & Benefits**
@@ -1728,11 +1727,11 @@ pip install grpcio protobuf grpcio-tools
 
 | Command | Description | Use Case |
 |---------|-------------|----------|
-| `ping_stream` | Heartbeat stream | Testing, monitoring |
-| `batch_inference` | ML model inference | Computer vision, NLP |
-| `process_large_dataset` | Data processing | ETL, analytics |
-| `tail_and_analyze` | Log analysis | Real-time monitoring |
-| `distributed_training` | ML training | Neural networks |
+| `stream_data` | Simple chunk stream | Demos, smoke tests |
+| `stream_progress` | Progress updates | UI feedback |
+| `stream_fibonacci` | Fibonacci stream | Demo/troubleshoot |
+| `generate_dataset` | Chunked dataset | ETL demos |
+| `infinite_stream` | Infinite stream | Cancellation testing |
 
 For comprehensive gRPC documentation, see **[README_GRPC.md](README_GRPC.md)**.
 
@@ -1874,7 +1873,8 @@ Use the async variant whenever you're inside an event loop so the Python bridge 
 ```elixir
 # Configure with gRPC for dedicated streaming and advanced features
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-Application.put_env(:snakepit, :grpc_config, %{base_port: 50051, port_range: 100})
+Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_host, "localhost")
 
 # Dedicated streaming capabilities
 {:ok, _} = Snakepit.execute_stream("batch_inference", %{
@@ -1921,17 +1921,15 @@ Application.put_env(:snakepit, :pool_config, %{
 #### Installation & Usage
 
 ```bash
-# Install gRPC dependencies
-make install-grpc
-
-# Generate protocol buffer code  
-make proto-python
+# Bootstrap toolchain (Mix + Python + gRPC stubs)
+mix snakepit.setup
+mix snakepit.doctor
 
 # Test with streaming demo
-elixir examples/grpc_streaming_demo.exs
+mix run --no-start examples/grpc_streaming_demo.exs
 
 # Test with non-streaming demo
-elixir examples/grpc_non_streaming_demo.exs
+mix run --no-start examples/grpc_basic.exs
 ```
 
 ### JavaScript/Node.js Adapter
@@ -1972,7 +1970,8 @@ The default ShowcaseAdapter provides a comprehensive set of tools demonstrating 
 | Tool | Description | Parameters | Example |
 |------|-------------|------------|---------|
 | `stream_data` | Stream data in chunks | `count` (int), `delay` (float) | `Snakepit.execute_stream("stream_data", %{count: 5, delay: 1.0}, callback)` |
-| `ping_stream` | Streaming heartbeat | `count` (int) | `Snakepit.execute_stream("ping_stream", %{count: 10}, callback)` |
+| `stream_progress` | Progress updates | `steps` (int), `delay_ms` (int) | `Snakepit.execute_stream("stream_progress", %{steps: 5, delay_ms: 250}, callback)` |
+| `stream_fibonacci` | Fibonacci sequence | `count` (int) | `Snakepit.execute_stream("stream_fibonacci", %{count: 10}, callback)` |
 
 #### Concurrency & Integration
 
@@ -2742,7 +2741,7 @@ Logger.configure(level: :debug)
 
 - [Telemetry & Observability](TELEMETRY.md) - Comprehensive telemetry system guide
 - [Testing Guide](README_TESTING.md) - How to run and write tests
-- [Unified gRPC Bridge](README_UNIFIED_GRPC_BRIDGE.md) - Stage 0, 1, and 2 implementation details
+- [Unified gRPC Bridge (archived)](docs/archive/design-process/README_UNIFIED_GRPC_BRIDGE.md) - Historical DSPex integration notes
 - [Bidirectional Tool Bridge](README_BIDIRECTIONAL_TOOL_BRIDGE.md) - Cross-language function execution between Elixir and Python
 - [Process Management](README_PROCESS_MANAGEMENT.md) - Persistent tracking and orphan cleanup
 - [gRPC Communication](README_GRPC.md) - Streaming and non-streaming gRPC details
@@ -2775,8 +2774,8 @@ mix test
 mix test --only python_integration
 
 # Run example scripts
-elixir examples/v2/session_based_demo.exs
-elixir examples/javascript_grpc_demo.exs
+mix run --no-start examples/grpc_basic.exs
+mix run --no-start examples/grpc_sessions.exs
 
 # Check code quality
 mix format --check-formatted
@@ -2787,7 +2786,7 @@ The automation commands above are now the canonical workflow:
 
 - `make bootstrap` provisions Mix deps, Python virtualenvs (`.venv` + `.venv-py313`), and regenerates gRPC stubs in one shot.
 - `mix snakepit.setup` runs the same bootstrap sequence entirely within Mix (useful on CI providers without `make`).
-- `mix snakepit.doctor` fails fast when the configured Python interpreter, `grpc` import, gRPC health probe, or worker port range are misconfigured. Run it before test suites or when onboarding a new machine.
+- `mix snakepit.doctor` fails fast when the configured Python interpreter, `grpc` import, gRPC health probe, or Elixir gRPC port are misconfigured. Run it before test suites or when onboarding a new machine.
 
 ### Running Tests
 
@@ -2817,22 +2816,13 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 
 ## 📊 Development Status
 
-**v0.5.1 (Current Release)**
-- **Worker pool scaling fixed** - Reliably scales to 250+ workers (previously ~105 limit)
-- **Thread explosion resolved** - Fixed fork bomb from Python scientific libraries
-- **Dynamic port allocation** - OS-assigned ports eliminate collision races
-- **Batched startup** - Configurable batching prevents resource exhaustion
-- **New diagnostic tools** - Added `mix diagnose.scaling` for bottleneck analysis
-- **Enhanced configuration** - Thread limiting and resource management improvements
+**v0.6.11 (Current Release)**
+- **Same-node bootstrap flow** - `mix snakepit.setup` + `mix snakepit.doctor` standardized across scripts/docs/examples.
+- **Adapter validation + status tools** - Doctor checks per-pool adapter imports; new `mix snakepit.status` + `mix snakepit.gen.adapter`.
+- **Binary gRPC payloads** - Bridge responses can return `binary_result` for large outputs.
+- **Python runtime fixes** - Threaded server avoids asyncio loop warnings and honors default adapter env.
 
-**v0.5.0**
-- **DSPy integration removed** - Clean architecture separation achieved
-- **Test infrastructure enhanced** - 89% increase in test coverage (27→51 tests)
-- **Code cleanup complete** - Significant dead code removed
-- **Python SessionContext streamlined** - Simplified implementation
-- **Supertester foundation** - Phase 1 complete with deterministic testing
-- **gRPC streaming bridge** - Full implementation with HTTP/2 multiplexing
-- **Comprehensive documentation** - All features well-documented
+For historical releases, see `CHANGELOG.md`.
 
 **Roadmap**
 - Complete Supertester conformance (Phases 2-4)

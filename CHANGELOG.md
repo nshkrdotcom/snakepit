@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.11] - 2025-12-20
+
+### Added
+- **Pool status CLI** – `mix snakepit.status` reports pool size, queue depth, and error counts without requiring a full dashboard stack.
+- **Adapter generator** – `mix snakepit.gen.adapter` scaffolds a minimal Python adapter under `priv/python` with a ready-to-copy `adapter_args` snippet.
+- **Binary gRPC results** – Bridge responses now include `binary_result` support so tools can return `{:binary, payload[, metadata]}` tuples for large outputs.
+- **Examples runner** – `examples/run_all.sh` executes every example (including showcase/loadtest) via `mix run`, with auto-stop and configurable loadtest sizes.
+
+### Changed
+- **Doctor checks** – `Snakepit.EnvDoctor` validates the Elixir `grpc_port` and runs per-pool adapter import health checks via `grpc_server.py --health-check --adapter ...`.
+- **Bootstrap consolidation** – scripts/docs/examples now standardize on `mix snakepit.setup` + `mix snakepit.doctor`, and examples prefer `mix run` with the shared bootstrap helper.
+- **Python env defaults** – gRPC workers merge default `PYTHONPATH` and `SNAKEPIT_PYTHON` into adapter environments to keep imports predictable.
+- **Docs organization** – legacy unified-bridge and unified-example design docs are archived, and install guidance now differentiates repo bootstrap from app usage.
+
+### Fixed
+- **Threaded server loop** – `grpc_server_threaded.py` now ensures a running asyncio event loop to avoid deprecation warnings.
+- **Worker spawn telemetry** – gRPC worker spawn/terminate durations now use consistent monotonic units, preventing negative duration values in telemetry handlers.
+- **Elixir tool decoding in Python** – `SessionContext.call_elixir_tool/2` decodes JSON/binary payloads via `TypeSerializer` instead of returning raw protobuf Any values.
+- **Python ML workflow serialization** – showcase ML handlers coerce NumPy-derived stats into JSON-safe floats to avoid `orjson` errors.
+- **Tool registration noise** – Python bridge caches tool registration per session and treats duplicate registrations as info, avoiding false error reports.
+
 ## [0.6.10] - 2025-11-13
 
 ### Added

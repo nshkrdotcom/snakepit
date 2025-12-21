@@ -330,7 +330,11 @@ defmodule Snakepit.GRPCWorker do
             worker_adapter_args
           end
 
-        adapter_env = Map.get(worker_config, :adapter_env, [])
+        adapter_env =
+          worker_config
+          |> Map.get(:adapter_env, [])
+          |> merge_with_default_adapter_env()
+
         heartbeat_env_json = encode_heartbeat_env(heartbeat_config)
 
         # Determine which script to use based on adapter_args (threaded vs process mode)
@@ -409,7 +413,6 @@ defmodule Snakepit.GRPCWorker do
         # Apply adapter_env to the spawned process if provided
         env_entries =
           adapter_env
-          |> normalize_adapter_env_entries()
           |> maybe_put_heartbeat_env(heartbeat_env_json)
 
         port_opts =
@@ -478,7 +481,7 @@ defmodule Snakepit.GRPCWorker do
           stats: %{
             requests: 0,
             errors: 0,
-            start_time: System.monotonic_time(:millisecond)
+            start_time: System.monotonic_time()
           }
         }
 
@@ -1235,6 +1238,57 @@ defmodule Snakepit.GRPCWorker do
       key when is_atom(key) -> [{Atom.to_string(key), ""}]
       _ -> []
     end)
+  end
+
+  defp merge_with_default_adapter_env(env) do
+    existing = normalize_adapter_env_entries(env)
+    defaults = default_adapter_env()
+
+    existing_keys =
+      existing
+      |> Enum.map(fn {key, _} -> String.downcase(key) end)
+      |> MapSet.new()
+
+    defaults
+    |> Enum.reject(fn {key, _value} -> MapSet.member?(existing_keys, String.downcase(key)) end)
+    |> Kernel.++(existing)
+  end
+
+  defp default_adapter_env do
+    priv_python =
+      :code.priv_dir(:snakepit)
+      |> to_string()
+      |> Path.join("python")
+
+    repo_priv_python =
+      Path.join(File.cwd!(), "priv/python")
+
+    path_sep = path_separator()
+
+    pythonpath =
+      [System.get_env("PYTHONPATH"), priv_python, repo_priv_python]
+      |> Enum.reject(&(&1 in [nil, ""]))
+      |> Enum.uniq()
+      |> Enum.join(path_sep)
+
+    interpreter =
+      Application.get_env(:snakepit, :python_executable) ||
+        System.get_env("SNAKEPIT_PYTHON") ||
+        Snakepit.Adapters.GRPCPython.executable_path()
+
+    []
+    |> maybe_cons("PYTHONPATH", pythonpath)
+    |> maybe_cons("SNAKEPIT_PYTHON", interpreter)
+  end
+
+  defp maybe_cons(acc, _key, value) when value in [nil, ""], do: acc
+  defp maybe_cons(acc, key, value), do: [{key, value} | acc]
+
+  defp path_separator do
+    case :os.type() do
+      {:win32, _} -> ";"
+      _ -> ":"
+    end
   end
 
   defp maybe_put_heartbeat_env(entries, nil), do: entries

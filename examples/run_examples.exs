@@ -6,10 +6,10 @@
 # Provides organized access to all example scripts with descriptions.
 #
 # Usage:
-#   mix run examples/run_examples.exs
-#   mix run examples/run_examples.exs --category gil
-#   mix run examples/run_examples.exs --run hybrid
-#   mix run examples/run_examples.exs --list
+#   mix run --no-start examples/run_examples.exs
+#   mix run --no-start examples/run_examples.exs --category gil
+#   mix run --no-start examples/run_examples.exs --run hybrid
+#   mix run --no-start examples/run_examples.exs --list
 #
 
 Code.require_file("mix_bootstrap.exs", __DIR__)
@@ -210,20 +210,25 @@ defmodule ExampleRunner do
     IO.puts("\nQuick Start (v0.6.0 Features):")
 
     IO.puts(
-      "  1. Process vs Thread comparison:  mix run examples/run_examples.exs --run comparison"
+      "  1. Process vs Thread comparison:  mix run --no-start examples/run_examples.exs --run comparison"
     )
 
-    IO.puts("  2. Hybrid pools (recommended):    mix run examples/run_examples.exs --run hybrid")
-    IO.puts("  3. Worker recycling:              mix run examples/run_examples.exs --run ttl")
+    IO.puts(
+      "  2. Hybrid pools (recommended):    mix run --no-start examples/run_examples.exs --run hybrid"
+    )
 
     IO.puts(
-      "  4. Telemetry integration:         mix run examples/run_examples.exs --run telemetry"
+      "  3. Worker recycling:              mix run --no-start examples/run_examples.exs --run ttl"
+    )
+
+    IO.puts(
+      "  4. Telemetry integration:         mix run --no-start examples/run_examples.exs --run telemetry"
     )
 
     IO.puts("\nRun by category:")
-    IO.puts("  mix run examples/run_examples.exs --category gil")
-    IO.puts("  mix run examples/run_examples.exs --category basics")
-    IO.puts("  mix run examples/run_examples.exs --category advanced")
+    IO.puts("  mix run --no-start examples/run_examples.exs --category gil")
+    IO.puts("  mix run --no-start examples/run_examples.exs --category basics")
+    IO.puts("  mix run --no-start examples/run_examples.exs --category advanced")
 
     IO.puts("\nOther options:")
     IO.puts("  --list    List all available examples")
@@ -241,7 +246,7 @@ defmodule ExampleRunner do
     Run Snakepit examples and demonstrations easily.
 
     Usage:
-      mix run examples/run_examples.exs [options]
+      mix run --no-start examples/run_examples.exs [options]
 
     Options:
       (none)              Interactive mode - shows menu
@@ -275,19 +280,19 @@ defmodule ExampleRunner do
 
     Examples:
       # Interactive mode
-      mix run examples/run_examples.exs
+      mix run --no-start examples/run_examples.exs
 
       # Run all GIL/threading examples
-      mix run examples/run_examples.exs --category gil
+      mix run --no-start examples/run_examples.exs --category gil
 
       # Run specific example
-      mix run examples/run_examples.exs --run comparison
+      mix run --no-start examples/run_examples.exs --run comparison
 
       # List all
-      mix run examples/run_examples.exs --list
+      mix run --no-start examples/run_examples.exs --list
 
     Recommended Starting Point:
-      mix run examples/run_examples.exs --run comparison
+      mix run --no-start examples/run_examples.exs --run comparison
 
     This shows the process vs thread profile comparison and explains
     when to use each mode.
@@ -375,7 +380,7 @@ defmodule ExampleRunner do
 
     if File.exists?(file_path) do
       # Run the script
-      case System.cmd("mix", ["run", file_path], stderr_to_stdout: true) do
+      case System.cmd("mix", ["run", "--no-start", file_path], stderr_to_stdout: true) do
         {output, 0} ->
           IO.puts(output)
 

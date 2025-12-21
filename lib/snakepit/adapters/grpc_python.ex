@@ -8,10 +8,10 @@ defmodule Snakepit.Adapters.GRPCPython do
     ## Configuration
 
         Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-      Application.put_env(:snakepit, :grpc_config, %{
-        base_port: 50051,
-        port_range: 100  # Will use ports 50051-50151
-      })
+        Application.put_env(:snakepit, :grpc_port, 50051)
+        Application.put_env(:snakepit, :grpc_host, "localhost")
+
+    Worker ports are OS-assigned (ephemeral) and reported back during startup.
 
   ## Features
 
@@ -147,7 +147,6 @@ defmodule Snakepit.Adapters.GRPCPython do
     ]
 
     streaming_commands = [
-      "ping_stream",
       "batch_inference",
       "process_large_dataset",
       "tail_and_analyze"

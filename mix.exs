@@ -1,7 +1,7 @@
 defmodule Snakepit.MixProject do
   use Mix.Project
 
-  @version "0.6.10"
+  @version "0.6.11"
   @source_url "https://github.com/nshkrdotcom/snakepit"
 
   def project do
@@ -98,7 +98,6 @@ defmodule Snakepit.MixProject do
         "README_BIDIRECTIONAL_TOOL_BRIDGE.md",
         "README_PROCESS_MANAGEMENT.md",
         "README_TESTING.md",
-        "README_UNIFIED_GRPC_BRIDGE.md",
         "ARCHITECTURE.md",
         "TELEMETRY.md",
         "DIAGS.md",
@@ -156,7 +155,6 @@ defmodule Snakepit.MixProject do
         {"README_GRPC.md", title: "gRPC Streaming Guide"},
         {"README_BIDIRECTIONAL_TOOL_BRIDGE.md", title: "Bidirectional Tool Bridge"},
         {"README_PROCESS_MANAGEMENT.md", title: "Process Management"},
-        {"README_UNIFIED_GRPC_BRIDGE.md", title: "Unified gRPC Bridge"},
         {"README_TESTING.md", title: "Testing Guide"},
         {"TELEMETRY.md", title: "Telemetry & Observability"},
 
@@ -177,7 +175,11 @@ defmodule Snakepit.MixProject do
         # Advanced topics
         {"docs/code-standards/test-architecture-supertester.md", title: "Test Architecture"},
         {"docs/architecture/adr-001-worker-starter-supervision-pattern.md",
-         title: "ADR-001: Worker Starter Pattern"}
+         title: "ADR-001: Worker Starter Pattern"},
+
+        # Archived documentation
+        {"docs/archive/design-process/README_UNIFIED_GRPC_BRIDGE.md",
+         title: "Unified gRPC Bridge (Archived)"}
       ],
       groups_for_extras: [
         "Getting Started": [
@@ -193,7 +195,6 @@ defmodule Snakepit.MixProject do
           "README_GRPC.md",
           "README_BIDIRECTIONAL_TOOL_BRIDGE.md",
           "README_PROCESS_MANAGEMENT.md",
-          "README_UNIFIED_GRPC_BRIDGE.md",
           "TELEMETRY.md"
         ],
         Architecture: [
@@ -219,6 +220,9 @@ defmodule Snakepit.MixProject do
         ],
         "Release Notes": [
           "CHANGELOG.md"
+        ],
+        Archive: [
+          "docs/archive/design-process/README_UNIFIED_GRPC_BRIDGE.md"
         ]
       ],
       groups_for_modules: [

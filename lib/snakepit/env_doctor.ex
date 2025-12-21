@@ -16,10 +16,11 @@ defmodule Snakepit.EnvDoctor do
     :venv,
     :venv_py313,
     :grpc_server,
+    :adapter_imports,
     :grpc_port
   ]
 
-  @runtime_checks [:python_exec, :grpc_import, :grpc_server]
+  @runtime_checks [:python_exec, :grpc_import, :grpc_server, :adapter_imports]
 
   @doc """
   Run the full doctor suite. Returns `{:ok, results}` or `{:error, results}`.
@@ -108,7 +109,7 @@ defmodule Snakepit.EnvDoctor do
         state,
         ["-c", "import grpc"],
         :grpc_import,
-        "Importing grpc failed. Run make bootstrap."
+        "Importing grpc failed. Run mix snakepit.setup (or make bootstrap)."
       )
     else
       {:error, message} -> error(:grpc_import, message)
@@ -123,7 +124,7 @@ defmodule Snakepit.EnvDoctor do
       false ->
         error(
           :venv,
-          ".venv missing. Run make bootstrap to create the default Python environment."
+          ".venv missing. Run mix snakepit.setup (or make bootstrap) to create the default Python environment."
         )
     end
   end
@@ -138,13 +139,13 @@ defmodule Snakepit.EnvDoctor do
       required? ->
         error(
           :venv_py313,
-          ".venv-py313 missing. Run make bootstrap to enable free-threaded tests."
+          ".venv-py313 missing. Run mix snakepit.setup (or make bootstrap) to enable free-threaded tests."
         )
 
       true ->
         warning(
           :venv_py313,
-          ".venv-py313 missing. Thread-profile tests will be skipped until you run make bootstrap."
+          ".venv-py313 missing. Thread-profile tests will be skipped until you run mix snakepit.setup (or make bootstrap)."
         )
     end
   end
@@ -156,7 +157,7 @@ defmodule Snakepit.EnvDoctor do
       unless File.exists?(script) do
         error(
           :grpc_server,
-          "priv/python/grpc_server.py missing. Run make bootstrap to regenerate assets."
+          "priv/python/grpc_server.py missing. Run mix snakepit.setup (or make bootstrap) to regenerate assets."
         )
       else
         args = [script, "--health-check"] ++ default_adapter_args()
@@ -173,19 +174,37 @@ defmodule Snakepit.EnvDoctor do
     end
   end
 
+  defp run_check(:adapter_imports, state) do
+    with {:ok, python_path} <- python_path_for_check(state) do
+      adapters = configured_adapter_paths()
+
+      case adapters do
+        [] ->
+          warning(
+            :adapter_imports,
+            "No adapter configured; default ShowcaseAdapter will be used."
+          )
+
+        _ ->
+          check_adapter_imports(state, python_path, adapters)
+      end
+    else
+      {:error, message} -> error(:adapter_imports, message)
+    end
+  end
+
   defp run_check(:grpc_port, _state) do
-    config = Application.get_env(:snakepit, :grpc_config, %{})
-    port = Map.get(config, :base_port, 50_052)
+    port = Application.get_env(:snakepit, :grpc_port, 50_051)
 
     case :gen_tcp.listen(port, [:binary, active: false, reuseaddr: true]) do
       {:ok, socket} ->
         :gen_tcp.close(socket)
-        ok(:grpc_port, "Port #{port} available for Python workers")
+        ok(:grpc_port, "Port #{port} available for the Elixir gRPC server")
 
       {:error, :eaddrinuse} ->
         error(
           :grpc_port,
-          "Port #{port} is already in use. Stop the conflicting service or adjust :grpc_config.base_port."
+          "Port #{port} is already in use. Stop the conflicting service or adjust :grpc_port."
         )
 
       {:error, reason} ->
@@ -208,15 +227,117 @@ defmodule Snakepit.EnvDoctor do
   defp python_env(root) do
     python_path = Path.join(root, "priv/python")
     existing = System.get_env("PYTHONPATH")
+    path_sep = path_separator()
 
     path =
       case existing do
         nil -> python_path
         "" -> python_path
-        other -> python_path <> ":" <> other
+        other -> python_path <> path_sep <> other
       end
 
     [{"PYTHONPATH", path}]
+  end
+
+  defp path_separator do
+    case :os.type() do
+      {:win32, _} -> ";"
+      _ -> ":"
+    end
+  end
+
+  defp configured_adapter_paths do
+    case Snakepit.Config.get_pool_configs() do
+      {:ok, pools} ->
+        pools
+        |> Enum.map(&extract_adapter_path(&1))
+        |> Enum.reject(&is_nil/1)
+        |> ensure_default_adapter()
+
+      {:error, _} ->
+        []
+        |> ensure_default_adapter()
+    end
+  end
+
+  defp extract_adapter_path(%{adapter_args: adapter_args}) do
+    parse_adapter_from_args(adapter_args)
+  end
+
+  defp extract_adapter_path(_), do: nil
+
+  defp parse_adapter_from_args(args) when is_list(args) do
+    args
+    |> Enum.reduce({nil, false}, fn arg, {found, expecting} ->
+      cond do
+        expecting ->
+          {arg, false}
+
+        is_binary(arg) and String.starts_with?(arg, "--adapter=") ->
+          {String.replace_prefix(arg, "--adapter=", ""), false}
+
+        arg == "--adapter" ->
+          {found, true}
+
+        true ->
+          {found, false}
+      end
+    end)
+    |> elem(0)
+  end
+
+  defp parse_adapter_from_args(_), do: nil
+
+  defp ensure_default_adapter(adapters) do
+    case adapters do
+      [] ->
+        default = parse_adapter_from_args(Snakepit.Adapters.GRPCPython.script_args() || [])
+
+        if default do
+          [default]
+        else
+          []
+        end
+
+      _ ->
+        Enum.uniq(adapters)
+    end
+  end
+
+  defp check_adapter_imports(state, python_path, adapters) do
+    script = Path.join(state.project_root, "priv/python/grpc_server.py")
+    env = python_env(state.project_root)
+
+    {ok_adapters, failed_adapters} =
+      Enum.reduce(adapters, {[], []}, fn adapter, {oks, fails} ->
+        args = [script, "--health-check", "--adapter", adapter]
+
+        case state.runner.cmd(python_path, args, cd: state.project_root, env: env) do
+          :ok -> {[adapter | oks], fails}
+          {:error, reason} -> {oks, [{adapter, reason} | fails]}
+        end
+      end)
+
+    case failed_adapters do
+      [] ->
+        ok(
+          :adapter_imports,
+          "Adapter import checks passed (#{length(ok_adapters)} adapters)"
+        )
+
+      _ ->
+        failures =
+          failed_adapters
+          |> Enum.map(fn {adapter, reason} ->
+            "#{adapter} (#{format_reason(reason)})"
+          end)
+          |> Enum.join(", ")
+
+        error(
+          :adapter_imports,
+          "Adapter import checks failed: #{failures}"
+        )
+    end
   end
 
   defp default_adapter_args do
@@ -247,13 +368,15 @@ defmodule Snakepit.EnvDoctor do
   end
 
   defp python_path_for_check(%{python_path: nil}) do
-    {:error, "Python not configured. Run make bootstrap or set SNAKEPIT_PYTHON=/path/to/python."}
+    {:error,
+     "Python not configured. Run mix snakepit.setup (or make bootstrap) or set SNAKEPIT_PYTHON=/path/to/python."}
   end
 
   defp python_path_for_check(%{python_path: path}) do
     cond do
       not File.exists?(path) ->
-        {:error, "Configured interpreter not found at #{path}. Run make bootstrap."}
+        {:error,
+         "Configured interpreter not found at #{path}. Run mix snakepit.setup (or make bootstrap)."}
 
       not executable?(path) ->
         {:error,

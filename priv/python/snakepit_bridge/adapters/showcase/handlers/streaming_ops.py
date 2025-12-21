@@ -13,12 +13,27 @@ class StreamingOpsHandler:
     def get_tools(self) -> Dict[str, Tool]:
         """Return all tools provided by this handler."""
         return {
+            "stream_data": Tool(self.stream_data),
             "stream_progress": Tool(self.stream_progress),
             "stream_fibonacci": Tool(self.stream_fibonacci),
             "generate_dataset": Tool(self.generate_dataset),
             "infinite_stream": Tool(self.infinite_stream),
         }
-    
+
+    def stream_data(self, ctx, count: int = 5, delay: float = 1.0) -> StreamChunk:
+        """Stream simple count-based chunks with an optional delay (seconds)."""
+        for i in range(count):
+            yield StreamChunk(
+                {
+                    "index": i + 1,
+                    "total": count,
+                    "message": f"Chunk {i + 1}/{count}",
+                },
+                is_final=(i == count - 1),
+            )
+            if i < count - 1 and delay > 0:
+                time.sleep(delay)
+
     def stream_progress(
         self,
         ctx,

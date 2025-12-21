@@ -203,9 +203,17 @@ class BaseAdapter:
             if response.success:
                 logger.info(f"Registered {len(tools)} tools for session {session_id}")
                 return list(response.tool_ids.keys())
-            else:
-                logger.error(f"Failed to register tools: {response.error_message}")
-                return []
+
+            error_message = response.error_message or ""
+            if "duplicate_tool" in error_message:
+                logger.info(
+                    "Tools already registered for session %s; skipping duplicate registration.",
+                    session_id,
+                )
+                return [tool.name for tool in tools]
+
+            logger.error(f"Failed to register tools: {response.error_message}")
+            return []
         except Exception as e:
             logger.error(f"Error registering tools: {e}")
             return []
@@ -243,6 +251,14 @@ class BaseAdapter:
             if response.success:
                 logger.info(f"Registered {len(tools)} tools for session {session_id}")
                 return list(response.tool_ids.keys())
+
+            error_message = response.error_message or ""
+            if "duplicate_tool" in error_message:
+                logger.info(
+                    "Tools already registered for session %s; skipping duplicate registration.",
+                    session_id,
+                )
+                return [tool.name for tool in tools]
 
             logger.error(f"Failed to register tools: {response.error_message}")
             return []

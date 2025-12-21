@@ -1,65 +1,58 @@
 #!/usr/bin/env bash
-# Setup Python dependencies for Snakepit
-# Uses uv by default (faster), falls back to pip if uv not available
+# Non-interactive Python setup for Snakepit.
+# Creates .venv (unless VENV_PATH is set) and installs priv/python requirements.
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PYTHON_DIR="$PROJECT_ROOT/priv/python"
+VENV_PATH="${VENV_PATH:-$PROJECT_ROOT/.venv}"
 
-echo "🐍 Setting up Python dependencies for Snakepit..."
-echo "📁 Python directory: $PYTHON_DIR"
+echo "🐍 Setting up Python dependencies (non-interactive)"
+echo "📁 Project root: $PROJECT_ROOT"
+echo "📦 Python package dir: $PYTHON_DIR"
+echo "🧠 Virtualenv: $VENV_PATH"
 
-# Check if uv is available
-if command -v uv &> /dev/null; then
-    echo "✅ Using uv (fast Python package installer)"
-    INSTALLER="uv pip"
-else
-    echo "⚠️  uv not found, falling back to pip"
-    echo "💡 Install uv for faster installs: curl -LsSf https://astral.sh/uv/install.sh | sh"
-    INSTALLER="pip"
+if command -v mix >/dev/null 2>&1; then
+  echo "➡️  Delegating to mix snakepit.setup (preferred)"
+  (cd "$PROJECT_ROOT" && mix snakepit.setup)
+  exit 0
 fi
 
-# Change to Python directory
-cd "$PYTHON_DIR"
-
-# Check if requirements.txt exists
-if [ ! -f "requirements.txt" ]; then
-    echo "❌ Error: requirements.txt not found in $PYTHON_DIR"
-    exit 1
+if [ ! -f "$PYTHON_DIR/requirements.txt" ]; then
+  echo "requirements.txt missing at $PYTHON_DIR" >&2
+  exit 1
 fi
 
-# Check if we're in a virtual environment
-if [ -z "$VIRTUAL_ENV" ]; then
-    echo "⚠️  Not in a virtual environment"
-    echo "💡 Recommended: Create a venv first:"
-    echo "   python3 -m venv .venv"
-    echo "   source .venv/bin/activate"
-    echo ""
-    read -p "Continue with system Python? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-else
-    echo "✅ Virtual environment detected: $VIRTUAL_ENV"
+# Create venv if missing
+if [ ! -d "$VENV_PATH" ]; then
+  if command -v uv >/dev/null 2>&1; then
+    echo "✅ Creating venv with uv..."
+    uv venv "$VENV_PATH"
+  else
+    echo "⚠️  uv not found; using python3 -m venv"
+    python3 -m venv "$VENV_PATH"
+  fi
 fi
 
-# Install dependencies
-echo "📦 Installing Python dependencies..."
-$INSTALLER install -r requirements.txt
+PYTHON_BIN="$VENV_PATH/bin/python"
+PIP_BIN="$VENV_PATH/bin/pip"
 
-# Verify installation
-echo ""
+if [ ! -x "$PYTHON_BIN" ]; then
+  echo "Virtualenv at $VENV_PATH is missing python executable" >&2
+  exit 1
+fi
+
+echo "📦 Installing dependencies into $VENV_PATH..."
+"$PIP_BIN" install --upgrade pip >/dev/null
+"$PIP_BIN" install -r "$PYTHON_DIR/requirements.txt"
+
 echo "🔍 Verifying installation..."
-python3 -c "import grpc; print(f'✅ gRPC {grpc.__version__} installed')" || echo "❌ gRPC not found"
-python3 -c "import google.protobuf; print(f'✅ Protobuf installed')" || echo "❌ Protobuf not found"
+"$PYTHON_BIN" - <<'PY'
+import grpc, google.protobuf
+print(f"grpcio: {grpc.__version__}")
+print(f"protobuf: {google.protobuf.__version__}")
+PY
 
-echo ""
-echo "✅ Python setup complete!"
-echo ""
-echo "Next steps:"
-echo "1. Generate protocol buffers: make proto-python"
-echo "2. Run tests: mix test"
-echo "3. Try examples: elixir examples/grpc_basic.exs"
+echo "✅ Python setup complete."

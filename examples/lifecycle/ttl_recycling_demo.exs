@@ -10,7 +10,7 @@
 # In production, use 1-2 hours.
 #
 # Usage:
-#   mix run examples/lifecycle/ttl_recycling_demo.exs
+#   mix run --no-start examples/lifecycle/ttl_recycling_demo.exs
 #
 
 # Disable automatic pooling to avoid port conflicts
@@ -31,6 +31,7 @@ defmodule TTLRecyclingDemo do
     IO.puts(String.duplicate("=", 70) <> "\n")
 
     # Attach telemetry handler to observe recycling
+    ensure_telemetry_started!()
     attach_telemetry_handler()
 
     IO.puts("Configuration:")
@@ -100,6 +101,14 @@ defmodule TTLRecyclingDemo do
       end,
       nil
     )
+  end
+
+  defp ensure_telemetry_started! do
+    case Application.ensure_all_started(:telemetry) do
+      {:ok, _apps} -> :ok
+      {:error, {:already_started, :telemetry}} -> :ok
+      {:error, {app, reason}} -> raise "Failed to start #{app}: #{inspect(reason)}"
+    end
   end
 
   defp show_production_configuration do

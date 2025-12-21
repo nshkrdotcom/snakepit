@@ -19,6 +19,8 @@ from snakepit_bridge_pb2 import (
 from snakepit_bridge_pb2_grpc import BridgeServiceStub
 from google.protobuf.struct_pb2 import Struct
 
+from .serialization import TypeSerializer
+
 logger = logging.getLogger(__name__)
 
 
@@ -156,7 +158,9 @@ class SessionContext:
                 result.Unpack(struct_result)
                 return dict(struct_result)
 
-            return result
+            binary_result = response.binary_result if getattr(response, "binary_result", None) else None
+            binary_data = binary_result if binary_result else None
+            return TypeSerializer.decode_any(result, binary_data)
 
         except Exception as e:
             logger.error(f"Error calling Elixir tool '{tool_name}': {e}")

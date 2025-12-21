@@ -162,6 +162,13 @@ defmodule Snakepit.Pool do
   end
 
   @doc """
+  Gets statistics for a specific pool name.
+  """
+  def get_stats(pool, pool_name) when is_atom(pool_name) do
+    GenServer.call(pool, {:get_stats, pool_name})
+  end
+
+  @doc """
   Lists all worker IDs in the pool.
 
   Can be called with pool process or pool name:

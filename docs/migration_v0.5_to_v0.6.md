@@ -123,7 +123,7 @@ For Python developers building custom adapters:
 # mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.6.0"}  # Update from 0.5.1
+    {:snakepit, "~> 0.6.11"}  # Update from 0.5.1
   ]
 end
 ```
@@ -152,10 +152,8 @@ config :snakepit,
   pooling_enabled: true,
   adapter_module: Snakepit.Adapters.GRPCPython,
   pool_size: 100,
-  grpc_config: %{
-    base_port: 50051,
-    port_range: 1000
-  }
+  grpc_port: 50051,
+  grpc_host: "localhost"
 ```
 
 **What Happens**: Config is automatically converted to use `:process` profile.
@@ -238,7 +236,8 @@ config :snakepit,
   adapter_module: Snakepit.Adapters.GRPCPython,
   pool_size: 100,
   pool_config: %{pool_size: 100},
-  grpc_config: %{base_port: 50051, port_range: 100}
+  grpc_port: 50051,
+  grpc_host: "localhost"
 ```
 
 **v0.6.0 Behavior**: Automatically converted to `:process` profile with name `:default`.
@@ -247,21 +246,21 @@ config :snakepit,
 
 ```elixir
 config :snakepit,
+  grpc_port: 50051,
+  grpc_host: "localhost",
   pools: [
     %{
       name: :api_pool,
       worker_profile: :process,
       pool_size: 100,
-      adapter_module: Snakepit.Adapters.GRPCPython,
-      grpc_config: %{base_port: 50051, port_range: 100}
+      adapter_module: Snakepit.Adapters.GRPCPython
     },
     %{
       name: :ml_pool,
       worker_profile: :thread,
       pool_size: 4,
       threads_per_worker: 16,
-      adapter_module: Snakepit.Adapters.GRPCPython,
-      grpc_config: %{base_port: 50151, port_range: 10}
+      adapter_module: Snakepit.Adapters.GRPCPython
     }
   ]
 ```
@@ -274,7 +273,8 @@ config :snakepit,
 | `adapter_module` | Per-pool `adapter_module` | Can specify per pool |
 | `pool_size` | Per-pool `pool_size` | Can differ per pool |
 | `pool_config` | Per-pool map | Merged into pool config |
-| `grpc_config` | Per-pool `grpc_config` | Can differ per pool |
+| `grpc_port` | Same | Elixir gRPC server port |
+| `grpc_host` | Same | Elixir gRPC server host |
 | N/A | `worker_profile` | **New**: `:process` or `:thread` |
 | N/A | `worker_ttl` | **New**: Lifecycle management |
 | N/A | `worker_max_requests` | **New**: Lifecycle management |
@@ -623,8 +623,8 @@ config :snakepit,
 # mix.exs - BEFORE (v0.5.1)
 {:snakepit, "~> 0.5.1"}
 
-# mix.exs - AFTER (v0.6.0)
-{:snakepit, "~> 0.6.0"}
+# mix.exs - AFTER (v0.6.11)
+{:snakepit, "~> 0.6.11"}
 
 # config/config.exs - UNCHANGED
 config :snakepit,

@@ -3,7 +3,13 @@
 # Advanced Telemetry Example
 # Demonstrates advanced telemetry features including runtime control,
 # correlation IDs, performance monitoring, and multiple event patterns
-# Usage: elixir examples/telemetry_advanced.exs
+# Usage: mix run --no-start examples/telemetry_advanced.exs
+
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
 
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
@@ -20,15 +26,10 @@ Application.put_env(:snakepit, :pools, [
 
 Application.put_env(:snakepit, :pool_config, %{pool_size: 3})
 Application.put_env(:snakepit, :grpc_port, 50051)
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 # Suppress Snakepit internal logs for clean output
 Application.put_env(:snakepit, :log_level, :warning)
-
-Mix.install([
-  {:snakepit, path: "."},
-  {:grpc, "~> 0.10.2"},
-  {:protobuf, "~> 0.14.1"}
-])
 
 defmodule TelemetryAdvancedExample do
   @moduledoc """
@@ -67,9 +68,8 @@ defmodule TelemetryAdvancedExample do
     :telemetry.attach_many(
       "demo-correlation-tracker",
       [
-        [:snakepit, :pool, :queue, :enqueued],
-        [:snakepit, :python, :call, :start],
-        [:snakepit, :python, :call, :stop]
+        [:snakepit, :grpc_worker, :execute, :start],
+        [:snakepit, :grpc_worker, :execute, :stop]
       ],
       &handle_correlated_events/4,
       %{events: []}
@@ -78,7 +78,7 @@ defmodule TelemetryAdvancedExample do
     # Performance monitor
     :telemetry.attach(
       "demo-perf-monitor",
-      [:snakepit, :python, :call, :stop],
+      [:snakepit, :grpc_worker, :execute, :stop],
       &handle_performance_check/4,
       %{threshold_ms: 100}
     )
@@ -86,7 +86,7 @@ defmodule TelemetryAdvancedExample do
     # Error tracker
     :telemetry.attach(
       "demo-error-tracker",
-      [:snakepit, :python, :call, :exception],
+      [:snakepit, :grpc_worker, :execute, :stop],
       &handle_python_exception/4,
       nil
     )
@@ -97,14 +97,11 @@ defmodule TelemetryAdvancedExample do
     correlation_id = metadata[:correlation_id] || "none"
 
     case event_name do
-      "enqueued" ->
-        IO.puts("  🔵 [Enqueued] correlation_id=#{correlation_id}")
-
       "start" ->
         IO.puts("  🟡 [Started] correlation_id=#{correlation_id} command=#{metadata.command}")
 
       "stop" ->
-        duration_ms = measurements.duration / 1_000_000
+        duration_ms = Map.get(measurements, :duration_ms, 0) * 1.0
 
         IO.puts(
           "  🟢 [Completed] correlation_id=#{correlation_id} duration=#{Float.round(duration_ms, 2)}ms"
@@ -116,7 +113,7 @@ defmodule TelemetryAdvancedExample do
   end
 
   defp handle_performance_check(_event, measurements, metadata, config) do
-    duration_ms = measurements.duration / 1_000_000
+    duration_ms = Map.get(measurements, :duration_ms, 0) * 1.0
     threshold = config.threshold_ms
 
     if duration_ms > threshold do
@@ -126,8 +123,12 @@ defmodule TelemetryAdvancedExample do
     end
   end
 
-  defp handle_python_exception(_event, _measurements, metadata, _config) do
-    IO.puts("  ❌ [EXCEPTION] command=#{metadata.command} error=#{inspect(metadata.error)}")
+  defp handle_python_exception(_event, measurements, metadata, _config) do
+    has_error = metadata[:status] == :error or Map.get(measurements, :errors, 0) > 0
+
+    if has_error do
+      IO.puts("  ❌ [EXCEPTION] command=#{metadata.command} error=#{inspect(metadata.error)}")
+    end
   end
 
   defp demo_correlation_tracking do
@@ -136,9 +137,15 @@ defmodule TelemetryAdvancedExample do
 
     # Execute multiple commands to see correlation
     for i <- 1..3 do
-      case Snakepit.execute("telemetry_demo", %{operation: "track_#{i}", delay_ms: 20}) do
-        {:ok, result} ->
-          IO.puts("  ✓ Request #{i} completed with correlation_id: #{result["correlation_id"]}")
+      correlation_id = "telemetry-demo-#{i}-#{System.unique_integer([:positive])}"
+
+      case Snakepit.execute("telemetry_demo", %{
+             operation: "track_#{i}",
+             delay_ms: 20,
+             correlation_id: correlation_id
+           }) do
+        {:ok, _result} ->
+          IO.puts("  ✓ Request #{i} completed with correlation_id: #{correlation_id}")
 
         {:error, reason} ->
           IO.puts("  ❌ Request #{i} failed: #{inspect(reason)}")
@@ -228,9 +235,9 @@ defmodule TelemetryAdvancedExample do
 
     :telemetry.attach(
       "demo-aggregator",
-      [:snakepit, :python, :call, :stop],
+      [:snakepit, :grpc_worker, :execute, :stop],
       fn _event, measurements, metadata, _config ->
-        send(aggregator_pid, {:metric, metadata.command, measurements.duration})
+        send(aggregator_pid, {:metric, metadata.command, measurements.duration_ms})
       end,
       nil
     )
@@ -253,15 +260,15 @@ defmodule TelemetryAdvancedExample do
         IO.puts("\n  Aggregated Statistics:")
 
         Enum.each(stats, fn {command, durations} ->
-          avg = Enum.sum(durations) / length(durations) / 1_000_000
-          min = Enum.min(durations) / 1_000_000
-          max = Enum.max(durations) / 1_000_000
+          avg = Enum.sum(durations) / length(durations)
+          min = Enum.min(durations)
+          max = Enum.max(durations)
 
           IO.puts("    Command: #{command}")
           IO.puts("      Count: #{length(durations)}")
           IO.puts("      Avg: #{Float.round(avg, 2)}ms")
-          IO.puts("      Min: #{Float.round(min, 2)}ms")
-          IO.puts("      Max: #{Float.round(max, 2)}ms")
+          IO.puts("      Min: #{Float.round(min * 1.0, 2)}ms")
+          IO.puts("      Max: #{Float.round(max * 1.0, 2)}ms")
         end)
     after
       1000 -> IO.puts("  ⚠️  Timeout waiting for aggregated stats")
@@ -292,12 +299,9 @@ defmodule TelemetryAdvancedExample do
   end
 
   defp get_worker_ids do
-    # Try to get worker IDs from pool stats or registry
+    # Try to get worker IDs from the pool registry
     try do
-      case Snakepit.Pool.get_stats() do
-        %{worker_ids: ids} when is_list(ids) -> ids
-        _ -> []
-      end
+      Snakepit.Pool.list_workers()
     rescue
       _ -> []
     end

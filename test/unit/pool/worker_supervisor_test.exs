@@ -217,7 +217,11 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
         socket
 
       {:error, :eaddrinuse} ->
-        Process.sleep(10)
+        receive do
+        after
+          10 -> :ok
+        end
+
         do_bind_port(port, attempts - 1)
 
       {:error, reason} ->

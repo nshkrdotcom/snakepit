@@ -707,5 +707,5 @@ IO.inspect(result)
 ## Related Documentation
 
 - [Main README](README.md)
-- [Unified gRPC Bridge](README_UNIFIED_GRPC_BRIDGE.md)
+- [Unified gRPC Bridge (archived)](docs/archive/design-process/README_UNIFIED_GRPC_BRIDGE.md)
 - [Testing Guide](README_TESTING.md)

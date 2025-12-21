@@ -1,83 +1,50 @@
-#!/bin/bash
-# Install protoc (Protocol Buffers compiler) on Ubuntu
-# This script installs protoc and the necessary plugins for Elixir and Python
+#!/usr/bin/env bash
+# Non-interactive installer for protoc on Ubuntu/Debian.
+# Installs protoc, protoc-gen-elixir, and Python gRPC tools.
 
-set -e
+set -euo pipefail
 
-echo "Installing Protocol Buffers compiler (protoc) on Ubuntu..."
+echo "Installing Protocol Buffers toolchain (non-interactive)..."
 
-# Check if running on Ubuntu/Debian
-if ! command -v apt-get &> /dev/null; then
-    echo "Error: This script is designed for Ubuntu/Debian systems with apt-get"
-    exit 1
+if ! command -v apt-get >/dev/null 2>&1; then
+  echo "Error: apt-get not found (expected Ubuntu/Debian). Aborting." >&2
+  exit 1
 fi
 
-# Check if protoc is already installed
-if command -v protoc &> /dev/null; then
-    CURRENT_VERSION=$(protoc --version | cut -d' ' -f2)
-    echo "protoc is already installed (version $CURRENT_VERSION)"
-    read -p "Do you want to reinstall/update? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Keeping existing installation"
-    else
-        echo "Proceeding with reinstallation..."
-    fi
+if [ "$(id -u)" -eq 0 ]; then
+  SUDO=""
 else
-    echo "protoc not found, proceeding with installation..."
+  SUDO="${SUDO:-sudo}"
 fi
 
-# Update package list
 echo "Updating package list..."
-sudo apt-get update
+$SUDO apt-get update -y
 
-# Install protobuf-compiler and related tools
 echo "Installing protobuf-compiler..."
-sudo apt-get install -y protobuf-compiler
+$SUDO apt-get install -y protobuf-compiler
 
-# Install protoc-gen-elixir plugin
-echo "Checking for Elixir protoc plugin..."
-if ! command -v protoc-gen-elixir &> /dev/null; then
-    echo "Installing protoc-gen-elixir..."
-    mix escript.install hex protobuf --force
-    
-    # Add escript path to PATH if not already there
-    ESCRIPT_PATH="$HOME/.mix/escripts"
-    if [[ ":$PATH:" != *":$ESCRIPT_PATH:"* ]]; then
-        echo "Adding $ESCRIPT_PATH to PATH..."
-        echo 'export PATH="$HOME/.mix/escripts:$PATH"' >> ~/.bashrc
-        export PATH="$ESCRIPT_PATH:$PATH"
-    fi
-else
-    echo "protoc-gen-elixir already installed"
+echo "Ensuring protoc-gen-elixir is available..."
+if ! command -v protoc-gen-elixir >/dev/null 2>&1; then
+  mix escript.install hex protobuf --force
 fi
 
-# Install Python gRPC tools
-echo "Installing Python gRPC tools..."
-pip3 install --user grpcio-tools
+# Ensure escripts path is in PATH for this shell; caller can persist if desired.
+ESCRIPT_PATH="$HOME/.mix/escripts"
+if [ -d "$ESCRIPT_PATH" ] && [[ ":${PATH}:" != *":${ESCRIPT_PATH}:"* ]]; then
+  export PATH="$ESCRIPT_PATH:$PATH"
+fi
 
-# Verify installations
+echo "Installing Python gRPC tools..."
+python3 -m pip install --user --upgrade grpcio-tools protobuf
+
 echo
 echo "Verifying installations..."
 echo "========================="
+command -v protoc >/dev/null 2>&1 && protoc --version || echo "✗ protoc not found"
+command -v protoc-gen-elixir >/dev/null 2>&1 && echo "✓ protoc-gen-elixir available" || echo "✗ protoc-gen-elixir not found"
+python3 -m grpc_tools.protoc --version >/dev/null 2>&1 && echo "✓ python grpc_tools.protoc available" || echo "✗ python grpc_tools.protoc not found"
 
-if command -v protoc &> /dev/null; then
-    echo "✓ protoc version: $(protoc --version)"
-else
-    echo "✗ protoc not found in PATH"
-fi
-
-if command -v protoc-gen-elixir &> /dev/null; then
-    echo "✓ protoc-gen-elixir found"
-else
-    echo "✗ protoc-gen-elixir not found in PATH"
-fi
-
-if python3 -m grpc_tools.protoc --version &> /dev/null 2>&1; then
-    echo "✓ Python gRPC tools installed"
-else
-    echo "✗ Python gRPC tools not found"
-fi
+echo "Done."
 
 echo
 echo "Installation complete!"
@@ -90,4 +57,4 @@ fi
 
 echo "You can now generate protobuf files with:"
 echo "  - Elixir: mix grpc.gen"
-echo "  - Python: python3 priv/python/generate_proto.py"
+echo "  - Python: make proto-python (or ./priv/python/generate_grpc.sh)"

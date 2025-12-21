@@ -108,7 +108,7 @@ Emitted after each successful request.
 
 **Measurements:**
 - `count: 1`
-- `duration_ms: integer()`
+- `duration_us: integer()` (microseconds)
 
 **Metadata:**
 ```elixir

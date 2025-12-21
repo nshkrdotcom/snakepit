@@ -8,9 +8,9 @@ A comprehensive example application demonstrating all features and best practice
 - ✅ Session management with proper state handling in Elixir
 - ✅ Streaming with real-time progress updates
 - ✅ Concurrent processing with robust error recovery
-- ✅ Variable management with type validation
 - ✅ Binary serialization for large data
 - ✅ Complete ML workflows with model training/inference
+- ✅ gRPC tools bridge (Elixir tools exposed to Python sessions)
 - ✅ **Enhanced tool capabilities (v0.4.1)**:
   - `process_text` - Text processing with upper, lower, reverse, length operations
   - `get_stats` - Real-time adapter and system monitoring
@@ -50,13 +50,13 @@ cd examples/snakepit_showcase
 mix setup
 
 # Run all demos
-mix demo.all
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end)'
 
 # Interactive mode
-mix demo.interactive
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.interactive() end)'
 
 # Run specific demo
-mix demo.execution_modes
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ExecutionModesDemo.run() end)'
 ```
 
 ## Important: Process Management
@@ -82,20 +82,20 @@ Real-time progress updates and efficient handling of large datasets.
 ### 4. Concurrent Processing
 Robust patterns for parallel execution with failure recovery and retry logic.
 
-### 5. Variable Management
-Type-safe variable operations with automatic serialization.
-
-### 6. Binary Serialization
+### 5. Binary Serialization
 Automatic optimization for large tensors and embeddings with 5-10x performance gains.
 
-### 7. ML Workflows
+### 6. ML Workflows
 Complete machine learning pipeline with error handling, timeouts, and progress tracking.
 
-### 8. Execution Modes Guide
+### 7. Execution Modes Guide
 Interactive demonstration of when to use different execution patterns:
 - Stateless execution for maximum parallelism
 - Session-based for stateful workflows
 - Streaming for long operations
+
+### 8. gRPC Tools Bridge
+Exposes Elixir tools to Python via `SessionContext` and validates bidirectional calls.
 
 ## Best Practices Demonstrated
 
@@ -105,10 +105,9 @@ Interactive demonstration of when to use different execution patterns:
 class BadAdapter:
     counters = {}  # This accumulates forever!
     
-# ✅ GOOD: State in SessionContext
+# ✅ GOOD: Keep Python stateless and ask Elixir to update session state
 def increment_counter(self, ctx):
-    current = ctx.get_variable('counter', 0)
-    ctx['counter'] = current + 1
+    return ctx.call_elixir_tool("increment_counter")
 ```
 
 ### Error Handling
@@ -184,7 +183,7 @@ config :logger, level: :debug
 ## Learn More
 
 - [Snakepit Documentation](../../README.md)
-- [gRPC Bridge Design](../../README_GRPC_BRIDGE.md)
+- [gRPC Bridge Design](../../README_GRPC.md)
 - [Technical Specification](docs/showcase-improvements-technical-spec.md)
 
 ## License

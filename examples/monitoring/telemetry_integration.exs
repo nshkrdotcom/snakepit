@@ -13,7 +13,7 @@
 # 5. Custom metrics aggregation
 #
 # Usage:
-#   mix run examples/monitoring/telemetry_integration.exs
+#   mix run --no-start examples/monitoring/telemetry_integration.exs
 #
 
 # Disable automatic pooling to avoid port conflicts

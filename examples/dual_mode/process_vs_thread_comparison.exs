@@ -12,7 +12,7 @@
 # 4. When to use which profile
 #
 # Usage:
-#   mix run examples/dual_mode/process_vs_thread_comparison.exs
+#   mix run --no-start examples/dual_mode/process_vs_thread_comparison.exs
 #
 
 # Disable automatic pooling to avoid port conflicts

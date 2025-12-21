@@ -3,6 +3,14 @@
 # Advanced gRPC Features Example
 # Demonstrates error handling, retries, and real-world patterns
 
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."},
+  {:grpc, "~> 0.10.2"},
+  {:protobuf, "~> 0.14.1"}
+])
+
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :pooling_enabled, true)
@@ -19,14 +27,7 @@ Application.put_env(:snakepit, :pools, [
 
 Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
 Application.put_env(:snakepit, :grpc_port, 50051)
-
-Code.require_file("mix_bootstrap.exs", __DIR__)
-
-Snakepit.Examples.Bootstrap.ensure_mix!([
-  {:snakepit, path: "."},
-  {:grpc, "~> 0.10.2"},
-  {:protobuf, "~> 0.14.1"}
-])
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 defmodule AdvancedExample do
   def run do

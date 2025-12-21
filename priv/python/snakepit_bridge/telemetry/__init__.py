@@ -30,7 +30,7 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, Optional
 
-from .manager import get_backend, set_backend
+from .manager import get_backend, set_backend, is_enabled
 
 # Import OpenTelemetry tracing functions from the old module
 from ..otel_tracing import (
@@ -53,6 +53,7 @@ __all__ = [
     "span",  # New event streaming span
     "set_backend",
     "get_backend",
+    "is_enabled",
     # OpenTelemetry (old, for backward compatibility)
     "setup_tracing",
     "get_tracer",

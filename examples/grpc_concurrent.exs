@@ -3,9 +3,9 @@
 # Concurrent Operations with gRPC Example
 # Demonstrates parallel task execution and pool utilization
 #
-# Usage: elixir examples/grpc_concurrent.exs [pool_size]
+# Usage: mix run --no-start examples/grpc_concurrent.exs [pool_size]
 # Default pool_size: 4
-# Example: elixir examples/grpc_concurrent.exs 100
+# Example: mix run --no-start examples/grpc_concurrent.exs 100
 
 pool_size =
   case System.argv() do
@@ -23,10 +23,18 @@ pool_size =
       4
 
     _ ->
-      IO.puts("⚠️ Usage: elixir examples/grpc_concurrent.exs [pool_size]")
+      IO.puts("⚠️ Usage: mix run --no-start examples/grpc_concurrent.exs [pool_size]")
       IO.puts("Using default: 4")
       4
   end
+
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."},
+  {:grpc, "~> 0.10.2"},
+  {:protobuf, "~> 0.14.1"}
+])
 
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
@@ -44,14 +52,7 @@ Application.put_env(:snakepit, :pools, [
 
 Application.put_env(:snakepit, :pool_config, %{pool_size: pool_size})
 Application.put_env(:snakepit, :grpc_port, 50051)
-
-Code.require_file("mix_bootstrap.exs", __DIR__)
-
-Snakepit.Examples.Bootstrap.ensure_mix!([
-  {:snakepit, path: "."},
-  {:grpc, "~> 0.10.2"},
-  {:protobuf, "~> 0.14.1"}
-])
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 defmodule ConcurrentExample do
   def run(pool_size) do

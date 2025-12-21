@@ -123,7 +123,7 @@ class MLWorkflowHandler:
         if session_id in self._ml_data:
             feature_names = self._ml_data[session_id]["feature_names"]
             # Generate fake feature scores
-            scores = np.random.rand(len(feature_names))
+            scores = np.random.rand(len(feature_names)).tolist()
             selected = sorted(zip(feature_names, scores), 
                             key=lambda x: x[1], reverse=True)[:k_best]
             
@@ -169,9 +169,9 @@ class MLWorkflowHandler:
     def cross_validate(self, ctx, cv_folds: int) -> Dict[str, Any]:
         """Perform cross-validation."""
         # Simulate CV results
-        accuracies = [0.92 + np.random.rand() * 0.06 for _ in range(cv_folds)]
-        mean_acc = np.mean(accuracies)
-        std_acc = np.std(accuracies)
+        accuracies = [float(0.92 + np.random.rand() * 0.06) for _ in range(cv_folds)]
+        mean_acc = float(np.mean(accuracies))
+        std_acc = float(np.std(accuracies))
         
         return {
             "mean_accuracy": mean_acc,

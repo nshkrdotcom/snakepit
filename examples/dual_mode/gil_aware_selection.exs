@@ -13,7 +13,7 @@
 # 5. Production configuration patterns for both cases
 #
 # Usage:
-#   mix run examples/dual_mode/gil_aware_selection.exs
+#   mix run --no-start examples/dual_mode/gil_aware_selection.exs
 #
 
 # Disable automatic pooling

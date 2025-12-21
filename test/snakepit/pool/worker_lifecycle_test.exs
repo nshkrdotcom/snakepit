@@ -380,7 +380,11 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           send(manager, :lifecycle_check)
-          Process.sleep(50)
+
+          receive do
+          after
+            50 -> :ok
+          end
         end)
 
       assert log =~ "Memory probe for #{worker_id} failed"

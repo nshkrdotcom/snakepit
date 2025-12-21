@@ -3,6 +3,14 @@
 # Session Management with gRPC Example
 # Demonstrates session affinity and stateful operation routing
 
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."},
+  {:grpc, "~> 0.10.2"},
+  {:protobuf, "~> 0.14.1"}
+])
+
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :pooling_enabled, true)
@@ -19,14 +27,7 @@ Application.put_env(:snakepit, :pools, [
 
 Application.put_env(:snakepit, :pool_config, %{pool_size: 4})
 Application.put_env(:snakepit, :grpc_port, 50051)
-
-Code.require_file("mix_bootstrap.exs", __DIR__)
-
-Snakepit.Examples.Bootstrap.ensure_mix!([
-  {:snakepit, path: "."},
-  {:grpc, "~> 0.10.2"},
-  {:protobuf, "~> 0.14.1"}
-])
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 IO.inspect(Application.get_env(:snakepit, :pool_size),
   label: "example pool_size env",
@@ -48,8 +49,12 @@ defmodule SessionExample do
       # Make multiple calls with the same session_id
       worker_ids =
         for _ <- 1..5 do
-          {:ok, result} = Snakepit.execute_in_session(session_id, "ping", %{})
-          result["worker_id"] || "unknown"
+          {:ok, _result} = Snakepit.execute_in_session(session_id, "ping", %{})
+
+          case Snakepit.Bridge.SessionStore.get_session(session_id) do
+            {:ok, session} -> session.last_worker_id || "unknown"
+            {:error, :not_found} -> "unknown"
+          end
         end
 
       unique_workers = Enum.uniq(worker_ids)
@@ -95,8 +100,15 @@ defmodule SessionExample do
 
     session_to_worker =
       Enum.map(sessions, fn session_id ->
-        {:ok, result} = Snakepit.execute_in_session(session_id, "ping", %{})
-        {session_id, result["worker_id"] || "unknown"}
+        {:ok, _result} = Snakepit.execute_in_session(session_id, "ping", %{})
+
+        worker_id =
+          case Snakepit.Bridge.SessionStore.get_session(session_id) do
+            {:ok, session} -> session.last_worker_id || "unknown"
+            {:error, :not_found} -> "unknown"
+          end
+
+        {session_id, worker_id}
       end)
 
     Enum.each(session_to_worker, fn {session_id, worker_id} ->
@@ -121,10 +133,14 @@ defmodule SessionExample do
       Enum.map(session_to_worker, fn {session_id, worker_id} ->
         case Snakepit.Bridge.SessionStore.get_session(session_id) do
           {:ok, session} ->
+            now = System.monotonic_time(:second)
+            age_seconds = max(now - session.created_at, 0)
+            idle_seconds = max(now - session.last_accessed, 0)
+
             IO.puts("  #{session_id}:")
             IO.puts("    Worker: #{worker_id}")
-            IO.puts("    Created: #{Map.get(session, :created_at, "unknown")}")
-            IO.puts("    Last accessed: #{Map.get(session, :last_accessed_at, "unknown")}")
+            IO.puts("    Age: #{age_seconds}s")
+            IO.puts("    Idle: #{idle_seconds}s")
 
           {:error, :not_found} ->
             IO.puts("  #{session_id}: Not found in SessionStore")

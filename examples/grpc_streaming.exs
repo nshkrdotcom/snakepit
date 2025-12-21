@@ -2,8 +2,8 @@
 
 # Streaming with gRPC Example
 # Demonstrates real-time streaming operations with progress tracking
-# Usage: elixir examples/grpc_streaming.exs [pool_size]
-# Example: elixir examples/grpc_streaming.exs 100
+# Usage: mix run --no-start examples/grpc_streaming.exs [pool_size]
+# Example: mix run --no-start examples/grpc_streaming.exs 100
 
 # Get pool size from command line argument (default: 2)
 pool_size =
@@ -13,6 +13,12 @@ pool_size =
   end
 
 IO.puts("Starting with pool size: #{pool_size}")
+
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
 
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
@@ -29,15 +35,10 @@ Application.put_env(:snakepit, :pools, [
 ])
 
 Application.put_env(:snakepit, :grpc_port, 50051)
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 # Suppress Snakepit internal logs for clean output
 Application.put_env(:snakepit, :log_level, :warning)
-
-Mix.install([
-  {:snakepit, path: "."},
-  {:grpc, "~> 0.10.2"},
-  {:protobuf, "~> 0.14.1"}
-])
 
 # Runtime logger filtering - suppress gRPC interceptor logs
 Logger.configure(level: :warning)
@@ -96,17 +97,20 @@ defmodule StreamingExample do
 
     case Snakepit.Pool.get_stats() do
       stats when is_map(stats) ->
-        IO.puts("  Workers: #{stats.workers}")
-        IO.puts("  Available: #{stats.available}")
-        IO.puts("  Busy: #{stats.busy}")
+        worker_count = Snakepit.Pool.Registry.worker_count()
+
+        IO.puts("  Workers: #{worker_count}")
+        IO.puts("  Queued: #{stats.queued}")
+        IO.puts("  Errors: #{stats.errors}")
         IO.puts("  Total requests: #{stats.requests}")
+        IO.puts("  Queue timeouts: #{stats.queue_timeouts}")
 
       error ->
         IO.puts("  ❌ Failed to get stats: #{inspect(error)}")
     end
 
     IO.puts("\n✅ Pool scaling example complete\n")
-    IO.puts("Note: Streaming tools (ping_stream, batch_inference) are not yet implemented.")
+    IO.puts("Note: Streaming tools like stream_progress are available; ping_stream is not.")
     IO.puts("This example demonstrates pool initialization and basic concurrent execution.\n")
   end
 

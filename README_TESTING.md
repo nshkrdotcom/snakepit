@@ -18,7 +18,7 @@ Before running any Elixir tests make sure the local toolchain is bootstrapped an
 
 ```bash
 make bootstrap          # installs Mix deps, creates .venv/.venv-py313, regenerates gRPC stubs
-mix snakepit.doctor     # verifies python executable, grpc import, health probe, and port availability
+mix snakepit.doctor     # verifies python executable, grpc import, health probe, and grpc_port availability
 ```
 
 (`mix snakepit.setup` runs the same bootstrap sequence from inside Mix if `make` is unavailable.)
@@ -219,7 +219,7 @@ The test suite is designed to run in CI environments:
 
 3. **Compilation Warnings**
    - Protocol buffer regeneration may be needed
-   - Run `mix grpc.gen` to regenerate Elixir bindings
+   - Run `mix snakepit.setup` (or `mix grpc.gen` if you only need Elixir bindings)
 
 ### Telemetry Verification Checklist
 
@@ -231,5 +231,5 @@ The test suite is designed to run in CI environments:
 ## Related Documentation
 
 - [Main README](README.md) - Project overview
-- [Unified gRPC Bridge](README_UNIFIED_GRPC_BRIDGE.md) - Protocol details
+- [Unified gRPC Bridge (archived)](docs/archive/design-process/README_UNIFIED_GRPC_BRIDGE.md) - Historical protocol notes
 - [Main README](README.md) - Implementation status

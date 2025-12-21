@@ -2,16 +2,16 @@ defmodule SnakepitShowcase.DemoRunner do
   @moduledoc """
   Orchestrates running various Snakepit demonstrations.
   """
-  
+
   alias SnakepitShowcase.Demos.{
     BasicDemo,
     SessionDemo,
     StreamingDemo,
     ConcurrentDemo,
-    VariablesDemo,
     BinaryDemo,
     MLWorkflowDemo,
-    ExecutionModesDemo
+    ExecutionModesDemo,
+    GrpcToolsDemo
   }
 
   @demos [
@@ -19,25 +19,24 @@ defmodule SnakepitShowcase.DemoRunner do
     {SessionDemo, "Session Management"},
     {StreamingDemo, "Streaming Operations"},
     {ConcurrentDemo, "Concurrent Processing"},
-    {VariablesDemo, "Variable Management"},
     {BinaryDemo, "Binary Serialization"},
     {MLWorkflowDemo, "ML Workflows"},
-    {ExecutionModesDemo, "Execution Modes Guide"}
+    {ExecutionModesDemo, "Execution Modes Guide"},
+    {GrpcToolsDemo, "gRPC Tools Bridge"}
   ]
 
   def run_all do
     IO.puts("\n🎯 Snakepit Showcase - Running All Demos\n")
-    
+
     Enum.each(@demos, fn {module, name} ->
       IO.puts("\n" <> String.duplicate("=", 60))
       IO.puts("📋 Demo: #{name}")
       IO.puts(String.duplicate("=", 60) <> "\n")
-      
+
       case module.run() do
         :ok -> IO.puts("✅ #{name} completed successfully")
         {:error, reason} -> IO.puts("❌ #{name} failed: #{inspect(reason)}")
       end
-      
     end)
   end
 
@@ -48,25 +47,25 @@ defmodule SnakepitShowcase.DemoRunner do
 
   defp main_menu do
     IO.puts("\nSelect a demo to run:")
-    
+
     @demos
     |> Enum.with_index(1)
     |> Enum.each(fn {{_module, name}, idx} ->
       IO.puts("  #{idx}. #{name}")
     end)
-    
+
     IO.puts("  0. Exit")
-    
+
     case IO.gets("\nEnter your choice: ") |> String.trim() |> Integer.parse() do
-      {0, _} -> 
+      {0, _} ->
         IO.puts("👋 Goodbye!")
         :ok
-        
+
       {choice, _} when choice > 0 and choice <= length(@demos) ->
         {module, name} = Enum.at(@demos, choice - 1)
         run_demo(module, name)
         main_menu()
-        
+
       _ ->
         IO.puts("❌ Invalid choice. Please try again.")
         main_menu()
@@ -77,9 +76,9 @@ defmodule SnakepitShowcase.DemoRunner do
     IO.puts("\n" <> String.duplicate("-", 40))
     IO.puts("🚀 Running: #{name}")
     IO.puts(String.duplicate("-", 40) <> "\n")
-    
+
     module.run()
-    
+
     IO.puts("\n✅ Demo completed. Press Enter to continue...")
     IO.gets("")
   end

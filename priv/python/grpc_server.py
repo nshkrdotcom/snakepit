@@ -198,6 +198,9 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         telemetry.set_backend(GrpcBackend(self.telemetry_stream))
         logger.info("Telemetry backend initialized (gRPC stream)")
 
+        self._registered_sessions = set()
+        self._register_lock = asyncio.Lock()
+
         logger.debug("Creating async channel to %s", elixir_address)
 
         # Create async client channel for async operations (proxying)
@@ -437,8 +440,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             
             # Register adapter tools with the session (for new BaseAdapter)
             if hasattr(adapter, 'register_with_session'):
-                registered_tools = adapter.register_with_session(request.session_id, self.sync_elixir_stub)
-                logger.info(f"Registered {len(registered_tools)} tools for session {request.session_id}")
+                await self._ensure_tools_registered(request.session_id, adapter)
             
             # Initialize adapter if needed
             if hasattr(adapter, 'initialize'):
@@ -540,8 +542,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             
             # Register adapter tools with the session (for new BaseAdapter)
             if hasattr(adapter, 'register_with_session'):
-                registered_tools = adapter.register_with_session(request.session_id, self.sync_elixir_stub)
-                logger.info(f"Registered {len(registered_tools)} tools for session {request.session_id}")
+                await self._ensure_tools_registered(request.session_id, adapter)
             
             # CRITICAL FIX: Initialize adapter (async-safe now that method is async)
             if hasattr(adapter, 'initialize'):
@@ -680,6 +681,18 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         except Exception as e:
             logger.error(f"ExecuteStreamingTool failed: {e}", exc_info=True)
             await context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    async def _ensure_tools_registered(self, session_id: str, adapter) -> None:
+        if session_id in self._registered_sessions:
+            return
+
+        async with self._register_lock:
+            if session_id in self._registered_sessions:
+                return
+
+            registered_tools = adapter.register_with_session(session_id, self.sync_elixir_stub)
+            if registered_tools is not None:
+                self._registered_sessions.add(session_id)
 
     async def WatchVariables(self, request, context):
         """Watch variables for changes - placeholder for Stage 3."""

@@ -6,8 +6,9 @@ streaming behaviour end-to-end.
 
 ## Current State
 
-- ✅ `Snakepit.execute_stream/4` and `execute_in_session_stream/5` stream results
-  through the gRPC adapter with full session awareness.
+- ✅ Elixir -> Python streaming (`Snakepit.execute_stream/4`, `execute_in_session_stream/5`)
+  is supported. Python -> Elixir streaming (`BridgeService.ExecuteStreamingTool`) returns
+  UNIMPLEMENTED today.
 - ✅ `Snakepit.Adapters.GRPCPython` handles request/response and streaming calls
   via `Snakepit.GRPC.Client` with per-worker session IDs.
 - ✅ Workers persist the OS-assigned port and expose their live `GRPC.Stub` so BridgeServer can reuse an existing channel (`test/unit/grpc/grpc_worker_ephemeral_port_test.exs`, `test/snakepit/grpc/bridge_server_test.exs`).
@@ -90,7 +91,7 @@ inside a `ThreadPoolExecutor`.
 - Exercise everything interactively:
 
   ```bash
-  MIX_ENV=dev mix run examples/stream_progress_demo.exs
+  MIX_ENV=dev mix run --no-start examples/stream_progress_demo.exs
   ```
 
 - Inspect decoded payloads quickly:

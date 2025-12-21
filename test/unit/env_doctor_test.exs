@@ -23,12 +23,12 @@ defmodule Snakepit.EnvDoctorTest do
       "#!/usr/bin/env python3\nprint('ok')\n"
     )
 
-    Application.put_env(:snakepit, :grpc_config, %{base_port: 55_000 + :rand.uniform(1_000)})
+    Application.put_env(:snakepit, :grpc_port, 55_000 + :rand.uniform(1_000))
 
     CommandRunner.reset!()
 
     on_exit(fn ->
-      Application.delete_env(:snakepit, :grpc_config)
+      Application.delete_env(:snakepit, :grpc_port)
       File.rm_rf(tmp)
     end)
 
@@ -36,7 +36,7 @@ defmodule Snakepit.EnvDoctorTest do
   end
 
   test "run returns ok when every check passes", %{root: root, python: python} do
-    CommandRunner.reset!([:ok, :ok])
+    CommandRunner.reset!([:ok, :ok, :ok])
 
     assert {:ok, results} =
              EnvDoctor.run(
@@ -50,12 +50,14 @@ defmodule Snakepit.EnvDoctorTest do
 
     assert [
              {:cmd, ^python, ["-c", "import grpc"], [cd: ^root, env: env1]},
-             {:cmd, ^python, [script_path, "--health-check" | _rest], [cd: ^root, env: env2]}
+             {:cmd, ^python, [script_path, "--health-check" | _rest], [cd: ^root, env: env2]},
+             {:cmd, ^python, [script_path, "--health-check" | _rest2], [cd: ^root, env: env3]}
            ] = CommandRunner.calls()
 
     assert script_path == Path.join(root, "priv/python/grpc_server.py")
     assert is_list(env1)
     assert is_list(env2)
+    assert is_list(env3)
   end
 
   test "run flags missing python executable", %{root: root} do
@@ -67,7 +69,7 @@ defmodule Snakepit.EnvDoctorTest do
              )
 
     assert %{name: :python_exec, status: :error, message: message} = hd(results)
-    assert message =~ "Run make bootstrap"
+    assert message =~ "mix snakepit.setup"
 
     assert CommandRunner.calls() == []
   end
@@ -85,7 +87,7 @@ defmodule Snakepit.EnvDoctorTest do
   end
 
   test "ensure_python!/1 raises on failed health check", %{root: root, python: python} do
-    CommandRunner.reset!([:ok, {:error, :health_failed}])
+    CommandRunner.reset!([:ok, {:error, :health_failed}, :ok])
 
     assert_raise RuntimeError, fn ->
       EnvDoctor.ensure_python!(

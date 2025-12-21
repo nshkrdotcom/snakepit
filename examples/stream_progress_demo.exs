@@ -1,6 +1,17 @@
 #!/usr/bin/env elixir
 
-Application.ensure_all_started(:logger)
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
+
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+Application.put_env(:snakepit, :pooling_enabled, true)
+Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_host, "localhost")
+Application.put_env(:snakepit, :log_level, :warning)
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 Snakepit.run_as_script(fn ->
   IO.puts("Starting stream_progress demo (5 steps)...")

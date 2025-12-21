@@ -10,14 +10,11 @@ config :snakepit,
     worker_restart_delay: 1_000
   },
   adapter_module: Snakepit.Adapters.GRPCPython,
-  health_check_interval: 30_000,
+  grpc_port: 50051,
+  grpc_host: "localhost",
   protocol_negotiation: true,
   enable_process_registry: true,
-  enable_application_cleanup: true,
-  grpc_config: %{
-    base_port: 50051,
-    port_range: 10
-  }
+  enable_application_cleanup: true
 
 # Logger configuration for development
 config :logger, :console,

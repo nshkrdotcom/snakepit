@@ -60,7 +60,13 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
         {:ok, %{"result" => 42}}
 
       "slow_operation" ->
-        Process.sleep(args["delay"] || 100)
+        delay = args["delay"] || 100
+
+        receive do
+        after
+          delay -> :ok
+        end
+
         {:ok, %{"status" => "completed"}}
 
       "initialize_session" ->

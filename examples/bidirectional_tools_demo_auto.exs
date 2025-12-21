@@ -88,6 +88,8 @@ alias Snakepit.Bridge.{SessionStore, ToolRegistry}
 # Configure the application
 Application.put_env(:snakepit, :grpc_port, 50051)
 Application.put_env(:snakepit, :pooling_enabled, false)
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
+grpc_port = Application.get_env(:snakepit, :grpc_port)
 
 # Start the application with gRPC server
 {:ok, _} = Application.ensure_all_started(:grpc)
@@ -97,7 +99,8 @@ Application.put_env(:snakepit, :pooling_enabled, false)
 {:ok, _} =
   Supervisor.start_link(
     [
-      {GRPC.Server.Supervisor, endpoint: Snakepit.GRPC.Endpoint, port: 50051, start_server: true}
+      {GRPC.Server.Supervisor,
+       endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true}
     ],
     strategy: :one_for_one
   )
@@ -115,7 +118,7 @@ SessionStore.delete_session(session_id)
 
 IO.puts("\n=== Bidirectional Tool Bridge Server ===")
 IO.puts("Session ID: #{session_id}")
-IO.puts("gRPC Server running on port 50051\n")
+IO.puts("gRPC Server running on port #{grpc_port}\n")
 
 # Register Elixir tools
 IO.puts("Registering Elixir tools...")
@@ -170,12 +173,30 @@ end
 
 IO.puts("\nServer is ready for Python connections!")
 IO.puts("Run the Python demo in another terminal:")
-IO.puts("  python examples/python_elixir_tools_demo.py")
+IO.puts("  SNAKEPIT_GRPC_PORT=#{grpc_port} python examples/python_elixir_tools_demo.py")
 IO.puts("\nPress Ctrl+C to stop the server.")
+IO.puts("Set SNAKEPIT_DEMO_DURATION_MS to auto-stop for scripted runs.")
 
 # Keep the server running
+auto_stop_ms =
+  case System.get_env("SNAKEPIT_DEMO_DURATION_MS") do
+    nil ->
+      nil
+
+    value ->
+      case Integer.parse(value) do
+        {int, ""} when int > 0 -> int
+        _ -> nil
+      end
+  end
+
 try do
-  Process.sleep(:infinity)
+  if auto_stop_ms do
+    IO.puts("Auto-stop enabled: stopping in #{div(auto_stop_ms, 1000)}s")
+    Process.sleep(auto_stop_ms)
+  else
+    Process.sleep(:infinity)
+  end
 rescue
   _ ->
     IO.puts("\nShutting down...")

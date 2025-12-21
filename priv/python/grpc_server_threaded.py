@@ -59,6 +59,16 @@ logging.getLogger().addFilter(_log_filter)
 logger.info("Loaded grpc_server_threaded.py from %s", __file__)
 
 
+def _ensure_event_loop() -> asyncio.AbstractEventLoop:
+    """Return a running loop or create one to avoid deprecation warnings."""
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
+
+
 class ThreadSafetyMonitor:
     """
     Monitor for tracking thread safety issues during execution.
@@ -133,7 +143,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         self.adapter_class = adapter_class
         self.elixir_address = elixir_address
         self.max_workers = max_workers
-        self.loop = loop or asyncio.get_event_loop()
+        self.loop = loop or _ensure_event_loop()
         self.server: Optional[grpc.aio.Server] = None
 
         # Thread safety monitoring

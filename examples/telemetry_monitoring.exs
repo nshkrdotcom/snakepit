@@ -6,7 +6,13 @@
 # - Performance tracking and alerting
 # - Error rate monitoring
 # - Resource usage tracking
-# Usage: elixir examples/telemetry_monitoring.exs
+# Usage: mix run --no-start examples/telemetry_monitoring.exs
+
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
 
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
@@ -23,15 +29,10 @@ Application.put_env(:snakepit, :pools, [
 
 Application.put_env(:snakepit, :pool_config, %{pool_size: 3})
 Application.put_env(:snakepit, :grpc_port, 50051)
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 # Suppress Snakepit internal logs for clean output
 Application.put_env(:snakepit, :log_level, :warning)
-
-Mix.install([
-  {:snakepit, path: "."},
-  {:grpc, "~> 0.10.2"},
-  {:protobuf, "~> 0.14.1"}
-])
 
 defmodule TelemetryMonitoringExample do
   @moduledoc """
@@ -94,7 +95,9 @@ defmodule TelemetryMonitoringExample do
         send(monitor, {:worker_restart, worker_id, restart_count})
 
         if restart_count > 3 do
-          IO.puts("  🚨 [ALERT] Worker #{worker_id} restarting frequently! (#{restart_count} restarts)")
+          IO.puts(
+            "  🚨 [ALERT] Worker #{worker_id} restarting frequently! (#{restart_count} restarts)"
+          )
         end
       end,
       nil
@@ -103,10 +106,10 @@ defmodule TelemetryMonitoringExample do
     # 2. Performance tracking
     :telemetry.attach(
       "monitor-performance",
-      [:snakepit, :python, :call, :stop],
+      [:snakepit, :grpc_worker, :execute, :stop],
       fn _event, measurements, metadata, _ ->
-        duration_ms = measurements.duration / 1_000_000
-        command = metadata.command
+        duration_ms = Map.get(measurements, :duration_ms, 0) * 1.0
+        command = metadata.command || "unknown"
 
         send(monitor, {:call_completed, command, duration_ms})
 
@@ -121,13 +124,15 @@ defmodule TelemetryMonitoringExample do
     # 3. Error monitoring
     :telemetry.attach(
       "monitor-errors",
-      [:snakepit, :python, :call, :exception],
-      fn _event, _measurements, metadata, _ ->
-        command = metadata.command
-        error = metadata[:error] || "unknown"
+      [:snakepit, :grpc_worker, :execute, :stop],
+      fn _event, measurements, metadata, _ ->
+        if metadata[:status] == :error or Map.get(measurements, :errors, 0) > 0 do
+          command = metadata.command || "unknown"
+          error = metadata[:error] || "unknown"
 
-        IO.puts("  ❌ [ERROR] command=#{command} error=#{inspect(error)}")
-        send(monitor, {:error, command, error})
+          IO.puts("  ❌ [ERROR] command=#{command} error=#{inspect(error)}")
+          send(monitor, {:error, command, error})
+        end
       end,
       nil
     )
@@ -165,15 +170,16 @@ defmodule TelemetryMonitoringExample do
 
   defp monitoring_loop(metrics) do
     receive do
-      {:call_completed, command, duration_ms} ->
+      {:call_completed, _command, duration_ms} ->
         updated = %{
           metrics
           | call_count: metrics.call_count + 1,
             total_duration: metrics.total_duration + duration_ms,
             slow_call_count:
-              if duration_ms > 200,
+              if(duration_ms > 200,
                 do: metrics.slow_call_count + 1,
                 else: metrics.slow_call_count
+              )
         }
 
         monitoring_loop(updated)
@@ -274,7 +280,11 @@ defmodule TelemetryMonitoringExample do
 
         sla_compliance =
           if metrics.call_count > 0,
-            do: Float.round((metrics.call_count - metrics.slow_call_count) / metrics.call_count * 100, 1),
+            do:
+              Float.round(
+                (metrics.call_count - metrics.slow_call_count) / metrics.call_count * 100,
+                1
+              ),
             else: 100.0
 
         IO.puts("║ Performance Metrics:                           ║")

@@ -139,10 +139,12 @@ defmodule Snakepit.GRPC.BridgeServer do
          {:ok, tool} <- ToolRegistry.get_tool(request.session_id, request.tool_name),
          {:ok, result} <- execute_tool_handler(tool, request, request.session_id) do
       execution_time = System.monotonic_time(:millisecond) - start_time
+      {encoded_result, binary_result} = encode_tool_result(result)
 
       %ExecuteToolResponse{
         success: true,
-        result: encode_tool_result(result),
+        result: encoded_result,
+        binary_result: binary_result || <<>>,
         error_message: nil,
         metadata: %{
           "execution_time" => to_string(execution_time),
@@ -563,10 +565,12 @@ defmodule Snakepit.GRPC.BridgeServer do
          {:ok, result} <-
            ToolRegistry.execute_local_tool(request.session_id, request.tool_name, params) do
       execution_time = System.monotonic_time(:millisecond) - start_time
+      {encoded_result, binary_result} = encode_tool_result(result)
 
       %ExecuteElixirToolResponse{
         success: true,
-        result: encode_tool_result(result),
+        result: encoded_result,
+        binary_result: binary_result || <<>>,
         error_message: nil,
         metadata: %{
           "execution_time" => to_string(execution_time)
@@ -617,26 +621,45 @@ defmodule Snakepit.GRPC.BridgeServer do
   defp encode_parameter_specs(_), do: []
 
   defp encode_default_value(nil), do: nil
-  defp encode_default_value(value), do: encode_tool_result(value)
+
+  defp encode_default_value(value) do
+    {any, _binary} = encode_tool_result(value)
+    any
+  end
+
+  defp encode_tool_result({:binary, data}) when is_binary(data) do
+    {empty_any(), data}
+  end
+
+  defp encode_tool_result({:binary, data, metadata}) when is_binary(data) do
+    {encode_any(metadata), data}
+  end
 
   defp encode_tool_result(value) do
-    # Encode tool results as JSON since we don't know the specific type
+    {encode_any(value), nil}
+  end
+
+  defp encode_any(value) do
     case Jason.encode(value) do
       {:ok, json_string} when is_binary(json_string) ->
-        # Ensure the value is properly encoded as bytes
         %Any{
           type_url: "type.googleapis.com/google.protobuf.StringValue",
-          # This should already be a binary string
           value: json_string
         }
 
       {:error, _} ->
-        # Fallback: encode as string representation
         %Any{
           type_url: "type.googleapis.com/google.protobuf.StringValue",
-          # inspect always returns a string
           value: inspect(value)
         }
     end
+  end
+
+  # Used when we only have an opaque binary payload and no metadata
+  defp empty_any do
+    %Any{
+      type_url: "type.googleapis.com/google.protobuf.StringValue",
+      value: "{}"
+    }
   end
 end

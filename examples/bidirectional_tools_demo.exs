@@ -92,6 +92,8 @@ alias Snakepit.Bridge.{SessionStore, ToolRegistry}
 # Configure the application
 Application.put_env(:snakepit, :grpc_port, 50051)
 Application.put_env(:snakepit, :pooling_enabled, false)
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
+grpc_port = Application.get_env(:snakepit, :grpc_port)
 
 # Start the application with gRPC server
 {:ok, _} = Application.ensure_all_started(:grpc)
@@ -101,7 +103,8 @@ Application.put_env(:snakepit, :pooling_enabled, false)
 {:ok, _} =
   Supervisor.start_link(
     [
-      {GRPC.Server.Supervisor, endpoint: Snakepit.GRPC.Endpoint, port: 50051, start_server: true}
+      {GRPC.Server.Supervisor,
+       endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true}
     ],
     strategy: :one_for_one
   )
@@ -116,7 +119,8 @@ session_id = "bidirectional-demo-#{:os.system_time(:millisecond)}"
   SessionStore.create_session(session_id, metadata: %{"demo" => "bidirectional_tools"})
 
 IO.puts("\n=== Bidirectional Tool Bridge Demo ===")
-IO.puts("Session ID: #{session_id}\n")
+IO.puts("Session ID: #{session_id}")
+IO.puts("gRPC Server running on port #{grpc_port}\n")
 
 # Register Elixir tools that Python can call
 IO.puts("1. Registering Elixir tools...")
@@ -185,8 +189,10 @@ IO.puts("\n3. Python Integration Demo")
 IO.puts("Now Python can discover and call these Elixir tools!")
 IO.puts("\nTo test from Python:")
 
-IO.puts(~S"""
+IO.puts(~s"""
 # In Python with a SessionContext:
+channel = grpc.insecure_channel("localhost:#{grpc_port}")
+stub = BridgeServiceStub(channel)
 ctx = SessionContext(stub, "#{session_id}")
 
 # List available Elixir tools
@@ -201,6 +207,9 @@ parse_json = ctx.elixir_tools["parse_json"]
 result = parse_json(json_string='{"test": true}')
 print("Parse result:", result)
 """)
+
+IO.puts("\nQuick start:")
+IO.puts("  SNAKEPIT_GRPC_PORT=#{grpc_port} python examples/python_elixir_tools_demo.py")
 
 IO.puts("\n4. Bidirectional Example")
 IO.puts("Python tools registered in this session:")
@@ -237,8 +246,25 @@ IO.puts("Session #{session_id} contains both Elixir and Python tools")
 IO.puts("Tools can be called bidirectionally through the gRPC bridge")
 
 # Keep the server running for Python demo
-IO.puts("\nPress Enter to stop the server and cleanup...")
-IO.gets("")
+auto_stop_ms =
+  case System.get_env("SNAKEPIT_DEMO_DURATION_MS") do
+    nil ->
+      nil
+
+    value ->
+      case Integer.parse(value) do
+        {int, ""} when int > 0 -> int
+        _ -> nil
+      end
+  end
+
+if auto_stop_ms do
+  IO.puts("\nAuto-stop enabled: stopping in #{div(auto_stop_ms, 1000)}s")
+  Process.sleep(auto_stop_ms)
+else
+  IO.puts("\nPress Enter to stop the server and cleanup...")
+  IO.gets("")
+end
 
 # Cleanup
 SessionStore.delete_session(session_id)

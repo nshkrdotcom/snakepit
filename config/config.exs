@@ -81,11 +81,7 @@ config :snakepit,
   # Can be overridden for distributed deployments (Docker, K8s, etc.)
   grpc_host: "localhost",
 
-  # gRPC worker configuration
-  grpc_config: %{
-    base_port: 50052,
-    port_range: 1000
-  },
+  # Worker ports are OS-assigned (ephemeral); no range configuration required.
 
   # Python scientific library threading limits
   # These are applied in Application.start/2 to prevent fork bombs during concurrent worker startup

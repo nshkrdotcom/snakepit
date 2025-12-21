@@ -343,7 +343,11 @@ defmodule Snakepit.Worker.LifecycleManager do
         {:noreply, state}
 
       {worker_id, worker_state} ->
-        SLog.warning("Worker #{worker_id} (#{inspect(pid)}) died: #{inspect(reason)}")
+        if Application.get_env(:snakepit, :test_mode, false) do
+          SLog.debug("Worker #{worker_id} (#{inspect(pid)}) died: #{inspect(reason)}")
+        else
+          SLog.warning("Worker #{worker_id} (#{inspect(pid)}) died: #{inspect(reason)}")
+        end
 
         # Emit telemetry
         emit_recycle_telemetry(worker_state, :worker_died)

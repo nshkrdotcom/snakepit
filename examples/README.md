@@ -1,16 +1,35 @@
 # Snakepit Examples
 
-This directory contains working examples demonstrating Snakepit's features. All examples can be run directly with `elixir` or `mix run`.
+This directory contains working examples demonstrating Snakepit's features. Run from the project root with `mix run --no-start` so each script can set `:grpc_port` and `:pooling_enabled` before the app starts.
 
 ## Quick Start
 
 ```bash
-# Run any example directly
-elixir examples/grpc_basic.exs
-
-# Or with mix
-mix run examples/grpc_basic.exs
+mix run --no-start examples/grpc_basic.exs
 ```
+
+## Run Everything
+
+```bash
+# From repo root
+./examples/run_all.sh
+
+# Or bootstrap first
+./examples/run_all.sh --setup
+
+# Extend the bidirectional auto-demo run time if needed (ms)
+SNAKEPIT_AUTO_DEMO_DURATION_MS=8000 ./examples/run_all.sh
+
+# Override loadtest worker counts
+LOADTEST_BASIC_WORKERS=25 LOADTEST_SUSTAINED_WORKERS=10 ./examples/run_all.sh
+
+# Shorten sustained load demo duration (ms) for faster runs
+SNAKEPIT_SUSTAINED_DURATION_MS=10000 ./examples/run_all.sh
+```
+
+Options:
+- `--skip-showcase` / `--skip-loadtest` to skip the demo apps
+- `--skip-doctor` to skip the environment check
 
 ## Examples by Category
 
@@ -23,7 +42,7 @@ mix run examples/grpc_basic.exs
 - Basic error handling
 
 ```bash
-elixir examples/grpc_basic.exs
+mix run --no-start examples/grpc_basic.exs
 ```
 
 #### `grpc_streaming.exs`
@@ -34,7 +53,7 @@ elixir examples/grpc_basic.exs
 
 ```bash
 # With custom pool size
-elixir examples/grpc_streaming.exs 5
+mix run --no-start examples/grpc_streaming.exs 5
 ```
 
 ### 🔍 Session Management
@@ -46,7 +65,7 @@ elixir examples/grpc_streaming.exs 5
 - Session cleanup
 
 ```bash
-elixir examples/grpc_sessions.exs
+mix run --no-start examples/grpc_sessions.exs
 ```
 
 ### ⚡ Concurrency & Performance
@@ -58,7 +77,7 @@ elixir examples/grpc_sessions.exs
 - Performance benchmarking
 
 ```bash
-elixir examples/grpc_concurrent.exs
+mix run --no-start examples/grpc_concurrent.exs
 ```
 
 #### `grpc_advanced.exs`
@@ -68,7 +87,7 @@ elixir examples/grpc_concurrent.exs
 - Resource management
 
 ```bash
-elixir examples/grpc_advanced.exs
+mix run --no-start examples/grpc_advanced.exs
 ```
 
 ### 🔁 Streaming
@@ -80,7 +99,7 @@ elixir examples/grpc_advanced.exs
 - Incremental results
 
 ```bash
-elixir examples/grpc_streaming_demo.exs
+mix run --no-start examples/grpc_streaming_demo.exs
 ```
 
 #### `stream_progress_demo.exs`
@@ -90,7 +109,7 @@ elixir examples/grpc_streaming_demo.exs
 - Real-time feedback
 
 ```bash
-elixir examples/stream_progress_demo.exs
+mix run --no-start examples/stream_progress_demo.exs
 ```
 
 ### 🔄 Bidirectional Tools
@@ -100,9 +119,10 @@ elixir examples/stream_progress_demo.exs
 - Elixir tools callable from Python
 - Python tools callable from Elixir
 - Tool registry and discovery
+- Set `SNAKEPIT_DEMO_DURATION_MS` to auto-stop in scripted runs
 
 ```bash
-elixir examples/bidirectional_tools_demo.exs
+mix run --no-start examples/bidirectional_tools_demo.exs
 ```
 
 #### `bidirectional_tools_demo_auto.exs`
@@ -111,7 +131,7 @@ elixir examples/bidirectional_tools_demo.exs
 - Complete workflow examples
 
 ```bash
-elixir examples/bidirectional_tools_demo_auto.exs
+mix run --no-start examples/bidirectional_tools_demo_auto.exs
 ```
 
 ### 🧵 Threading (v0.6.0+)
@@ -123,7 +143,7 @@ elixir examples/bidirectional_tools_demo_auto.exs
 - Capacity management
 
 ```bash
-elixir examples/threaded_profile_demo.exs
+mix run --no-start examples/threaded_profile_demo.exs
 ```
 
 ---
@@ -140,7 +160,7 @@ elixir examples/threaded_profile_demo.exs
 - Python telemetry API (`emit()` and `span()`)
 
 ```bash
-elixir examples/telemetry_basic.exs
+mix run --no-start examples/telemetry_basic.exs
 ```
 
 **What you'll learn:**
@@ -159,7 +179,7 @@ elixir examples/telemetry_basic.exs
 - Event aggregation and metrics
 
 ```bash
-elixir examples/telemetry_advanced.exs
+mix run --no-start examples/telemetry_advanced.exs
 ```
 
 **What you'll learn:**
@@ -179,7 +199,7 @@ elixir examples/telemetry_advanced.exs
 - Real-time metrics dashboard
 
 ```bash
-elixir examples/telemetry_monitoring.exs
+mix run --no-start examples/telemetry_monitoring.exs
 ```
 
 **What you'll learn:**
@@ -198,7 +218,7 @@ elixir examples/telemetry_monitoring.exs
 - Real-time metrics visualization
 
 ```bash
-elixir examples/telemetry_metrics_integration.exs
+mix run --no-start examples/telemetry_metrics_integration.exs
 ```
 
 **What you'll learn:**
@@ -221,7 +241,7 @@ elixir examples/telemetry_metrics_integration.exs
 - Pattern matching on errors
 
 ```bash
-elixir examples/structured_errors.exs
+mix run --no-start examples/structured_errors.exs
 ```
 
 **What you'll learn:**
@@ -240,6 +260,32 @@ Bootstrap script for Mix-based applications
 #### `run_examples.exs`
 Helper script to run multiple examples
 
+#### `run_all.sh`
+Runs every example (scripts + demo apps) via `mix run`
+
+## Example Apps
+
+### `examples/snakepit_showcase`
+Run the showcase app with `mix run`:
+
+```bash
+cd examples/snakepit_showcase
+mix setup
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end)'
+```
+
+### `examples/snakepit_loadtest`
+Run the load tests with `mix run`:
+
+```bash
+cd examples/snakepit_loadtest
+mix setup
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(10) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.StressTestDemo.run(10) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BurstLoadDemo.run(10) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(5) end)'
+```
+
 ---
 
 ## Common Patterns
@@ -248,10 +294,10 @@ Helper script to run multiple examples
 
 ```elixir
 # Custom pool size
-elixir examples/grpc_streaming.exs 10
+mix run --no-start examples/grpc_streaming.exs 10
 
 # Environment variables
-SNAKEPIT_LOG_LEVEL=debug elixir examples/grpc_basic.exs
+SNAKEPIT_LOG_LEVEL=debug mix run --no-start examples/grpc_basic.exs
 ```
 
 ### Suppressing Logs
@@ -311,12 +357,9 @@ See [`TELEMETRY.md`](../TELEMETRY.md) for the complete event catalog and integra
 - Erlang/OTP 27+
 - Python 3.9+ with required packages:
   ```bash
-  # Install from project root
-  ./deps/snakepit/scripts/setup_python.sh
-
-  # Or manually
-  cd priv/python
-  pip install -r requirements.txt
+  # From project root
+  mix snakepit.setup
+  mix snakepit.doctor
   ```
 
 ## Troubleshooting
@@ -333,7 +376,7 @@ See [`TELEMETRY.md`](../TELEMETRY.md) for the complete event catalog and integra
 
 ### "Module not found"
 - Run examples from project root
-- Ensure `Mix.install` points to correct path
+- Ensure `mix_bootstrap.exs` is present and referenced
 
 ### Telemetry events not received
 - Check telemetry handlers are attached before execution
@@ -344,7 +387,7 @@ See [`TELEMETRY.md`](../TELEMETRY.md) for the complete event catalog and integra
 
 When adding new examples:
 
-1. Follow the existing pattern (shebang, config, Mix.install, module, run_as_script)
+1. Follow the existing pattern (shebang, mix_bootstrap, config, module, run_as_script)
 2. Include clear documentation in comments
 3. Add error handling
 4. Suppress unnecessary logs

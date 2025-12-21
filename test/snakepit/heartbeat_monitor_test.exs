@@ -1,5 +1,6 @@
 defmodule Snakepit.HeartbeatMonitorTest do
   use ExUnit.Case, async: false
+  import Snakepit.TestHelpers, only: [assert_eventually: 2]
 
   alias Snakepit.HeartbeatMonitor
 
@@ -101,14 +102,17 @@ defmodule Snakepit.HeartbeatMonitorTest do
         ping_fun: ping_fun
       )
 
-    # Allow multiple cycles to run
-    Process.sleep(1_000)
+    assert_eventually(
+      fn ->
+        status = HeartbeatMonitor.get_status(monitor)
 
-    status = HeartbeatMonitor.get_status(monitor)
-
-    assert status.missed_heartbeats == 0
-    assert status.stats.pings_sent >= 8
-    assert status.stats.pongs_received == status.stats.pings_sent
+        status.missed_heartbeats == 0 and
+          status.stats.pings_sent >= 8 and
+          status.stats.pongs_received == status.stats.pings_sent
+      end,
+      timeout: 2_000,
+      interval: 50
+    )
 
     :ok = GenServer.stop(monitor)
     send(worker_pid, :halt)
@@ -129,17 +133,23 @@ defmodule Snakepit.HeartbeatMonitorTest do
         ping_fun: fn _timestamp -> :ok end
       )
 
-    # Allow a couple of failure cycles
-    Process.sleep(200)
+    assert_eventually(
+      fn ->
+        status = HeartbeatMonitor.get_status(monitor)
+
+        status.stats.timeouts >= 1 and
+          status.missed_heartbeats >= 1 and
+          Process.alive?(worker_pid) and
+          Process.alive?(monitor)
+      end,
+      timeout: 1_000,
+      interval: 25
+    )
 
     refute_received {:DOWN, ^worker_ref, :process, ^worker_pid, _}
 
     status = HeartbeatMonitor.get_status(monitor)
     assert status.dependent == false
-    assert status.stats.timeouts >= 1
-    assert status.missed_heartbeats >= 1
-    assert Process.alive?(worker_pid)
-    assert Process.alive?(monitor)
 
     :ok = GenServer.stop(monitor)
     send(worker_pid, :halt)

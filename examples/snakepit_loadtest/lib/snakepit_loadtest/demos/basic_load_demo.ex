@@ -15,23 +15,26 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
     # Get the current pool size
     pool_config = Application.get_env(:snakepit, :pool_config, %{})
     current_pool_size = Map.get(pool_config, :pool_size, System.schedulers_online() * 2)
-    
+
     # Use configured pool size instead of trying to reconfigure
     actual_pool_size = min(current_pool_size, worker_count)
-    
+
     if worker_count > current_pool_size do
-      IO.puts("⚠️  Note: Requested #{worker_count} workers but pool is configured for #{current_pool_size}")
+      IO.puts(
+        "Note: Requested #{worker_count} workers but pool is configured for #{current_pool_size}"
+      )
+
       IO.puts("   Using #{actual_pool_size} workers for this test")
       IO.puts("   To use more workers, configure pool_size in config.exs\n")
     end
-    
+
     # Ensure Snakepit is started
     case Application.ensure_all_started(:snakepit) do
       {:ok, _} -> :ok
       {:error, {:already_started, :snakepit}} -> :ok
       error -> raise "Failed to start Snakepit: #{inspect(error)}"
     end
-    
+
     # Warm up the pool
     IO.puts("Warming up pool...")
     warm_up_pool(actual_pool_size)
@@ -49,17 +52,18 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
     |> Task.async_stream(
       fn _ -> Snakepit.execute("ping", %{message: "warmup"}) end,
       max_concurrency: pool_size,
-      timeout: 30000  # Increased timeout to 30 seconds for gRPC startup
+      # Increased timeout to 30 seconds for gRPC startup
+      timeout: 30000
     )
     |> Stream.run()
   end
 
   defp run_concurrent_workers(worker_count) do
     workload = SnakepitLoadtest.generate_workload(:compute, %{duration: 50})
-    
+
     start_time = System.monotonic_time(:millisecond)
-    
-    results = 
+
+    results =
       1..worker_count
       |> Task.async_stream(
         fn worker_id ->
@@ -73,19 +77,19 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
       |> Enum.map(fn
         {:ok, {worker_id, time, {:ok, _result}}} ->
           {:success, worker_id, time}
-        
+
         {:ok, {worker_id, time, {:error, reason}}} ->
           {:error, worker_id, time, reason}
-        
+
         {:exit, :timeout} ->
           {:timeout, nil, nil}
-        
+
         {:exit, reason} ->
           {:crash, nil, nil, reason}
       end)
-    
+
     total_time = System.monotonic_time(:millisecond) - start_time
-    
+
     %{
       results: results,
       total_time: total_time,
@@ -117,7 +121,7 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
     if success_count > 0 do
       response_times = Enum.map(successful, fn {:success, _, time} -> time end)
       stats = SnakepitLoadtest.calculate_stats(response_times)
-      
+
       IO.puts("\n⏱️  Response Time Statistics")
       IO.puts("============================")
       IO.puts(SnakepitLoadtest.format_stats(stats))
@@ -125,12 +129,13 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
 
     if error_count > 0 do
       IO.puts("\n❌ Errors:")
+
       errors
       |> Enum.take(5)
       |> Enum.each(fn {:error, worker_id, _time, reason} ->
         IO.puts("   Worker #{worker_id}: #{inspect(reason)}")
       end)
-      
+
       if error_count > 5 do
         IO.puts("   ... and #{error_count - 5} more errors")
       end
@@ -140,11 +145,13 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
   defp percentage(part, whole) when whole > 0 do
     round(part / whole * 100)
   end
+
   defp percentage(_, _), do: 0
 
   defp format_throughput(count, time_ms) when time_ms > 0 do
     throughput = count / (time_ms / 1000)
     :erlang.float_to_binary(throughput, decimals: 2)
   end
+
   defp format_throughput(_, _), do: "0.00"
 end

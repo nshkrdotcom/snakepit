@@ -83,14 +83,17 @@ defmodule Snakepit.GRPC.HeartbeatEndToEndTest do
     assert_receive {:heartbeat_monitor_started, ^worker_id, monitor_pid}, 30_000
     assert is_pid(monitor_pid)
 
-    # Allow heartbeat loop to run at least once after initial delay
-    Process.sleep(4_000)
+    assert_eventually(
+      fn ->
+        status = Snakepit.HeartbeatMonitor.get_status(monitor_pid)
 
-    status = Snakepit.HeartbeatMonitor.get_status(monitor_pid)
-
-    assert status.stats.pings_sent >= 1
-    assert status.stats.pongs_received >= 1
-    assert status.missed_heartbeats == 0
+        status.stats.pings_sent >= 1 and
+          status.stats.pongs_received >= 1 and
+          status.missed_heartbeats == 0
+      end,
+      timeout: 5_000,
+      interval: 200
+    )
 
     :ok = GenServer.stop(worker_pid)
 

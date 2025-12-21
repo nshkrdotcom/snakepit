@@ -11,7 +11,7 @@
 # - Thread pool for background computation (CPU-bound)
 #
 # Usage:
-#   mix run examples/dual_mode/hybrid_pools.exs
+#   mix run --no-start examples/dual_mode/hybrid_pools.exs
 #
 
 # Disable automatic pooling to avoid port conflicts

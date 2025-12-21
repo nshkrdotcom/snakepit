@@ -27,12 +27,12 @@ defmodule SnakepitLoadtest.MixProject do
     [
       # Use Snakepit from parent directory
       {:snakepit, path: "../../"},
-      
+
       # Core dependencies
       {:jason, "~> 1.4"},
-      {:telemetry_metrics, "~> 0.6"},
+      {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
-      
+
       # Testing
       {:ex_unit_notifier, "~> 1.3", only: :test}
     ]
@@ -50,8 +50,9 @@ defmodule SnakepitLoadtest.MixProject do
 
   defp basic_demo(args) do
     workers = parse_workers(args, 10)
+
     Mix.Task.run("run", [
-      "-e", 
+      "-e",
       """
       # Use the new managed run function
       Snakepit.run_as_script(fn ->
@@ -63,8 +64,9 @@ defmodule SnakepitLoadtest.MixProject do
 
   defp stress_demo(args) do
     workers = parse_workers(args, 50)
+
     Mix.Task.run("run", [
-      "-e", 
+      "-e",
       """
       Snakepit.run_as_script(fn ->
         SnakepitLoadtest.Demos.StressTestDemo.run(#{workers})
@@ -75,8 +77,9 @@ defmodule SnakepitLoadtest.MixProject do
 
   defp burst_demo(args) do
     workers = parse_workers(args, 100)
+
     Mix.Task.run("run", [
-      "-e", 
+      "-e",
       """
       Snakepit.run_as_script(fn ->
         SnakepitLoadtest.Demos.BurstLoadDemo.run(#{workers})
@@ -87,8 +90,9 @@ defmodule SnakepitLoadtest.MixProject do
 
   defp sustained_demo(args) do
     workers = parse_workers(args, 20)
+
     Mix.Task.run("run", [
-      "-e", 
+      "-e",
       """
       Snakepit.run_as_script(fn ->
         SnakepitLoadtest.Demos.SustainedLoadDemo.run(#{workers})
@@ -99,12 +103,14 @@ defmodule SnakepitLoadtest.MixProject do
 
   defp parse_workers(args, default) do
     case args do
-      [count | _] -> 
+      [count | _] ->
         case Integer.parse(count) do
           {n, ""} when n > 0 -> n
           _ -> default
         end
-      _ -> default
+
+      _ ->
+        default
     end
   end
 end

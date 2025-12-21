@@ -9,7 +9,11 @@ defmodule ThreadCapacityStoreTest do
   end
 
   test "tracks capacity and load through the GenServer owner" do
-    worker_pid = spawn(fn -> Process.sleep(:infinity) end)
+    worker_pid =
+      spawn(fn ->
+        Process.sleep(:infinity)
+      end)
+
     on_exit(fn -> Process.exit(worker_pid, :kill) end)
 
     assert :ok = CapacityStore.track_worker(worker_pid, 2)

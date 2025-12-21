@@ -3,6 +3,12 @@
 # Basic gRPC Usage Example
 # Demonstrates simple request/response patterns with Snakepit's gRPC adapter
 
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
+
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :pooling_enabled, true)
@@ -18,15 +24,10 @@ Application.put_env(:snakepit, :pools, [
 
 Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
 Application.put_env(:snakepit, :grpc_port, 50051)
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 # Suppress Snakepit internal logs (options: :debug, :info, :warning, :error, :none)
 Application.put_env(:snakepit, :log_level, :warning)
-
-Mix.install([
-  {:snakepit, path: "."},
-  {:grpc, "~> 0.10.2"},
-  {:protobuf, "~> 0.14.1"}
-])
 
 defmodule BasicExample do
   def run do

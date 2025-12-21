@@ -2,7 +2,7 @@
 
 # gRPC Streaming Demo for Snakepit
 # Demonstrates real-time streaming with the ShowcaseAdapter
-# Usage: elixir examples/grpc_streaming_demo.exs [pool_size]
+# Usage: mix run --no-start examples/grpc_streaming_demo.exs [pool_size]
 
 pool_size =
   case System.argv() do
@@ -18,6 +18,14 @@ pool_size =
     _ ->
       2
   end
+
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."},
+  {:grpc, "~> 0.10.2"},
+  {:protobuf, "~> 0.14.1"}
+])
 
 # Configure Snakepit
 Application.put_env(:snakepit, :pooling_enabled, true)
@@ -35,14 +43,7 @@ Application.put_env(:snakepit, :pools, [
 Application.put_env(:snakepit, :pool_config, %{pool_size: pool_size})
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :grpc_port, 50051)
-
-Code.require_file("mix_bootstrap.exs", __DIR__)
-
-Snakepit.Examples.Bootstrap.ensure_mix!([
-  {:snakepit, path: "."},
-  {:grpc, "~> 0.10.2"},
-  {:protobuf, "~> 0.14.1"}
-])
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 defmodule StreamingDemo do
   def run(pool_size) do
@@ -55,7 +56,7 @@ defmodule StreamingDemo do
     IO.puts("📊 Demo 1: Progress Updates")
     IO.puts("-" |> String.duplicate(40))
 
-    case Snakepit.execute_stream("ping_stream", %{count: 5}, fn chunk ->
+    case Snakepit.execute_stream("stream_progress", %{steps: 5, delay_ms: 150}, fn chunk ->
            IO.puts("  #{inspect(chunk)}")
          end) do
       :ok -> IO.puts("  ✅ Streaming completed")

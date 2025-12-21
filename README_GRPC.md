@@ -3,6 +3,7 @@
 ## Overview
 
 This guide covers Snakepit's gRPC streaming implementation - a modern replacement for stdin/stdout communication that enables real-time progress updates, progressive results, and superior performance for ML and data processing workflows.
+Streaming is supported for Elixir -> Python tool execution (`Snakepit.execute_stream`). Python -> Elixir streaming via `BridgeService.ExecuteStreamingTool` currently returns UNIMPLEMENTED.
 
 ## Table of Contents
 
@@ -20,14 +21,9 @@ This guide covers Snakepit's gRPC streaming implementation - a modern replacemen
 ### 1. Install Dependencies
 
 ```bash
-# Install gRPC dependencies
-make install-grpc
-
-# Generate protocol buffer code
-make proto-python
-
-# Verify installation
-python -c "import grpc, snakepit_bridge.grpc.snakepit_pb2; print('✅ gRPC ready')"
+# Bootstrap Python + gRPC stubs
+mix snakepit.setup
+mix snakepit.doctor
 ```
 
 ### 2. Basic Configuration
@@ -35,10 +31,8 @@ python -c "import grpc, snakepit_bridge.grpc.snakepit_pb2; print('✅ gRPC ready
 ```elixir
 # Configure Snakepit with gRPC adapter
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-Application.put_env(:snakepit, :grpc_config, %{
-  base_port: 50051,
-  port_range: 100  # Uses ports 50051-50151
-})
+Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_host, "localhost")
 
 {:ok, _} = Application.ensure_all_started(:snakepit)
 ```
@@ -50,7 +44,7 @@ Application.put_env(:snakepit, :grpc_config, %{
 {:ok, result} = Snakepit.execute("ping", %{})
 
 # NEW: Streaming execution
-Snakepit.execute_stream("ping_stream", %{count: 5}, fn chunk ->
+Snakepit.execute_stream("stream_progress", %{steps: 5, delay_ms: 250}, fn chunk ->
   IO.puts("Received: #{chunk["message"]}")
 end)
 ```
@@ -69,14 +63,19 @@ end)
 # mix.exs
 def deps do
   [
-    {:grpc, "~> 0.8"},
-    {:protobuf, "~> 0.12"},
+    {:grpc, "~> 0.10.2"},
+    {:protobuf, "~> 0.14.1"},
     # ... existing deps
   ]
 end
 ```
 
 ### Python Dependencies
+
+For most setups, run `mix snakepit.setup` + `mix snakepit.doctor` from the project
+root and skip the manual pip steps below.
+If Snakepit is a dependency, install from `deps/snakepit/priv/python/requirements.txt`
+and set `SNAKEPIT_PYTHON` (or `:python_executable`) to your venv.
 
 ```bash
 # Option 1: Install with gRPC support
@@ -93,12 +92,12 @@ pip install -e ".[all]"  # Includes gRPC + MessagePack
 
 ```bash
 # Complete development environment
-make dev-setup
+mix snakepit.setup
+mix snakepit.doctor
 
 # Or step by step:
-make install-grpc      # Install Python gRPC deps
-make proto-python      # Generate protobuf code
-make test             # Verify everything works
+mix grpc.gen
+./priv/python/generate_grpc.sh
 ```
 
 ## Core Concepts
@@ -125,6 +124,12 @@ Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)   
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonMsgpack)  # MessagePack
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)     # JSON
 ```
+
+### Same-Node Model
+
+- Python workers are spawned as local OS processes via `Port.open/2`.
+- gRPC traffic is local: workers connect back to `grpc_host:grpc_port`.
+- Remote workers are not supported yet; plan deployments on a single host per node.
 
 ### Worker Architecture
 
@@ -245,7 +250,7 @@ end
 Run the end-to-end streaming example to watch five progress updates stream from Python back into Elixir:
 
 ```bash
-MIX_ENV=dev mix run examples/stream_progress_demo.exs
+MIX_ENV=dev mix run --no-start examples/stream_progress_demo.exs
 ```
 
 Internally it calls the `stream_progress` tool with a configurable `delay_ms`
@@ -548,8 +553,8 @@ end)
 
 **Step 1: Install gRPC**
 ```bash
-make install-grpc
-make proto-python
+mix snakepit.setup
+mix snakepit.doctor
 ```
 
 **Step 2: Update Configuration**
@@ -559,7 +564,8 @@ Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV
 
 # After  
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-Application.put_env(:snakepit, :grpc_config, %{base_port: 50051, port_range: 100})
+Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_host, "localhost")
 ```
 
 **Step 3: Keep Existing Code**
@@ -911,11 +917,12 @@ end)
 
 ```bash
 # Solution: Generate protobuf code
-make proto-python
+mix snakepit.setup
+# Or just regenerate stubs:
+./priv/python/generate_grpc.sh
 
 # Verify:
-ls priv/python/snakepit_bridge/grpc/
-# Should show: snakepit_pb2.py, snakepit_pb2_grpc.py
+ls priv/python/snakepit_bridge_pb2.py priv/python/snakepit_bridge_pb2_grpc.py
 ```
 
 #### 2. "gRPC dependencies not available"
@@ -925,28 +932,25 @@ ls priv/python/snakepit_bridge/grpc/
 python -c "import grpc; print('gRPC:', grpc.__version__)"
 python -c "import google.protobuf; print('Protobuf OK')"
 
-# Install if missing
-pip install 'snakepit-bridge[grpc]'
+# Install if missing (repo/dev)
+pip install -r priv/python/requirements.txt
 ```
 
 #### 3. "Port already in use"
 
 ```elixir
-# Solution: Configure different port range
-Application.put_env(:snakepit, :grpc_config, %{
-  base_port: 50100,  # Try different base port
-  port_range: 50     # Smaller range
-})
+# Solution: Configure a different Elixir gRPC port
+Application.put_env(:snakepit, :grpc_port, 50100)
 ```
 
 #### 4. Worker initialization timeout
 
 ```bash
 # Check Python process
-ps aux | grep grpc_bridge
+ps aux | grep grpc_server
 
 # Check Python errors
-python priv/python/grpc_bridge.py --help
+python priv/python/grpc_server.py --help
 
 # Increase timeout
 Application.put_env(:snakepit, :worker_init_timeout, 30_000)
@@ -993,21 +997,16 @@ Snakepit.GRPCWorker.get_info(worker)
 ### Performance Tuning
 
 ```elixir
-# Adjust gRPC settings
-Application.put_env(:snakepit, :grpc_config, %{
-  base_port: 50051,
-  port_range: 100,
-  # Increase concurrent streams
-  max_concurrent_streams: 10,
-  # Tune timeouts
-  connection_timeout: 10_000,
-  stream_timeout: 300_000
-})
+# Pool + timeout tuning
+Application.put_env(:snakepit, :pool_startup_timeout, 15_000)
+Application.put_env(:snakepit, :pool_queue_timeout, 5_000)
+Application.put_env(:snakepit, :pool_max_queue_size, 1000)
 
-# Pool optimization
+# Pool size optimization
 Application.put_env(:snakepit, :pool_config, %{
   pool_size: 16,  # More workers for concurrent streams
-  worker_init_timeout: 30_000
+  startup_batch_size: 8,
+  startup_batch_delay_ms: 750
 })
 ```
 

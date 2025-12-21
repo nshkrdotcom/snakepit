@@ -209,6 +209,7 @@ defmodule Snakepit.Bridge.ExecuteToolResponse do
   )
 
   field(:execution_time_ms, 5, type: :int64, json_name: "executionTimeMs")
+  field(:binary_result, 6, type: :bytes, json_name: "binaryResult")
 end
 
 defmodule Snakepit.Bridge.ToolChunk.MetadataEntry do
@@ -426,6 +427,7 @@ defmodule Snakepit.Bridge.ExecuteElixirToolResponse do
   )
 
   field(:execution_time_ms, 5, type: :int64, json_name: "executionTimeMs")
+  field(:binary_result, 6, type: :bytes, json_name: "binaryResult")
 end
 
 defmodule Snakepit.Bridge.TelemetryEvent.MeasurementsEntry do

@@ -1,28 +1,31 @@
-#!/bin/bash
-# File: scripts/run_integration_tests.sh
+#!/usr/bin/env bash
+# Run Snakepit integration tests with up-to-date assets.
 
-echo "Running DSPex gRPC Bridge Integration Tests"
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_ROOT"
+
+echo "=========================================="
+echo "Running Snakepit integration test suite"
 echo "=========================================="
 
-# Ensure Python dependencies are installed
-echo "Installing Python dependencies..."
-cd snakepit/priv/python
-pip install -r requirements.txt
-cd ../../..
+export MIX_ENV=${MIX_ENV:-test}
 
-# Compile protocol buffers
-echo "Compiling protocol buffers..."
-cd snakepit
-mix protobuf.compile
-cd ..
+echo "Step 1: Bootstrap toolchain (Mix + Python + gRPC stubs)..."
+mix snakepit.setup
 
-# Run tests
-echo "Running integration tests..."
-cd snakepit
+echo "Step 2: Verify environment (doctor)..."
+mix snakepit.doctor
+
+echo "Step 3: Run integration tests..."
 mix test --only integration
 
-# Run performance tests if requested
-if [ "$1" == "--perf" ]; then
-  echo "Running performance tests..."
+echo "Step 4: Run Python-backed integration tests..."
+mix test --only python_integration
+
+if [ "${1:-}" = "--perf" ]; then
+  echo "Step 5: Run performance-tagged tests..."
   mix test --only performance
 fi

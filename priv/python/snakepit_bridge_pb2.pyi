@@ -159,7 +159,7 @@ class ExecuteToolRequest(_message.Message):
     def __init__(self, session_id: _Optional[str] = ..., tool_name: _Optional[str] = ..., parameters: _Optional[_Mapping[str, _any_pb2.Any]] = ..., metadata: _Optional[_Mapping[str, str]] = ..., stream: bool = ..., binary_parameters: _Optional[_Mapping[str, bytes]] = ...) -> None: ...
 
 class ExecuteToolResponse(_message.Message):
-    __slots__ = ("success", "result", "error_message", "metadata", "execution_time_ms")
+    __slots__ = ("success", "result", "error_message", "metadata", "execution_time_ms", "binary_result")
     class MetadataEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -172,12 +172,14 @@ class ExecuteToolResponse(_message.Message):
     ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_TIME_MS_FIELD_NUMBER: _ClassVar[int]
+    BINARY_RESULT_FIELD_NUMBER: _ClassVar[int]
     success: bool
     result: _any_pb2.Any
     error_message: str
     metadata: _containers.ScalarMap[str, str]
     execution_time_ms: int
-    def __init__(self, success: bool = ..., result: _Optional[_Union[_any_pb2.Any, _Mapping]] = ..., error_message: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., execution_time_ms: _Optional[int] = ...) -> None: ...
+    binary_result: bytes
+    def __init__(self, success: bool = ..., result: _Optional[_Union[_any_pb2.Any, _Mapping]] = ..., error_message: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., execution_time_ms: _Optional[int] = ..., binary_result: _Optional[bytes] = ...) -> None: ...
 
 class ToolChunk(_message.Message):
     __slots__ = ("chunk_id", "data", "is_final", "metadata")
@@ -326,7 +328,7 @@ class ExecuteElixirToolRequest(_message.Message):
     def __init__(self, session_id: _Optional[str] = ..., tool_name: _Optional[str] = ..., parameters: _Optional[_Mapping[str, _any_pb2.Any]] = ..., metadata: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class ExecuteElixirToolResponse(_message.Message):
-    __slots__ = ("success", "result", "error_message", "metadata", "execution_time_ms")
+    __slots__ = ("success", "result", "error_message", "metadata", "execution_time_ms", "binary_result")
     class MetadataEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -339,12 +341,14 @@ class ExecuteElixirToolResponse(_message.Message):
     ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_TIME_MS_FIELD_NUMBER: _ClassVar[int]
+    BINARY_RESULT_FIELD_NUMBER: _ClassVar[int]
     success: bool
     result: _any_pb2.Any
     error_message: str
     metadata: _containers.ScalarMap[str, str]
     execution_time_ms: int
-    def __init__(self, success: bool = ..., result: _Optional[_Union[_any_pb2.Any, _Mapping]] = ..., error_message: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., execution_time_ms: _Optional[int] = ...) -> None: ...
+    binary_result: bytes
+    def __init__(self, success: bool = ..., result: _Optional[_Union[_any_pb2.Any, _Mapping]] = ..., error_message: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., execution_time_ms: _Optional[int] = ..., binary_result: _Optional[bytes] = ...) -> None: ...
 
 class TelemetryEvent(_message.Message):
     __slots__ = ("event_parts", "measurements", "metadata", "timestamp_ns", "correlation_id")

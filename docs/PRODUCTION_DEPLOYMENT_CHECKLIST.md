@@ -32,11 +32,11 @@ mix test
 # Expected: 60 tests, 0 failures
 
 # Test basic example
-elixir examples/grpc_basic.exs
+mix run --no-start examples/grpc_basic.exs
 # Expected: "✅ No orphaned processes"
 
 # Stress test with 100 workers
-elixir examples/grpc_concurrent.exs 100
+mix run --no-start examples/grpc_concurrent.exs 100
 # Expected: Zero orphans after completion
 
 # Verify no orphans

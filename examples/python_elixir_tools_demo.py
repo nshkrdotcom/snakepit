@@ -7,12 +7,18 @@ This example shows:
 2. Calling Elixir tools from Python
 3. Using tool proxies for seamless integration
 4. Combining Python and Elixir capabilities
+
+Configuration:
+- Use --host/--port (or SNAKEPIT_GRPC_HOST/SNAKEPIT_GRPC_PORT) to target Elixir
+- Use --session-id (or SNAKEPIT_SESSION_ID) to skip the prompt
 """
 
 import sys
+import os
 import json
 import asyncio
 import logging
+import argparse
 from typing import Dict, Any
 
 # Add parent directory to path for imports
@@ -27,6 +33,37 @@ from snakepit_bridge.base_adapter import BaseAdapter, tool
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _default_port() -> int:
+    value = os.getenv("SNAKEPIT_GRPC_PORT")
+    if not value:
+        return 50051
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid SNAKEPIT_GRPC_PORT={value!r}; expected an integer.") from exc
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Python → Elixir tools demo")
+    parser.add_argument(
+        "--host",
+        default=os.getenv("SNAKEPIT_GRPC_HOST", "localhost"),
+        help="Elixir gRPC host (default: localhost or SNAKEPIT_GRPC_HOST)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=_default_port(),
+        help="Elixir gRPC port (default: 50051 or SNAKEPIT_GRPC_PORT)",
+    )
+    parser.add_argument(
+        "--session-id",
+        default=os.getenv("SNAKEPIT_SESSION_ID"),
+        help="Session ID to use (default: prompt or SNAKEPIT_SESSION_ID)",
+    )
+    return parser.parse_args()
 
 
 class DemoAdapter(BaseAdapter):
@@ -89,14 +126,20 @@ class DemoAdapter(BaseAdapter):
 
 async def main():
     """Run the demonstration."""
+    args = _parse_args()
+
     # Connect to Elixir gRPC server
-    channel = grpc.insecure_channel('localhost:50051')
+    channel = grpc.insecure_channel(f"{args.host}:{args.port}")
     stub = BridgeServiceStub(channel)
     
     # Get session ID from user or use default
-    print("Enter the session ID from the Elixir demo (or press Enter for default):")
-    user_input = input().strip()
-    session_id = user_input if user_input else "bidirectional-demo"
+    if args.session_id:
+        session_id = args.session_id
+    else:
+        print("Enter the session ID from the Elixir demo (or press Enter for default):")
+        user_input = input().strip()
+        session_id = user_input if user_input else "bidirectional-demo"
+
     print(f"\nUsing session ID: {session_id}")
     
     # Skip session initialization since the Elixir demo already created it

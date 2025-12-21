@@ -100,6 +100,8 @@ message ExecuteToolResponse {
   string error_message = 3;
   map<string, string> metadata = 4;
   int64 execution_time_ms = 5;
+  // Optional opaque binary result payload for large or non-JSON-friendly data
+  bytes binary_result = 6;
 }
 
 message ToolChunk {
@@ -173,6 +175,8 @@ message ExecuteElixirToolResponse {
   string error_message = 3;
   map<string, string> metadata = 4;
   int64 execution_time_ms = 5;
+  // Optional opaque binary result payload for Elixir tools
+  bytes binary_result = 6;
 }
 
 // Telemetry Messages

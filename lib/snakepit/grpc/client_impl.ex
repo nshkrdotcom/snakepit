@@ -241,17 +241,49 @@ defmodule Snakepit.GRPC.ClientImpl do
     end
   end
 
-  defp handle_tool_response(%Bridge.ExecuteToolResponse{success: true, result: any_result}) do
-    # Simple JSON decoder for tool responses
-    case Jason.decode(any_result.value) do
-      {:ok, decoded} -> {:ok, decoded}
-      {:error, _} -> {:ok, any_result.value}
+  @doc false
+  def decode_tool_response(response), do: handle_tool_response(response)
+
+  defp handle_tool_response(%Bridge.ExecuteToolResponse{
+         success: true,
+         result: any_result,
+         binary_result: binary_result
+       }) do
+    cond do
+      binary_payload?(binary_result) ->
+        metadata = decode_any(any_result)
+        {:ok, format_binary_result(binary_result, metadata)}
+
+      true ->
+        {:ok, decode_any(any_result)}
     end
   end
 
   defp handle_tool_response(%Bridge.ExecuteToolResponse{success: false, error_message: error}) do
     {:error, error}
   end
+
+  defp binary_payload?(binary) when is_binary(binary), do: byte_size(binary) > 0
+  defp binary_payload?(_), do: false
+
+  defp format_binary_result(binary_result, metadata) do
+    case metadata do
+      nil -> {:binary, binary_result}
+      %{} = map when map_size(map) == 0 -> {:binary, binary_result}
+      _ -> {:binary, binary_result, metadata}
+    end
+  end
+
+  defp decode_any(nil), do: nil
+
+  defp decode_any(%Google.Protobuf.Any{value: value}) when is_binary(value) do
+    case Jason.decode(value) do
+      {:ok, decoded} -> decoded
+      {:error, _} -> value
+    end
+  end
+
+  defp decode_any(%Google.Protobuf.Any{value: value}), do: value
 
   defp build_execute_tool_request(session_id, tool_name, proto_params, binary_params) do
     %Bridge.ExecuteToolRequest{

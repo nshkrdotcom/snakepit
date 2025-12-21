@@ -1,6 +1,8 @@
 defmodule Snakepit.Examples.Bootstrap do
   @moduledoc false
 
+  require Logger
+
   @spec ensure_mix!([term()]) :: :ok
   def ensure_mix!(deps) when is_list(deps) do
     mix_started =
@@ -20,6 +22,83 @@ defmodule Snakepit.Examples.Bootstrap do
       Mix.install(deps)
     end
 
+    maybe_apply_snakepit_log_level()
+    configure_logger_from_snakepit()
+
     :ok
+  end
+
+  defp maybe_apply_snakepit_log_level do
+    case System.get_env("SNAKEPIT_LOG_LEVEL") do
+      nil ->
+        :ok
+
+      value ->
+        case normalize_log_level(value) do
+          {:ok, level} -> Application.put_env(:snakepit, :log_level, level)
+          :error -> :ok
+        end
+    end
+  end
+
+  defp normalize_log_level(value) when is_binary(value) do
+    case String.downcase(String.trim(value)) do
+      "debug" -> {:ok, :debug}
+      "info" -> {:ok, :info}
+      "warning" -> {:ok, :warning}
+      "warn" -> {:ok, :warning}
+      "error" -> {:ok, :error}
+      "none" -> {:ok, :none}
+      _ -> :error
+    end
+  end
+
+  defp configure_logger_from_snakepit do
+    level =
+      Application.get_env(:snakepit, :log_level, :info)
+      |> map_snakepit_level()
+
+    Logger.configure(level: level)
+  end
+
+  defp map_snakepit_level(:none), do: :error
+  defp map_snakepit_level(:warning), do: :warning
+  defp map_snakepit_level(:error), do: :error
+  defp map_snakepit_level(:debug), do: :debug
+  defp map_snakepit_level(_), do: :info
+
+  @spec ensure_grpc_port!() :: :ok
+  def ensure_grpc_port! do
+    port = Application.get_env(:snakepit, :grpc_port, 50_051)
+
+    if port_available?(port) do
+      :ok
+    else
+      available = find_available_port()
+      Application.put_env(:snakepit, :grpc_port, available)
+      IO.puts("ℹ️  grpc_port #{port} in use; using #{available} instead")
+      :ok
+    end
+  end
+
+  defp port_available?(port) do
+    case :gen_tcp.listen(port, [:binary, active: false, reuseaddr: true]) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        true
+
+      {:error, :eaddrinuse} ->
+        false
+
+      {:error, _reason} ->
+        false
+    end
+  end
+
+  defp find_available_port do
+    {:ok, socket} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+    {:ok, {_ip, port}} = :inet.sockname(socket)
+    :gen_tcp.close(socket)
+    port
   end
 end

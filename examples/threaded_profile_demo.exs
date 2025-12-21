@@ -20,7 +20,7 @@ Application.put_env(:snakepit, :pooling_enabled, false)
 # - Snakepit v0.6.0+
 #
 # Usage:
-#   mix run examples/threaded_profile_demo.exs
+#   mix run --no-start examples/threaded_profile_demo.exs
 #
 
 Code.require_file("mix_bootstrap.exs", __DIR__)

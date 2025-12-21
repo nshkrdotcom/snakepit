@@ -81,7 +81,10 @@ defmodule Snakepit.Performance.WorkerCrashStormTest do
       |> Enum.take(2)
       |> Enum.each(&kill_worker(&1, tracker))
 
-      Process.sleep(25)
+      receive do
+      after
+        25 -> :ok
+      end
     end)
   end
 

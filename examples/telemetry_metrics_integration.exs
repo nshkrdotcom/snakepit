@@ -3,7 +3,13 @@
 # Telemetry Metrics Integration Example
 # Demonstrates how to integrate Snakepit telemetry with metrics systems
 # like Prometheus, StatsD, and custom exporters
-# Usage: elixir examples/telemetry_metrics_integration.exs
+# Usage: mix run --no-start examples/telemetry_metrics_integration.exs
+
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
 
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
@@ -20,16 +26,10 @@ Application.put_env(:snakepit, :pools, [
 
 Application.put_env(:snakepit, :pool_config, %{pool_size: 3})
 Application.put_env(:snakepit, :grpc_port, 50051)
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 # Suppress Snakepit internal logs for clean output
 Application.put_env(:snakepit, :log_level, :warning)
-
-Mix.install([
-  {:snakepit, path: "."},
-  {:grpc, "~> 0.10.2"},
-  {:protobuf, "~> 0.14.1"},
-  {:telemetry_metrics, "~> 1.0"}
-])
 
 defmodule TelemetryMetricsExample do
   @moduledoc """
@@ -53,11 +53,12 @@ defmodule TelemetryMetricsExample do
 
     IO.puts("✓ Metrics system initialized\n")
     IO.puts("Metrics being collected:")
-    IO.puts("  - snakepit.python.call.duration (summary)")
-    IO.puts("  - snakepit.python.call.count (counter)")
+    IO.puts("  - snakepit.grpc_worker.execute.stop.duration_ms (summary)")
+    IO.puts("  - snakepit.grpc_worker.execute.stop.count (counter)")
+    IO.puts("  - snakepit.grpc_worker.execute.stop.error_count (counter)")
     IO.puts("  - snakepit.pool.queue_depth (gauge)")
     IO.puts("  - snakepit.pool.available_workers (gauge)")
-    IO.puts("  - snakepit.error.count (counter)\n")
+    IO.puts("  - snakepit.pool.worker.spawned.count (counter)\n")
 
     # Run workload
     simulate_workload()
@@ -82,21 +83,27 @@ defmodule TelemetryMetricsExample do
     metrics = [
       # Summary: Python call duration
       Telemetry.Metrics.summary(
-        "snakepit.python.call.stop.duration",
-        unit: {:native, :millisecond},
+        "snakepit.grpc_worker.execute.stop.duration_ms",
+        event_name: [:snakepit, :grpc_worker, :execute, :stop],
+        measurement: :duration_ms,
+        unit: :millisecond,
         tags: [:command]
       ),
 
       # Counter: Total calls
       Telemetry.Metrics.counter(
-        "snakepit.python.call.stop.count",
+        "snakepit.grpc_worker.execute.stop.count",
+        event_name: [:snakepit, :grpc_worker, :execute, :stop],
+        measurement: :executions,
         tags: [:command]
       ),
 
       # Counter: Errors
       Telemetry.Metrics.counter(
-        "snakepit.python.call.exception.count",
-        tags: [:command, :error_type]
+        "snakepit.grpc_worker.execute.stop.error_count",
+        event_name: [:snakepit, :grpc_worker, :execute, :stop],
+        measurement: :errors,
+        tags: [:command, :error_kind]
       ),
 
       # Last value: Queue depth
@@ -135,27 +142,49 @@ defmodule TelemetryMetricsExample do
   end
 
   defp handle_metric_event(metric, _event, measurements, metadata, exporter) do
-    case metric.metric_type do
-      :summary ->
+    case metric do
+      %Telemetry.Metrics.Summary{} ->
         # Extract duration and convert to milliseconds
+        measurement_key = measurement_key(metric, :duration)
+
         value =
           measurements
-          |> Map.get(List.last(metric.measurement || [:duration]))
+          |> Map.get(measurement_key)
           |> case do
             nil -> 0
+            v when measurement_key == :duration_ms -> v
             v -> v / 1_000_000
           end
 
         tags = extract_tags(metric.tags, metadata)
         send(exporter, {:summary, metric.name, value, tags})
 
-      :counter ->
-        tags = extract_tags(metric.tags, metadata)
-        send(exporter, {:counter, metric.name, 1, tags})
+      %Telemetry.Metrics.Counter{} ->
+        measurement_key = measurement_key(metric, nil)
 
-      :last_value ->
+        value =
+          cond do
+            is_nil(measurement_key) ->
+              1
+
+            Map.has_key?(measurements, measurement_key) ->
+              case Map.get(measurements, measurement_key) do
+                v when is_number(v) -> v
+                _ -> 0
+              end
+
+            true ->
+              0
+          end
+
+        if value > 0 do
+          tags = extract_tags(metric.tags, metadata)
+          send(exporter, {:counter, metric.name, value, tags})
+        end
+
+      %Telemetry.Metrics.LastValue{} ->
         # Get the measurement value
-        measurement_key = List.last(metric.measurement || [:value])
+        measurement_key = measurement_key(metric, :value)
         value = Map.get(measurements, measurement_key, 0)
         tags = extract_tags(metric.tags, metadata)
         send(exporter, {:gauge, metric.name, value, tags})
@@ -272,7 +301,7 @@ defmodule TelemetryMetricsExample do
             max = Enum.max(values)
             count = length(values)
 
-            short_name = name |> to_string() |> String.split(".") |> List.last()
+            short_name = name |> metric_name_to_string() |> String.split(".") |> List.last()
             tag_str = format_tags(tags)
 
             IO.puts(
@@ -284,7 +313,7 @@ defmodule TelemetryMetricsExample do
             )
 
             IO.puts(
-              "║     Min: #{pad_left(Float.round(min, 2), 10)}ms Max: #{pad_left(Float.round(max, 2), 8)}ms          ║"
+              "║     Min: #{pad_left(Float.round(min * 1.0, 2), 10)}ms Max: #{pad_left(Float.round(max * 1.0, 2), 8)}ms          ║"
             )
           end)
 
@@ -296,7 +325,7 @@ defmodule TelemetryMetricsExample do
           IO.puts("║ Counter Metrics:                                               ║")
 
           Enum.each(counters, fn {{name, tags}, data} ->
-            short_name = name |> to_string() |> String.split(".") |> List.last()
+            short_name = name |> metric_name_to_string() |> String.split(".") |> List.last()
             tag_str = format_tags(tags)
             IO.puts("║   #{pad_left(short_name, 40)}#{tag_str}: #{pad_left(data.count, 10)} ║")
           end)
@@ -309,7 +338,7 @@ defmodule TelemetryMetricsExample do
           IO.puts("║ Gauge Metrics (Last Value):                                    ║")
 
           Enum.each(gauges, fn {{name, tags}, data} ->
-            short_name = name |> to_string() |> String.split(".") |> List.last()
+            short_name = name |> metric_name_to_string() |> String.split(".") |> List.last()
             tag_str = format_tags(tags)
             IO.puts("║   #{pad_left(short_name, 40)}#{tag_str}: #{pad_left(data.value, 10)} ║")
           end)
@@ -319,10 +348,10 @@ defmodule TelemetryMetricsExample do
 
         IO.puts("║                                                                ║")
         IO.puts("║ Prometheus Format Example:                                     ║")
-        IO.puts("║   # TYPE snakepit_python_call_duration_ms summary              ║")
-        IO.puts("║   snakepit_python_call_duration_ms{command=\"add\"} 45.2        ║")
-        IO.puts("║   # TYPE snakepit_python_call_count counter                    ║")
-        IO.puts("║   snakepit_python_call_count{command=\"add\"} 5                 ║")
+        IO.puts("║   # TYPE snakepit_grpc_worker_execute_duration_ms summary      ║")
+        IO.puts("║   snakepit_grpc_worker_execute_duration_ms{command=\"add\"} 45.2 ║")
+        IO.puts("║   # TYPE snakepit_grpc_worker_execute_count counter            ║")
+        IO.puts("║   snakepit_grpc_worker_execute_count{command=\"add\"} 5         ║")
         IO.puts("╚════════════════════════════════════════════════════════════════╝")
     after
       1000 -> IO.puts("⚠️  Timeout retrieving metrics")
@@ -336,6 +365,18 @@ defmodule TelemetryMetricsExample do
     |> Enum.map(fn {k, v} -> "#{k}=#{v}" end)
     |> Enum.join(",")
     |> then(fn s -> "{#{s}}" end)
+  end
+
+  defp metric_name_to_string(name) when is_list(name), do: Enum.join(name, ".")
+  defp metric_name_to_string(name), do: to_string(name)
+
+  defp measurement_key(metric, default) do
+    case metric.measurement do
+      nil -> default
+      key when is_atom(key) -> key
+      keys when is_list(keys) -> List.last(keys)
+      _ -> default
+    end
   end
 
   defp pad_left(value, width) do
@@ -373,11 +414,13 @@ defmodule TelemetryMetricsExample.PrometheusGuide do
     ║                                                                ║
     ║    defp metrics do                                             ║
     ║      [                                                         ║
-    ║        summary("snakepit.python.call.stop.duration",          ║
-    ║          unit: {:native, :millisecond},                        ║
+    ║        summary("snakepit.grpc_worker.execute.stop.duration_ms",║
+    ║          measurement: :duration_ms,                            ║
+    ║          unit: :millisecond,                                   ║
     ║          tags: [:command]),                                    ║
-    ║        counter("snakepit.python.call.exception.count",        ║
-    ║          tags: [:error_type]),                                 ║
+    ║        counter("snakepit.grpc_worker.execute.stop.error_count",║
+    ║          measurement: :errors,                                 ║
+    ║          tags: [:command, :error_kind]),                       ║
     ║        last_value("snakepit.pool.status.queue_depth")         ║
     ║      ]                                                         ║
     ║    end                                                         ║
@@ -408,7 +451,7 @@ defmodule TelemetryMetricsExample.PrometheusGuide do
     ║                                                                ║
     ║    :telemetry.attach(                                          ║
     ║      "my-custom-handler",                                      ║
-    ║      [:snakepit, :python, :call, :stop],                      ║
+    ║      [:snakepit, :grpc_worker, :execute, :stop],              ║
     ║      &MyApp.handle_metric/4,                                   ║
     ║      nil                                                       ║
     ║    )                                                           ║

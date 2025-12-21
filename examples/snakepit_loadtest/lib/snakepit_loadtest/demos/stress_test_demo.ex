@@ -14,6 +14,7 @@ defmodule SnakepitLoadtest.Demos.StressTestDemo do
 
     # Configure for stress testing
     pool_size = min(div(worker_count, 2), 100)
+
     Application.put_env(:snakepit, :pool_config, %{
       pool_size: pool_size,
       max_overflow: 20,
@@ -25,14 +26,16 @@ defmodule SnakepitLoadtest.Demos.StressTestDemo do
     # Run different stress scenarios
     IO.puts("Phase 1: Memory pressure test...")
     memory_results = stress_memory(worker_count)
-    
-    Process.sleep(2000)  # Brief cooldown
-    
+
+    # Brief cooldown
+    Process.sleep(2000)
+
     IO.puts("\nPhase 2: CPU intensive test...")
     cpu_results = stress_cpu(worker_count)
-    
-    Process.sleep(2000)  # Brief cooldown
-    
+
+    # Brief cooldown
+    Process.sleep(2000)
+
     IO.puts("\nPhase 3: Mixed workload test...")
     mixed_results = stress_mixed(worker_count)
 
@@ -45,43 +48,46 @@ defmodule SnakepitLoadtest.Demos.StressTestDemo do
   end
 
   defp stress_memory(worker_count) do
-    workload = SnakepitLoadtest.generate_workload(:memory, %{
-      duration: 100
-    })
-    
+    workload =
+      SnakepitLoadtest.generate_workload(:memory, %{
+        duration: 100
+      })
+
     execute_stress_test(worker_count, workload, "Memory")
   end
 
   defp stress_cpu(worker_count) do
-    workload = SnakepitLoadtest.generate_workload(:compute, %{
-      duration: 200
-    })
-    
+    workload =
+      SnakepitLoadtest.generate_workload(:compute, %{
+        duration: 200
+      })
+
     execute_stress_test(worker_count, workload, "CPU")
   end
 
   defp stress_mixed(worker_count) do
-    workload = SnakepitLoadtest.generate_workload(:mixed, %{
-      compute_duration: 50,
-      sleep: 5
-    })
-    
+    workload =
+      SnakepitLoadtest.generate_workload(:mixed, %{
+        compute_duration: 50,
+        sleep: 5
+      })
+
     execute_stress_test(worker_count, workload, "Mixed")
   end
 
   defp execute_stress_test(worker_count, workload, phase_name) do
     start_time = System.monotonic_time(:millisecond)
-    
+
     # Launch workers in waves
     waves = 5
     workers_per_wave = div(worker_count, waves)
-    
-    results = 
+
+    results =
       1..waves
       |> Enum.flat_map(fn wave ->
         IO.write("  Wave #{wave}/#{waves}...")
-        
-        wave_results = 
+
+        wave_results =
           1..workers_per_wave
           |> Task.async_stream(
             fn worker_id ->
@@ -99,14 +105,15 @@ defmodule SnakepitLoadtest.Demos.StressTestDemo do
             {:exit, :timeout} -> {:timeout, nil, nil}
             {:exit, reason} -> {:crash, nil, nil, reason}
           end)
-        
+
         IO.puts(" done")
-        Process.sleep(500)  # Small delay between waves
+        # Small delay between waves
+        Process.sleep(500)
         wave_results
       end)
-    
+
     total_time = System.monotonic_time(:millisecond) - start_time
-    
+
     %{
       phase: phase_name,
       results: results,
@@ -118,31 +125,36 @@ defmodule SnakepitLoadtest.Demos.StressTestDemo do
   defp display_stress_results(all_results) do
     IO.puts("\n📈 Stress Test Results")
     IO.puts("======================")
-    
+
     Enum.each([:memory, :cpu, :mixed], fn phase ->
       results = Map.get(all_results, phase)
       display_phase_results(results)
     end)
-    
+
     IO.puts("\n🔍 System Impact Analysis")
     IO.puts("=========================")
     analyze_system_impact(all_results)
   end
 
-  defp display_phase_results(%{phase: phase, results: results, total_time: total_time, worker_count: worker_count}) do
+  defp display_phase_results(%{
+         phase: phase,
+         results: results,
+         total_time: total_time,
+         worker_count: worker_count
+       }) do
     successful = Enum.filter(results, &match?({:success, _, _}, &1))
     errors = Enum.filter(results, &match?({:error, _, _, _}, &1))
     timeouts = Enum.filter(results, &match?({:timeout, _, _}, &1))
-    
+
     success_count = length(successful)
     error_count = length(errors)
     timeout_count = length(timeouts)
-    
+
     IO.puts("\n#{phase} Phase:")
     IO.puts("  Success rate: #{percentage(success_count, worker_count)}%")
     IO.puts("  Errors: #{error_count}, Timeouts: #{timeout_count}")
     IO.puts("  Total time: #{total_time}ms")
-    
+
     if success_count > 0 do
       response_times = Enum.map(successful, fn {:success, _, time} -> time end)
       stats = SnakepitLoadtest.calculate_stats(response_times)
@@ -156,31 +168,32 @@ defmodule SnakepitLoadtest.Demos.StressTestDemo do
     memory_median = get_median_response(all_results.memory)
     cpu_median = get_median_response(all_results.cpu)
     mixed_median = get_median_response(all_results.mixed)
-    
+
     if memory_median && cpu_median && mixed_median do
       IO.puts("Response time degradation:")
       IO.puts("  Memory → CPU: #{format_degradation(memory_median, cpu_median)}")
       IO.puts("  CPU → Mixed: #{format_degradation(cpu_median, mixed_median)}")
       IO.puts("  Overall: #{format_degradation(memory_median, mixed_median)}")
     end
-    
+
     # Success rate analysis
     memory_success = calculate_success_rate(all_results.memory)
     cpu_success = calculate_success_rate(all_results.cpu)
     mixed_success = calculate_success_rate(all_results.mixed)
-    
+
     IO.puts("\nSuccess rate trend:")
     IO.puts("  Memory: #{memory_success}%")
     IO.puts("  CPU: #{cpu_success}%")
     IO.puts("  Mixed: #{mixed_success}%")
-    
+
     if mixed_success < 90 do
-      IO.puts("\n⚠️  Warning: Success rate below 90% indicates system stress")
+      IO.puts("\nNote: Success rate below 90% indicates system stress")
     end
   end
 
   defp get_median_response(%{results: results}) do
     successful = Enum.filter(results, &match?({:success, _, _}, &1))
+
     if length(successful) > 0 do
       response_times = Enum.map(successful, fn {:success, _, time} -> time end)
       stats = SnakepitLoadtest.calculate_stats(response_times)
@@ -196,10 +209,11 @@ defmodule SnakepitLoadtest.Demos.StressTestDemo do
   end
 
   defp format_degradation(base, current) when base > 0 do
-    degradation = ((current - base) / base) * 100
+    degradation = (current - base) / base * 100
     sign = if degradation >= 0, do: "+", else: ""
     "#{sign}#{format_number(degradation)}%"
   end
+
   defp format_degradation(_, _), do: "N/A"
 
   defp percentage(part, whole) when whole > 0, do: round(part / whole * 100)

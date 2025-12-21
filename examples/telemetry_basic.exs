@@ -2,7 +2,13 @@
 
 # Basic Telemetry Example
 # Demonstrates how to attach telemetry handlers and receive events from Python workers
-# Usage: elixir examples/telemetry_basic.exs
+# Usage: mix run --no-start examples/telemetry_basic.exs
+
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
 
 # Configure Snakepit for gRPC
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
@@ -19,15 +25,10 @@ Application.put_env(:snakepit, :pools, [
 
 Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
 Application.put_env(:snakepit, :grpc_port, 50051)
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 # Suppress Snakepit internal logs for clean output
 Application.put_env(:snakepit, :log_level, :warning)
-
-Mix.install([
-  {:snakepit, path: "."},
-  {:grpc, "~> 0.10.2"},
-  {:protobuf, "~> 0.14.1"}
-])
 
 defmodule TelemetryBasicExample do
   @moduledoc """
@@ -76,7 +77,7 @@ defmodule TelemetryBasicExample do
     # Handler 2: Python call events
     :telemetry.attach(
       "demo-python-call-stop",
-      [:snakepit, :python, :call, :stop],
+      [:snakepit, :grpc_worker, :execute, :stop],
       &handle_python_call_stop/4,
       nil
     )
@@ -107,7 +108,8 @@ defmodule TelemetryBasicExample do
 
   # Event handlers
   defp handle_worker_spawned(_event, measurements, metadata, _config) do
-    duration_ms = measurements.duration / 1_000_000
+    duration_native = Map.get(measurements, :duration, 0)
+    duration_ms = System.convert_time_unit(duration_native, :native, :millisecond) * 1.0
 
     IO.puts(
       "  📊 [Worker Spawned] worker_id=#{metadata.worker_id} duration=#{Float.round(duration_ms, 2)}ms"
@@ -115,10 +117,10 @@ defmodule TelemetryBasicExample do
   end
 
   defp handle_python_call_stop(_event, measurements, metadata, _config) do
-    duration_ms = measurements.duration / 1_000_000
+    duration_ms = Map.get(measurements, :duration_ms, 0) * 1.0
 
     IO.puts(
-      "  📊 [Python Call] command=#{metadata.command} duration=#{Float.round(duration_ms, 2)}ms"
+      "  📊 [Worker Call] command=#{metadata.command} duration=#{Float.round(duration_ms, 2)}ms"
     )
   end
 

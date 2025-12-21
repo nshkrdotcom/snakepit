@@ -19,6 +19,8 @@ Implementation plans, design documents, and stage completion reports that guided
 - `demo_behavior_design.md` - Demo behavior design
 - `messagepack_wire_protocol_implementation.md` - MessagePack protocol design
 - `SUPERTESTER_REFACTOR_PLAN.md` - Test refactoring plan
+- `README_UNIFIED_GRPC_BRIDGE.md` - Unified gRPC bridge implementation notes
+- `UNIFIED_EXAMPLE_DESIGN.md` - Unified showcase example design document
 
 ### `analysis/`
 Historical analysis, cleanup reports, and issue assessments:

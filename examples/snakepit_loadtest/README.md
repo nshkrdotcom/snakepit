@@ -12,7 +12,7 @@ A comprehensive load testing framework for Snakepit Python integration, designed
 ## Installation
 
 ```bash
-cd snakepit_loadtest
+cd examples/snakepit_loadtest
 mix deps.get
 ```
 
@@ -23,10 +23,10 @@ Tests simple concurrent execution with configurable workers:
 
 ```bash
 # Default: 10 workers
-mix demo.basic
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(10) end)'
 
 # Custom: 200 workers
-mix demo.basic 200
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(200) end)'
 ```
 
 ### Stress Test
@@ -34,10 +34,10 @@ Pushes the system to its limits with memory-intensive and CPU-intensive workload
 
 ```bash
 # Default: 50 workers
-mix demo.stress
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.StressTestDemo.run(50) end)'
 
 # Custom: 150 workers
-mix demo.stress 150
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.StressTestDemo.run(150) end)'
 ```
 
 ### Burst Load Test
@@ -45,42 +45,46 @@ Simulates sudden traffic spikes with ramp-up and cool-down phases:
 
 ```bash
 # Default: 100 peak workers
-mix demo.burst
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BurstLoadDemo.run(100) end)'
 
 # Custom: 500 peak workers
-mix demo.burst 500
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BurstLoadDemo.run(500) end)'
 ```
 
 ### Sustained Load Test
-Runs continuous load for 2 minutes to test long-term stability:
+Runs continuous load for 2 minutes to test long-term stability (override with `SNAKEPIT_SUSTAINED_DURATION_MS`):
 
 ```bash
-# Default: 20 workers
-mix demo.sustained
+# Default: 20 workers, 2 minutes
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(20) end)'
+
+# Shortened duration (ms)
+SNAKEPIT_SUSTAINED_DURATION_MS=10000 \
+  mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(20) end)'
 
 # Custom: 50 workers
-mix demo.sustained 50
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(50) end)'
 ```
 
 ## Test Scenarios
 
-### 1. Basic Load Test (`demo.basic`)
+### 1. Basic Load Test (`BasicLoadDemo`)
 - Simple compute tasks
 - Configurable pool size (capped at 50)
 - Measures basic throughput and latency
 
-### 2. Stress Test (`demo.stress`)
+### 2. Stress Test (`StressTestDemo`)
 - Three phases: Memory pressure, CPU intensive, Mixed workload
 - Tests system limits and degradation patterns
 - Identifies bottlenecks and failure modes
 
-### 3. Burst Load Test (`demo.burst`)
+### 3. Burst Load Test (`BurstLoadDemo`)
 - Simulates realistic traffic patterns
 - 9 phases from warm-up to cool-down
 - Tests burst handling and recovery characteristics
 
-### 4. Sustained Load Test (`demo.sustained`)
-- 2-minute continuous load
+### 4. Sustained Load Test (`SustainedLoadDemo`)
+- 2-minute continuous load (override with `SNAKEPIT_SUSTAINED_DURATION_MS`)
 - Mixed workload (compute, memory, I/O)
 - Monitors performance stability over time
 
