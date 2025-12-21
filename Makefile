@@ -64,6 +64,7 @@ test:
 	mix test --color
 
 bootstrap:
+	@mix deps.get
 	@mix snakepit.setup
 
 # Show help
