@@ -6,6 +6,7 @@ defmodule Snakepit.GRPC.ClientImpl do
   require Logger
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Bridge
+  alias Snakepit.Telemetry.Correlation
 
   @default_timeout 30_000
 
@@ -156,16 +157,10 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
-    parameters = sanitize_parameters(parameters)
     binary_params = Keyword.get(opts, :binary_parameters, %{})
 
-    with {:ok, proto_params} <- encode_parameters(parameters),
-         {:ok, encoded_binary} <- encode_binary_parameters(binary_params) do
-      request = build_execute_tool_request(session_id, tool_name, proto_params, encoded_binary)
-
-      timeout = opts[:timeout] || @default_timeout
-      call_opts = [timeout: timeout]
-
+    with {:ok, request, call_opts} <-
+           prepare_execute_tool_request(session_id, tool_name, parameters, binary_params, opts) do
       case Bridge.BridgeService.Stub.execute_tool(channel, request, call_opts) do
         {:ok, response, _headers} -> handle_tool_response(response)
         {:ok, response} -> handle_tool_response(response)
@@ -177,18 +172,10 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
-    parameters = sanitize_parameters(parameters)
     binary_params = Keyword.get(opts, :binary_parameters, %{})
 
-    with {:ok, proto_params} <- encode_parameters(parameters),
-         {:ok, encoded_binary} <- encode_binary_parameters(binary_params) do
-      request =
-        build_execute_tool_request(session_id, tool_name, proto_params, encoded_binary)
-        |> Map.put(:stream, true)
-
-      timeout = opts[:timeout] || 300_000
-      call_opts = [timeout: timeout]
-
+    with {:ok, request, call_opts} <-
+           prepare_execute_stream_request(session_id, tool_name, parameters, binary_params, opts) do
       Bridge.BridgeService.Stub.execute_streaming_tool(channel, request, call_opts)
     else
       {:error, reason} -> {:error, reason}
@@ -285,12 +272,13 @@ defmodule Snakepit.GRPC.ClientImpl do
 
   defp decode_any(%Google.Protobuf.Any{value: value}), do: value
 
-  defp build_execute_tool_request(session_id, tool_name, proto_params, binary_params) do
+  defp build_execute_tool_request(session_id, tool_name, proto_params, binary_params, metadata) do
     %Bridge.ExecuteToolRequest{
       session_id: session_id,
       tool_name: tool_name,
       parameters: proto_params,
-      binary_parameters: binary_params
+      binary_parameters: binary_params,
+      metadata: metadata
     }
   end
 
@@ -338,4 +326,96 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   defp encode_binary_parameters(_), do: {:ok, %{}}
+
+  @doc false
+  def prepare_execute_tool_request(session_id, tool_name, parameters, binary_params, opts \\ []) do
+    prepare_execute_request(
+      session_id,
+      tool_name,
+      parameters,
+      binary_params,
+      opts,
+      @default_timeout,
+      false
+    )
+  end
+
+  @doc false
+  def prepare_execute_stream_request(session_id, tool_name, parameters, binary_params, opts \\ []) do
+    prepare_execute_request(
+      session_id,
+      tool_name,
+      parameters,
+      binary_params,
+      opts,
+      300_000,
+      true
+    )
+  end
+
+  defp prepare_execute_request(
+         session_id,
+         tool_name,
+         parameters,
+         binary_params,
+         opts,
+         default_timeout,
+         stream?
+       ) do
+    correlation_id = resolve_correlation_id(parameters, opts)
+    parameters = sanitize_parameters(parameters)
+
+    with {:ok, proto_params} <- encode_parameters(parameters),
+         {:ok, encoded_binary} <- encode_binary_parameters(binary_params) do
+      metadata = build_request_metadata(correlation_id)
+
+      request =
+        build_execute_tool_request(session_id, tool_name, proto_params, encoded_binary, metadata)
+        |> maybe_put_stream(stream?)
+
+      timeout = opts[:timeout] || default_timeout
+      call_opts = [timeout: timeout] |> maybe_put_correlation_metadata(correlation_id)
+
+      {:ok, request, call_opts}
+    end
+  end
+
+  defp maybe_put_stream(request, true), do: Map.put(request, :stream, true)
+  defp maybe_put_stream(request, false), do: request
+
+  defp resolve_correlation_id(parameters, opts) do
+    opts_correlation = Keyword.get(opts, :correlation_id)
+
+    (opts_correlation || extract_correlation_id(parameters))
+    |> Correlation.ensure()
+  end
+
+  defp extract_correlation_id(parameters) when is_map(parameters) do
+    Map.get(parameters, :correlation_id) || Map.get(parameters, "correlation_id")
+  end
+
+  defp extract_correlation_id(parameters) when is_list(parameters) do
+    Enum.find_value(parameters, fn
+      {:correlation_id, value} -> value
+      {"correlation_id", value} -> value
+      _ -> nil
+    end)
+  end
+
+  defp extract_correlation_id(_), do: nil
+
+  defp build_request_metadata(correlation_id) when is_binary(correlation_id) do
+    %{"correlation_id" => correlation_id}
+  end
+
+  defp maybe_put_correlation_metadata(call_opts, correlation_id) when is_binary(correlation_id) do
+    existing = Keyword.get(call_opts, :metadata, [])
+
+    filtered =
+      Enum.reject(existing, fn {key, _} ->
+        String.downcase(to_string(key)) == "x-snakepit-correlation-id"
+      end)
+
+    Keyword.put(call_opts, :metadata, [{"x-snakepit-correlation-id", correlation_id} | filtered])
+  end
 end

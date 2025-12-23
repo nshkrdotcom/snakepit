@@ -19,6 +19,20 @@ class DummyAdapter:
         self._context = context
 
 
+class CaptureAdapter:
+    __thread_safe__ = True
+    captured_metadata = None
+    captured_correlation = None
+
+    def set_session_context(self, context: SessionContext) -> None:
+        self._context = context
+
+    def execute_tool(self, tool_name: str, arguments: dict, context) -> dict:
+        CaptureAdapter.captured_metadata = getattr(context, "request_metadata", None)
+        CaptureAdapter.captured_correlation = telemetry.get_correlation_id()
+        return {"ok": True}
+
+
 class FakeAwaitable:
     def __init__(self, value):
         self._value = value
@@ -108,4 +122,32 @@ def test_initialize_session_propagates_correlation(stub_factory):
         header == telemetry.CORRELATION_HEADER and value == "threaded-cid"
         for header, value in async_stub.calls[-1]
     )
+    assert telemetry.get_correlation_id() is None
+
+
+def test_execute_tool_exposes_request_metadata_and_header_correlation(stub_factory):
+    created, threaded_module = stub_factory
+
+    CaptureAdapter.captured_metadata = None
+    CaptureAdapter.captured_correlation = None
+
+    servicer = threaded_module.ThreadedBridgeServiceServicer(
+        CaptureAdapter,
+        "localhost:50051",
+        max_workers=4,
+    )
+
+    async def run_call():
+        request = pb2.ExecuteToolRequest(
+            session_id="session-123",
+            tool_name="noop",
+            metadata={"correlation_id": "metadata-cid", "trace": "value"},
+        )
+        context = FakeContext()
+        await servicer.ExecuteTool(request, context)
+
+    asyncio.run(run_call())
+
+    assert CaptureAdapter.captured_metadata == {"correlation_id": "metadata-cid", "trace": "value"}
+    assert CaptureAdapter.captured_correlation == "threaded-cid"
     assert telemetry.get_correlation_id() is None

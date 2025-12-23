@@ -25,7 +25,9 @@ defmodule Snakepit.Pool.QueueManagementTest do
       size: 1,
       workers: [],
       available: MapSet.new(),
-      busy: %{},
+      worker_loads: %{},
+      worker_capacities: %{},
+      capacity_strategy: :pool,
       request_queue: :queue.new(),
       cancelled_requests: %{},
       stats: stats,
@@ -153,6 +155,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
     # Flush the synthetic cast emitted during the cancellation skip
     receive do
       {:"$gen_cast", {:checkin_worker, :queue_pool, "worker_1"}} -> :ok
+      {:"$gen_cast", {:checkin_worker, :queue_pool, "worker_1", :skip_decrement}} -> :ok
       {:"$gen_cast", {:checkin_worker, _pool, _worker}} -> :ok
     after
       0 -> :ok

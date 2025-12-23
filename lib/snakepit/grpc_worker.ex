@@ -631,12 +631,14 @@ defmodule Snakepit.GRPCWorker do
   def handle_call({:execute_stream, command, args, callback_fn, timeout}, _from, state) do
     SLog.debug("[GRPCWorker] execute_stream #{command} with args #{Redaction.describe(args)}")
 
+    args_with_corr = ensure_correlation(args)
+
     result =
       state.adapter.grpc_execute_stream(
         state.connection,
         state.session_id,
         command,
-        args,
+        args_with_corr,
         callback_fn,
         timeout
       )

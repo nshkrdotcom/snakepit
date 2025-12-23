@@ -419,98 +419,111 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         """Executes a non-streaming tool."""
         logger.info(f"ExecuteTool: {request.tool_name} for session {request.session_id}")
         start_time = time.time()
+        metadata = context.invocation_metadata()
 
-        try:
-            # Ensure session exists in Elixir
-            init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
+        with telemetry.otel_span(
+            "BridgeService/ExecuteTool",
+            context_metadata=metadata,
+            attributes={
+                "snakepit.session_id": request.session_id,
+                "snakepit.tool": request.tool_name,
+            },
+        ):
             try:
-                self.sync_elixir_stub.InitializeSession(init_request)
-            except grpc.RpcError as e:
-                # Session might already exist, that's ok
-                if e.code() != grpc.StatusCode.ALREADY_EXISTS:
-                    logger.debug(f"InitializeSession for {request.session_id}: {e}")
+                # Ensure session exists in Elixir
+                init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
+                try:
+                    self.sync_elixir_stub.InitializeSession(init_request)
+                except grpc.RpcError as e:
+                    # Session might already exist, that's ok
+                    if e.code() != grpc.StatusCode.ALREADY_EXISTS:
+                        logger.debug(f"InitializeSession for {request.session_id}: {e}")
 
-            # Create ephemeral context for this request
-            session_context = SessionContext(self.sync_elixir_stub, request.session_id)
-            await self._ensure_heartbeat_client(request.session_id)
-            
-            # Create adapter instance for this request
-            adapter = self.adapter_class()
-            adapter.set_session_context(session_context)
-            
-            # Register adapter tools with the session (for new BaseAdapter)
-            if hasattr(adapter, 'register_with_session'):
-                await self._ensure_tools_registered(request.session_id, adapter)
-            
-            # Initialize adapter if needed
-            if hasattr(adapter, 'initialize'):
-                await adapter.initialize()
-            
-            # Decode parameters from protobuf Any using TypeSerializer
-            arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
-            # Also handle binary parameters if present
-            for key, binary_val in request.binary_parameters.items():
-                arguments[key] = pickle.loads(binary_val)
-            
-            # Execute the tool
-            if not hasattr(adapter, 'execute_tool'):
-                raise grpc.RpcError(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support 'execute_tool'")
-            
-            # CORRECT: Await the async method
-            import inspect
-            if inspect.iscoroutinefunction(adapter.execute_tool):
-                result_data = await adapter.execute_tool(
-                    tool_name=request.tool_name,
-                    arguments=arguments,
-                    context=session_context
+                # Create ephemeral context for this request
+                session_context = SessionContext(
+                    self.sync_elixir_stub,
+                    request.session_id,
+                    request_metadata=dict(request.metadata),
                 )
-            else:
-                result_data = adapter.execute_tool(
-                    tool_name=request.tool_name,
-                    arguments=arguments,
-                    context=session_context
-                )
-            
-            # Check if a generator was mistakenly returned (should have been called via streaming endpoint)
-            if inspect.isgenerator(result_data) or inspect.isasyncgen(result_data):
-                logger.warning(f"Tool '{request.tool_name}' returned a generator but was called via non-streaming ExecuteTool. Returning empty result.")
-                result_data = {"error": "Streaming tool called on non-streaming endpoint."}
-            
-            # Use TypeSerializer to encode the result
-            response = pb2.ExecuteToolResponse(success=True)
-
-            # Infer the type of the result (simple type inference for now)
-            if isinstance(result_data, dict):
-                result_type = "map"
-            elif isinstance(result_data, str):
-                result_type = "string"
-            elif isinstance(result_data, (int, float)):
-                result_type = "float"
-            elif isinstance(result_data, bool):
-                result_type = "boolean"
-            elif isinstance(result_data, list):
-                result_type = "list"
-            else:
-                result_type = "string"  # Default fallback
-
-            # Use the centralized serializer to encode the result correctly
-            any_msg, binary_data = TypeSerializer.encode_any(result_data, result_type)
-            
-            # The result from encode_any is already a protobuf Any message, so we just assign it
-            response.result.CopyFrom(any_msg)
-            if binary_data:
-                response.binary_result = binary_data
+                await self._ensure_heartbeat_client(request.session_id)
                 
-            response.execution_time_ms = int((time.time() - start_time) * 1000)
-            
-            return response
+                # Create adapter instance for this request
+                adapter = self.adapter_class()
+                adapter.set_session_context(session_context)
                 
-        except Exception as e:
-            logger.error(f"ExecuteTool failed: {e}", exc_info=True)
-            response = pb2.ExecuteToolResponse()
-            response.success = False
-            response.error_message = str(e)
-            return response
+                # Register adapter tools with the session (for new BaseAdapter)
+                if hasattr(adapter, 'register_with_session'):
+                    await self._ensure_tools_registered(request.session_id, adapter)
+                
+                # Initialize adapter if needed
+                if hasattr(adapter, 'initialize'):
+                    await adapter.initialize()
+                
+                # Decode parameters from protobuf Any using TypeSerializer
+                arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
+                # Also handle binary parameters if present
+                for key, binary_val in request.binary_parameters.items():
+                    arguments[key] = pickle.loads(binary_val)
+                
+                # Execute the tool
+                if not hasattr(adapter, 'execute_tool'):
+                    raise grpc.RpcError(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support 'execute_tool'")
+                
+                # CORRECT: Await the async method
+                import inspect
+                if inspect.iscoroutinefunction(adapter.execute_tool):
+                    result_data = await adapter.execute_tool(
+                        tool_name=request.tool_name,
+                        arguments=arguments,
+                        context=session_context
+                    )
+                else:
+                    result_data = adapter.execute_tool(
+                        tool_name=request.tool_name,
+                        arguments=arguments,
+                        context=session_context
+                    )
+                
+                # Check if a generator was mistakenly returned (should have been called via streaming endpoint)
+                if inspect.isgenerator(result_data) or inspect.isasyncgen(result_data):
+                    logger.warning(f"Tool '{request.tool_name}' returned a generator but was called via non-streaming ExecuteTool. Returning empty result.")
+                    result_data = {"error": "Streaming tool called on non-streaming endpoint."}
+                
+                # Use TypeSerializer to encode the result
+                response = pb2.ExecuteToolResponse(success=True)
+
+                # Infer the type of the result (simple type inference for now)
+                if isinstance(result_data, dict):
+                    result_type = "map"
+                elif isinstance(result_data, str):
+                    result_type = "string"
+                elif isinstance(result_data, (int, float)):
+                    result_type = "float"
+                elif isinstance(result_data, bool):
+                    result_type = "boolean"
+                elif isinstance(result_data, list):
+                    result_type = "list"
+                else:
+                    result_type = "string"  # Default fallback
+
+                # Use the centralized serializer to encode the result correctly
+                any_msg, binary_data = TypeSerializer.encode_any(result_data, result_type)
+                
+                # The result from encode_any is already a protobuf Any message, so we just assign it
+                response.result.CopyFrom(any_msg)
+                if binary_data:
+                    response.binary_result = binary_data
+                    
+                response.execution_time_ms = int((time.time() - start_time) * 1000)
+                
+                return response
+                    
+            except Exception as e:
+                logger.error(f"ExecuteTool failed: {e}", exc_info=True)
+                response = pb2.ExecuteToolResponse()
+                response.success = False
+                response.error_message = str(e)
+                return response
     
     async def ExecuteStreamingTool(self, request, context):
         """Execute a streaming tool, bridging async/sync generators safely."""
@@ -520,167 +533,179 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
         metadata = context.invocation_metadata()
 
-        try:
-            # Ensure session exists in Elixir
-            init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
+        with telemetry.otel_span(
+            "BridgeService/ExecuteStreamingTool",
+            context_metadata=metadata,
+            attributes={
+                "snakepit.session_id": request.session_id,
+                "snakepit.tool": request.tool_name,
+            },
+        ):
             try:
-                self.sync_elixir_stub.InitializeSession(init_request)
-            except grpc.RpcError as e:
-                # Session might already exist, that's ok
-                if e.code() != grpc.StatusCode.ALREADY_EXISTS:
-                    logger.debug(f"InitializeSession for {request.session_id}: {e}")
-
-            # Create ephemeral context for this request
-            logger.info(f"Creating SessionContext for {request.session_id}")
-            session_context = SessionContext(self.sync_elixir_stub, request.session_id)
-            await self._ensure_heartbeat_client(request.session_id)
-            
-            # Create adapter instance for this request
-            logger.info(f"Creating adapter instance: {self.adapter_class}")
-            adapter = self.adapter_class()
-            adapter.set_session_context(session_context)
-            
-            # Register adapter tools with the session (for new BaseAdapter)
-            if hasattr(adapter, 'register_with_session'):
-                await self._ensure_tools_registered(request.session_id, adapter)
-            
-            # CRITICAL FIX: Initialize adapter (async-safe now that method is async)
-            if hasattr(adapter, 'initialize'):
-                if inspect.iscoroutinefunction(adapter.initialize):
-                    await adapter.initialize()
-                else:
-                    adapter.initialize()
-
-            # Decode parameters from protobuf Any using TypeSerializer
-            arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
-            # Also handle binary parameters if present
-            for key, binary_val in request.binary_parameters.items():
-                arguments[key] = pickle.loads(binary_val)
-
-            # Execute the tool
-            if not hasattr(adapter, 'execute_tool'):
-                await context.abort(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support tool execution")
-                return
-
-            # CRITICAL FIX: Support both sync and async execute_tool
-            if inspect.iscoroutinefunction(adapter.execute_tool):
-                stream_iterator = await adapter.execute_tool(
-                    tool_name=request.tool_name,
-                    arguments=arguments,
-                    context=session_context
-                )
-            else:
-                stream_iterator = adapter.execute_tool(
-                    tool_name=request.tool_name,
-                    arguments=arguments,
-                    context=session_context
-                )
-
-            loop = self.loop
-            queue: asyncio.Queue = asyncio.Queue()
-            sentinel = object()
-            chunk_id_counter = 0
-            marked_final = False
-
-            def encode_payload(payload):
-                if payload is None:
-                    return b""
-                if isinstance(payload, (bytes, bytearray, memoryview)):
-                    return bytes(payload)
-                if isinstance(payload, str):
-                    return payload.encode("utf-8")
-                return json.dumps(payload).encode("utf-8")
-
-            def build_chunk(payload, *, is_final=False, metadata=None):
-                nonlocal chunk_id_counter, marked_final
-                chunk_id_counter += 1
-                chunk = pb2.ToolChunk(
-                    chunk_id=f"{request.tool_name}-{chunk_id_counter}",
-                    data=encode_payload(payload),
-                    is_final=is_final,
-                )
-
-                if metadata and isinstance(metadata, dict):
-                    chunk.metadata.update({str(k): str(v) for k, v in metadata.items()})
-
-                if is_final:
-                    marked_final = True
-
-                return chunk
-
-            async def enqueue_chunk(payload, *, is_final=False, metadata=None):
-                await queue.put(build_chunk(payload, is_final=is_final, metadata=metadata))
-
-            def unpack_chunk(chunk_data):
-                payload = chunk_data
-                metadata = None
-                is_final = False
-
-                if hasattr(chunk_data, "data"):
-                    payload = getattr(chunk_data, "data")
-
-                if hasattr(chunk_data, "is_final"):
-                    is_final = bool(getattr(chunk_data, "is_final"))
-
-                if hasattr(chunk_data, "metadata"):
-                    meta_attr = getattr(chunk_data, "metadata")
-                    if isinstance(meta_attr, dict):
-                        metadata = meta_attr
-
-                return payload, is_final, metadata
-
-            async def drain_async(iterator):
-                async for chunk_data in iterator:
-                    payload, is_final, metadata = unpack_chunk(chunk_data)
-                    await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
-
-            def drain_sync(iterator):
-                for chunk_data in iterator:
-                    payload, is_final, metadata = unpack_chunk(chunk_data)
-                    fut = asyncio.run_coroutine_threadsafe(
-                        enqueue_chunk(payload, is_final=is_final, metadata=metadata),
-                        loop,
-                    )
-                    fut.result()
-
-            async def produce_chunks():
-                error_raised = False
+                # Ensure session exists in Elixir
+                init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
                 try:
-                    if hasattr(stream_iterator, "__aiter__"):
-                        await drain_async(stream_iterator)
-                    elif hasattr(stream_iterator, "__iter__"):
-                        await asyncio.to_thread(drain_sync, stream_iterator)
+                    self.sync_elixir_stub.InitializeSession(init_request)
+                except grpc.RpcError as e:
+                    # Session might already exist, that's ok
+                    if e.code() != grpc.StatusCode.ALREADY_EXISTS:
+                        logger.debug(f"InitializeSession for {request.session_id}: {e}")
+
+                # Create ephemeral context for this request
+                logger.info(f"Creating SessionContext for {request.session_id}")
+                session_context = SessionContext(
+                    self.sync_elixir_stub,
+                    request.session_id,
+                    request_metadata=dict(request.metadata),
+                )
+                await self._ensure_heartbeat_client(request.session_id)
+                
+                # Create adapter instance for this request
+                logger.info(f"Creating adapter instance: {self.adapter_class}")
+                adapter = self.adapter_class()
+                adapter.set_session_context(session_context)
+                
+                # Register adapter tools with the session (for new BaseAdapter)
+                if hasattr(adapter, 'register_with_session'):
+                    await self._ensure_tools_registered(request.session_id, adapter)
+                
+                # CRITICAL FIX: Initialize adapter (async-safe now that method is async)
+                if hasattr(adapter, 'initialize'):
+                    if inspect.iscoroutinefunction(adapter.initialize):
+                        await adapter.initialize()
                     else:
-                        payload, is_final, metadata = unpack_chunk(stream_iterator)
-                        await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
-                except Exception as iteration_error:
-                    error_raised = True
-                    await queue.put(iteration_error)
-                finally:
-                    if not error_raised and not marked_final:
-                        await enqueue_chunk(None, is_final=True)
-                    await queue.put(sentinel)
+                        adapter.initialize()
 
-            asyncio.create_task(produce_chunks())
+                # Decode parameters from protobuf Any using TypeSerializer
+                arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
+                # Also handle binary parameters if present
+                for key, binary_val in request.binary_parameters.items():
+                    arguments[key] = pickle.loads(binary_val)
 
-            while True:
-                item = await queue.get()
-                if item is sentinel:
-                    break
-                if isinstance(item, Exception):
-                    logger.error(
-                        "Streaming tool %s raised %s",
-                        request.tool_name,
-                        item,
-                        exc_info=True,
-                    )
-                    await context.abort(grpc.StatusCode.INTERNAL, str(item))
+                # Execute the tool
+                if not hasattr(adapter, 'execute_tool'):
+                    await context.abort(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support tool execution")
                     return
-                yield item
 
-        except Exception as e:
-            logger.error(f"ExecuteStreamingTool failed: {e}", exc_info=True)
-            await context.abort(grpc.StatusCode.INTERNAL, str(e))
+                # CRITICAL FIX: Support both sync and async execute_tool
+                if inspect.iscoroutinefunction(adapter.execute_tool):
+                    stream_iterator = await adapter.execute_tool(
+                        tool_name=request.tool_name,
+                        arguments=arguments,
+                        context=session_context
+                    )
+                else:
+                    stream_iterator = adapter.execute_tool(
+                        tool_name=request.tool_name,
+                        arguments=arguments,
+                        context=session_context
+                    )
+
+                loop = self.loop
+                queue: asyncio.Queue = asyncio.Queue()
+                sentinel = object()
+                chunk_id_counter = 0
+                marked_final = False
+
+                def encode_payload(payload):
+                    if payload is None:
+                        return b""
+                    if isinstance(payload, (bytes, bytearray, memoryview)):
+                        return bytes(payload)
+                    if isinstance(payload, str):
+                        return payload.encode("utf-8")
+                    return json.dumps(payload).encode("utf-8")
+
+                def build_chunk(payload, *, is_final=False, metadata=None):
+                    nonlocal chunk_id_counter, marked_final
+                    chunk_id_counter += 1
+                    chunk = pb2.ToolChunk(
+                        chunk_id=f"{request.tool_name}-{chunk_id_counter}",
+                        data=encode_payload(payload),
+                        is_final=is_final,
+                    )
+
+                    if metadata and isinstance(metadata, dict):
+                        chunk.metadata.update({str(k): str(v) for k, v in metadata.items()})
+
+                    if is_final:
+                        marked_final = True
+
+                    return chunk
+
+                async def enqueue_chunk(payload, *, is_final=False, metadata=None):
+                    await queue.put(build_chunk(payload, is_final=is_final, metadata=metadata))
+
+                def unpack_chunk(chunk_data):
+                    payload = chunk_data
+                    metadata = None
+                    is_final = False
+
+                    if hasattr(chunk_data, "data"):
+                        payload = getattr(chunk_data, "data")
+
+                    if hasattr(chunk_data, "is_final"):
+                        is_final = bool(getattr(chunk_data, "is_final"))
+
+                    if hasattr(chunk_data, "metadata"):
+                        meta_attr = getattr(chunk_data, "metadata")
+                        if isinstance(meta_attr, dict):
+                            metadata = meta_attr
+
+                    return payload, is_final, metadata
+
+                async def drain_async(iterator):
+                    async for chunk_data in iterator:
+                        payload, is_final, metadata = unpack_chunk(chunk_data)
+                        await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
+
+                def drain_sync(iterator):
+                    for chunk_data in iterator:
+                        payload, is_final, metadata = unpack_chunk(chunk_data)
+                        fut = asyncio.run_coroutine_threadsafe(
+                            enqueue_chunk(payload, is_final=is_final, metadata=metadata),
+                            loop,
+                        )
+                        fut.result()
+
+                async def produce_chunks():
+                    error_raised = False
+                    try:
+                        if hasattr(stream_iterator, "__aiter__"):
+                            await drain_async(stream_iterator)
+                        elif hasattr(stream_iterator, "__iter__"):
+                            await asyncio.to_thread(drain_sync, stream_iterator)
+                        else:
+                            payload, is_final, metadata = unpack_chunk(stream_iterator)
+                            await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
+                    except Exception as iteration_error:
+                        error_raised = True
+                        await queue.put(iteration_error)
+                    finally:
+                        if not error_raised and not marked_final:
+                            await enqueue_chunk(None, is_final=True)
+                        await queue.put(sentinel)
+
+                asyncio.create_task(produce_chunks())
+
+                while True:
+                    item = await queue.get()
+                    if item is sentinel:
+                        break
+                    if isinstance(item, Exception):
+                        logger.error(
+                            "Streaming tool %s raised %s",
+                            request.tool_name,
+                            item,
+                            exc_info=True,
+                        )
+                        await context.abort(grpc.StatusCode.INTERNAL, str(item))
+                        return
+                    yield item
+
+            except Exception as e:
+                logger.error(f"ExecuteStreamingTool failed: {e}", exc_info=True)
+                await context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     async def _ensure_tools_registered(self, session_id: str, adapter) -> None:
         if session_id in self._registered_sessions:

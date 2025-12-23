@@ -20,7 +20,7 @@
 
 ### 1. Add to mix.exs
 ```elixir
-{:snakepit, "~> 0.6.11"}
+{:snakepit, "~> 0.7.0"}
 ```
 
 ### 2. Install Elixir deps
@@ -69,6 +69,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
+- [What's New in v0.7.0](#whats-new-in-v070)
 - [What's New in v0.6.11](#whats-new-in-v0611)
 - [What's New in v0.6.10](#whats-new-in-v0610)
 - [What's New in v0.6.9](#whats-new-in-v069)
@@ -150,6 +151,18 @@ For **non-DSPex users**, if you're using these classes directly:
 - [Architecture Decision](https://github.com/nshkrdotcom/dspex/blob/main/docs/architecture_review_20251007/09_ARCHITECTURE_DECISION_RECORD.md)
 
 **Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
+
+---
+
+## 🆕 What's New in v0.7.0
+
+**Capacity-aware scheduling + correlation propagation** – Released 2025-12-22, v0.7.0 makes thread profile capacity real, enforces correlation across gRPC boundaries, and preserves process-profile thread limits when custom envs are set.
+
+- **Capacity-aware Pool scheduling** – Pool now tracks per-worker load and honors `threads_per_worker` while preserving session affinity; configure behavior with `capacity_strategy` (`:pool` default, `:profile`, `:hybrid`).
+- **Correlation propagation end-to-end** – gRPC calls now carry `x-snakepit-correlation-id` headers and `ExecuteToolRequest.metadata`, and streaming requests generate correlation IDs when missing.
+- **Python telemetry alignment** – `grpc_server.py` wraps ExecuteTool/ExecuteStreamingTool in OTel spans using incoming headers and passes request metadata into adapters.
+- **Process profile env merge** – System thread limits from `Snakepit.Application` are preserved when `adapter_env` is set; user overrides still win.
+- **ToolRegistry cleanup logging** – Cleanup logs now report the correct number of removed tools.
 
 ---
 
@@ -512,6 +525,7 @@ config :snakepit,
       worker_profile: :thread,
       pool_size: 4,
       threads_per_worker: 16,
+      capacity_strategy: :pool,        # Default; use :hybrid to retain CapacityStore telemetry
       adapter_module: Snakepit.Adapters.GRPCPython,
       adapter_args: ["--max-workers", "16"],
       worker_ttl: {3600, :seconds},
@@ -519,6 +533,11 @@ config :snakepit,
     }
   ]
 ```
+
+`capacity_strategy` controls how the pool interprets per-worker capacity:
+- `:pool` (default) uses pool-managed load tracking with session affinity.
+- `:profile` forces single-slot scheduling (advanced/manual use).
+- `:hybrid` keeps pool scheduling while updating CapacityStore telemetry.
 
 ### 🔧 Key Modules Added
 
@@ -622,7 +641,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-    {:snakepit, "~> 0.6.11"}
+    {:snakepit, "~> 0.7.0"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,
@@ -879,7 +898,7 @@ config :snakepit,
 # In your mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.6.11"}
+    {:snakepit, "~> 0.7.0"}
   ]
 end
 
@@ -912,7 +931,7 @@ end)
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.6.11"}
+    {:snakepit, "~> 0.7.0"}
   ]
 end
 ```
@@ -2816,11 +2835,11 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 
 ## 📊 Development Status
 
-**v0.6.11 (Current Release)**
-- **Same-node bootstrap flow** - `mix snakepit.setup` + `mix snakepit.doctor` standardized across scripts/docs/examples.
-- **Adapter validation + status tools** - Doctor checks per-pool adapter imports; new `mix snakepit.status` + `mix snakepit.gen.adapter`.
-- **Binary gRPC payloads** - Bridge responses can return `binary_result` for large outputs.
-- **Python runtime fixes** - Threaded server avoids asyncio loop warnings and honors default adapter env.
+**v0.7.0 (Current Release)**
+- **Capacity-aware scheduling** - Pool honors `threads_per_worker` and session affinity with `capacity_strategy` overrides.
+- **Correlation propagation** - gRPC calls carry `x-snakepit-correlation-id` headers and request metadata, including streaming.
+- **Process profile env merge** - System thread limits stay intact when custom `adapter_env` is configured.
+- **ToolRegistry cleanup logging** - Cleanup logs now report the correct tool count.
 
 For historical releases, see `CHANGELOG.md`.
 

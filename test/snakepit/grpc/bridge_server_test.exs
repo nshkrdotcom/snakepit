@@ -329,6 +329,7 @@ defmodule Snakepit.GRPC.BridgeServerTest do
         session_id: session_id,
         tool_name: "remote_binary_tool",
         parameters: %{},
+        metadata: %{"correlation_id" => "bridge-correlation-1"},
         binary_parameters: %{"blob" => blob}
       }
 
@@ -339,6 +340,7 @@ defmodule Snakepit.GRPC.BridgeServerTest do
                      1_000
 
       assert opts[:binary_parameters] == %{"blob" => blob}
+      assert opts[:correlation_id] == "bridge-correlation-1"
     end
 
     test "rejects binary parameters that are not binaries", %{session_id: session_id} do

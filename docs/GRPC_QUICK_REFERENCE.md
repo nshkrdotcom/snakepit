@@ -15,6 +15,7 @@ streaming behaviour end-to-end.
 - ✅ BridgeServer validates JSON payloads up front and emits descriptive `{:invalid_parameter, key, reason}` tuples on malformed input (`test/snakepit/grpc/bridge_server_test.exs`).
 - ✅ SessionStore and bridge registries keep state in `:protected` ETS tables with private DETS handles while enforcing configurable quotas that fail fast with tagged errors (`test/unit/bridge/session_store_test.exs`, `test/unit/pool/process_registry_security_test.exs`).
 - ✅ The logger redaction helper summarises sensitive payloads so gRPC logs never leak credentials or large blobs (`test/unit/logger/redaction_test.exs`).
+- ✅ Correlation IDs propagate via `x-snakepit-correlation-id` headers and `ExecuteToolRequest.metadata`; Python telemetry reads the header while adapters can inspect `SessionContext.request_metadata`.
 - ✅ Python bridge servers (`priv/python/grpc_server.py` and
   `priv/python/grpc_server_threaded.py`) bridge async generators and synchronous
   iterators into gRPC streams using an `asyncio.Queue`.

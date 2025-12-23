@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2025-12-22
+
+### Added
+- **Capacity-aware scheduling** – Pool tracks per-worker load and `threads_per_worker`, with `capacity_strategy` (`:pool` default, `:profile`, `:hybrid`) configurable globally or per pool.
+- **Request metadata exposure** – Python SessionContext now carries `request_metadata` for adapters; `grpc_server.py` wraps ExecuteTool/ExecuteStreamingTool in telemetry spans.
+
+### Changed
+- **Correlation propagation** – gRPC calls now set `x-snakepit-correlation-id` headers and `ExecuteToolRequest.metadata` on execute + streaming paths; streaming calls ensure a correlation ID exists.
+- **Process profile env merge** – Worker env defaults merge system thread limits with user overrides instead of replacing them.
+
+### Fixed
+- **ToolRegistry cleanup logging** – Cleanup logs now report the correct count of removed tools.
+
 ## [0.6.11] - 2025-12-20
 
 ### Added

@@ -223,7 +223,8 @@ defmodule Snakepit.Bridge.ToolRegistry do
   @impl true
   def handle_call({:cleanup_session, session_id}, _from, state) do
     pattern = {{session_id, :_}, :_}
-    num_deleted = :ets.match_delete(@table_name, pattern)
+    num_deleted = :ets.match_object(@table_name, pattern) |> length()
+    :ets.match_delete(@table_name, pattern)
 
     SLog.debug("Cleaned up #{num_deleted} tools for session: #{session_id}")
 

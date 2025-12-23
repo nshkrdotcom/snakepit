@@ -125,6 +125,15 @@ Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonM
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GenericPythonV2)     # JSON
 ```
 
+### Correlation IDs
+
+Snakepit propagates correlation IDs on every gRPC tool call via:
+- gRPC metadata header `x-snakepit-correlation-id` (used by Python telemetry)
+- `ExecuteToolRequest.metadata["correlation_id"]` (available to adapters)
+
+To provide your own correlation ID, include `correlation_id` in tool args or pass
+`correlation_id: "..."` in gRPC client opts. Streaming calls generate one when missing.
+
 ### Same-Node Model
 
 - Python workers are spawned as local OS processes via `Port.open/2`.

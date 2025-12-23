@@ -406,7 +406,11 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                         logger.debug(f"InitializeSession: {e}")
 
                 # Create ephemeral context and adapter
-                session_context = SessionContext(self.sync_elixir_stub, request.session_id)
+                session_context = SessionContext(
+                    self.sync_elixir_stub,
+                    request.session_id,
+                    request_metadata=dict(request.metadata),
+                )
                 adapter = self.adapter_class()
                 adapter.set_session_context(session_context)
 
@@ -520,7 +524,11 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                     if e.code() != grpc.StatusCode.ALREADY_EXISTS:
                         logger.debug(f"InitializeSession: {e}")
 
-                session_context = SessionContext(self.sync_elixir_stub, request.session_id)
+                session_context = SessionContext(
+                    self.sync_elixir_stub,
+                    request.session_id,
+                    request_metadata=dict(request.metadata),
+                )
                 adapter = self.adapter_class()
                 adapter.set_session_context(session_context)
 

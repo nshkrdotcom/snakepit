@@ -40,16 +40,18 @@ class SessionContext:
     - Optional: Elixir tool proxy for cross-language tool calls
     """
 
-    def __init__(self, stub: BridgeServiceStub, session_id: str):
+    def __init__(self, stub: BridgeServiceStub, session_id: str, request_metadata: Optional[Dict[str, Any]] = None):
         """
         Initialize session context.
 
         Args:
             stub: gRPC stub for calling back to Elixir
             session_id: Unique session identifier
+            request_metadata: Metadata provided with the tool execution request
         """
         self.stub = stub
         self.session_id = session_id
+        self.request_metadata = dict(request_metadata or {})
         self._elixir_tools: Optional[Dict[str, Any]] = None
         logger.debug(f"SessionContext created for session {session_id}")
 

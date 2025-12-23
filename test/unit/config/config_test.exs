@@ -51,6 +51,29 @@ defmodule Snakepit.ConfigTest do
       assert is_boolean(normalized.thread_safety_checks)
     end
 
+    test "defaults capacity_strategy to :pool" do
+      Application.delete_env(:snakepit, :capacity_strategy)
+
+      normalized = Config.normalize_pool_config(%{name: :cap_default})
+      assert normalized.capacity_strategy == :pool
+    end
+
+    test "prefers pool-specific capacity_strategy over global config" do
+      Application.put_env(:snakepit, :capacity_strategy, :hybrid)
+
+      on_exit(fn ->
+        Application.delete_env(:snakepit, :capacity_strategy)
+      end)
+
+      normalized =
+        Config.normalize_pool_config(%{
+          name: :cap_override,
+          capacity_strategy: :profile
+        })
+
+      assert normalized.capacity_strategy == :profile
+    end
+
     test "injects heartbeat defaults into normalized config" do
       normalized = Config.normalize_pool_config(%{name: :hb_test})
       assert normalized.heartbeat.enabled == true
@@ -134,6 +157,13 @@ defmodule Snakepit.ConfigTest do
       config = %{name: :test, worker_max_requests: -100}
 
       assert {:error, {:invalid_worker_max_requests, -100, _}} =
+               Config.validate_pool_config(config)
+    end
+
+    test "rejects invalid capacity_strategy" do
+      config = %{name: :test, capacity_strategy: :unknown}
+
+      assert {:error, {:invalid_capacity_strategy, :unknown}} =
                Config.validate_pool_config(config)
     end
   end

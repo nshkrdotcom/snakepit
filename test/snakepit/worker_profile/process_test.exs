@@ -92,6 +92,51 @@ defmodule Snakepit.WorkerProfile.ProcessTest do
     end
   end
 
+  describe "adapter_env merging" do
+    @thread_env_vars [
+      "OPENBLAS_NUM_THREADS",
+      "MKL_NUM_THREADS",
+      "OMP_NUM_THREADS",
+      "NUMEXPR_NUM_THREADS",
+      "VECLIB_MAXIMUM_THREADS",
+      "GRPC_POLL_STRATEGY"
+    ]
+
+    setup do
+      original_env =
+        @thread_env_vars
+        |> Enum.map(fn var -> {var, System.get_env(var)} end)
+        |> Enum.into(%{})
+
+      System.put_env("OPENBLAS_NUM_THREADS", "4")
+      System.put_env("OMP_NUM_THREADS", "2")
+      System.put_env("GRPC_POLL_STRATEGY", "poll")
+
+      on_exit(fn ->
+        Enum.each(original_env, fn
+          {key, nil} -> System.delete_env(key)
+          {key, value} -> System.put_env(key, value)
+        end)
+      end)
+
+      :ok
+    end
+
+    test "user adapter_env overrides system defaults but preserves other limits" do
+      config = %{
+        adapter_env: [{"OPENBLAS_NUM_THREADS", "8"}, {"CUSTOM_VAR", "custom"}]
+      }
+
+      updated = Process.apply_adapter_env(config)
+      env = Map.new(updated.adapter_env)
+
+      assert env["OPENBLAS_NUM_THREADS"] == "8"
+      assert env["OMP_NUM_THREADS"] == "2"
+      assert env["GRPC_POLL_STRATEGY"] == "poll"
+      assert env["CUSTOM_VAR"] == "custom"
+    end
+  end
+
   describe "High concurrency optimization" do
     test "process profile optimal for 100+ workers" do
       # Process profile scales to 100-250 workers efficiently

@@ -3,16 +3,36 @@
 **Date:** 2025-12-22
 **Reference:** [FINDINGS.md](./FINDINGS.md)
 
+## Start Here (Implementation Orientation)
+
+This doc assumes `FINDINGS.md` is correct and focuses on what to change. If you need evidence, jump back to the findings.
+
+Non-goals for this pass:
+- DETS sync/performance changes (leave as-is for crash safety).
+- Server-side streaming implementation (document the limitation unless you explicitly commit to build it).
+
+Quick change map (files you will almost certainly touch):
+- Elixir: `lib/snakepit/pool/pool.ex`, `lib/snakepit/grpc/client_impl.ex`, `lib/snakepit/grpc_worker.ex`, `lib/snakepit/worker_profile/process.ex`, `lib/snakepit/bridge/tool_registry.ex`, `lib/snakepit/config.ex`
+- Python: `priv/python/grpc_server.py`, `priv/python/grpc_server_threaded.py`, `priv/python/snakepit_bridge/otel_tracing.py`
+- Tests: `test/` (pool scheduling + session affinity + correlation + env merge), `priv/python/tests/` (telemetry + request metadata)
+
+Definition of done (for this pass):
+- Correlation ID is present in gRPC metadata header and `ExecuteToolRequest.metadata` for both execute and streaming paths.
+- Pool scheduling honors per-worker capacity and preserves session affinity when capacity remains.
+- `:capacity_strategy` config is documented, default is `:pool`.
+- Process profile env merge preserves system-level thread limits and allows user overrides.
+- ToolRegistry cleanup log reports a count (not `true`).
+
 ## Priority Matrix
 
 | Priority | Issue | Impact | Effort |
 |----------|-------|--------|--------|
 | P1 | Thread profile capacity scheduling | Headline feature broken | Medium |
-| P2 | Correlation ID not reaching Python | Observability broken | Low |
-| P2 | DETS sync bottleneck | Startup performance | Medium |
-| P3 | WorkerProfile.Process adapter_env | Thread safety regression | Trivial |
-| P4 | ToolRegistry cleanup_session log | Cosmetic | Trivial |
+| P1 | Correlation ID propagation (header + metadata) | Observability correctness | Low |
+| P2 | WorkerProfile.Process adapter_env | Thread safety regression | Trivial |
+| P3 | ToolRegistry cleanup_session log | Cosmetic | Trivial |
 | P4 | BridgeServer streaming | Feature gap | Medium |
+| P4 | DETS sync bottleneck (defer; keep current behavior) | Startup performance | Medium |
 
 ---
 
@@ -23,74 +43,91 @@ Pool uses binary busy/available scheduling. Thread profile's multi-slot capacity
 
 ### Solution Approach
 
-**Option A: Unified Load-Based Scheduling (Recommended)**
+**Option A: Capacity-Aware Pool State (Recommended)**
 
-Transform Pool from binary to load-based scheduling:
+Convert Pool from binary busy/available to per-worker load tracking, while preserving session affinity:
+
+- Replace `busy` with `worker_loads` (worker_id => in-flight count)
+- Keep `available` as "workers with remaining capacity"
+- On checkout: prefer the affinity worker if `load < capacity`, else pick any available worker
+- On checkin: decrement load and re-add to available when `load < capacity`
+- If you still want CapacityStore/telemetry from the thread profile, update it from Pool or route through the profile module without double-counting
+- Populate `worker_capacities` from pool config (`threads_per_worker`) or `profile_module.get_capacity/1` at worker registration
+- Preserve thread-limit behavior (system env + per-worker adapter_env) so `threads_per_worker` does not regress the existing Python safety constraints
 
 ```elixir
-# lib/snakepit/pool/pool.ex
+# lib/snakepit/pool/pool.ex (illustrative)
 
-# Change PoolState struct
 defmodule PoolState do
   defstruct [
     ...
-    :worker_loads,  # Map: worker_id => current_load
-    :worker_capacities,  # Map: worker_id => max_capacity
+    :worker_loads,       # worker_id => in-flight count
+    :worker_capacities,  # worker_id => max capacity
+    :available,          # MapSet of workers with load < capacity
     ...
   ]
 end
 
-# New checkout logic
-defp checkout_worker(pool_state, session_id, affinity_cache, profile_module) do
-  # Find worker with available capacity
-  eligible_worker = find_eligible_worker(pool_state, profile_module)
+defp checkout_worker(pool_state, session_id, affinity_cache) do
+  case try_checkout_preferred_worker(pool_state, session_id, affinity_cache) do
+    {:ok, worker_id, new_state} ->
+      {:ok, worker_id, new_state}
 
-  case eligible_worker do
-    nil -> {:error, :no_workers}
-    worker_id ->
-      new_loads = Map.update!(pool_state.worker_loads, worker_id, &(&1 + 1))
-      {:ok, worker_id, %{pool_state | worker_loads: new_loads}}
+    :no_preferred_worker ->
+      case Enum.take(pool_state.available, 1) do
+        [worker_id] -> increment_load(pool_state, worker_id, session_id)
+        [] -> {:error, :no_workers}
+      end
   end
 end
 
-defp find_eligible_worker(pool_state, profile_module) do
-  pool_state.worker_loads
-  |> Enum.find(fn {worker_id, load} ->
-    capacity = Map.get(pool_state.worker_capacities, worker_id, 1)
-    load < capacity
-  end)
-  |> case do
-    {worker_id, _load} -> worker_id
-    nil -> nil
-  end
+defp increment_load(pool_state, worker_id, session_id) do
+  new_loads = Map.update(pool_state.worker_loads, worker_id, 1, &(&1 + 1))
+  capacity = Map.get(pool_state.worker_capacities, worker_id, 1)
+
+  new_available =
+    if new_loads[worker_id] < capacity do
+      pool_state.available
+    else
+      MapSet.delete(pool_state.available, worker_id)
+    end
+
+  if session_id, do: store_session_affinity(session_id, worker_id)
+  {:ok, worker_id, %{pool_state | worker_loads: new_loads, available: new_available}}
 end
 
-# On checkin, decrement load instead of moving to available set
 defp checkin_worker(pool_state, worker_id) do
-  new_loads = Map.update!(pool_state.worker_loads, worker_id, &max(&1 - 1, 0))
-  %{pool_state | worker_loads: new_loads}
+  new_loads = Map.update(pool_state.worker_loads, worker_id, 0, &max(&1 - 1, 0))
+  capacity = Map.get(pool_state.worker_capacities, worker_id, 1)
+
+  new_available =
+    if new_loads[worker_id] < capacity do
+      MapSet.put(pool_state.available, worker_id)
+    else
+      pool_state.available
+    end
+
+  %{pool_state | worker_loads: new_loads, available: new_available}
 end
 ```
 
-**Option B: Profile-Aware Dispatch**
+**Configuration (recommended)**
 
-Keep Pool simple, but route through profile module for thread profile:
+Expose a capacity strategy that can be set globally and overridden per pool:
 
-```elixir
-# lib/snakepit/pool/pool.ex
+- `:capacity_strategy` = `:pool` (default) - Pool tracks load/capacity and schedules accordingly
+- `:capacity_strategy` = `:profile` - advanced use only; only valid if callers invoke profile module directly
+- `:capacity_strategy` = `:hybrid` - Pool schedules; profile tracks load for telemetry/CapacityStore
 
-defp execute_on_worker(worker_id, command, args, opts, pool_config) do
-  profile_module = Snakepit.Config.get_profile_module(pool_config)
+For the 80% case, `:pool` is sufficient and the least surprising. `:hybrid` is architecturally cleaner if you want profile-level telemetry without coupling scheduling to the profile implementation.
 
-  # Use profile's execute_request which handles capacity
-  request = %{command: command, args: args}
-  timeout = get_command_timeout(command, args, opts)
+**Option B: Profile-Aware Checkout (Smaller Change, Still Requires Pool Changes)**
 
-  profile_module.execute_request(worker_id, request, timeout)
-end
-```
+Routing only `execute_on_worker` through `profile_module.execute_request/3` is **not sufficient** because the Pool still checks out a worker as a single-capacity slot. To make this viable:
 
-This leverages Thread.execute_request's existing `check_and_increment_load/1`.
+- Allow multiple concurrent checkouts for the same worker when `profile_module.get_load/1 < get_capacity/1`
+- If `profile_module.execute_request/3` returns `{:error, :worker_at_capacity}`, retry with another worker or enqueue
+- Ensure streaming paths either participate in capacity accounting or are explicitly documented as single-slot
 
 ### Migration Path
 1. Add feature flag `:capacity_aware_scheduling` (default: false)
@@ -100,10 +137,10 @@ This leverages Thread.execute_request's existing `check_and_increment_load/1`.
 
 ---
 
-## P2: Fix Correlation ID Propagation
+## P1: Fix Correlation ID Propagation
 
 ### Problem
-`sanitize_parameters/1` strips correlation_id before sending to Python.
+`sanitize_parameters/1` strips correlation_id before sending to Python, and the gRPC client never sets the `x-snakepit-correlation-id` header that Python's telemetry expects. We want correlation_id in **both** the gRPC metadata header and the request metadata map.
 
 ### Solution
 
@@ -112,7 +149,6 @@ This leverages Thread.execute_request's existing `check_and_increment_load/1`.
 
 # Change execute_tool to preserve and pass correlation_id
 def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
-  # Extract correlation_id BEFORE sanitization
   correlation_id = extract_correlation_id(parameters)
 
   parameters = sanitize_parameters(parameters)
@@ -121,14 +157,17 @@ def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
   with {:ok, proto_params} <- encode_parameters(parameters),
        {:ok, encoded_binary} <- encode_binary_parameters(binary_params) do
 
-    # Pass correlation_id to request builder
-    request = build_execute_tool_request(
-      session_id,
-      tool_name,
-      proto_params,
-      encoded_binary,
-      correlation_id
-    )
+    metadata = build_request_metadata(correlation_id)
+    request =
+      build_execute_tool_request(
+        session_id,
+        tool_name,
+        proto_params,
+        encoded_binary,
+        metadata
+      )
+    timeout = opts[:timeout] || @default_timeout
+    call_opts = [timeout: timeout] |> maybe_put_correlation_metadata(correlation_id)
     ...
   end
 end
@@ -136,14 +175,16 @@ end
 defp extract_correlation_id(parameters) when is_map(parameters) do
   Map.get(parameters, :correlation_id) || Map.get(parameters, "correlation_id")
 end
+defp extract_correlation_id(parameters) when is_list(parameters) do
+  Enum.find_value(parameters, fn
+    {:correlation_id, value} -> value
+    {"correlation_id", value} -> value
+    _ -> nil
+  end)
+end
+defp extract_correlation_id(_), do: nil
 
-defp build_execute_tool_request(session_id, tool_name, proto_params, binary_params, correlation_id) do
-  metadata = if correlation_id do
-    %{"correlation_id" => correlation_id}
-  else
-    %{}
-  end
-
+defp build_execute_tool_request(session_id, tool_name, proto_params, binary_params, metadata) do
   %Bridge.ExecuteToolRequest{
     session_id: session_id,
     tool_name: tool_name,
@@ -152,107 +193,48 @@ defp build_execute_tool_request(session_id, tool_name, proto_params, binary_para
     metadata: metadata
   }
 end
+
+defp build_request_metadata(nil), do: %{}
+defp build_request_metadata(correlation_id), do: %{"correlation_id" => correlation_id}
+
+defp maybe_put_correlation_metadata(call_opts, nil), do: call_opts
+defp maybe_put_correlation_metadata(call_opts, correlation_id) do
+  Keyword.put(call_opts, :metadata, [{"x-snakepit-correlation-id", correlation_id}])
+end
 ```
+
+Apply the same `maybe_put_correlation_metadata/2` logic in `execute_streaming_tool/5` so streaming requests carry the header as well.
+Also ensure streaming requests have a correlation_id (e.g., call `ensure_correlation/1` in `GRPCWorker.handle_call({:execute_stream, ...})` or generate one in the gRPC client when missing).
 
 ### Python Side
-Ensure Python adapter reads correlation_id from request.metadata:
+Ensure Python servers apply the gRPC metadata header to the telemetry context (threaded server already does), and pass the request metadata into adapter context for tool code that expects it:
 
 ```python
-# priv/python/snakepit_bridge/base_adapter.py
+# priv/python/grpc_server.py
 
-def execute_tool(self, request, context):
+async def ExecuteTool(self, request, context):
+    metadata = context.invocation_metadata()
     correlation_id = request.metadata.get("correlation_id")
     if correlation_id:
-        # Set in thread-local or pass to tool execution
-        set_correlation_id(correlation_id)
+        telemetry.set_correlation_id(correlation_id)
+    with telemetry.otel_span(
+        "BridgeService/ExecuteTool",
+        context_metadata=metadata,
+        attributes={"snakepit.session_id": request.session_id, "snakepit.tool": request.tool_name},
+    ):
+        ...
 ```
+
+Treat the gRPC header as the source of truth for tracing; use `request.metadata` as a mirror for adapters and debugging.
 
 ---
 
-## P2: Reduce DETS Sync Frequency
-
-### Problem
-`:dets.sync` after every insert creates I/O bottleneck.
-
-### Solution Options
-
-**Option A: Batch Sync (Recommended)**
-
-```elixir
-# lib/snakepit/pool/process_registry.ex
-
-# Add batch buffer to state
-defstruct [
-  ...
-  :pending_writes,  # List of pending {worker_id, info} tuples
-  :last_sync_time   # Monotonic time of last sync
-]
-
-@batch_sync_interval 100  # ms
-@max_pending_writes 50
-
-# Queue writes instead of immediate sync
-def handle_call({:activate_worker, worker_id, ...}, _from, state) do
-  worker_info = build_worker_info(...)
-
-  :ets.insert(state.table, {worker_id, worker_info})
-  :dets.insert(state.dets_table, {worker_id, worker_info})
-
-  new_pending = [{worker_id, worker_info} | state.pending_writes]
-
-  state = %{state | pending_writes: new_pending}
-  state = maybe_flush_pending(state)
-
-  {:reply, :ok, state}
-end
-
-defp maybe_flush_pending(state) do
-  now = System.monotonic_time(:millisecond)
-  elapsed = now - state.last_sync_time
-
-  if length(state.pending_writes) >= @max_pending_writes or elapsed >= @batch_sync_interval do
-    :dets.sync(state.dets_table)
-    %{state | pending_writes: [], last_sync_time: now}
-  else
-    # Schedule async sync if not already scheduled
-    unless state.sync_scheduled do
-      Process.send_after(self(), :flush_dets, @batch_sync_interval)
-    end
-    %{state | sync_scheduled: true}
-  end
-end
-
-def handle_info(:flush_dets, state) do
-  :dets.sync(state.dets_table)
-  {:noreply, %{state | pending_writes: [], last_sync_time: System.monotonic_time(:millisecond), sync_scheduled: false}}
-end
-```
-
-**Option B: Accept Small Orphan Window**
-
-Rely on run_id-based cleanup (already implemented) and remove per-operation sync:
-
-```elixir
-# Remove :dets.sync calls, rely on auto_save: 1000 configured in init
-:dets.open_file(dets_table_name, [
-  {:file, to_charlist(dets_file)},
-  {:type, :set},
-  {:auto_save, 1000},  # Already configured
-  {:repair, true}
-])
-```
-
-Risk: Up to 1 second of writes could be lost on crash. Run-id cleanup handles orphans on next startup.
-
-### Recommendation
-Option B is simpler and the run_id cleanup mechanism is robust. The 1-second window is acceptable given the existing cleanup strategy.
-
----
-
-## P3: Fix WorkerProfile.Process adapter_env
+## P2: Fix WorkerProfile.Process adapter_env
 
 ### Problem
 `build_process_env/1` result is discarded.
+
+Note: `GRPCWorker` sets `{:env, ...}` when `adapter_env` is non-empty; if that replaces inherited env, dropping thread-limit variables becomes more likely unless they are explicitly merged.
 
 ### Solution
 
@@ -291,7 +273,7 @@ end
 
 ---
 
-## P4: Fix ToolRegistry cleanup_session Log
+## P3: Fix ToolRegistry cleanup_session Log
 
 ### Problem
 `:ets.match_delete/2` returns `true`, not count.
@@ -333,12 +315,26 @@ Given the complexity, documenting the limitation is recommended for now.
 
 ---
 
+## P4: DETS Sync Bottleneck (Defer; Correctness First)
+
+### Problem
+Immediate `:dets.sync` calls can be a startup bottleneck, but they are intentionally used to guarantee crash persistence and robust orphan cleanup.
+
+### Decision (Current)
+- Keep immediate sync on reserve/register/activate.
+- Do not batch or remove sync in this phase.
+- If this is revisited later, re-validate orphan cleanup guarantees and update `README_PROCESS_MANAGEMENT.md` and related tests.
+
+### Recommendation
+No change while correctness is the priority.
+
+---
+
 ## Implementation Order
 
-1. **Week 1**: P3 (adapter_env) + P4 (cleanup log) - trivial fixes
-2. **Week 2**: P2 (correlation ID) - improves debugging immediately
-3. **Week 3-4**: P2 (DETS batch sync) - measure startup time before/after
-4. **v0.7.0**: P1 (capacity-aware scheduling) - requires thorough testing
+1. **Phase 1 (low effort, correctness)**: P1 (correlation header + metadata) + P2 (adapter_env) + P3 (cleanup log)
+2. **Phase 2 (core behavior)**: P1 (capacity-aware scheduling) with full concurrency and affinity tests
+3. **Deferred**: P4 (BridgeServer streaming) and P4 (DETS sync optimization) until correctness work is complete
 
 ---
 
@@ -349,20 +345,26 @@ Given the complexity, documenting the limitation is recommended for now.
 - [ ] Fire 8 concurrent requests
 - [ ] Verify all 8 execute in parallel (not serialized to 2)
 - [ ] Verify CapacityStore load tracking matches actual in-flight requests
+- [ ] Verify session affinity prefers the same worker when capacity is available
+- [ ] Verify `:capacity_strategy` default is documented and behaves as expected (`:pool` or `:hybrid`)
+- [ ] Confirm Python thread-limit env remains correct when `threads_per_worker` is used
 
 ### Correlation ID
 - [ ] Send request with explicit correlation_id
-- [ ] Verify Python logs contain same correlation_id
+- [ ] Verify `ExecuteToolRequest.metadata["correlation_id"]` is set
+- [ ] Verify gRPC metadata header `x-snakepit-correlation-id` is set on ExecuteTool/ExecuteStreamingTool
+- [ ] Verify Python logs contain same correlation_id (from header)
 - [ ] Verify Elixir logs contain same correlation_id
 - [ ] Test auto-generated correlation_id propagates
+- [ ] Verify streaming path has a correlation_id (header + metadata)
 
-### DETS Performance
-- [ ] Benchmark pool startup time with 100 workers (before)
-- [ ] Apply batch sync or remove sync
-- [ ] Benchmark pool startup time (after)
-- [ ] Verify orphan cleanup still works after simulated crash
+### DETS Correctness (No Optimization)
+- [ ] Crash after reserve, confirm DETS entry persists and orphan cleanup runs on next boot
+- [ ] Crash after activate, confirm DETS entry persists and stale processes are cleaned
+- [ ] Verify `:rogue_cleanup` behavior does not break current persistence guarantees
 
 ### adapter_env
 - [ ] Configure process profile pool
 - [ ] Verify Python worker has `OPENBLAS_NUM_THREADS=1` in environment
 - [ ] Run NumPy workload, verify single-threaded execution
+- [ ] Verify system-level thread limits from `Snakepit.Application` are preserved when `adapter_env` is set

@@ -260,6 +260,7 @@ config :snakepit,
       worker_profile: :thread,
       pool_size: 4,
       threads_per_worker: 16,
+      capacity_strategy: :pool,
       adapter_module: Snakepit.Adapters.GRPCPython
     }
   ]
@@ -279,6 +280,7 @@ config :snakepit,
 | N/A | `worker_ttl` | **New**: Lifecycle management |
 | N/A | `worker_max_requests` | **New**: Lifecycle management |
 | N/A | `threads_per_worker` | **New**: Thread profile only |
+| N/A | `capacity_strategy` | **New**: Pool scheduling (`:pool`, `:profile`, `:hybrid`) |
 
 ---
 
@@ -580,9 +582,9 @@ iex> Logger.configure(level: :debug)
 
 **Symptom**: `{:error, :not_implemented}`
 
-**Cause**: Trying to use `:thread` profile before Phase 3 deployment
+**Cause**: Thread profile requires threaded adapter mode (`--max-workers`) and thread-safe adapters; older releases did not support thread scheduling.
 
-**Solution**: Use `:process` profile until thread profile is fully deployed
+**Solution**: Upgrade to v0.7.0+, ensure adapter args include `--max-workers`, and fall back to `:process` if adapters are not thread-safe.
 
 ### Issue: Performance regression
 

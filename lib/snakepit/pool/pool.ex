@@ -32,7 +32,9 @@ defmodule Snakepit.Pool do
       :size,
       :workers,
       :available,
-      :busy,
+      :worker_loads,
+      :worker_capacities,
+      :capacity_strategy,
       :request_queue,
       :cancelled_requests,
       :stats,
@@ -253,7 +255,9 @@ defmodule Snakepit.Pool do
             size: size,
             workers: [],
             available: MapSet.new(),
-            busy: %{},
+            worker_loads: %{},
+            worker_capacities: %{},
+            capacity_strategy: resolve_capacity_strategy(pool_config),
             request_queue: :queue.new(),
             cancelled_requests: %{},
             stats: %{
@@ -333,9 +337,17 @@ defmodule Snakepit.Pool do
         # Update pool state with workers
         updated_pool_state =
           if length(workers) > 0 do
+            worker_capacities = build_worker_capacities(pool_state, workers)
             available = MapSet.new(workers)
 
-            %{pool_state | workers: workers, available: available, initialized: true}
+            %{
+              pool_state
+              | workers: workers,
+                available: available,
+                worker_capacities: worker_capacities,
+                worker_loads: %{},
+                initialized: true
+            }
           else
             # Pool failed to start any workers
             SLog.error("❌ Pool #{pool_name} failed to start any workers!")
@@ -459,7 +471,7 @@ defmodule Snakepit.Pool do
             pool_saturated: acc.pool_saturated + Map.get(pool.stats, :pool_saturated, 0),
             workers: acc.workers + length(pool.workers),
             available: acc.available + MapSet.size(pool.available),
-            busy: acc.busy + map_size(pool.busy)
+            busy: acc.busy + busy_worker_count(pool)
           }
         end
       )
@@ -477,7 +489,7 @@ defmodule Snakepit.Pool do
           Map.merge(pool_state.stats, %{
             workers: length(pool_state.workers),
             available: MapSet.size(pool_state.available),
-            busy: map_size(pool_state.busy),
+            busy: busy_worker_count(pool_state),
             queued: :queue.len(pool_state.request_queue)
           })
 
@@ -571,10 +583,14 @@ defmodule Snakepit.Pool do
             [worker_id | pool_state.workers]
           end
 
-        updated_pool_state = %{pool_state | workers: new_workers}
+        updated_pool_state =
+          pool_state
+          |> Map.put(:workers, new_workers)
+          |> ensure_worker_capacity(worker_id)
+          |> ensure_worker_available(worker_id)
 
         # CRITICAL FIX: Immediately drive the queue by treating this as a checkin
-        GenServer.cast(self(), {:checkin_worker, pool_name, worker_id})
+        GenServer.cast(self(), {:checkin_worker, pool_name, worker_id, :skip_decrement})
 
         updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
         {:reply, :ok, %{state | pools: updated_pools}}
@@ -690,7 +706,7 @@ defmodule Snakepit.Pool do
                   %{
                     pool: pool_name,
                     available_workers: MapSet.size(pool_state.available),
-                    busy_workers: map_size(pool_state.busy)
+                    busy_workers: busy_worker_count(pool_state)
                   }
                 )
 
@@ -730,7 +746,22 @@ defmodule Snakepit.Pool do
 
   # checkin_worker - WITH pool_name parameter
   @impl true
+  def handle_cast({:checkin_worker, pool_name, worker_id, :skip_decrement}, state)
+      when is_atom(pool_name) do
+    do_handle_checkin(pool_name, worker_id, state, false)
+  end
+
   def handle_cast({:checkin_worker, pool_name, worker_id}, state) when is_atom(pool_name) do
+    do_handle_checkin(pool_name, worker_id, state, true)
+  end
+
+  # Legacy checkin_worker WITHOUT pool_name (infer from worker_id)
+  def handle_cast({:checkin_worker, worker_id}, state) do
+    pool_name = extract_pool_name_from_worker_id(worker_id)
+    handle_cast({:checkin_worker, pool_name, worker_id}, state)
+  end
+
+  defp do_handle_checkin(pool_name, worker_id, state, decrement?) do
     case Map.get(state.pools, pool_name) do
       nil ->
         SLog.error("checkin_worker: pool #{pool_name} not found!")
@@ -742,6 +773,13 @@ defmodule Snakepit.Pool do
 
         pruned_cancelled =
           prune_cancelled_requests(pool_state.cancelled_requests, now, retention_ms)
+
+        pool_state =
+          if decrement? do
+            decrement_worker_load(pool_state, worker_id)
+          else
+            pool_state
+          end
 
         case :queue.out(pool_state.request_queue) do
           {{:value, {queued_from, command, args, opts, _queued_at, timer_ref}}, new_queue} ->
@@ -756,7 +794,7 @@ defmodule Snakepit.Pool do
                   cancelled_requests: new_cancelled
               }
 
-              GenServer.cast(self(), {:checkin_worker, pool_name, worker_id})
+              GenServer.cast(self(), {:checkin_worker, pool_name, worker_id, :skip_decrement})
               updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
               {:noreply, %{state | pools: updated_pools}}
             else
@@ -764,6 +802,8 @@ defmodule Snakepit.Pool do
               {client_pid, _tag} = queued_from
 
               if Process.alive?(client_pid) do
+                pool_state = increment_worker_load(pool_state, worker_id, nil)
+
                 async_with_context(fn ->
                   ref = Process.monitor(client_pid)
                   result = execute_on_worker(worker_id, command, args, opts)
@@ -791,7 +831,7 @@ defmodule Snakepit.Pool do
                 {:noreply, %{state | pools: updated_pools}}
               else
                 SLog.debug("Discarding request from dead client #{inspect(client_pid)}")
-                GenServer.cast(self(), {:checkin_worker, pool_name, worker_id})
+                GenServer.cast(self(), {:checkin_worker, pool_name, worker_id, :skip_decrement})
 
                 updated_pool_state = %{
                   pool_state
@@ -805,26 +845,15 @@ defmodule Snakepit.Pool do
             end
 
           {:empty, _} ->
-            new_available = MapSet.put(pool_state.available, worker_id)
-            new_busy = Map.delete(pool_state.busy, worker_id)
-
             updated_pool_state = %{
               pool_state
-              | available: new_available,
-                busy: new_busy,
-                cancelled_requests: pruned_cancelled
+              | cancelled_requests: pruned_cancelled
             }
 
             updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
             {:noreply, %{state | pools: updated_pools}}
         end
     end
-  end
-
-  # Legacy checkin_worker WITHOUT pool_name (infer from worker_id)
-  def handle_cast({:checkin_worker, worker_id}, state) do
-    pool_name = extract_pool_name_from_worker_id(worker_id)
-    handle_cast({:checkin_worker, pool_name, worker_id}, state)
   end
 
   # queue_timeout - WITH pool_name
@@ -894,13 +923,15 @@ defmodule Snakepit.Pool do
           pool_state ->
             new_workers = List.delete(pool_state.workers, worker_id)
             new_available = MapSet.delete(pool_state.available, worker_id)
-            new_busy = Map.delete(pool_state.busy, worker_id)
+            new_loads = Map.delete(pool_state.worker_loads, worker_id)
+            new_capacities = Map.delete(pool_state.worker_capacities, worker_id)
 
             updated_pool_state = %{
               pool_state
               | workers: new_workers,
                 available: new_available,
-                busy: new_busy
+                worker_loads: new_loads,
+                worker_capacities: new_capacities
             }
 
             updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
@@ -942,7 +973,7 @@ defmodule Snakepit.Pool do
         Initialized: #{pool_state.initialized}
         Workers: #{length(pool_state.workers)}
         Available: #{MapSet.size(pool_state.available)}
-        Busy: #{map_size(pool_state.busy)}
+        Busy: #{busy_worker_count(pool_state)}
         Queued: #{:queue.len(pool_state.request_queue)}
         Waiters: #{length(pool_state.initialization_waiters)}
       """)
@@ -1236,15 +1267,7 @@ defmodule Snakepit.Pool do
         # Workers only enter this set after {:worker_ready} event, ensuring they're ready
         case Enum.take(pool_state.available, 1) do
           [worker_id] ->
-            new_available = MapSet.delete(pool_state.available, worker_id)
-            new_busy = Map.put(pool_state.busy, worker_id, true)
-            new_pool_state = %{pool_state | available: new_available, busy: new_busy}
-
-            # Store session affinity if we have a session_id
-            if session_id do
-              store_session_affinity(session_id, worker_id)
-            end
-
+            new_pool_state = increment_worker_load(pool_state, worker_id, session_id)
             {:ok, worker_id, new_pool_state}
 
           [] ->
@@ -1261,11 +1284,7 @@ defmodule Snakepit.Pool do
       {:ok, preferred_worker_id} ->
         # Check if preferred worker is available
         if MapSet.member?(pool_state.available, preferred_worker_id) do
-          # Remove the preferred worker from available set
-          new_available = MapSet.delete(pool_state.available, preferred_worker_id)
-          new_busy = Map.put(pool_state.busy, preferred_worker_id, true)
-          new_pool_state = %{pool_state | available: new_available, busy: new_busy}
-
+          new_pool_state = increment_worker_load(pool_state, preferred_worker_id, session_id)
           SLog.debug("Using preferred worker #{preferred_worker_id} for session #{session_id}")
           {:ok, preferred_worker_id, new_pool_state}
         else
@@ -1274,6 +1293,186 @@ defmodule Snakepit.Pool do
 
       {:error, :not_found} ->
         :no_preferred_worker
+    end
+  end
+
+  defp increment_worker_load(pool_state, worker_id, session_id) do
+    pool_state = ensure_worker_capacity(pool_state, worker_id)
+    new_load = worker_load(pool_state, worker_id) + 1
+    capacity = effective_capacity(pool_state, worker_id)
+
+    new_loads = Map.put(pool_state.worker_loads, worker_id, new_load)
+
+    new_available =
+      if new_load < capacity do
+        MapSet.put(pool_state.available, worker_id)
+      else
+        MapSet.delete(pool_state.available, worker_id)
+      end
+
+    pool_state = %{
+      pool_state
+      | worker_loads: new_loads,
+        available: new_available
+    }
+
+    maybe_track_capacity(pool_state, worker_id, :increment)
+
+    if session_id do
+      store_session_affinity(session_id, worker_id)
+    end
+
+    pool_state
+  end
+
+  defp decrement_worker_load(pool_state, worker_id) do
+    pool_state = ensure_worker_capacity(pool_state, worker_id)
+    current_load = worker_load(pool_state, worker_id)
+    new_load = max(current_load - 1, 0)
+    capacity = effective_capacity(pool_state, worker_id)
+
+    new_loads =
+      if new_load > 0 do
+        Map.put(pool_state.worker_loads, worker_id, new_load)
+      else
+        Map.delete(pool_state.worker_loads, worker_id)
+      end
+
+    new_available =
+      if new_load < capacity do
+        MapSet.put(pool_state.available, worker_id)
+      else
+        pool_state.available
+      end
+
+    pool_state = %{
+      pool_state
+      | worker_loads: new_loads,
+        available: new_available
+    }
+
+    maybe_track_capacity(pool_state, worker_id, :decrement)
+
+    pool_state
+  end
+
+  defp worker_load(pool_state, worker_id) do
+    Map.get(pool_state.worker_loads, worker_id, 0)
+  end
+
+  defp worker_capacity(pool_state, worker_id) do
+    Map.get(
+      pool_state.worker_capacities,
+      worker_id,
+      resolve_worker_capacity(pool_state, worker_id)
+    )
+  end
+
+  defp effective_capacity(pool_state, worker_id) do
+    capacity = worker_capacity(pool_state, worker_id)
+
+    case pool_state.capacity_strategy do
+      :profile -> 1
+      _ -> capacity
+    end
+  end
+
+  defp build_worker_capacities(pool_state, workers) do
+    Enum.reduce(workers, pool_state.worker_capacities, fn worker_id, acc ->
+      Map.put_new(acc, worker_id, resolve_worker_capacity(pool_state, worker_id))
+    end)
+  end
+
+  defp ensure_worker_capacity(pool_state, worker_id) do
+    if Map.has_key?(pool_state.worker_capacities, worker_id) do
+      pool_state
+    else
+      capacity = resolve_worker_capacity(pool_state, worker_id)
+
+      %{
+        pool_state
+        | worker_capacities: Map.put(pool_state.worker_capacities, worker_id, capacity)
+      }
+    end
+  end
+
+  defp ensure_worker_available(pool_state, worker_id) do
+    load = worker_load(pool_state, worker_id)
+    capacity = effective_capacity(pool_state, worker_id)
+
+    if load < capacity do
+      %{pool_state | available: MapSet.put(pool_state.available, worker_id)}
+    else
+      pool_state
+    end
+  end
+
+  defp resolve_worker_capacity(pool_state, _worker_id) do
+    pool_config = pool_state.pool_config || %{}
+
+    capacity =
+      if Snakepit.Config.thread_profile?(pool_config) do
+        Map.get(pool_config, :threads_per_worker, 1)
+      else
+        1
+      end
+
+    max(capacity, 1)
+  end
+
+  defp busy_worker_count(pool_state) do
+    map_size(pool_state.worker_loads)
+  end
+
+  defp resolve_capacity_strategy(pool_config) do
+    Map.get(pool_config, :capacity_strategy) ||
+      Application.get_env(:snakepit, :capacity_strategy, :pool)
+  end
+
+  defp maybe_track_capacity(pool_state, worker_id, :increment) do
+    if pool_state.capacity_strategy == :hybrid and
+         Snakepit.Config.thread_profile?(pool_state.pool_config) do
+      _ = Snakepit.WorkerProfile.Thread.CapacityStore.ensure_started()
+
+      case Snakepit.Pool.Registry.get_worker_pid(worker_id) do
+        {:ok, pid} ->
+          case Snakepit.WorkerProfile.Thread.CapacityStore.check_and_increment_load(pid) do
+            {:ok, capacity, new_load} ->
+              if new_load == capacity do
+                :telemetry.execute(
+                  [:snakepit, :pool, :capacity_reached],
+                  %{capacity: capacity, load: new_load},
+                  %{worker_pid: pid, profile: :thread}
+                )
+              end
+
+            {:at_capacity, capacity, load} ->
+              :telemetry.execute(
+                [:snakepit, :pool, :capacity_reached],
+                %{capacity: capacity, load: load},
+                %{worker_pid: pid, profile: :thread, rejected: true}
+              )
+
+            {:error, :unknown_worker} ->
+              SLog.warning("Worker #{inspect(pid)} not found in capacity store")
+          end
+
+        {:error, _} ->
+          :ok
+      end
+    end
+  end
+
+  defp maybe_track_capacity(pool_state, worker_id, :decrement) do
+    if pool_state.capacity_strategy == :hybrid and
+         Snakepit.Config.thread_profile?(pool_state.pool_config) do
+      case Snakepit.Pool.Registry.get_worker_pid(worker_id) do
+        {:ok, pid} ->
+          _ = Snakepit.WorkerProfile.Thread.CapacityStore.decrement_load(pid)
+
+        {:error, _} ->
+          :ok
+      end
     end
   end
 

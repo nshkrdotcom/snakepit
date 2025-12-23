@@ -17,7 +17,7 @@ Application.put_env(:snakepit, :pooling_enabled, false)
 # Requirements:
 # - Python 3.13+ (optional, works with 3.8+ but optimal with 3.13+)
 # - NumPy (for CPU-intensive operations)
-# - Snakepit v0.6.0+
+# - Snakepit v0.7.0+
 #
 # Usage:
 #   mix run --no-start examples/threaded_profile_demo.exs
@@ -34,7 +34,7 @@ defmodule ThreadedProfileDemo do
 
   def run do
     IO.puts("\n" <> String.duplicate("=", 70))
-    IO.puts("Snakepit v0.6.0 - Threaded Profile Demonstration")
+    IO.puts("Snakepit v0.7.0 - Threaded Profile Demonstration")
     IO.puts(String.duplicate("=", 70) <> "\n")
 
     # Check Python version
@@ -94,6 +94,7 @@ defmodule ThreadedProfileDemo do
     #       worker_profile: :thread,
     #       pool_size: 2,
     #       threads_per_worker: 8,
+    #       capacity_strategy: :pool,
     #       adapter_module: Snakepit.Adapters.GRPCPython,
     #       adapter_args: [
     #         "--adapter", "snakepit_bridge.adapters.threaded_showcase.ThreadedShowcaseAdapter",
@@ -111,12 +112,13 @@ defmodule ThreadedProfileDemo do
         worker_profile: :thread,
         pool_size: 4,
         threads_per_worker: 16,
+        capacity_strategy: :pool,
         adapter_args: ["--max-workers", "16"]
       }
     """)
 
     IO.puts("Status: Thread profile implementation complete!")
-    IO.puts("Note: Full multi-pool support in Phase 3 completion\n")
+    IO.puts("Note: Capacity-aware scheduling is enabled by default\n")
   end
 
   defp demo_concurrent_requests do
@@ -152,7 +154,7 @@ defmodule ThreadedProfileDemo do
     IO.puts(String.duplicate("-", 70))
 
     IO.puts("""
-    ThreadProfile tracks capacity via ETS:
+    ThreadProfile capacity can be tracked via ETS in :hybrid mode:
 
       Worker PID     | Capacity | Load | Available
       ---------------|----------|------|----------
@@ -164,7 +166,7 @@ defmodule ThreadedProfileDemo do
     Pool automatically routes to workers with available capacity.
     """)
 
-    IO.puts("ETS table: :snakepit_worker_capacity")
+    IO.puts("ETS table: :snakepit_worker_capacity (hybrid mode)")
     IO.puts("Format: {worker_pid, capacity, current_load}\n")
   end
 

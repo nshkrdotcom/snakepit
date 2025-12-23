@@ -102,6 +102,7 @@ defmodule HybridPoolsDemo do
           worker_profile: :thread,
           pool_size: 4,
           threads_per_worker: 16,
+          capacity_strategy: :pool,
           adapter_module: Snakepit.Adapters.GRPCPython,
           adapter_args: [
             "--adapter",

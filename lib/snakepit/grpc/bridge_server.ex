@@ -12,6 +12,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   alias Snakepit.GRPCWorker
   alias Snakepit.GRPC.Client, as: GRPCClient
   alias Snakepit.Pool.Registry, as: PoolRegistry
+  alias Snakepit.Telemetry.Correlation
 
   alias Snakepit.Bridge.{
     PingRequest,
@@ -130,14 +131,17 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   # Tool Execution
 
-  def execute_tool(%ExecuteToolRequest{} = request, _stream) do
+  def execute_tool(%ExecuteToolRequest{} = request, stream) do
     SLog.info("ExecuteTool: #{request.tool_name} for session #{request.session_id}")
 
     start_time = System.monotonic_time(:millisecond)
+    correlation_id = resolve_request_correlation_id(request, stream)
+    request = ensure_request_correlation(request, correlation_id)
 
     with {:ok, _session} <- SessionStore.get_session(request.session_id),
          {:ok, tool} <- ToolRegistry.get_tool(request.session_id, request.tool_name),
-         {:ok, result} <- execute_tool_handler(tool, request, request.session_id) do
+         {:ok, result} <-
+           execute_tool_handler(tool, request, request.session_id, correlation_id) do
       execution_time = System.monotonic_time(:millisecond) - start_time
       {encoded_result, binary_result} = encode_tool_result(result)
 
@@ -164,7 +168,7 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  defp execute_tool_handler(%{type: :local} = tool, request, session_id) do
+  defp execute_tool_handler(%{type: :local} = tool, request, session_id, _correlation_id) do
     # Execute local Elixir tool
     case decode_tool_parameters(request.parameters, request.binary_parameters) do
       {:ok, params} ->
@@ -175,7 +179,7 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  defp execute_tool_handler(%{type: :remote} = tool, request, session_id) do
+  defp execute_tool_handler(%{type: :remote} = tool, request, session_id, correlation_id) do
     # Forward to Python worker
     SLog.debug("Executing remote tool #{tool.name} on worker #{tool.worker_id}")
 
@@ -183,7 +187,7 @@ defmodule Snakepit.GRPC.BridgeServer do
          {:ok, channel, cleanup} <- ensure_worker_channel(tool.worker_id) do
       result =
         try do
-          forward_tool_to_worker(channel, request, session_id, params)
+          forward_tool_to_worker(channel, request, session_id, params, correlation_id)
         after
           cleanup.()
         end
@@ -312,13 +316,15 @@ defmodule Snakepit.GRPC.BridgeServer do
     end
   end
 
-  defp forward_tool_to_worker(channel, request, session_id, decoded_params) do
+  defp forward_tool_to_worker(channel, request, session_id, decoded_params, correlation_id) do
+    worker_metadata = ensure_metadata_correlation(request.metadata, correlation_id)
+
     # Create the request to forward to the worker
     worker_request = %ExecuteToolRequest{
       session_id: session_id,
       tool_name: request.tool_name,
       parameters: request.parameters,
-      metadata: request.metadata,
+      metadata: worker_metadata,
       binary_parameters: request.binary_parameters
     }
 
@@ -328,6 +334,7 @@ defmodule Snakepit.GRPC.BridgeServer do
       worker_request.metadata
       |> tool_call_options()
       |> Keyword.put(:binary_parameters, binary_params)
+      |> Keyword.put(:correlation_id, correlation_id)
 
     case GRPCClient.execute_tool(
            channel,
@@ -355,7 +362,42 @@ defmodule Snakepit.GRPC.BridgeServer do
       end
   end
 
-  defp tool_call_options(_metadata), do: []
+  defp resolve_request_correlation_id(request, stream) do
+    request
+    |> correlation_id_from_metadata()
+    |> case do
+      nil -> correlation_id_from_headers(stream)
+      value -> value
+    end
+    |> Correlation.ensure()
+  end
+
+  defp correlation_id_from_metadata(%{metadata: metadata}) when is_map(metadata) do
+    Map.get(metadata, "correlation_id") || Map.get(metadata, :correlation_id)
+  end
+
+  defp correlation_id_from_metadata(_), do: nil
+
+  defp correlation_id_from_headers(nil), do: nil
+
+  defp correlation_id_from_headers(stream) do
+    stream
+    |> GRPC.Stream.get_headers()
+    |> Map.get("x-snakepit-correlation-id")
+  end
+
+  defp ensure_request_correlation(%ExecuteToolRequest{} = request, correlation_id) do
+    metadata = ensure_metadata_correlation(request.metadata, correlation_id)
+    %{request | metadata: metadata}
+  end
+
+  defp ensure_metadata_correlation(nil, correlation_id) do
+    %{"correlation_id" => correlation_id}
+  end
+
+  defp ensure_metadata_correlation(metadata, correlation_id) when is_map(metadata) do
+    Map.put(metadata, "correlation_id", correlation_id)
+  end
 
   defp parse_timeout_ms(nil), do: :error
 

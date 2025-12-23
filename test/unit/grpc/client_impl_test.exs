@@ -71,4 +71,43 @@ defmodule Snakepit.GRPC.ClientImplTest do
       assert {:ok, %{"hello" => "world"}} == ClientImpl.decode_tool_response(response)
     end
   end
+
+  describe "correlation metadata propagation" do
+    test "prepare_execute_tool_request sets metadata header and request metadata" do
+      {:ok, request, call_opts} =
+        ClientImpl.prepare_execute_tool_request(
+          "session-123",
+          "noop",
+          %{correlation_id: "cid-123"},
+          %{},
+          timeout: 1_000
+        )
+
+      assert request.metadata["correlation_id"] == "cid-123"
+      refute Map.has_key?(request.parameters, "correlation_id")
+      assert {"x-snakepit-correlation-id", "cid-123"} in Keyword.get(call_opts, :metadata, [])
+    end
+
+    test "prepare_execute_stream_request generates correlation id when missing" do
+      {:ok, request, call_opts} =
+        ClientImpl.prepare_execute_stream_request(
+          "session-123",
+          "stream",
+          %{},
+          %{},
+          timeout: 1_000
+        )
+
+      assert request.stream == true
+      assert is_binary(request.metadata["correlation_id"])
+      refute request.metadata["correlation_id"] == ""
+      refute Map.has_key?(request.parameters, "correlation_id")
+
+      assert {"x-snakepit-correlation-id", request.metadata["correlation_id"]} in Keyword.get(
+               call_opts,
+               :metadata,
+               []
+             )
+    end
+  end
 end

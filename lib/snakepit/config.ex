@@ -48,6 +48,7 @@ defmodule Snakepit.Config do
   - `pool_size` - Number of workers
   - `adapter_args` - CLI arguments for adapter
   - `adapter_env` - Environment variables
+  - `capacity_strategy` - `:pool`, `:profile`, or `:hybrid` (default: `:pool`)
 
   ### Process Profile Specific
   - `startup_batch_size` - Workers per batch (default: 8)
@@ -89,6 +90,7 @@ defmodule Snakepit.Config do
     adapter_module: module(),
     adapter_args: list(),
     adapter_env: list(),
+    capacity_strategy: :pool | :profile | :hybrid,
     pool_identifier: atom() | nil,
     worker_ttl: :infinity | {integer(), :seconds | :minutes | :hours},
     worker_max_requests: :infinity | pos_integer(),
@@ -110,6 +112,7 @@ defmodule Snakepit.Config do
   @default_batch_size 8
   @default_batch_delay 750
   @default_threads_per_worker 10
+  @default_capacity_strategy :pool
 
   @default_heartbeat_config %{
     enabled: true,
@@ -163,6 +166,7 @@ defmodule Snakepit.Config do
   def validate_pool_config(config) when is_map(config) do
     with :ok <- validate_required_fields(config),
          :ok <- validate_profile(config),
+         :ok <- validate_capacity_strategy(config),
          :ok <- validate_pool_size(config),
          :ok <- validate_lifecycle_options(config) do
       {:ok, normalize_pool_config(config)}
@@ -190,6 +194,10 @@ defmodule Snakepit.Config do
   def normalize_pool_config(config) do
     profile = Map.get(config, :worker_profile, @default_profile)
 
+    capacity_strategy =
+      Map.get(config, :capacity_strategy) ||
+        Application.get_env(:snakepit, :capacity_strategy, @default_capacity_strategy)
+
     base_config =
       config
       |> Map.put_new(:worker_profile, @default_profile)
@@ -198,6 +206,7 @@ defmodule Snakepit.Config do
       |> Map.put_new(:adapter_env, [])
       |> Map.put_new(:worker_ttl, :infinity)
       |> Map.put_new(:worker_max_requests, :infinity)
+      |> Map.put(:capacity_strategy, capacity_strategy)
 
     heartbeat =
       config
@@ -311,7 +320,9 @@ defmodule Snakepit.Config do
       pool_size: Application.get_env(:snakepit, :pool_size, @default_pool_size),
       adapter_module: Application.get_env(:snakepit, :adapter_module),
       adapter_args: [],
-      adapter_env: []
+      adapter_env: [],
+      capacity_strategy:
+        Application.get_env(:snakepit, :capacity_strategy, @default_capacity_strategy)
     }
 
     # Add pool_config if present
@@ -390,6 +401,19 @@ defmodule Snakepit.Config do
 
       invalid ->
         {:error, {:invalid_profile, invalid, "must be :process or :thread"}}
+    end
+  end
+
+  defp validate_capacity_strategy(config) do
+    case Map.get(config, :capacity_strategy) do
+      nil ->
+        :ok
+
+      strategy when strategy in [:pool, :profile, :hybrid] ->
+        :ok
+
+      invalid ->
+        {:error, {:invalid_capacity_strategy, invalid}}
     end
   end
 

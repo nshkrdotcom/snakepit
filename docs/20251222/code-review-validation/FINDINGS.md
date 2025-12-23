@@ -8,6 +8,31 @@
 
 An external code review raised several concerns about Snakepit's implementation. This document validates each claim against the actual codebase (v0.6.11) and provides specific file/line references.
 
+## Start Here (Orientation)
+
+This is a verification report, not an implementation plan. It answers "is the critique true?" and points to the exact evidence. If you are about to fix things, read this first, then move to `docs/20251222/code-review-validation/RECOMMENDATIONS.md`.
+
+Scope and constraints for this report:
+- Version validated: v0.6.11 (current evidence is anchored to this code layout).
+- Correctness first; do not change DETS sync behavior during this pass.
+- Correlation IDs must reach Python via both gRPC metadata header (`x-snakepit-correlation-id`) and `ExecuteToolRequest.metadata`.
+- Python telemetry only reads the header today; request metadata is for adapters/debugging.
+- Server-side streaming is currently unimplemented; treat this as a known gap unless you plan to implement it.
+
+Quick file map (start here before deep reads):
+- Pool scheduling + affinity: `lib/snakepit/pool/pool.ex`
+- Thread profile capacity tracking: `lib/snakepit/worker_profile/thread.ex`
+- Process profile env merging: `lib/snakepit/worker_profile/process.ex`
+- gRPC client metadata + parameter sanitization: `lib/snakepit/grpc/client_impl.ex`
+- Correlation generation (including streaming path): `lib/snakepit/grpc_worker.ex`
+- Python server telemetry + adapter context: `priv/python/grpc_server.py`, `priv/python/grpc_server_threaded.py`
+- Tool cleanup logging: `lib/snakepit/bridge/tool_registry.ex`
+- Proto contract: `priv/proto/snakepit_bridge.proto`
+
+How to use this document:
+- The table below is the truth table for the external review.
+- Each issue section shows evidence and impact; fixes live in `RECOMMENDATIONS.md`.
+
 | Issue | Verdict | Severity | Effort |
 |-------|---------|----------|--------|
 | Thread profile capacity not realized by Pool | **TRUE** | High | Medium |
@@ -78,6 +103,10 @@ defp execute_on_worker(worker_id, command, args, opts) do
   ...
 end
 ```
+
+**No Pool code path calls `WorkerProfile.*.execute_request/3`:**
+- Pool only uses the profile module during worker startup (`profile_module.start_worker/1`)
+- Capacity-aware execution is only exercised if a caller invokes the profile module directly
 
 ### Impact
 - Users configuring `:thread` profile with `threads_per_worker=16` and `pool_size=4` expect 64 concurrent requests
@@ -270,32 +299,43 @@ defp build_execute_tool_request(session_id, tool_name, proto_params, binary_para
 end
 ```
 
+**Proto DOES support ExecuteToolRequest.metadata, but Python expects a gRPC header:**
+
+```proto
+// priv/proto/snakepit_bridge.proto:85-96
+message ExecuteToolRequest {
+  string session_id = 1;
+  string tool_name = 2;
+  map<string, google.protobuf.Any> parameters = 3;
+  map<string, string> metadata = 4;
+  bool stream = 5;
+  map<string, bytes> binary_parameters = 6;
+}
+```
+
+```python
+# priv/python/snakepit_bridge/otel_tracing.py:24-148
+CORRELATION_HEADER = "x-snakepit-correlation-id"
+...
+def _extract_correlation_id(metadata):
+    for key, value in metadata:
+        if key.lower() == CORRELATION_HEADER:
+            return value
+```
+
+**No alternate path currently reaches Python:**
+- BridgeServer forwards request.metadata, but `GRPCClient.execute_tool/5` does not place metadata on the gRPC call
+- Neither the Elixir client nor the pool attaches gRPC metadata headers
+- Python servers do not read `ExecuteToolRequest.metadata` for correlation; only the gRPC header is used for telemetry
+- `priv/python/grpc_server.py` (process mode) does not wrap ExecuteTool in a telemetry span, so even a header would not be applied without changes
+
 ### Impact
 - End-to-end request tracing broken
 - Python logs cannot be correlated with Elixir logs
 - Debugging distributed issues is harder
 
 ### Recommendation
-
-```elixir
-# lib/snakepit/grpc/client_impl.ex
-defp build_execute_tool_request(session_id, tool_name, proto_params, binary_params, opts) do
-  correlation_id = Keyword.get(opts, :correlation_id)
-
-  %Bridge.ExecuteToolRequest{
-    session_id: session_id,
-    tool_name: tool_name,
-    parameters: proto_params,
-    binary_parameters: binary_params,
-    metadata: build_request_metadata(correlation_id)
-  }
-end
-
-defp build_request_metadata(nil), do: %{}
-defp build_request_metadata(correlation_id) do
-  %{"correlation_id" => correlation_id}
-end
-```
+Pass correlation_id via **both** gRPC metadata headers (`x-snakepit-correlation-id`) and `ExecuteToolRequest.metadata`, and update Python ExecuteTool handling to apply the header for telemetry plus the request metadata for adapters; see [RECOMMENDATIONS.md](./RECOMMENDATIONS.md).
 
 ---
 
@@ -324,14 +364,17 @@ end
 :dets.sync(state.dets_table)  # <-- Sync per reserve
 ```
 
+**No async/batched DETS writes exist elsewhere in ProcessRegistry.**
+
 ### Impact
 - DETS sync is a disk I/O operation
 - Starting 100 workers = 200+ DETS syncs (reserve + activate)
 - Sequential GenServer calls serialize this further
 - Can significantly slow pool startup on spinning disks
+- No dedicated benchmark found; the only timing data is indirect (e.g., `docs/20251113/slow-test-report.md` cites ~4.9s for a cold app start that includes DETS/registry work)
 
 ### Recommendation
-See [RECOMMENDATIONS.md](./RECOMMENDATIONS.md) for batching strategies.
+Defer any batching/removal of `:dets.sync` while correctness is the priority; keep current behavior unless a future correctness review explicitly approves changes (see [RECOMMENDATIONS.md](./RECOMMENDATIONS.md)).
 
 ---
 
@@ -370,9 +413,28 @@ end
 
 The `build_process_env/1` function correctly builds single-threading environment variables, but the result is discarded. The `config` map passed to `WorkerSupervisor.start_worker` may or may not have `:adapter_env` set by the caller.
 
+**GRPCWorker does apply adapter_env when spawning Python:**
+
+```elixir
+# lib/snakepit/grpc_worker.ex:333-415
+adapter_env =
+  worker_config
+  |> Map.get(:adapter_env, [])
+  |> merge_with_default_adapter_env()
+...
+port_opts =
+  if env_entries != [] do
+    env_tuples = Enum.map(env_entries, &to_env_tuple/1)
+    port_opts ++ [{:env, env_tuples}]
+  else
+    port_opts
+  end
+```
+
 ### Impact
 - Single-threading enforcement for scientific libraries (OPENBLAS, MKL, OMP) may not be applied
 - Thread contention in NumPy/PyTorch operations when users expect single-threaded workers
+- System-level thread limits set in `Snakepit.Application` are not merged into the per-worker env; if `{:env, ...}` replaces the inherited environment (OTP behavior varies), those globals could be dropped
 
 ### Recommendation
 
@@ -381,8 +443,10 @@ def start_worker(config) do
   ...
   adapter_env = build_process_env(config)
 
-  # Merge computed env into config
-  config_with_env = Map.put(config, :adapter_env, adapter_env)
+  # Merge computed env into config; user-provided values win
+  config_with_env = Map.update(config, :adapter_env, adapter_env, fn existing ->
+    Keyword.merge(adapter_env, existing || [])
+  end)
 
   case Snakepit.Pool.WorkerSupervisor.start_worker(
          worker_id,
@@ -410,6 +474,16 @@ The review mentioned `SnakeBridge.Stream's from_streaming_tool looks incomplete`
 
 ---
 
+## Reviewer Notes
+
+- Thread profile docs still claim a stub implementation, but `Snakepit.WorkerProfile.Thread.execute_request/3` and capacity tracking are implemented (`lib/snakepit/worker_profile/thread.ex:136-205`).
+- Streaming requests do not call `ensure_correlation/1`, so correlation IDs are not guaranteed for `execute_stream` paths even on the Elixir side (`lib/snakepit/grpc_worker.ex:631-652`).
+- Correlation ID propagation depends on gRPC metadata headers (`x-snakepit-correlation-id`); request metadata alone is insufficient without Python-side support (`priv/python/snakepit_bridge/otel_tracing.py:24-148`).
+- DETS sync is intentionally immediate for crash safety; do not change without a correctness-driven review and doc updates (`README_PROCESS_MANAGEMENT.md`).
+- GRPCWorker sets `{:env, ...}` when adapter_env is non-empty; confirm whether this replaces or augments inherited env so thread-limit globals are not accidentally dropped (`lib/snakepit/grpc_worker.ex:333-415`, `lib/snakepit/application.ex:24-44`).
+
+---
+
 ## Summary
 
 Of the 7 issues raised in the external review:
@@ -420,6 +494,8 @@ Of the 7 issues raised in the external review:
 The most critical issues are:
 1. **Thread profile scheduling** - high impact, breaks a headline feature
 2. **Correlation ID stripping** - medium impact, breaks observability
-3. **DETS sync bottleneck** - medium impact, affects startup performance
+3. **Process profile adapter_env** - low effort fix with correctness impact on thread limits
+
+DETS sync concerns are intentionally deferred while correctness is the priority.
 
 See [RECOMMENDATIONS.md](./RECOMMENDATIONS.md) for prioritized fix recommendations.

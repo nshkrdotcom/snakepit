@@ -48,7 +48,7 @@ defmodule Snakepit.WorkerProfile.Process do
     pool_name = Map.get(config, :pool_name, Snakepit.Pool)
 
     # Build adapter environment with single-threading enforcement
-    _adapter_env = build_process_env(config)
+    config_with_env = apply_adapter_env(config)
 
     # Start the worker via the WorkerSupervisor, passing worker_config for lifecycle management
     case Snakepit.Pool.WorkerSupervisor.start_worker(
@@ -56,7 +56,7 @@ defmodule Snakepit.WorkerProfile.Process do
            worker_module,
            adapter_module,
            pool_name,
-           config
+           config_with_env
          ) do
       {:ok, pid} ->
         SLog.debug("Process profile started worker #{worker_id}: #{inspect(pid)}")
@@ -187,27 +187,51 @@ defmodule Snakepit.WorkerProfile.Process do
     "GRPC_POLL_STRATEGY"
   ]
 
-  defp build_process_env(config) do
-    # Start with comprehensive single-threading defaults
-    default_env =
-      Enum.map(@all_thread_control_vars, fn var ->
-        case var do
-          "GRPC_POLL_STRATEGY" -> {var, "poll"}
-          _ -> {var, "1"}
-        end
-      end)
+  @doc false
+  def apply_adapter_env(config) when is_map(config) do
+    Map.put(config, :adapter_env, build_process_env(config))
+  end
 
-    # Get user-specified environment (overrides defaults)
+  @doc false
+  def build_process_env(config) do
+    defaults = build_process_env_defaults()
     user_env = Map.get(config, :adapter_env, [])
+    merge_env(defaults, user_env)
+  end
 
-    # Merge: user env overrides defaults
+  defp build_process_env_defaults do
+    Enum.map(@all_thread_control_vars, fn var ->
+      {var, System.get_env(var) || default_thread_value(var)}
+    end)
+  end
+
+  defp default_thread_value("GRPC_POLL_STRATEGY"), do: "poll"
+  defp default_thread_value(_var), do: "1"
+
+  defp merge_env(defaults, user_env) do
     merged =
-      Enum.reduce(user_env, Map.new(default_env), fn {key, val}, acc ->
+      Enum.reduce(normalize_env_entries(user_env), Map.new(defaults), fn {key, val}, acc ->
         Map.put(acc, key, val)
       end)
 
-    # Convert back to list of tuples
     Map.to_list(merged)
+  end
+
+  defp normalize_env_entries(nil), do: []
+
+  defp normalize_env_entries(env) when is_map(env) do
+    env
+    |> Map.to_list()
+    |> normalize_env_entries()
+  end
+
+  defp normalize_env_entries(env) when is_list(env) do
+    Enum.flat_map(env, fn
+      {key, value} -> [{to_string(key), to_string(value)}]
+      key when is_binary(key) -> [{key, ""}]
+      key when is_atom(key) -> [{Atom.to_string(key), ""}]
+      _ -> []
+    end)
   end
 
   defp get_worker_module(worker_pid) do

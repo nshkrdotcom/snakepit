@@ -38,17 +38,16 @@ defmodule Snakepit.WorkerProfile.Thread do
 
   ## Status
 
-  **Phase 1 (Current)**: Stub implementation that returns `:not_implemented`
-
-  Full implementation planned for Phase 2-3 of v0.6.0 development.
+  Thread profile is fully supported when paired with Python 3.13+ and thread-safe adapters.
 
   ## Implementation Notes
 
-  The thread profile will:
-  1. Start fewer Python processes (4-16 instead of 100+)
-  2. Each process runs a ThreadPoolExecutor with N threads
-  3. Track in-flight requests per worker for capacity management
-  4. Support concurrent requests to same worker via HTTP/2 multiplexing
+  The thread profile:
+  1. Starts fewer Python processes (4-16 instead of 100+)
+  2. Runs a ThreadPoolExecutor per worker process
+  3. Tracks per-worker capacity via `threads_per_worker` for pool scheduling
+  4. Supports optional CapacityStore telemetry with `capacity_strategy: :hybrid`
+  5. Allows concurrent requests to the same worker via HTTP/2 multiplexing
   """
 
   @behaviour Snakepit.WorkerProfile
