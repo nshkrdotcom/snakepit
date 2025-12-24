@@ -57,7 +57,7 @@ defmodule SnakepitLoadtest.MixProject do
       # Use the new managed run function
       Snakepit.run_as_script(fn ->
         SnakepitLoadtest.Demos.BasicLoadDemo.run(#{workers})
-      end)
+      end, halt: true)
       """
     ])
   end
@@ -70,7 +70,7 @@ defmodule SnakepitLoadtest.MixProject do
       """
       Snakepit.run_as_script(fn ->
         SnakepitLoadtest.Demos.StressTestDemo.run(#{workers})
-      end)
+      end, halt: true)
       """
     ])
   end
@@ -83,7 +83,7 @@ defmodule SnakepitLoadtest.MixProject do
       """
       Snakepit.run_as_script(fn ->
         SnakepitLoadtest.Demos.BurstLoadDemo.run(#{workers})
-      end)
+      end, halt: true)
       """
     ])
   end
@@ -96,7 +96,7 @@ defmodule SnakepitLoadtest.MixProject do
       """
       Snakepit.run_as_script(fn ->
         SnakepitLoadtest.Demos.SustainedLoadDemo.run(#{workers})
-      end)
+      end, halt: true)
       """
     ])
   end

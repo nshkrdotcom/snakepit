@@ -26,6 +26,4 @@ echo "GRPC_READY:${actual_port}"
 echo "REQUESTED_PORT:${requested_port}"
 
 # Keep process alive so the BEAM Port stays open
-while true; do
-  sleep 1
-done
+tail -f /dev/null

@@ -27,14 +27,8 @@ defmodule SnakepitLoadtest.Demos.StressTestDemo do
     IO.puts("Phase 1: Memory pressure test...")
     memory_results = stress_memory(worker_count)
 
-    # Brief cooldown
-    Process.sleep(2000)
-
     IO.puts("\nPhase 2: CPU intensive test...")
     cpu_results = stress_cpu(worker_count)
-
-    # Brief cooldown
-    Process.sleep(2000)
 
     IO.puts("\nPhase 3: Mixed workload test...")
     mixed_results = stress_mixed(worker_count)
@@ -107,8 +101,6 @@ defmodule SnakepitLoadtest.Demos.StressTestDemo do
           end)
 
         IO.puts(" done")
-        # Small delay between waves
-        Process.sleep(500)
         wave_results
       end)
 

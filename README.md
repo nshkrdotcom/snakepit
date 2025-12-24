@@ -20,7 +20,7 @@
 
 ### 1. Add to mix.exs
 ```elixir
-{:snakepit, "~> 0.7.0"}
+{:snakepit, "~> 0.7.1"}
 ```
 
 ### 2. Install Elixir deps
@@ -69,6 +69,7 @@ Snakepit is a battle-tested Elixir library that provides a robust pooling system
 
 ## 📋 Table of Contents
 
+- [What's New in v0.7.1](#whats-new-in-v071)
 - [What's New in v0.7.0](#whats-new-in-v070)
 - [What's New in v0.6.11](#whats-new-in-v0611)
 - [What's New in v0.6.10](#whats-new-in-v0610)
@@ -151,6 +152,16 @@ For **non-DSPex users**, if you're using these classes directly:
 - [Architecture Decision](https://github.com/nshkrdotcom/dspex/blob/main/docs/architecture_review_20251007/09_ARCHITECTURE_DECISION_RECORD.md)
 
 **Note**: `VariableAwareMixin` (the base mixin) remains in Snakepit as it's generic and useful for any Python integration, not just DSPy.
+
+---
+
+## 🆕 What's New in v0.7.1
+
+**Script ergonomics + safer defaults** – Released 2025-12-24, v0.7.1 makes pooling opt-in by default, auto-restarts scripts under Mix, and tightens example cleanup so `mix run` and `run_all.sh` behave predictably.
+
+- **Pooling defaults to opt-in** – `pooling_enabled` now defaults to `false`; enable it explicitly in config or per-script when you need pooled workers.
+- **`run_as_script/2` upgrades** – Automatic restart under Mix, `await_pool: false` support for gRPC-only demos, configurable shutdown/cleanup timeouts, and optional `halt: true` for scripts that must exit.
+- **Examples + runner updates** – Examples now cleanly stop in both `mix run` and `run_all.sh`, with `SNAKEPIT_EXAMPLE_DURATION_MS` and per-example timeouts available.
 
 ---
 
@@ -641,7 +652,7 @@ Run different workload types in separate pools with appropriate profiles!
 #### For Existing Users (v0.5.x → v0.6.0)
 ```bash
 # 1. Update dependency
-    {:snakepit, "~> 0.7.0"}
+    {:snakepit, "~> 0.7.1"}
 
 # 2. No config changes required! But consider adding:
 config :snakepit,
@@ -898,11 +909,11 @@ config :snakepit,
 # In your mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.7.0"}
+    {:snakepit, "~> 0.7.1"}
   ]
 end
 
-# Configure with gRPC adapter
+# Configure with gRPC adapter (pooling is opt-in)
 Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :grpc_port, 50051)
@@ -931,7 +942,7 @@ end)
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.7.0"}
+    {:snakepit, "~> 0.7.1"}
   ]
 end
 ```
@@ -1209,10 +1220,14 @@ Application.start(:snakepit)
 
 ### Running the Examples
 
-Examples are designed to run from the project root with `mix run --no-start` so
-each script can set `:grpc_port` and `:pooling_enabled` before the app starts.
+Examples are designed to run from the project root with `mix run` (or `--no-start`
+if you want to avoid auto-start); scripts restart Snakepit as needed so each
+script can set `:grpc_port` and `:pooling_enabled` safely.
 Each script loads `examples/mix_bootstrap.exs` so it can fall back to
 `Mix.install` when executed outside a Mix project.
+
+Use `SNAKEPIT_EXAMPLE_DURATION_MS` to auto-stop scripted demos, and
+`SNAKEPIT_RUN_TIMEOUT_MS` in `examples/run_all.sh` to cap per-example runtime.
 
 #### Quick Reference
 
@@ -1360,12 +1375,26 @@ Snakepit.run_as_script(fn ->
   end)
   IO.puts("Processed #{length(results)} items")
 end, timeout: 30_000)
+
+# For gRPC-only demos (no worker pool)
+Snakepit.run_as_script(fn ->
+  MyApp.start_grpc_server_only()
+end, await_pool: false)
+
+# Force BEAM exit after cleanup (useful for CI or run_all.sh)
+Snakepit.run_as_script(fn ->
+  MyApp.run_demo()
+end, halt: true)
 ```
 
 This ensures:
 - The pool waits for all workers to be ready before executing
 - All Python/external processes are properly terminated on exit
 - No orphaned processes remain after your script completes
+
+When running under `mix run`, `run_as_script/2` automatically restarts Snakepit to
+apply any script-level `Application.put_env/3` overrides (disable with `restart: false`).
+Set `SNAKEPIT_SCRIPT_HALT=true` to force a clean exit if your script would otherwise linger.
 
 #### Session-Based State Management
 
@@ -2835,11 +2864,10 @@ Snakepit is released under the MIT License. See the [LICENSE](https://github.com
 
 ## 📊 Development Status
 
-**v0.7.0 (Current Release)**
-- **Capacity-aware scheduling** - Pool honors `threads_per_worker` and session affinity with `capacity_strategy` overrides.
-- **Correlation propagation** - gRPC calls carry `x-snakepit-correlation-id` headers and request metadata, including streaming.
-- **Process profile env merge** - System thread limits stay intact when custom `adapter_env` is configured.
-- **ToolRegistry cleanup logging** - Cleanup logs now report the correct tool count.
+**v0.7.1 (Current Release)**
+- **Pooling defaults to opt-in** - `pooling_enabled` now defaults to `false` to avoid auto-start surprises in scripts.
+- **Script ergonomics** - `run_as_script/2` restarts under Mix, supports `await_pool: false`, adds optional `halt: true`, and cleans up lingering workers.
+- **Examples + runner polish** - `mix run` + `run_all.sh` behave consistently with auto-stop and timeouts.
 
 For historical releases, see `CHANGELOG.md`.
 

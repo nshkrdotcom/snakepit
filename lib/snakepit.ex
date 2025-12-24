@@ -189,6 +189,13 @@ defmodule Snakepit do
   ## Options
 
     * `:timeout` - Maximum time to wait for pool initialization (default: 15000ms)
+    * `:shutdown_timeout` - Time to wait for supervisor shutdown confirmation (default: 15000ms)
+    * `:cleanup_timeout` - Time to wait for worker process cleanup before forcing cleanup (default: 5000ms)
+      (cleanup is bounded; if it exceeds `cleanup_timeout + 1000` ms the script continues)
+    * `:restart` - Restart Snakepit if already started to apply script config (`:auto` | true | false)
+    * `:await_pool` - Wait for pool readiness (default: `pooling_enabled` setting)
+    * `:halt` - Force `System.halt/1` after cleanup for scripts that must exit (default: false,
+      or set `SNAKEPIT_SCRIPT_HALT=true`)
 
   ## Returns
 
@@ -197,47 +204,242 @@ defmodule Snakepit do
   """
   @spec run_as_script((-> any()), keyword()) :: any() | {:error, term()}
   def run_as_script(fun, opts \\ []) when is_function(fun, 0) do
-    timeout = Keyword.get(opts, :timeout, 15_000)
+    startup_timeout = Keyword.get(opts, :timeout, 15_000)
+    shutdown_timeout = Keyword.get(opts, :shutdown_timeout, 15_000)
+    cleanup_timeout = Keyword.get(opts, :cleanup_timeout, 5_000)
+    restart = Keyword.get(opts, :restart, :auto)
+    await_pool = Keyword.get(opts, :await_pool, pooling_enabled?())
+    halt = Keyword.get(opts, :halt, env_truthy?("SNAKEPIT_SCRIPT_HALT"))
 
     # Ensure all dependencies are started, including Snakepit itself
+    maybe_restart_snakepit(restart, shutdown_timeout, cleanup_timeout)
     {:ok, _apps} = Application.ensure_all_started(:snakepit)
 
     # Deterministically wait for the pool to be fully initialized
-    case Snakepit.Pool.await_ready(Snakepit.Pool, timeout) do
+    startup_result =
+      if await_pool do
+        Snakepit.Pool.await_ready(Snakepit.Pool, startup_timeout)
+      else
+        :ok
+      end
+
+    case startup_result do
       :ok ->
-        try do
-          fun.()
-        after
-          IO.puts("\n[Snakepit] Script execution finished. Shutting down gracefully...")
+        beam_run_id = safe_beam_run_id()
 
-          # Monitor the supervisor to wait for actual shutdown signal
-          case Process.whereis(Snakepit.Supervisor) do
-            nil ->
-              # Already shut down
-              IO.puts("[Snakepit] Shutdown complete (supervisor already terminated).")
+        result =
+          try do
+            {:ok, fun.()}
+          catch
+            kind, reason ->
+              {:error, {kind, reason, __STACKTRACE__}}
+          after
+            IO.puts("\n[Snakepit] Script execution finished. Shutting down gracefully...")
 
-            supervisor_pid ->
-              ref = Process.monitor(supervisor_pid)
-              Application.stop(:snakepit)
-
-              # Wait for :DOWN signal from BEAM - no guessing with sleep
-              receive do
-                {:DOWN, ^ref, :process, ^supervisor_pid, _reason} ->
-                  IO.puts("[Snakepit] Shutdown complete (confirmed via :DOWN signal).")
-              after
-                5_000 ->
-                  IO.puts(
-                    "[Snakepit] Warning: Shutdown confirmation timeout after 5s. " <>
-                      "Proceeding anyway."
-                  )
-              end
+            stop_snakepit(shutdown_timeout, label: "Shutdown")
+            run_cleanup_with_timeout(beam_run_id, cleanup_timeout)
           end
+
+        case result do
+          {:ok, value} ->
+            maybe_halt(halt, 0)
+            value
+
+          {:error, {kind, reason, stacktrace}} ->
+            maybe_halt(halt, 1)
+            :erlang.raise(kind, reason, stacktrace)
         end
 
       {:error, %Snakepit.Error{category: :timeout}} ->
-        IO.puts("[Snakepit] Error: Pool failed to initialize within #{timeout}ms")
+        IO.puts("[Snakepit] Error: Pool failed to initialize within #{startup_timeout}ms")
         Application.stop(:snakepit)
+        maybe_halt(halt, 1)
         {:error, :pool_initialization_timeout}
+    end
+  end
+
+  defp pooling_enabled? do
+    Application.get_env(:snakepit, :pooling_enabled, false)
+  end
+
+  defp maybe_restart_snakepit(restart, shutdown_timeout, cleanup_timeout) do
+    if should_restart?(restart) and snakepit_started?() do
+      IO.puts("[Snakepit] Restarting to apply script configuration...")
+      beam_run_id = safe_beam_run_id()
+      stop_snakepit(shutdown_timeout, label: "Restart cleanup")
+      maybe_cleanup_orphaned_workers(beam_run_id, cleanup_timeout)
+    end
+  end
+
+  defp should_restart?(true), do: true
+  defp should_restart?(false), do: false
+  defp should_restart?(:auto), do: mix_project_loaded?()
+  defp should_restart?(_), do: false
+
+  defp mix_project_loaded? do
+    mix_started? =
+      Enum.any?(Application.started_applications(), fn {app, _desc, _vsn} ->
+        app == :mix
+      end)
+
+    if mix_started? and Code.ensure_loaded?(Mix.Project) and
+         function_exported?(Mix.Project, :get, 0) do
+      try do
+        Mix.Project.get() != nil
+      catch
+        _, _ -> false
+      end
+    else
+      false
+    end
+  end
+
+  defp snakepit_started? do
+    Enum.any?(Application.started_applications(), fn {app, _desc, _vsn} ->
+      app == :snakepit
+    end)
+  end
+
+  defp stop_snakepit(shutdown_timeout, opts) do
+    label = Keyword.get(opts, :label, "Shutdown")
+
+    # Monitor the supervisor to wait for actual shutdown signal
+    case Process.whereis(Snakepit.Supervisor) do
+      nil ->
+        Application.stop(:snakepit)
+        # Already shut down
+        IO.puts("[Snakepit] #{label} complete (supervisor already terminated).")
+
+      supervisor_pid ->
+        ref = Process.monitor(supervisor_pid)
+        Application.stop(:snakepit)
+
+        # Wait for :DOWN signal from BEAM - no guessing with sleep
+        receive do
+          {:DOWN, ^ref, :process, ^supervisor_pid, _reason} ->
+            IO.puts("[Snakepit] #{label} complete (confirmed via :DOWN signal).")
+        after
+          shutdown_timeout ->
+            IO.puts(
+              "[Snakepit] Warning: #{label} confirmation timeout after #{shutdown_timeout}ms. " <>
+                "Proceeding anyway."
+            )
+        end
+    end
+  end
+
+  defp safe_beam_run_id do
+    try do
+      Snakepit.Pool.ProcessRegistry.get_beam_run_id()
+    catch
+      _, _ -> nil
+    end
+  end
+
+  defp maybe_cleanup_orphaned_workers(nil, _timeout_ms), do: :ok
+  defp maybe_cleanup_orphaned_workers(_run_id, timeout_ms) when timeout_ms <= 0, do: :ok
+
+  defp maybe_cleanup_orphaned_workers(run_id, timeout_ms) do
+    if wait_for_run_id_shutdown(run_id, timeout_ms) do
+      :ok
+    else
+      IO.puts(
+        "[Snakepit] Warning: Worker processes still running after #{timeout_ms}ms. " <>
+          "Forcing cleanup..."
+      )
+
+      Snakepit.ProcessKiller.kill_by_run_id(run_id)
+
+      if not wait_for_run_id_shutdown(run_id, timeout_ms) do
+        IO.puts("[Snakepit] Warning: Worker processes still running after forced cleanup.")
+      end
+    end
+  end
+
+  defp wait_for_run_id_shutdown(run_id, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    wait_for_run_id_shutdown_loop(run_id, deadline)
+  end
+
+  defp wait_for_run_id_shutdown_loop(run_id, deadline) do
+    if System.monotonic_time(:millisecond) >= deadline do
+      false
+    else
+      if run_id_processes?(run_id) do
+        receive do
+        after
+          100 -> :ok
+        end
+
+        wait_for_run_id_shutdown_loop(run_id, deadline)
+      else
+        true
+      end
+    end
+  end
+
+  defp run_id_processes?(run_id) do
+    Snakepit.ProcessKiller.find_python_processes()
+    |> Enum.any?(fn pid ->
+      case Snakepit.ProcessKiller.get_process_command(pid) do
+        {:ok, cmd} -> run_id_in_command?(cmd, run_id)
+        _ -> false
+      end
+    end)
+  end
+
+  defp run_id_in_command?(command, run_id) do
+    has_script =
+      String.contains?(command, "grpc_server.py") or
+        String.contains?(command, "grpc_server_threaded.py")
+
+    has_run_id =
+      String.contains?(command, "--snakepit-run-id #{run_id}") or
+        String.contains?(command, "--run-id #{run_id}")
+
+    has_script and has_run_id
+  end
+
+  defp run_cleanup_with_timeout(run_id, cleanup_timeout) do
+    if cleanup_timeout <= 0 or is_nil(run_id) do
+      maybe_cleanup_orphaned_workers(run_id, cleanup_timeout)
+    else
+      task_timeout = cleanup_timeout + 1_000
+      task = Task.async(fn -> maybe_cleanup_orphaned_workers(run_id, cleanup_timeout) end)
+
+      case Task.yield(task, task_timeout) || Task.shutdown(task, :brutal_kill) do
+        {:ok, _} ->
+          :ok
+
+        nil ->
+          IO.puts(
+            "[Snakepit] Warning: cleanup exceeded #{task_timeout}ms. Skipping remaining cleanup."
+          )
+
+        {:exit, reason} ->
+          IO.puts("[Snakepit] Warning: cleanup crashed: #{inspect(reason)}")
+      end
+    end
+  end
+
+  defp maybe_halt(true, status) do
+    if status != 0 do
+      IO.puts("[Snakepit] Halting BEAM with status #{status}.")
+    end
+
+    # Flush all IO before halting to ensure output is visible
+    :ok = :io.put_chars(:standard_io, [])
+    :ok = :io.put_chars(:standard_error, [])
+
+    System.halt(status)
+  end
+
+  defp maybe_halt(_, _status), do: :ok
+
+  defp env_truthy?(name) do
+    case System.get_env(name) do
+      nil -> false
+      value -> String.downcase(String.trim(value)) in ["1", "true", "yes", "y", "on"]
     end
   end
 

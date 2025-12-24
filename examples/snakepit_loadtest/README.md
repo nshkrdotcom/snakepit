@@ -23,10 +23,10 @@ Tests simple concurrent execution with configurable workers:
 
 ```bash
 # Default: 10 workers
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(10) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(10) end, halt: true)'
 
 # Custom: 200 workers
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(200) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(200) end, halt: true)'
 ```
 
 ### Stress Test
@@ -34,10 +34,10 @@ Pushes the system to its limits with memory-intensive and CPU-intensive workload
 
 ```bash
 # Default: 50 workers
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.StressTestDemo.run(50) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.StressTestDemo.run(50) end, halt: true)'
 
 # Custom: 150 workers
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.StressTestDemo.run(150) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.StressTestDemo.run(150) end, halt: true)'
 ```
 
 ### Burst Load Test
@@ -45,10 +45,10 @@ Simulates sudden traffic spikes with ramp-up and cool-down phases:
 
 ```bash
 # Default: 100 peak workers
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BurstLoadDemo.run(100) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BurstLoadDemo.run(100) end, halt: true)'
 
 # Custom: 500 peak workers
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BurstLoadDemo.run(500) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BurstLoadDemo.run(500) end, halt: true)'
 ```
 
 ### Sustained Load Test
@@ -56,14 +56,14 @@ Runs continuous load for 2 minutes to test long-term stability (override with `S
 
 ```bash
 # Default: 20 workers, 2 minutes
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(20) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(20) end, halt: true)'
 
 # Shortened duration (ms)
 SNAKEPIT_SUSTAINED_DURATION_MS=10000 \
-  mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(20) end)'
+  mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(20) end, halt: true)'
 
 # Custom: 50 workers
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(50) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(50) end, halt: true)'
 ```
 
 ## Test Scenarios
@@ -147,6 +147,7 @@ All demo tasks use `Snakepit.run_as_script/2` to ensure:
 - Proper pool initialization before tests begin
 - Complete cleanup of all Python processes on exit
 - No orphaned processes after demo completion
+- `halt: true` forces a clean exit after cleanup when running via `mix run`
 
 This happens automatically - you'll see shutdown messages like:
 ```

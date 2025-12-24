@@ -104,6 +104,6 @@ defmodule StreamingDemo do
 end
 
 # Run with proper cleanup
-Snakepit.run_as_script(fn ->
+Snakepit.Examples.Bootstrap.run_example(fn ->
   StreamingDemo.run(pool_size)
 end)

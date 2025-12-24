@@ -256,8 +256,6 @@ defmodule TelemetryMetricsExample do
         {:ok, _} -> IO.puts("  ✓ #{command} executed")
         {:error, _} -> IO.puts("  ❌ #{command} failed")
       end
-
-      Process.sleep(100)
     end
 
     # Execute some concurrent requests
@@ -272,7 +270,6 @@ defmodule TelemetryMetricsExample do
 
     Task.await_many(tasks, 30_000)
 
-    Process.sleep(200)
     IO.puts("  ✓ Workload complete\n")
   end
 
@@ -462,7 +459,7 @@ defmodule TelemetryMetricsExample.PrometheusGuide do
 end
 
 # Run the example with proper cleanup
-Snakepit.run_as_script(fn ->
+Snakepit.Examples.Bootstrap.run_example(fn ->
   TelemetryMetricsExample.run()
   TelemetryMetricsExample.PrometheusGuide.show_integration_guide()
 end)

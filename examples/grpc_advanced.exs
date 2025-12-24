@@ -37,19 +37,13 @@ defmodule AdvancedExample do
     IO.puts("1. Multi-stage pipeline execution:")
     pipeline_example()
 
-    Process.sleep(300)
-
     # 2. Error handling and graceful degradation
     IO.puts("\n2. Error handling:")
     error_handling_example()
 
-    Process.sleep(300)
-
     # 3. Concurrent task coordination
     IO.puts("\n3. Concurrent task coordination:")
     concurrent_coordination_example()
-
-    Process.sleep(300)
 
     # 4. Session-based workflow
     IO.puts("\n4. Session-based workflow:")
@@ -174,6 +168,6 @@ defmodule AdvancedExample do
 end
 
 # Run the example with proper cleanup
-Snakepit.run_as_script(fn ->
+Snakepit.Examples.Bootstrap.run_example(fn ->
   AdvancedExample.run()
 end)

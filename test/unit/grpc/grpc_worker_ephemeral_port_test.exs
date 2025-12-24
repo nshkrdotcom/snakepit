@@ -32,7 +32,11 @@ defmodule Snakepit.GRPCWorkerEphemeralPortTest do
     @impl true
     def handle_call({:worker_ready, worker_id}, _from, state) do
       send(state.test_pid, {:worker_ready_called, worker_id, self()})
-      Process.sleep(:infinity)
+
+      receive do
+        :unblock -> :ok
+      end
+
       {:reply, :ok, state}
     end
   end

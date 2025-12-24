@@ -153,6 +153,6 @@ defmodule SessionExample do
 end
 
 # Run the example with proper cleanup
-Snakepit.run_as_script(fn ->
+Snakepit.Examples.Bootstrap.run_example(fn ->
   SessionExample.run()
 end)

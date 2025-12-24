@@ -36,7 +36,6 @@ defmodule SnakepitBenchmark do
     Enum.map(@pool_sizes, fn size ->
       # Ensure clean state
       Application.stop(:snakepit)
-      :timer.sleep(100)
 
       # Configure adapter and pool
       Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
@@ -44,17 +43,20 @@ defmodule SnakepitBenchmark do
       Application.put_env(:snakepit, :pooling_enabled, true)
 
       # Measure startup
-      {time_us, {:ok, _}} = :timer.tc(fn ->
-        {:ok, _} = Application.ensure_all_started(:snakepit)
-        # Wait for all workers ready
-        :timer.sleep(1000)
-        Snakepit.execute("ping", %{})
-      end)
+      {time_us, {:ok, _}} =
+        :timer.tc(fn ->
+          {:ok, _} = Application.ensure_all_started(:snakepit)
+          # Wait for all workers ready
+          :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 15_000)
+          Snakepit.execute("ping", %{})
+        end)
 
       time_ms = time_us / 1000
       time_per_worker = time_ms / size
 
-      IO.puts("  Pool size #{size}: #{Float.round(time_ms, 2)}ms total, #{Float.round(time_per_worker, 2)}ms per worker")
+      IO.puts(
+        "  Pool size #{size}: #{Float.round(time_ms, 2)}ms total, #{Float.round(time_per_worker, 2)}ms per worker"
+      )
 
       %{
         pool_size: size,
@@ -75,20 +77,27 @@ defmodule SnakepitBenchmark do
     Application.put_env(:snakepit, :pool_config, %{pool_size: 8})
     Application.put_env(:snakepit, :pooling_enabled, true)
     {:ok, _} = Application.ensure_all_started(:snakepit)
-    :timer.sleep(1000)
+    :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 15_000)
 
-    {time_us, _} = :timer.tc(fn ->
-      1..@iterations
-      |> Task.async_stream(fn _i ->
-        Snakepit.execute("ping", %{})
-      end, max_concurrency: 20, timeout: 30_000)
-      |> Enum.to_list()
-    end)
+    {time_us, _} =
+      :timer.tc(fn ->
+        1..@iterations
+        |> Task.async_stream(
+          fn _i ->
+            Snakepit.execute("ping", %{})
+          end,
+          max_concurrency: 20,
+          timeout: 30_000
+        )
+        |> Enum.to_list()
+      end)
 
     time_s = time_us / 1_000_000
     rps = @iterations / time_s
 
-    IO.puts("  #{@iterations} requests in #{Float.round(time_s, 2)}s = #{Float.round(rps, 2)} req/s")
+    IO.puts(
+      "  #{@iterations} requests in #{Float.round(time_s, 2)}s = #{Float.round(rps, 2)} req/s"
+    )
 
     %{
       total_requests: @iterations,
@@ -104,10 +113,13 @@ defmodule SnakepitBenchmark do
     latencies =
       1..50
       |> Enum.map(fn _ ->
-        {time_us, _} = :timer.tc(fn ->
-          Snakepit.execute("ping", %{})
-        end)
-        time_us / 1000  # Convert to ms
+        {time_us, _} =
+          :timer.tc(fn ->
+            Snakepit.execute("ping", %{})
+          end)
+
+        # Convert to ms
+        time_us / 1000
       end)
 
     sorted = Enum.sort(latencies)
@@ -140,18 +152,25 @@ defmodule SnakepitBenchmark do
     IO.puts("--------------------------------")
 
     Enum.map([10, 50, 100], fn concurrent ->
-      {time_us, _} = :timer.tc(fn ->
-        1..concurrent
-        |> Task.async_stream(fn _i ->
-          Snakepit.execute("ping", %{})
-        end, max_concurrency: concurrent, timeout: 30_000)
-        |> Enum.to_list()
-      end)
+      {time_us, _} =
+        :timer.tc(fn ->
+          1..concurrent
+          |> Task.async_stream(
+            fn _i ->
+              Snakepit.execute("ping", %{})
+            end,
+            max_concurrency: concurrent,
+            timeout: 30_000
+          )
+          |> Enum.to_list()
+        end)
 
       time_ms = time_us / 1000
       rps = concurrent / (time_us / 1_000_000)
 
-      IO.puts("  #{concurrent} concurrent: #{Float.round(time_ms, 2)}ms, #{Float.round(rps, 2)} req/s")
+      IO.puts(
+        "  #{concurrent} concurrent: #{Float.round(time_ms, 2)}ms, #{Float.round(rps, 2)} req/s"
+      )
 
       %{
         concurrent: concurrent,

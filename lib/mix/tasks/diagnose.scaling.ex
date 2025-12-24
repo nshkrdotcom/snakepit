@@ -501,9 +501,6 @@ defmodule Mix.Tasks.Diagnose.Scaling do
         IO.puts("\n" <> String.duplicate("-", 60))
         IO.puts("🔬 Testing #{count} workers...")
 
-        # Small delay between tests
-        :timer.sleep(2000)
-
         before_metrics = capture_metrics()
 
         # Try to start a worker

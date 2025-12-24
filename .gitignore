@@ -216,3 +216,7 @@ repomix*.xml
 /arsenal/
 
 /Citadel/
+
+# Generated artifacts (machine-specific, regeneratable)
+examples/generated/
+priv/snakepit/manifests/

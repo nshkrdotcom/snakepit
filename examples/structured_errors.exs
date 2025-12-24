@@ -137,7 +137,6 @@ defmodule StructuredErrorsExample do
     for {command, params} <- commands do
       result = Snakepit.execute(command, params)
       handle_result(command, result)
-      Process.sleep(50)
     end
 
     IO.puts("")
@@ -236,6 +235,6 @@ defmodule StructuredErrorsExample do
 end
 
 # Run the example with proper cleanup
-Snakepit.run_as_script(fn ->
+Snakepit.Examples.Bootstrap.run_example(fn ->
   StructuredErrorsExample.run()
 end)

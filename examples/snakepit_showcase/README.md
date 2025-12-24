@@ -50,13 +50,13 @@ cd examples/snakepit_showcase
 mix setup
 
 # Run all demos
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end, halt: true)'
 
 # Interactive mode
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.interactive() end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.interactive() end, halt: true)'
 
 # Run specific demo
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ExecutionModesDemo.run() end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ExecutionModesDemo.run() end, halt: true)'
 ```
 
 ## Important: Process Management
@@ -65,6 +65,7 @@ All demos use `Snakepit.run_as_script/2` to ensure:
 - Deterministic pool initialization (no race conditions)
 - Proper cleanup of all Python processes on exit
 - No orphaned processes after demo completion
+- `halt: true` forces a clean exit after cleanup when running via `mix run`
 
 This is handled automatically by the framework - you don't need to add any cleanup code!
 

@@ -43,8 +43,6 @@ defmodule SnakepitShowcase.RunShowcase do
       module.run()
       IO.puts("✅ Demo '#{name}' complete.")
       IO.puts(String.duplicate("-", 50))
-      # A small pause between demos for readability
-      Process.sleep(1000)
     end)
 
     IO.puts("\n\n✅✅✅ All Snakepit showcases completed successfully! ✅✅✅")

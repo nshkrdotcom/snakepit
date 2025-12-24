@@ -111,11 +111,18 @@ defmodule SnakepitLoadtest.Demos.BurstLoadDemo do
             {:timeout, nil}
         end)
 
-      if delay > 0, do: Process.sleep(delay)
+      if delay > 0, do: wait_delay(delay)
 
       results
     end)
     |> Enum.flat_map(& &1)
+  end
+
+  defp wait_delay(delay_ms) when is_integer(delay_ms) and delay_ms > 0 do
+    receive do
+    after
+      delay_ms -> :ok
+    end
   end
 
   defp display_burst_results(phase_results) do

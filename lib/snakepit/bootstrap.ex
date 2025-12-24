@@ -23,18 +23,23 @@ defmodule Snakepit.Bootstrap do
   @spec run(Keyword.t()) :: :ok | {:error, term()}
   def run(opts \\ []) do
     # Prevent concurrent bootstrap runs - use fixed lock key
-    case :global.set_lock({__MODULE__, :bootstrap_lock}, [node()], 0) do
+    lock = {__MODULE__, :bootstrap_lock}
+
+    case :global.set_lock(lock, [node()], 0) do
+      true ->
+        run_with_lock(lock, fn -> do_run(opts) end)
+
       false ->
         Mix.shell().info("⚠️  Bootstrap already running, waiting...")
-        :timer.sleep(500)
-        run(opts)
+        :global.trans(lock, fn -> do_run(opts) end, [node()])
+    end
+  end
 
-      true ->
-        try do
-          do_run(opts)
-        after
-          :global.del_lock({__MODULE__, :bootstrap_lock}, [node()])
-        end
+  defp run_with_lock(lock, fun) do
+    try do
+      fun.()
+    after
+      :global.del_lock(lock, [node()])
     end
   end
 

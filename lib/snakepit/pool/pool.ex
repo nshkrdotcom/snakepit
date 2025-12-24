@@ -1250,11 +1250,22 @@ defmodule Snakepit.Pool do
 
       # Delay between batches (unless this is the last batch)
       unless batch_num == div(actual_count - 1, batch_size) do
-        :timer.sleep(batch_delay)
+        wait_for_batch_delay(batch_delay)
       end
 
       workers
     end)
+  end
+
+  defp wait_for_batch_delay(delay_ms) when delay_ms <= 0, do: :ok
+
+  defp wait_for_batch_delay(delay_ms) do
+    ref = make_ref()
+    Process.send_after(self(), {:startup_batch_delay, ref}, delay_ms)
+
+    receive do
+      {:startup_batch_delay, ^ref} -> :ok
+    end
   end
 
   defp checkout_worker(pool_state, session_id, affinity_cache) do

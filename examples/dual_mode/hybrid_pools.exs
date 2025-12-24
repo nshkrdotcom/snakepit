@@ -297,5 +297,10 @@ defmodule HybridPoolsDemo do
   end
 end
 
-# Run the demo
-HybridPoolsDemo.run()
+# Run the demo with clean startup/shutdown
+Snakepit.Examples.Bootstrap.run_example(
+  fn ->
+    HybridPoolsDemo.run()
+  end,
+  await_pool: false
+)

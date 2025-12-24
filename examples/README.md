@@ -1,11 +1,11 @@
 # Snakepit Examples
 
-This directory contains working examples demonstrating Snakepit's features. Run from the project root with `mix run --no-start` so each script can set `:grpc_port` and `:pooling_enabled` before the app starts.
+This directory contains working examples demonstrating Snakepit's features. Run from the project root with `mix run` (or `--no-start` if you prefer); each script restarts Snakepit as needed so it can set `:grpc_port` and `:pooling_enabled` safely.
 
 ## Quick Start
 
 ```bash
-mix run --no-start examples/grpc_basic.exs
+mix run examples/grpc_basic.exs
 ```
 
 ## Run Everything
@@ -17,7 +17,10 @@ mix run --no-start examples/grpc_basic.exs
 # Or bootstrap first
 ./examples/run_all.sh --setup
 
-# Extend the bidirectional auto-demo run time if needed (ms)
+# Extend demo run time if needed (ms)
+SNAKEPIT_EXAMPLE_DURATION_MS=8000 ./examples/run_all.sh
+
+# Override just the bidirectional auto-demo duration (ms)
 SNAKEPIT_AUTO_DEMO_DURATION_MS=8000 ./examples/run_all.sh
 
 # Override loadtest worker counts
@@ -25,6 +28,9 @@ LOADTEST_BASIC_WORKERS=25 LOADTEST_SUSTAINED_WORKERS=10 ./examples/run_all.sh
 
 # Shorten sustained load demo duration (ms) for faster runs
 SNAKEPIT_SUSTAINED_DURATION_MS=10000 ./examples/run_all.sh
+
+# Increase or disable per-example timeout (ms, set 0 to disable)
+SNAKEPIT_RUN_TIMEOUT_MS=240000 ./examples/run_all.sh
 ```
 
 Options:
@@ -119,7 +125,7 @@ mix run --no-start examples/stream_progress_demo.exs
 - Elixir tools callable from Python
 - Python tools callable from Elixir
 - Tool registry and discovery
-- Set `SNAKEPIT_DEMO_DURATION_MS` to auto-stop in scripted runs
+- Set `SNAKEPIT_EXAMPLE_DURATION_MS` (or `SNAKEPIT_DEMO_DURATION_MS`) to auto-stop in scripted runs
 
 ```bash
 mix run --no-start examples/bidirectional_tools_demo.exs
@@ -271,7 +277,7 @@ Run the showcase app with `mix run`:
 ```bash
 cd examples/snakepit_showcase
 mix setup
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end, halt: true)'
 ```
 
 ### `examples/snakepit_loadtest`
@@ -280,15 +286,21 @@ Run the load tests with `mix run`:
 ```bash
 cd examples/snakepit_loadtest
 mix setup
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(10) end)'
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.StressTestDemo.run(10) end)'
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BurstLoadDemo.run(10) end)'
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(5) end)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(10) end, halt: true)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.StressTestDemo.run(10) end, halt: true)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BurstLoadDemo.run(10) end, halt: true)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(5) end, halt: true)'
 ```
 
 ---
 
 ## Common Patterns
+
+### Example Wrapper
+
+Examples use `Snakepit.Examples.Bootstrap.run_example/2`, which wraps `Snakepit.run_as_script/2`,
+awaits the pool when enabled, and defaults to `halt: true` so `mix run` exits cleanly.
+Use `await_pool: false` for docs-only or gRPC-only demos.
 
 ### Running with Custom Configuration
 
@@ -387,7 +399,7 @@ See [`TELEMETRY.md`](../TELEMETRY.md) for the complete event catalog and integra
 
 When adding new examples:
 
-1. Follow the existing pattern (shebang, mix_bootstrap, config, module, run_as_script)
+1. Follow the existing pattern (shebang, mix_bootstrap, config, module, run_example)
 2. Include clear documentation in comments
 3. Add error handling
 4. Suppress unnecessary logs

@@ -50,6 +50,7 @@ mix test test/unit/logger/redaction_test.exs                          # Log reda
 # Run Python pytest suites only (auto-manages .venv, installs/updates deps, regenerates protos)
 ./test_python.sh
 ./test_python.sh -k streaming  # Any args are forwarded to pytest
+# No manual venv activation needed; the script handles creation/updates.
 # The Python requirements now include pytest-asyncio so coroutine-based tests (e.g., heartbeat client)
 # run without extra configuration.
 ```

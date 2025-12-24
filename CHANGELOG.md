@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2025-12-24
+
+### Added
+- **Script ergonomics** – `Snakepit.run_as_script/2` now supports `restart`, `await_pool`, and `halt` options plus configurable shutdown/cleanup timeouts.
+- **Example runner controls** – `examples/run_all.sh` honors `SNAKEPIT_EXAMPLE_DURATION_MS` and `SNAKEPIT_RUN_TIMEOUT_MS`.
+- **Examples bootstrap helper** – `Snakepit.Examples.Bootstrap.run_example/2` centralizes pool readiness and script exit behavior.
+
+### Changed
+- **Pooling defaults to opt-in** – `pooling_enabled` now defaults to `false` to avoid auto-start surprises in scripts.
+- **Examples cleanup** – bidirectional and documentation-only examples now shut down cleanly under both `mix run` and `run_all.sh`.
+
+### Fixed
+- **Mix-run config drift** – examples now restart Snakepit to apply script-level env overrides, preventing port mismatches and orphaned workers.
+
 ## [0.7.0] - 2025-12-22
 
 ### Added

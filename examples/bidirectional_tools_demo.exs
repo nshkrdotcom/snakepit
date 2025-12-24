@@ -89,165 +89,206 @@ Snakepit.Examples.Bootstrap.ensure_mix!([
 
 alias Snakepit.Bridge.{SessionStore, ToolRegistry}
 
-# Configure the application
 Application.put_env(:snakepit, :grpc_port, 50051)
 Application.put_env(:snakepit, :pooling_enabled, false)
 Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 grpc_port = Application.get_env(:snakepit, :grpc_port)
 
-# Start the application with gRPC server
-{:ok, _} = Application.ensure_all_started(:grpc)
-{:ok, _} = Application.ensure_all_started(:snakepit)
+defmodule BidirectionalToolsDemo do
+  def run(grpc_port, auto_stop_ms) do
+    {:ok, grpc_supervisor} = start_grpc_supervisor(grpc_port)
+    Process.unlink(grpc_supervisor)
+    session_id = nil
 
-# Start the gRPC server supervisor
-{:ok, _} =
-  Supervisor.start_link(
-    [
-      {GRPC.Server.Supervisor,
-       endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true}
-    ],
-    strategy: :one_for_one
-  )
+    try do
+      session_id = "bidirectional-demo-#{:os.system_time(:millisecond)}"
 
-# Wait for services to start
-Process.sleep(500)
+      {:ok, _session} =
+        SessionStore.create_session(
+          session_id,
+          metadata: %{"demo" => "bidirectional_tools"}
+        )
 
-# Create a session
-session_id = "bidirectional-demo-#{:os.system_time(:millisecond)}"
+      IO.puts("\n=== Bidirectional Tool Bridge Demo ===")
+      IO.puts("Session ID: #{session_id}")
+      IO.puts("gRPC Server running on port #{grpc_port}\n")
 
-{:ok, _session} =
-  SessionStore.create_session(session_id, metadata: %{"demo" => "bidirectional_tools"})
+      # Register Elixir tools that Python can call
+      IO.puts("1. Registering Elixir tools...")
 
-IO.puts("\n=== Bidirectional Tool Bridge Demo ===")
-IO.puts("Session ID: #{session_id}")
-IO.puts("gRPC Server running on port #{grpc_port}\n")
+      ToolRegistry.register_elixir_tool(
+        session_id,
+        "parse_json",
+        &ElixirTools.parse_json/1,
+        %{
+          description: "Parse a JSON string and return analysis",
+          exposed_to_python: true,
+          parameters: [
+            %{name: "json_string", type: "string", required: true}
+          ]
+        }
+      )
 
-# Register Elixir tools that Python can call
-IO.puts("1. Registering Elixir tools...")
+      ToolRegistry.register_elixir_tool(
+        session_id,
+        "calculate_fibonacci",
+        &ElixirTools.calculate_fibonacci/1,
+        %{
+          description: "Calculate Fibonacci sequence up to n numbers",
+          exposed_to_python: true,
+          parameters: [
+            %{name: "n", type: "integer", required: true}
+          ]
+        }
+      )
 
-ToolRegistry.register_elixir_tool(
-  session_id,
-  "parse_json",
-  &ElixirTools.parse_json/1,
-  %{
-    description: "Parse a JSON string and return analysis",
-    exposed_to_python: true,
-    parameters: [
-      %{name: "json_string", type: "string", required: true}
-    ]
-  }
-)
+      ToolRegistry.register_elixir_tool(
+        session_id,
+        "process_list",
+        &ElixirTools.process_list/1,
+        %{
+          description: "Process a list with various operations",
+          exposed_to_python: true,
+          parameters: [
+            %{name: "list", type: "array", required: true},
+            %{name: "operation", type: "string", required: false}
+          ]
+        }
+      )
 
-ToolRegistry.register_elixir_tool(
-  session_id,
-  "calculate_fibonacci",
-  &ElixirTools.calculate_fibonacci/1,
-  %{
-    description: "Calculate Fibonacci sequence up to n numbers",
-    exposed_to_python: true,
-    parameters: [
-      %{name: "n", type: "integer", required: true}
-    ]
-  }
-)
+      # List registered Elixir tools
+      elixir_tools = ToolRegistry.list_exposed_elixir_tools(session_id)
+      IO.puts("Registered #{length(elixir_tools)} Elixir tools:")
 
-ToolRegistry.register_elixir_tool(
-  session_id,
-  "process_list",
-  &ElixirTools.process_list/1,
-  %{
-    description: "Process a list with various operations",
-    exposed_to_python: true,
-    parameters: [
-      %{name: "list", type: "array", required: true},
-      %{name: "operation", type: "string", required: false}
-    ]
-  }
-)
+      for tool <- elixir_tools do
+        IO.puts("  - #{tool.name}: #{tool.description}")
+      end
 
-# List registered Elixir tools
-elixir_tools = ToolRegistry.list_exposed_elixir_tools(session_id)
-IO.puts("Registered #{length(elixir_tools)} Elixir tools:")
+      IO.puts("\n2. Testing direct Elixir tool execution...")
 
-for tool <- elixir_tools do
-  IO.puts("  - #{tool.name}: #{tool.description}")
+      {:ok, result} =
+        ToolRegistry.execute_local_tool(
+          session_id,
+          "parse_json",
+          %{"json_string" => ~s({"name": "test", "value": 42})}
+        )
+
+      IO.puts("Direct execution result: #{inspect(result)}")
+
+      IO.puts("\n3. Python Integration Demo")
+      IO.puts("Now Python can discover and call these Elixir tools!")
+      IO.puts("\nTo test from Python:")
+
+      IO.puts(~s"""
+      # In Python with a SessionContext:
+      channel = grpc.insecure_channel("localhost:#{grpc_port}")
+      stub = BridgeServiceStub(channel)
+      ctx = SessionContext(stub, "#{session_id}")
+
+      # List available Elixir tools
+      print("Available Elixir tools:", list(ctx.elixir_tools.keys()))
+
+      # Call an Elixir tool
+      result = ctx.call_elixir_tool("calculate_fibonacci", n=10)
+      print("Fibonacci result:", result)
+
+      # Or use the proxy directly
+      parse_json = ctx.elixir_tools["parse_json"]
+      result = parse_json(json_string='{"test": true}')
+      print("Parse result:", result)
+      """)
+
+      IO.puts("\nQuick start:")
+      IO.puts("  SNAKEPIT_GRPC_PORT=#{grpc_port} python examples/python_elixir_tools_demo.py")
+
+      IO.puts("\n4. Bidirectional Example")
+      IO.puts("Python tools registered in this session:")
+
+      python_tools = [
+        %{name: "ml_analyze_text", type: :remote, description: "Analyze text using ML"},
+        %{
+          name: "process_image",
+          type: :remote,
+          description: "Process images with various filters"
+        },
+        %{name: "data_transform", type: :remote, description: "Transform data between formats"}
+      ]
+
+      for tool <- python_tools do
+        IO.puts("  - #{tool.name}: #{tool.description}")
+      end
+
+      IO.puts("\n5. Complete Workflow Example")
+
+      IO.puts(~S"""
+      A complete bidirectional workflow might look like:
+
+      1. Python receives data and does initial ML processing
+      2. Python calls Elixir's parse_json to validate structure
+      3. Elixir processes the parsed data with business logic
+      4. Elixir calls Python's ml_analyze_text for sentiment
+      5. Results are combined and stored in Elixir
+
+      This seamless integration allows each language to handle
+      what it does best!
+      """)
+
+      IO.puts("\n=== Demo Complete ===")
+      IO.puts("Session #{session_id} contains both Elixir and Python tools")
+      IO.puts("Tools can be called bidirectionally through the gRPC bridge")
+
+      wait_for_exit(auto_stop_ms)
+    after
+      if is_binary(session_id) do
+        SessionStore.delete_session(session_id)
+        ToolRegistry.cleanup_session(session_id)
+      end
+
+      stop_grpc_supervisor(grpc_supervisor)
+      IO.puts("Server stopped and session cleaned up.")
+    end
+  end
+
+  defp start_grpc_supervisor(grpc_port) do
+    Supervisor.start_link(
+      [
+        {GRPC.Server.Supervisor,
+         endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true}
+      ],
+      strategy: :one_for_one
+    )
+  end
+
+  defp stop_grpc_supervisor(pid) when is_pid(pid) do
+    if Process.alive?(pid) do
+      Supervisor.stop(pid, :shutdown, 5_000)
+    else
+      :ok
+    end
+  rescue
+    _ -> :ok
+  end
+
+  defp stop_grpc_supervisor(_), do: :ok
+
+  defp wait_for_exit(nil) do
+    IO.puts("\nPress Enter to stop the server and cleanup...")
+    IO.gets("")
+  end
+
+  defp wait_for_exit(auto_stop_ms) do
+    IO.puts("\nAuto-stop enabled: stopping in #{div(auto_stop_ms, 1000)}s")
+
+    receive do
+    after
+      auto_stop_ms -> :ok
+    end
+  end
 end
 
-IO.puts("\n2. Testing direct Elixir tool execution...")
-
-# Test direct execution
-{:ok, result} =
-  ToolRegistry.execute_local_tool(
-    session_id,
-    "parse_json",
-    %{"json_string" => ~s({"name": "test", "value": 42})}
-  )
-
-IO.puts("Direct execution result: #{inspect(result)}")
-
-IO.puts("\n3. Python Integration Demo")
-IO.puts("Now Python can discover and call these Elixir tools!")
-IO.puts("\nTo test from Python:")
-
-IO.puts(~s"""
-# In Python with a SessionContext:
-channel = grpc.insecure_channel("localhost:#{grpc_port}")
-stub = BridgeServiceStub(channel)
-ctx = SessionContext(stub, "#{session_id}")
-
-# List available Elixir tools
-print("Available Elixir tools:", list(ctx.elixir_tools.keys()))
-
-# Call an Elixir tool
-result = ctx.call_elixir_tool("calculate_fibonacci", n=10)
-print("Fibonacci result:", result)
-
-# Or use the proxy directly
-parse_json = ctx.elixir_tools["parse_json"]
-result = parse_json(json_string='{"test": true}')
-print("Parse result:", result)
-""")
-
-IO.puts("\nQuick start:")
-IO.puts("  SNAKEPIT_GRPC_PORT=#{grpc_port} python examples/python_elixir_tools_demo.py")
-
-IO.puts("\n4. Bidirectional Example")
-IO.puts("Python tools registered in this session:")
-
-# In a real scenario, Python would register its tools here
-# For demo purposes, we'll simulate what Python tools might look like
-python_tools = [
-  %{name: "ml_analyze_text", type: :remote, description: "Analyze text using ML"},
-  %{name: "process_image", type: :remote, description: "Process images with various filters"},
-  %{name: "data_transform", type: :remote, description: "Transform data between formats"}
-]
-
-for tool <- python_tools do
-  IO.puts("  - #{tool.name}: #{tool.description}")
-end
-
-IO.puts("\n5. Complete Workflow Example")
-
-IO.puts(~S"""
-A complete bidirectional workflow might look like:
-
-1. Python receives data and does initial ML processing
-2. Python calls Elixir's parse_json to validate structure  
-3. Elixir processes the parsed data with business logic
-4. Elixir calls Python's ml_analyze_text for sentiment
-5. Results are combined and stored in Elixir
-
-This seamless integration allows each language to handle
-what it does best!
-""")
-
-IO.puts("\n=== Demo Complete ===")
-IO.puts("Session #{session_id} contains both Elixir and Python tools")
-IO.puts("Tools can be called bidirectionally through the gRPC bridge")
-
-# Keep the server running for Python demo
 auto_stop_ms =
-  case System.get_env("SNAKEPIT_DEMO_DURATION_MS") do
+  case System.get_env("SNAKEPIT_DEMO_DURATION_MS") ||
+         System.get_env("SNAKEPIT_EXAMPLE_DURATION_MS") do
     nil ->
       nil
 
@@ -258,15 +299,7 @@ auto_stop_ms =
       end
   end
 
-if auto_stop_ms do
-  IO.puts("\nAuto-stop enabled: stopping in #{div(auto_stop_ms, 1000)}s")
-  Process.sleep(auto_stop_ms)
-else
-  IO.puts("\nPress Enter to stop the server and cleanup...")
-  IO.gets("")
-end
-
-# Cleanup
-SessionStore.delete_session(session_id)
-ToolRegistry.cleanup_session(session_id)
-IO.puts("Server stopped and session cleaned up.")
+Snakepit.Examples.Bootstrap.run_example(
+  fn -> BidirectionalToolsDemo.run(grpc_port, auto_stop_ms) end,
+  await_pool: false
+)

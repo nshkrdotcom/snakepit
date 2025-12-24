@@ -278,5 +278,10 @@ defmodule GILAwareSelection do
   end
 end
 
-# Run the demo
-GILAwareSelection.run()
+# Run the demo with clean startup/shutdown
+Snakepit.Examples.Bootstrap.run_example(
+  fn ->
+    GILAwareSelection.run()
+  end,
+  await_pool: false
+)

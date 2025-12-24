@@ -18,6 +18,4 @@ done
 
 echo "GRPC_READY:$port"
 # Keep running to simulate a server
-while true; do
-  sleep 1
-done
+tail -f /dev/null

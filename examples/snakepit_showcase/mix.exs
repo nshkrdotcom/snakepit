@@ -44,42 +44,42 @@ defmodule SnakepitShowcase.MixProject do
       setup: ["deps.get"],
       demo: ["run"],
       "demo.all": [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end, halt: true)'"
       ],
       "demo.interactive": [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.interactive() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.interactive() end, halt: true)'"
       ],
       "demo.basic": [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.BasicDemo.run() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.BasicDemo.run() end, halt: true)'"
       ],
       "demo.session": [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.SessionDemo.run() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.SessionDemo.run() end, halt: true)'"
       ],
       "demo.streaming": [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.StreamingDemo.run() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.StreamingDemo.run() end, halt: true)'"
       ],
       "demo.concurrent": [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ConcurrentDemo.run() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ConcurrentDemo.run() end, halt: true)'"
       ],
       "demo.variables": [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.VariablesDemo.run() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.VariablesDemo.run() end, halt: true)'"
       ],
       "demo.binary": [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.BinaryDemo.run() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.BinaryDemo.run() end, halt: true)'"
       ],
       "demo.ml_workflow": [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.MLWorkflowDemo.run() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.MLWorkflowDemo.run() end, halt: true)'"
       ],
       "demo.execution_modes": [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ExecutionModesDemo.run() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.ExecutionModesDemo.run() end, halt: true)'"
       ],
       "demo.grpc_tools": [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.GrpcToolsDemo.run() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.Demos.GrpcToolsDemo.run() end, halt: true)'"
       ],
 
       # --- NEW ALIAS ---
       showcase: [
-        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.RunShowcase.run() end)'"
+        "run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.RunShowcase.run() end, halt: true)'"
       ]
     ]
   end

@@ -9,8 +9,8 @@ config :snakepit,
   log_level: :info,
   # Track current Mix environment for runtime diagnostics without depending on Mix at runtime
   environment: config_env(),
-  # Enable pooling by default
-  pooling_enabled: true,
+  # Pooling is opt-in to avoid auto-start surprises in scripts and examples
+  pooling_enabled: false,
   enable_otlp?: false,
 
   # Pool configuration

@@ -150,7 +150,6 @@ defmodule TelemetryBasicExample do
   defp demo_worker_lifecycle do
     IO.puts("Demo 1: Worker Lifecycle Events")
     IO.puts("  (Events will be emitted as workers are already running)")
-    Process.sleep(100)
     IO.puts("")
   end
 
@@ -164,14 +163,11 @@ defmodule TelemetryBasicExample do
       {:error, reason} -> IO.puts("  ❌ Error: #{inspect(reason)}")
     end
 
-    Process.sleep(100)
-
     case Snakepit.execute("add", %{a: 10, b: 32}) do
       {:ok, result} -> IO.puts("  ✓ Result: #{inspect(result)}")
       {:error, reason} -> IO.puts("  ❌ Error: #{inspect(reason)}")
     end
 
-    Process.sleep(100)
     IO.puts("")
   end
 
@@ -193,12 +189,11 @@ defmodule TelemetryBasicExample do
         IO.puts("  ❌ Error: #{inspect(reason)}")
     end
 
-    Process.sleep(100)
     IO.puts("")
   end
 end
 
 # Run the example with proper cleanup
-Snakepit.run_as_script(fn ->
+Snakepit.Examples.Bootstrap.run_example(fn ->
   TelemetryBasicExample.run()
 end)

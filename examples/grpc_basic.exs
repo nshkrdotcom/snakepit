@@ -41,8 +41,6 @@ defmodule BasicExample do
       {:error, reason} -> IO.puts("Error: #{inspect(reason)}")
     end
 
-    Process.sleep(100)
-
     # 2. Echo command with data
     IO.puts("\n2. Echo command:")
     echo_data = %{message: "Hello from gRPC!", timestamp: DateTime.utc_now()}
@@ -52,8 +50,6 @@ defmodule BasicExample do
       {:error, reason} -> IO.puts("Error: #{inspect(reason)}")
     end
 
-    Process.sleep(100)
-
     # 3. Add command (simple calculation)
     IO.puts("\n3. Add command:")
 
@@ -61,8 +57,6 @@ defmodule BasicExample do
       {:ok, result} -> IO.inspect(result, label: "Add result")
       {:error, reason} -> IO.puts("Error: #{inspect(reason)}")
     end
-
-    Process.sleep(100)
 
     # 4. Get adapter info
     IO.puts("\n4. Adapter info:")
@@ -83,6 +77,6 @@ defmodule BasicExample do
 end
 
 # Run the example with proper cleanup
-Snakepit.run_as_script(fn ->
+Snakepit.Examples.Bootstrap.run_example(fn ->
   BasicExample.run()
 end)

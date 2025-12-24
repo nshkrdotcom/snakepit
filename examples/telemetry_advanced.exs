@@ -150,8 +150,6 @@ defmodule TelemetryAdvancedExample do
         {:error, reason} ->
           IO.puts("  ❌ Request #{i} failed: #{inspect(reason)}")
       end
-
-      Process.sleep(50)
     end
 
     IO.puts("")
@@ -167,15 +165,12 @@ defmodule TelemetryAdvancedExample do
       {:error, reason} -> IO.puts("  ❌ Error: #{inspect(reason)}")
     end
 
-    Process.sleep(100)
-
     # Slow command (should trigger alert)
     case Snakepit.execute("telemetry_demo", %{operation: "slow", delay_ms: 150}) do
       {:ok, _} -> IO.puts("  ✓ Slow command completed (alert expected above)")
       {:error, reason} -> IO.puts("  ❌ Error: #{inspect(reason)}")
     end
 
-    Process.sleep(100)
     IO.puts("")
   end
 
@@ -202,8 +197,6 @@ defmodule TelemetryAdvancedExample do
           IO.puts("  ℹ️  Runtime control requires GrpcStream GenServer (full implementation)")
       end
 
-      Process.sleep(50)
-
       # Try to toggle telemetry
       try do
         IO.puts("  Attempting to toggle telemetry for worker #{worker_id}...")
@@ -212,8 +205,6 @@ defmodule TelemetryAdvancedExample do
 
         # Execute a command (fewer events expected)
         Snakepit.execute("ping", %{})
-        Process.sleep(50)
-
         # Re-enable
         Snakepit.Telemetry.GrpcStream.toggle(worker_id, true)
         IO.puts("  ✓ Telemetry re-enabled for worker")
@@ -247,10 +238,7 @@ defmodule TelemetryAdvancedExample do
 
     for i <- 1..5 do
       Snakepit.execute("add", %{a: i, b: i * 2})
-      Process.sleep(20)
     end
-
-    Process.sleep(100)
 
     # Get aggregated results
     send(aggregator_pid, {:get_stats, self()})
@@ -309,6 +297,6 @@ defmodule TelemetryAdvancedExample do
 end
 
 # Run the example with proper cleanup
-Snakepit.run_as_script(fn ->
+Snakepit.Examples.Bootstrap.run_example(fn ->
   TelemetryAdvancedExample.run()
 end)

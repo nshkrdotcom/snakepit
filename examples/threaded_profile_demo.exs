@@ -17,7 +17,7 @@ Application.put_env(:snakepit, :pooling_enabled, false)
 # Requirements:
 # - Python 3.13+ (optional, works with 3.8+ but optimal with 3.13+)
 # - NumPy (for CPU-intensive operations)
-# - Snakepit v0.7.0+
+# - Snakepit v0.7.1+
 #
 # Usage:
 #   mix run --no-start examples/threaded_profile_demo.exs
@@ -34,7 +34,7 @@ defmodule ThreadedProfileDemo do
 
   def run do
     IO.puts("\n" <> String.duplicate("=", 70))
-    IO.puts("Snakepit v0.7.0 - Threaded Profile Demonstration")
+    IO.puts("Snakepit v0.7.1 - Threaded Profile Demonstration")
     IO.puts(String.duplicate("=", 70) <> "\n")
 
     # Check Python version
@@ -201,5 +201,10 @@ defmodule ThreadedProfileDemo do
   end
 end
 
-# Run the demo
-ThreadedProfileDemo.run()
+# Run the demo with clean startup/shutdown
+Snakepit.Examples.Bootstrap.run_example(
+  fn ->
+    ThreadedProfileDemo.run()
+  end,
+  await_pool: false
+)

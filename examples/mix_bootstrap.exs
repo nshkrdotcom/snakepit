@@ -67,6 +67,46 @@ defmodule Snakepit.Examples.Bootstrap do
   defp map_snakepit_level(:debug), do: :debug
   defp map_snakepit_level(_), do: :info
 
+  @spec await_pool_ready!(timeout()) :: :ok
+  def await_pool_ready!(timeout \\ 15_000) do
+    case Process.whereis(Snakepit.Pool) do
+      nil ->
+        :ok
+
+      _pid ->
+        case Snakepit.Pool.await_ready(Snakepit.Pool, timeout) do
+          :ok -> :ok
+          {:error, reason} -> raise "Pool did not initialize: #{inspect(reason)}"
+        end
+    end
+  end
+
+  @spec run_example((-> any()), Keyword.t()) :: any()
+  def run_example(fun, opts \\ []) when is_function(fun, 0) do
+    await_pool = Keyword.get(opts, :await_pool, pooling_enabled?())
+    await_timeout = Keyword.get(opts, :await_timeout, Keyword.get(opts, :timeout, 15_000))
+
+    run_opts =
+      opts
+      |> Keyword.put(:await_pool, false)
+      |> Keyword.put_new(:halt, true)
+
+    Snakepit.run_as_script(
+      fn ->
+        if await_pool do
+          await_pool_ready!(await_timeout)
+        end
+
+        fun.()
+      end,
+      run_opts
+    )
+  end
+
+  defp pooling_enabled? do
+    Application.get_env(:snakepit, :pooling_enabled, false)
+  end
+
   @spec ensure_grpc_port!() :: :ok
   def ensure_grpc_port! do
     port = Application.get_env(:snakepit, :grpc_port, 50_051)

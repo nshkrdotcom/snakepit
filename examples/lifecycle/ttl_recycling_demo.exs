@@ -226,5 +226,10 @@ defmodule TTLRecyclingDemo do
   end
 end
 
-# Run the demo
-TTLRecyclingDemo.run()
+# Run the demo with clean startup/shutdown
+Snakepit.Examples.Bootstrap.run_example(
+  fn ->
+    TTLRecyclingDemo.run()
+  end,
+  await_pool: false
+)

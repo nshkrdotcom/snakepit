@@ -217,8 +217,6 @@ defmodule TelemetryMonitoringExample do
         {:ok, result} -> IO.puts("  ✓ Operation #{i} completed: #{inspect(result)}")
         {:error, reason} -> IO.puts("  ❌ Operation #{i} failed: #{inspect(reason)}")
       end
-
-      Process.sleep(50)
     end
 
     IO.puts("")
@@ -235,8 +233,6 @@ defmodule TelemetryMonitoringExample do
         {:ok, _result} -> IO.puts("  ✓ Operation with #{delay}ms delay completed")
         {:error, reason} -> IO.puts("  ❌ Operation failed: #{inspect(reason)}")
       end
-
-      Process.sleep(100)
     end
 
     IO.puts("")
@@ -260,7 +256,6 @@ defmodule TelemetryMonitoringExample do
     success_count = Enum.count(results, &(&1 == :ok))
 
     IO.puts("  ✓ Completed: #{success_count}/10 requests\n")
-    Process.sleep(200)
   end
 
   defp display_dashboard(monitor) do
@@ -347,6 +342,6 @@ defmodule TelemetryMonitoringExample do
 end
 
 # Run the example with proper cleanup
-Snakepit.run_as_script(fn ->
+Snakepit.Examples.Bootstrap.run_example(fn ->
   TelemetryMonitoringExample.run()
 end)

@@ -388,4 +388,9 @@ defmodule TelemetryIntegrationDemo do
 end
 
 # Run the demo
-TelemetryIntegrationDemo.run()
+Snakepit.Examples.Bootstrap.run_example(
+  fn ->
+    TelemetryIntegrationDemo.run()
+  end,
+  await_pool: false
+)

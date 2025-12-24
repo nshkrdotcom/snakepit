@@ -255,6 +255,6 @@ defmodule ConcurrentExample do
 end
 
 # Run the example with proper cleanup
-Snakepit.run_as_script(fn ->
+Snakepit.Examples.Bootstrap.run_example(fn ->
   ConcurrentExample.run(pool_size)
 end)

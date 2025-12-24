@@ -29,7 +29,7 @@ defmodule ProcessVsThreadComparison do
 
   def run do
     IO.puts("\n" <> String.duplicate("=", 70))
-    IO.puts("Snakepit v0.6.0 - Process vs Thread Profile Comparison")
+    IO.puts("Snakepit v0.7.1 - Process vs Thread Profile Comparison")
     IO.puts(String.duplicate("=", 70) <> "\n")
 
     # Check Python version
@@ -222,5 +222,10 @@ defmodule ProcessVsThreadComparison do
   end
 end
 
-# Run the comparison
-ProcessVsThreadComparison.run()
+# Run the comparison with clean startup/shutdown
+Snakepit.Examples.Bootstrap.run_example(
+  fn ->
+    ProcessVsThreadComparison.run()
+  end,
+  await_pool: false
+)

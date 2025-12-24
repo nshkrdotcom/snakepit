@@ -85,101 +85,138 @@ Snakepit.Examples.Bootstrap.ensure_mix!([
 
 alias Snakepit.Bridge.{SessionStore, ToolRegistry}
 
-# Configure the application
 Application.put_env(:snakepit, :grpc_port, 50051)
 Application.put_env(:snakepit, :pooling_enabled, false)
 Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 grpc_port = Application.get_env(:snakepit, :grpc_port)
 
-# Start the application with gRPC server
-{:ok, _} = Application.ensure_all_started(:grpc)
-{:ok, _} = Application.ensure_all_started(:snakepit)
+defmodule BidirectionalToolsDemoAuto do
+  def run(grpc_port, auto_stop_ms) do
+    {:ok, grpc_supervisor} = start_grpc_supervisor(grpc_port)
+    Process.unlink(grpc_supervisor)
 
-# Start the gRPC server supervisor
-{:ok, _} =
-  Supervisor.start_link(
-    [
-      {GRPC.Server.Supervisor,
-       endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true}
-    ],
-    strategy: :one_for_one
-  )
+    try do
+      session_id = "bidirectional-demo"
+      SessionStore.delete_session(session_id)
 
-# Wait for services to start
-Process.sleep(500)
+      {:ok, _session} =
+        SessionStore.create_session(
+          session_id,
+          metadata: %{"demo" => "bidirectional_tools"}
+        )
 
-# Use a fixed session ID for easy Python integration
-session_id = "bidirectional-demo"
-# Clean up any existing session first
-SessionStore.delete_session(session_id)
+      IO.puts("\n=== Bidirectional Tool Bridge Server ===")
+      IO.puts("Session ID: #{session_id}")
+      IO.puts("gRPC Server running on port #{grpc_port}\n")
 
-{:ok, _session} =
-  SessionStore.create_session(session_id, metadata: %{"demo" => "bidirectional_tools"})
+      IO.puts("Registering Elixir tools...")
 
-IO.puts("\n=== Bidirectional Tool Bridge Server ===")
-IO.puts("Session ID: #{session_id}")
-IO.puts("gRPC Server running on port #{grpc_port}\n")
+      ToolRegistry.register_elixir_tool(
+        session_id,
+        "parse_json",
+        &ElixirTools.parse_json/1,
+        %{
+          description: "Parse a JSON string and return analysis",
+          exposed_to_python: true,
+          parameters: [
+            %{name: "json_string", type: "string", required: true}
+          ]
+        }
+      )
 
-# Register Elixir tools
-IO.puts("Registering Elixir tools...")
+      ToolRegistry.register_elixir_tool(
+        session_id,
+        "calculate_fibonacci",
+        &ElixirTools.calculate_fibonacci/1,
+        %{
+          description: "Calculate Fibonacci sequence up to n numbers",
+          exposed_to_python: true,
+          parameters: [
+            %{name: "n", type: "integer", required: true}
+          ]
+        }
+      )
 
-ToolRegistry.register_elixir_tool(
-  session_id,
-  "parse_json",
-  &ElixirTools.parse_json/1,
-  %{
-    description: "Parse a JSON string and return analysis",
-    exposed_to_python: true,
-    parameters: [
-      %{name: "json_string", type: "string", required: true}
-    ]
-  }
-)
+      ToolRegistry.register_elixir_tool(
+        session_id,
+        "process_list",
+        &ElixirTools.process_list/1,
+        %{
+          description: "Process a list with various operations",
+          exposed_to_python: true,
+          parameters: [
+            %{name: "list", type: "array", required: true},
+            %{name: "operation", type: "string", required: false}
+          ]
+        }
+      )
 
-ToolRegistry.register_elixir_tool(
-  session_id,
-  "calculate_fibonacci",
-  &ElixirTools.calculate_fibonacci/1,
-  %{
-    description: "Calculate Fibonacci sequence up to n numbers",
-    exposed_to_python: true,
-    parameters: [
-      %{name: "n", type: "integer", required: true}
-    ]
-  }
-)
+      elixir_tools = ToolRegistry.list_exposed_elixir_tools(session_id)
+      IO.puts("Registered #{length(elixir_tools)} Elixir tools:")
 
-ToolRegistry.register_elixir_tool(
-  session_id,
-  "process_list",
-  &ElixirTools.process_list/1,
-  %{
-    description: "Process a list with various operations",
-    exposed_to_python: true,
-    parameters: [
-      %{name: "list", type: "array", required: true},
-      %{name: "operation", type: "string", required: false}
-    ]
-  }
-)
+      for tool <- elixir_tools do
+        IO.puts("  - #{tool.name}: #{tool.description}")
+      end
 
-# List registered tools
-elixir_tools = ToolRegistry.list_exposed_elixir_tools(session_id)
-IO.puts("Registered #{length(elixir_tools)} Elixir tools:")
+      IO.puts("\nServer is ready for Python connections!")
+      IO.puts("Run the Python demo in another terminal:")
+      IO.puts("  SNAKEPIT_GRPC_PORT=#{grpc_port} python examples/python_elixir_tools_demo.py")
+      IO.puts("\nPress Ctrl+C to stop the server.")
+      IO.puts("Set SNAKEPIT_DEMO_DURATION_MS to auto-stop for scripted runs.")
 
-for tool <- elixir_tools do
-  IO.puts("  - #{tool.name}: #{tool.description}")
+      wait_for_exit(auto_stop_ms)
+    rescue
+      _ ->
+        IO.puts("\nShutting down...")
+    after
+      SessionStore.delete_session("bidirectional-demo")
+      ToolRegistry.cleanup_session("bidirectional-demo")
+      stop_grpc_supervisor(grpc_supervisor)
+      IO.puts("Cleanup complete.")
+    end
+  end
+
+  defp start_grpc_supervisor(grpc_port) do
+    Supervisor.start_link(
+      [
+        {GRPC.Server.Supervisor,
+         endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true}
+      ],
+      strategy: :one_for_one
+    )
+  end
+
+  defp stop_grpc_supervisor(pid) when is_pid(pid) do
+    if Process.alive?(pid) do
+      Supervisor.stop(pid, :shutdown, 5_000)
+    else
+      :ok
+    end
+  rescue
+    _ -> :ok
+  end
+
+  defp stop_grpc_supervisor(_), do: :ok
+
+  defp wait_for_exit(nil) do
+    receive do
+      :stop -> :ok
+    end
+  end
+
+  defp wait_for_exit(auto_stop_ms) when is_integer(auto_stop_ms) and auto_stop_ms > 0 do
+    IO.puts("Auto-stop enabled: stopping in #{div(auto_stop_ms, 1000)}s")
+
+    receive do
+    after
+      auto_stop_ms -> :ok
+    end
+  end
 end
 
-IO.puts("\nServer is ready for Python connections!")
-IO.puts("Run the Python demo in another terminal:")
-IO.puts("  SNAKEPIT_GRPC_PORT=#{grpc_port} python examples/python_elixir_tools_demo.py")
-IO.puts("\nPress Ctrl+C to stop the server.")
-IO.puts("Set SNAKEPIT_DEMO_DURATION_MS to auto-stop for scripted runs.")
-
-# Keep the server running
 auto_stop_ms =
-  case System.get_env("SNAKEPIT_DEMO_DURATION_MS") do
+  case System.get_env("SNAKEPIT_DEMO_DURATION_MS") ||
+         System.get_env("SNAKEPIT_EXAMPLE_DURATION_MS") do
     nil ->
       nil
 
@@ -190,19 +227,7 @@ auto_stop_ms =
       end
   end
 
-try do
-  if auto_stop_ms do
-    IO.puts("Auto-stop enabled: stopping in #{div(auto_stop_ms, 1000)}s")
-    Process.sleep(auto_stop_ms)
-  else
-    Process.sleep(:infinity)
-  end
-rescue
-  _ ->
-    IO.puts("\nShutting down...")
-after
-  # Always cleanup
-  SessionStore.delete_session(session_id)
-  ToolRegistry.cleanup_session(session_id)
-  IO.puts("Cleanup complete.")
-end
+Snakepit.Examples.Bootstrap.run_example(
+  fn -> BidirectionalToolsDemoAuto.run(grpc_port, auto_stop_ms) end,
+  await_pool: false
+)
