@@ -29,7 +29,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.7.2"}
+    {:snakepit, "~> 0.7.3"}
   ]
 end
 ```
@@ -230,4 +230,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Contributing
 
-See [AGENTS.md](AGENTS.md) for development guidelines and [CHANGELOG.md](CHANGELOG.md) for version history.
+See [CHANGELOG.md](CHANGELOG.md) for version history. Development guidelines are in `AGENTS.md`.

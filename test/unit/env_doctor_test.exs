@@ -23,12 +23,9 @@ defmodule Snakepit.EnvDoctorTest do
       "#!/usr/bin/env python3\nprint('ok')\n"
     )
 
-    Application.put_env(:snakepit, :grpc_port, 55_000 + :rand.uniform(1_000))
-
     CommandRunner.reset!()
 
     on_exit(fn ->
-      Application.delete_env(:snakepit, :grpc_port)
       File.rm_rf(tmp)
     end)
 
@@ -43,7 +40,8 @@ defmodule Snakepit.EnvDoctorTest do
                project_root: root,
                python_path: python,
                runner: CommandRunner,
-               require_python_313?: true
+               require_python_313?: true,
+               grpc_port: 0
              )
 
     assert Enum.all?(results, &(&1.status in [:ok]))

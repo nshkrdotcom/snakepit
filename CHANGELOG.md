@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2025-12-25
+
+### Fixed
+- **CI test infrastructure** – Fixed `python_integration` test failures in CI by starting `GRPC.Client.Supervisor` in `PythonIntegrationCase` setup and enabling pooling in `StreamingRegressionTest` setup.
+- **EnvDoctor port check race condition** – Fixed intermittent `env_doctor_test` failures caused by `:grpc_port` check reading from global Application env instead of opts. The check now accepts `grpc_port` via opts (consistent with other state values), eliminating conflicts when tests or the application bind to overlapping port ranges.
+
 ## [0.7.2] - 2025-12-25
 
 ### Changed

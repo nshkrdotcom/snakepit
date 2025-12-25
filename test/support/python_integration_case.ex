@@ -39,6 +39,8 @@ defmodule Snakepit.PythonIntegrationCase do
 
     # Start the services we need manually
     children = [
+      # GRPC client supervisor - required for GRPC.Stub.connect() calls
+      {GRPC.Client.Supervisor, []},
       # Start the gRPC server
       {GRPC.Server.Supervisor, endpoint: Snakepit.GRPC.Endpoint, port: 50_051, start_server: true}
     ]

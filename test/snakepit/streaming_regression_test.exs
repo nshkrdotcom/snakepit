@@ -24,8 +24,23 @@ defmodule Snakepit.StreamingRegressionTest do
   end
 
   setup_all do
+    # Store original config for cleanup
+    original_pooling = Application.get_env(:snakepit, :pooling_enabled, false)
+
+    # Enable pooling and restart the application
+    Application.put_env(:snakepit, :pooling_enabled, true)
+    Application.stop(:snakepit)
     {:ok, _} = Application.ensure_all_started(:snakepit)
+
     :ok = Snakepit.Pool.await_ready()
+
+    on_exit(fn ->
+      # Restore original configuration
+      Application.stop(:snakepit)
+      Application.put_env(:snakepit, :pooling_enabled, original_pooling)
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+    end)
+
     :ok
   end
 

@@ -88,11 +88,14 @@ defmodule Snakepit.EnvDoctor do
         Application.get_env(:snakepit, :require_python_313?, false)
       )
 
+    grpc_port = opts[:grpc_port] || Application.get_env(:snakepit, :grpc_port, 50_051)
+
     %{
       project_root: project_root,
       python_path: python_path,
       runner: runner,
-      require_python_313?: require_python_313?
+      require_python_313?: require_python_313?,
+      grpc_port: grpc_port
     }
   end
 
@@ -199,9 +202,7 @@ defmodule Snakepit.EnvDoctor do
     end
   end
 
-  defp run_check(:grpc_port, _state) do
-    port = Application.get_env(:snakepit, :grpc_port, 50_051)
-
+  defp run_check(:grpc_port, %{grpc_port: port}) do
     case :gen_tcp.listen(port, [:binary, active: false, reuseaddr: true]) do
       {:ok, socket} ->
         :gen_tcp.close(socket)
