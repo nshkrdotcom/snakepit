@@ -4,8 +4,8 @@ defmodule Snakepit.GRPC.ClientImpl do
   """
 
   require Logger
-  alias Snakepit.Logger, as: SLog
   alias Snakepit.Bridge
+  alias Snakepit.Logger, as: SLog
   alias Snakepit.Telemetry.Correlation
 
   @default_timeout 30_000
@@ -159,26 +159,28 @@ defmodule Snakepit.GRPC.ClientImpl do
   def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     binary_params = Keyword.get(opts, :binary_parameters, %{})
 
-    with {:ok, request, call_opts} <-
-           prepare_execute_tool_request(session_id, tool_name, parameters, binary_params, opts) do
-      case Bridge.BridgeService.Stub.execute_tool(channel, request, call_opts) do
-        {:ok, response, _headers} -> handle_tool_response(response)
-        {:ok, response} -> handle_tool_response(response)
-        {:error, reason} -> handle_error(reason)
-      end
-    else
-      {:error, reason} -> {:error, reason}
+    case prepare_execute_tool_request(session_id, tool_name, parameters, binary_params, opts) do
+      {:ok, request, call_opts} ->
+        case Bridge.BridgeService.Stub.execute_tool(channel, request, call_opts) do
+          {:ok, response, _headers} -> handle_tool_response(response)
+          {:ok, response} -> handle_tool_response(response)
+          {:error, reason} -> handle_error(reason)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     binary_params = Keyword.get(opts, :binary_parameters, %{})
 
-    with {:ok, request, call_opts} <-
-           prepare_execute_stream_request(session_id, tool_name, parameters, binary_params, opts) do
-      Bridge.BridgeService.Stub.execute_streaming_tool(channel, request, call_opts)
-    else
-      {:error, reason} -> {:error, reason}
+    case prepare_execute_stream_request(session_id, tool_name, parameters, binary_params, opts) do
+      {:ok, request, call_opts} ->
+        Bridge.BridgeService.Stub.execute_streaming_tool(channel, request, call_opts)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -236,13 +238,11 @@ defmodule Snakepit.GRPC.ClientImpl do
          result: any_result,
          binary_result: binary_result
        }) do
-    cond do
-      binary_payload?(binary_result) ->
-        metadata = decode_any(any_result)
-        {:ok, format_binary_result(binary_result, metadata)}
-
-      true ->
-        {:ok, decode_any(any_result)}
+    if binary_payload?(binary_result) do
+      metadata = decode_any(any_result)
+      {:ok, format_binary_result(binary_result, metadata)}
+    else
+      {:ok, decode_any(any_result)}
     end
   end
 
@@ -315,12 +315,10 @@ defmodule Snakepit.GRPC.ClientImpl do
 
   defp encode_binary_parameters(binary_params) when is_map(binary_params) do
     Enum.reduce_while(binary_params, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
-      cond do
-        not is_binary(value) ->
-          {:halt, {:error, {:invalid_parameter, key, :not_binary}}}
-
-        true ->
-          {:cont, {:ok, Map.put(acc, to_string(key), value)}}
+      if is_binary(value) do
+        {:cont, {:ok, Map.put(acc, to_string(key), value)}}
+      else
+        {:halt, {:error, {:invalid_parameter, key, :not_binary}}}
       end
     end)
   end

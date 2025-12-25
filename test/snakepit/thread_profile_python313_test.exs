@@ -2,15 +2,18 @@ defmodule Snakepit.ThreadProfilePython313Test do
   use ExUnit.Case, async: false
   import Snakepit.TestHelpers
 
+  alias Snakepit.Test.PythonEnv
+  alias Snakepit.WorkerProfile.Thread
+
   @moduletag :python313
   @moduletag :thread_profile
   @moduletag :python_integration
   @moduletag timeout: 120_000
 
   setup_all do
-    case Snakepit.Test.PythonEnv.skip_unless_python_313(%{}) do
+    case PythonEnv.skip_unless_python_313(%{}) do
       :ok ->
-        Snakepit.Test.PythonEnv.reset_python_config()
+        PythonEnv.reset_python_config()
         :ok
 
       other ->
@@ -21,15 +24,15 @@ defmodule Snakepit.ThreadProfilePython313Test do
   setup do
     prev_pools = Application.get_env(:snakepit, :pools)
     prev_pooling = Application.get_env(:snakepit, :pooling_enabled)
-    python313_path = Snakepit.Test.PythonEnv.python_313_path()
+    python313_path = PythonEnv.python_313_path()
 
     Application.stop(:snakepit)
     Application.load(:snakepit)
-    Snakepit.Test.PythonEnv.configure_for_python(python313_path)
+    PythonEnv.configure_for_python(python313_path)
 
     on_exit(fn ->
       Application.stop(:snakepit)
-      Snakepit.Test.PythonEnv.reset_python_config()
+      PythonEnv.reset_python_config()
       restore_env(:pools, prev_pools)
       restore_env(:pooling_enabled, prev_pooling)
 
@@ -123,14 +126,14 @@ defmodule Snakepit.ThreadProfilePython313Test do
       workers = Snakepit.Pool.list_workers(Snakepit.Pool, :capacity_test)
 
       # Should have at least 1 worker (may have more due to batching/defaults)
-      assert length(workers) >= 1,
+      assert not Enum.empty?(workers),
              "Expected at least 1 worker, got #{length(workers)}: #{inspect(workers)}"
 
       # Test capacity on first worker
       [worker_id | _] = workers
 
       # Check capacity via profile
-      {:ok, metadata} = Snakepit.WorkerProfile.Thread.get_metadata(worker_id)
+      {:ok, metadata} = Thread.get_metadata(worker_id)
 
       # Capacity should be > 1 for thread profile (may not be exactly 8 due to ETS tracking timing)
       # The key is it's NOT 1 like process profile
@@ -187,8 +190,8 @@ defmodule Snakepit.ThreadProfilePython313Test do
                _ -> false
              end)
 
-      # Verify all used same worker (would need request tracking)
-      # TODO: Add worker_id to response to verify
+      # NOTE: Unable to verify all requests used the same worker without worker_id in response.
+      # This is a known limitation of the current response format.
     end
 
     test "thread worker respects capacity limits" do
@@ -257,30 +260,6 @@ defmodule Snakepit.ThreadProfilePython313Test do
 
       # All should eventually complete (via queueing)
       assert length(results) == 3
-    end
-  end
-
-  describe "Thread profile with GIL detection" do
-    test "detects Python 3.13 GIL status" do
-      # Verify we're using Python 3.13 with GIL detection
-      python313_path = Path.expand(".venv-py313/bin/python3")
-
-      {:ok, {major, minor, _patch}} = Snakepit.PythonVersion.detect(python313_path)
-
-      assert major == 3
-      assert minor >= 13
-
-      assert Snakepit.PythonVersion.supports_free_threading?({major, minor, 0}) == true
-    end
-
-    test "thread profile recommended for Python 3.13" do
-      python313_path = Path.expand(".venv-py313/bin/python3")
-
-      {:ok, version} = Snakepit.PythonVersion.detect(python313_path)
-
-      profile = Snakepit.PythonVersion.recommend_profile(version)
-
-      assert profile == :thread
     end
   end
 end

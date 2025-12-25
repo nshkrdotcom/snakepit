@@ -248,15 +248,15 @@ defmodule Snakepit.Config do
   """
   @spec get_pool_config(atom()) :: {:ok, pool_config()} | {:error, term()}
   def get_pool_config(pool_name) when is_atom(pool_name) do
-    case get_pool_configs() do
-      {:ok, pools} ->
-        case Enum.find(pools, fn pool -> Map.get(pool, :name) == pool_name end) do
-          nil -> {:error, :pool_not_found}
-          config -> {:ok, config}
-        end
+    with {:ok, pools} <- get_pool_configs() do
+      find_pool_by_name(pools, pool_name)
+    end
+  end
 
-      error ->
-        error
+  defp find_pool_by_name(pools, pool_name) do
+    case Enum.find(pools, fn pool -> Map.get(pool, :name) == pool_name end) do
+      nil -> {:error, :pool_not_found}
+      config -> {:ok, config}
     end
   end
 
@@ -428,9 +428,8 @@ defmodule Snakepit.Config do
   end
 
   defp validate_lifecycle_options(config) do
-    with :ok <- validate_ttl(config),
-         :ok <- validate_max_requests(config) do
-      :ok
+    with :ok <- validate_ttl(config) do
+      validate_max_requests(config)
     end
   end
 
@@ -489,12 +488,10 @@ defmodule Snakepit.Config do
   end
 
   defp normalize_heartbeat_key(key) when is_binary(key) do
-    cond do
-      key in @heartbeat_string_keys ->
-        String.to_existing_atom(key)
-
-      true ->
-        key
+    if key in @heartbeat_string_keys do
+      String.to_existing_atom(key)
+    else
+      key
     end
   rescue
     ArgumentError ->

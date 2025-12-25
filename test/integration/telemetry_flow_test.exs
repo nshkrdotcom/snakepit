@@ -1,6 +1,14 @@
 defmodule Snakepit.Integration.TelemetryFlowTest do
   use ExUnit.Case, async: false
 
+  alias Snakepit.Bridge.TelemetryEventFilter
+  alias Snakepit.Bridge.TelemetrySamplingUpdate
+  alias Snakepit.Bridge.TelemetryToggle
+  alias Snakepit.Telemetry.Control
+  alias Snakepit.Telemetry.GrpcStream
+  alias Snakepit.Telemetry.Naming
+  alias Snakepit.Telemetry.SafeMetadata
+
   @moduletag :integration
   @moduletag timeout: 60_000
 
@@ -88,21 +96,21 @@ defmodule Snakepit.Integration.TelemetryFlowTest do
   test "telemetry naming module validates event parts" do
     # Test valid Python event
     assert {:ok, [:snakepit, :python, :call, :start]} =
-             Snakepit.Telemetry.Naming.from_parts(["python", "call", "start"])
+             Naming.from_parts(["python", "call", "start"])
 
     # Test invalid event
     assert {:error, :unknown_event} =
-             Snakepit.Telemetry.Naming.from_parts(["invalid", "event"])
+             Naming.from_parts(["invalid", "event"])
 
     # Test tool execution events
     assert {:ok, [:snakepit, :python, :tool, :execution, :start]} =
-             Snakepit.Telemetry.Naming.from_parts(["tool", "execution", "start"])
+             Naming.from_parts(["tool", "execution", "start"])
   end
 
   test "telemetry safe metadata sanitizes input" do
     # Test that unknown keys remain as strings (atom safety)
     {:ok, metadata} =
-      Snakepit.Telemetry.SafeMetadata.sanitize(%{
+      SafeMetadata.sanitize(%{
         "node" => "test@localhost",
         "unknown_key" => "value"
       })
@@ -116,34 +124,34 @@ defmodule Snakepit.Integration.TelemetryFlowTest do
 
   test "telemetry measurement keys are validated" do
     # Valid measurement key
-    assert {:ok, :duration} = Snakepit.Telemetry.Naming.measurement_key("duration")
+    assert {:ok, :duration} = Naming.measurement_key("duration")
 
     # Invalid measurement key
     assert {:error, :unknown_measurement_key} =
-             Snakepit.Telemetry.Naming.measurement_key("invalid_key")
+             Naming.measurement_key("invalid_key")
   end
 
   test "telemetry control messages are built correctly" do
     # Test toggle
-    toggle = Snakepit.Telemetry.Control.toggle(true)
-    assert toggle.control == {:toggle, %Snakepit.Bridge.TelemetryToggle{enabled: true}}
+    toggle = Control.toggle(true)
+    assert toggle.control == {:toggle, %TelemetryToggle{enabled: true}}
 
     # Test sampling
-    sampling = Snakepit.Telemetry.Control.sampling(0.5, ["python.call.*"])
+    sampling = Control.sampling(0.5, ["python.call.*"])
 
     assert sampling.control ==
              {:sampling,
-              %Snakepit.Bridge.TelemetrySamplingUpdate{
+              %TelemetrySamplingUpdate{
                 sampling_rate: 0.5,
                 event_patterns: ["python.call.*"]
               }}
 
     # Test filter
-    filter = Snakepit.Telemetry.Control.filter(allow: ["python.*"])
+    filter = Control.filter(allow: ["python.*"])
 
     assert filter.control ==
              {:filter,
-              %Snakepit.Bridge.TelemetryEventFilter{
+              %TelemetryEventFilter{
                 allow: ["python.*"],
                 deny: []
               }}
@@ -151,7 +159,7 @@ defmodule Snakepit.Integration.TelemetryFlowTest do
 
   test "telemetry grpc stream manager can list streams" do
     # This should work even without active streams
-    streams = Snakepit.Telemetry.GrpcStream.list_streams()
+    streams = GrpcStream.list_streams()
     assert is_list(streams)
   end
 end

@@ -49,9 +49,8 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
 
   defp ensure_runtime(config) do
     with :ok <- start_app(:opentelemetry),
-         :ok <- maybe_start_exporter_app(config),
-         :ok <- configure_exporter(config.exporters) do
-      :ok
+         :ok <- maybe_start_exporter_app(config) do
+      configure_exporter(config.exporters)
     end
   rescue
     error -> {:error, error}

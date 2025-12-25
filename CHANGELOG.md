@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2025-12-25
+
+### Changed
+- **Codebase cleanup** – Removed dead code, unused modules, and obsolete files across the Elixir and Python codebases.
+- **Static analysis compliance** – Resolved Dialyzer warnings and Credo issues for cleaner, more maintainable code.
+- **Documentation overhaul** – Rewrote README.md and ARCHITECTURE.md for v0.7.2; consolidated DIAGS.md and DIAGS2.md into a single DIAGRAMS.md with mermaid diagrams; updated all README_* guides with version markers; removed obsolete test_bidirectional.py and remaining_handlers.txt.
+
 ## [0.7.1] - 2025-12-24
 
 ### Added

@@ -168,42 +168,46 @@ defmodule Snakepit.Telemetry.Naming do
       iex> Snakepit.Telemetry.Naming.from_parts(["unknown", "event"])
       {:error, :unknown_event}
   """
-  def from_parts(parts) when is_list(parts) do
-    case parts do
-      # Python events
-      ["python", "call", "start"] ->
-        {:ok, [:snakepit, :python, :call, :start]}
+  def from_parts(["python", "call", "start"]) do
+    {:ok, [:snakepit, :python, :call, :start]}
+  end
 
-      ["python", "call", "stop"] ->
-        {:ok, [:snakepit, :python, :call, :stop]}
+  def from_parts(["python", "call", "stop"]) do
+    {:ok, [:snakepit, :python, :call, :stop]}
+  end
 
-      ["python", "call", "exception"] ->
-        {:ok, [:snakepit, :python, :call, :exception]}
+  def from_parts(["python", "call", "exception"]) do
+    {:ok, [:snakepit, :python, :call, :exception]}
+  end
 
-      ["python", "memory", "sampled"] ->
-        {:ok, [:snakepit, :python, :memory, :sampled]}
+  def from_parts(["python", "memory", "sampled"]) do
+    {:ok, [:snakepit, :python, :memory, :sampled]}
+  end
 
-      ["python", "cpu", "sampled"] ->
-        {:ok, [:snakepit, :python, :cpu, :sampled]}
+  def from_parts(["python", "cpu", "sampled"]) do
+    {:ok, [:snakepit, :python, :cpu, :sampled]}
+  end
 
-      ["python", "gc", "completed"] ->
-        {:ok, [:snakepit, :python, :gc, :completed]}
+  def from_parts(["python", "gc", "completed"]) do
+    {:ok, [:snakepit, :python, :gc, :completed]}
+  end
 
-      ["python", "error", "occurred"] ->
-        {:ok, [:snakepit, :python, :error, :occurred]}
+  def from_parts(["python", "error", "occurred"]) do
+    {:ok, [:snakepit, :python, :error, :occurred]}
+  end
 
-      # Alternative format with dots
-      ["tool", "execution", action] when action in ["start", "stop", "exception"] ->
-        {:ok, [:snakepit, :python, :tool, :execution, String.to_existing_atom(action)]}
-
-      ["tool", "result_size"] ->
-        {:ok, [:snakepit, :python, :tool, :result_size]}
-
-      _ ->
-        {:error, :unknown_event}
-    end
+  def from_parts(["tool", "execution", action]) when action in ["start", "stop", "exception"] do
+    {:ok, [:snakepit, :python, :tool, :execution, String.to_existing_atom(action)]}
   rescue
     ArgumentError -> {:error, :invalid_atom}
+  end
+
+  def from_parts(["tool", "result_size"]) do
+    {:ok, [:snakepit, :python, :tool, :result_size]}
+  end
+
+  def from_parts(parts) when is_list(parts) do
+    {:error, :unknown_event}
   end
 
   @doc """
@@ -282,20 +286,16 @@ defmodule Snakepit.Telemetry.Naming do
   @doc """
   Build a pool event name.
   """
-  def pool_event(action) when action in @pool_events do
-    case action do
-      :initialized -> [:snakepit, :pool, :initialized]
-      :status -> [:snakepit, :pool, :status]
-      :queue_enqueued -> [:snakepit, :pool, :queue, :enqueued]
-      :queue_dequeued -> [:snakepit, :pool, :queue, :dequeued]
-      :queue_timeout -> [:snakepit, :pool, :queue, :timeout]
-      :worker_spawn_started -> [:snakepit, :pool, :worker, :spawn_started]
-      :worker_spawned -> [:snakepit, :pool, :worker, :spawned]
-      :worker_spawn_failed -> [:snakepit, :pool, :worker, :spawn_failed]
-      :worker_terminated -> [:snakepit, :pool, :worker, :terminated]
-      :worker_restarted -> [:snakepit, :pool, :worker, :restarted]
-    end
-  end
+  def pool_event(:initialized), do: [:snakepit, :pool, :initialized]
+  def pool_event(:status), do: [:snakepit, :pool, :status]
+  def pool_event(:queue_enqueued), do: [:snakepit, :pool, :queue, :enqueued]
+  def pool_event(:queue_dequeued), do: [:snakepit, :pool, :queue, :dequeued]
+  def pool_event(:queue_timeout), do: [:snakepit, :pool, :queue, :timeout]
+  def pool_event(:worker_spawn_started), do: [:snakepit, :pool, :worker, :spawn_started]
+  def pool_event(:worker_spawned), do: [:snakepit, :pool, :worker, :spawned]
+  def pool_event(:worker_spawn_failed), do: [:snakepit, :pool, :worker, :spawn_failed]
+  def pool_event(:worker_terminated), do: [:snakepit, :pool, :worker, :terminated]
+  def pool_event(:worker_restarted), do: [:snakepit, :pool, :worker, :restarted]
 
   @doc """
   Build a session event name.

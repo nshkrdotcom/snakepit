@@ -16,7 +16,7 @@ defmodule Snakepit.PythonIntegrationCase do
 
       @moduletag :python_integration
 
-      alias Snakepit.Bridge.{SessionStore, Serialization}
+      alias Snakepit.Bridge.{Serialization, SessionStore}
       alias Snakepit.GRPC.Client
     end
   end
@@ -29,7 +29,7 @@ defmodule Snakepit.PythonIntegrationCase do
     # Don't use pooling, start services manually
     Application.put_env(:snakepit, :pooling_enabled, false)
     Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-    Application.put_env(:snakepit, :grpc_port, 50051)
+    Application.put_env(:snakepit, :grpc_port, 50_051)
 
     # Stop the application if it's running
     Application.stop(:snakepit)
@@ -40,7 +40,7 @@ defmodule Snakepit.PythonIntegrationCase do
     # Start the services we need manually
     children = [
       # Start the gRPC server
-      {GRPC.Server.Supervisor, endpoint: Snakepit.GRPC.Endpoint, port: 50051, start_server: true}
+      {GRPC.Server.Supervisor, endpoint: Snakepit.GRPC.Endpoint, port: 50_051, start_server: true}
     ]
 
     # SessionStore is already started by the application, no need to start it again

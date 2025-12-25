@@ -1,5 +1,7 @@
 # Snakepit Testing Guide
 
+> Updated for Snakepit v0.7.2
+
 This guide covers the testing approach for the Snakepit project, including test organization, running tests, and understanding test output.
 
 ## Test Overview

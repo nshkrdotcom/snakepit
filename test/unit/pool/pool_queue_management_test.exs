@@ -211,8 +211,8 @@ defmodule Snakepit.Pool.QueueSaturationRuntimeTest do
   import ExUnit.CaptureLog
   require Logger
 
-  alias Snakepit.TestAdapters.QueueProbeAdapter
   alias MapSet
+  alias Snakepit.TestAdapters.QueueProbeAdapter
 
   setup do
     original_level = Logger.level()

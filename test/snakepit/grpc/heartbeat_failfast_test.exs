@@ -7,8 +7,8 @@ defmodule Snakepit.GRPC.HeartbeatFailfastTest do
   import Snakepit.TestHelpers
 
   alias Snakepit.Pool.ProcessRegistry
-  alias Snakepit.Pool.WorkerSupervisor
   alias Snakepit.Pool.Registry, as: PoolRegistry
+  alias Snakepit.Pool.WorkerSupervisor
   alias Snakepit.ProcessKiller
 
   @moduletag :python_integration

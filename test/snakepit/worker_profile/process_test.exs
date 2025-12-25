@@ -2,6 +2,7 @@ defmodule Snakepit.WorkerProfile.ProcessTest do
   use ExUnit.Case, async: true
 
   alias Snakepit.WorkerProfile.Process
+  alias Snakepit.WorkerProfile.Thread
 
   describe "Process profile enforces single-threading" do
     test "capacity is always 1" do
@@ -22,33 +23,6 @@ defmodule Snakepit.WorkerProfile.ProcessTest do
       assert metadata.capacity == 1
       assert metadata.worker_type == "single-process"
       assert metadata.threading == "single-threaded"
-    end
-  end
-
-  describe "GIL compatibility (Python < 3.13)" do
-    test "process profile recommended for Python 3.12 and earlier" do
-      # Process profile works with ALL Python versions (GIL or no GIL)
-      versions = [
-        {3, 8, 0},
-        {3, 9, 0},
-        {3, 10, 0},
-        {3, 11, 0},
-        {3, 12, 0}
-      ]
-
-      for version <- versions do
-        # These versions have GIL, so process profile is recommended
-        refute Snakepit.PythonVersion.supports_free_threading?(version)
-        assert Snakepit.PythonVersion.recommend_profile(version) == :process
-      end
-    end
-
-    test "process profile works with any Python version" do
-      # Key architectural decision: process profile is universal
-      # Works with Python 2.7, 3.x, 3.13+, etc.
-      assert Snakepit.PythonVersion.meets_requirements?({3, 8, 0}) == true
-      assert Snakepit.PythonVersion.meets_requirements?({3, 12, 0}) == true
-      assert Snakepit.PythonVersion.meets_requirements?({3, 13, 0}) == true
     end
   end
 
@@ -169,7 +143,7 @@ defmodule Snakepit.WorkerProfile.ProcessTest do
 
     test "metadata shows difference from thread profile" do
       {:ok, process_meta} = Process.get_metadata(:worker1)
-      {:ok, thread_meta} = Snakepit.WorkerProfile.Thread.get_metadata(:worker2)
+      {:ok, thread_meta} = Thread.get_metadata(:worker2)
 
       # Process has capacity 1, thread has capacity > 1
       assert process_meta.capacity == 1

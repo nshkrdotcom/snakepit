@@ -1,5 +1,7 @@
 # Snakepit Telemetry
 
+> Updated for Snakepit v0.7.2
+
 Snakepit provides a comprehensive distributed telemetry system that enables observability across your Elixir cluster and Python workers. All telemetry flows through Elixir's standard `:telemetry` library, providing a unified interface for monitoring, metrics, and tracing.
 
 ## Features

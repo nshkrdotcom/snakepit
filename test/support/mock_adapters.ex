@@ -18,7 +18,6 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
   @impl true
   def script_args, do: []
 
-  @impl true
   def supported_commands do
     [
       "ping",
@@ -30,7 +29,6 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
     ]
   end
 
-  @impl true
   def validate_command(command, _args) do
     if command in supported_commands() do
       :ok
@@ -49,35 +47,42 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
 
   def grpc_execute(_conn, _session_id, command, args, _timeout) do
     # Simulate command execution
-    case command do
-      "ping" ->
-        {:ok, %{"status" => "pong", "worker_id" => "test_worker"}}
+    execute_command(command, args)
+  end
 
-      "echo" ->
-        {:ok, %{"echoed" => args}}
+  defp execute_command("ping", _args) do
+    {:ok, %{"status" => "pong", "worker_id" => "test_worker"}}
+  end
 
-      "compute" ->
-        {:ok, %{"result" => 42}}
+  defp execute_command("echo", args) do
+    {:ok, %{"echoed" => args}}
+  end
 
-      "slow_operation" ->
-        delay = args["delay"] || 100
+  defp execute_command("compute", _args) do
+    {:ok, %{"result" => 42}}
+  end
 
-        receive do
-        after
-          delay -> :ok
-        end
+  defp execute_command("slow_operation", args) do
+    delay = args["delay"] || 100
 
-        {:ok, %{"status" => "completed"}}
-
-      "initialize_session" ->
-        {:ok, %{"session_id" => args["session_id"] || "test_session"}}
-
-      "cleanup_session" ->
-        {:ok, %{"status" => "cleaned"}}
-
-      _ ->
-        {:error, "Unknown command: #{command}"}
+    receive do
+    after
+      delay -> :ok
     end
+
+    {:ok, %{"status" => "completed"}}
+  end
+
+  defp execute_command("initialize_session", args) do
+    {:ok, %{"session_id" => args["session_id"] || "test_session"}}
+  end
+
+  defp execute_command("cleanup_session", _args) do
+    {:ok, %{"status" => "cleaned"}}
+  end
+
+  defp execute_command(command, _args) do
+    {:error, "Unknown command: #{command}"}
   end
 
   def uses_grpc?, do: true
@@ -99,13 +104,11 @@ defmodule Snakepit.TestAdapters.FailingAdapter do
   @impl true
   def script_args, do: []
 
-  @impl true
   def supported_commands, do: ["ping"]
 
-  @impl true
   def validate_command(_command, _args), do: :ok
 
-  def get_port, do: 60000
+  def get_port, do: 60_000
 
   def init_grpc_connection(_port) do
     {:error, :connection_refused}
@@ -118,7 +121,7 @@ defmodule Snakepit.TestAdapters.EphemeralPortGRPCAdapter do
   @moduledoc false
   @behaviour Snakepit.Adapter
 
-  @actual_port 61234
+  @actual_port 61_234
 
   def actual_port, do: @actual_port
 
@@ -133,10 +136,8 @@ defmodule Snakepit.TestAdapters.EphemeralPortGRPCAdapter do
   @impl true
   def script_args, do: []
 
-  @impl true
   def supported_commands, do: ["ping"]
 
-  @impl true
   def validate_command(_command, _args), do: :ok
 
   def get_port, do: 0

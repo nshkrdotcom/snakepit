@@ -325,15 +325,13 @@ defmodule Snakepit.Telemetry.GrpcStream do
   ## Private Helpers
 
   defp send_control_request(stream, control_msg) do
-    try do
-      {:ok, GRPC.Stub.send_request(stream, control_msg)}
-    rescue
-      error ->
-        {:error, error}
-    catch
-      :exit, reason ->
-        {:error, reason}
-    end
+    {:ok, GRPC.Stub.send_request(stream, control_msg)}
+  rescue
+    error ->
+      {:error, error}
+  catch
+    :exit, reason ->
+      {:error, reason}
   end
 
   defp initiate_stream(channel, worker_ctx) do
@@ -364,12 +362,10 @@ defmodule Snakepit.Telemetry.GrpcStream do
   end
 
   defp open_telemetry_stream(channel) do
-    try do
-      BridgeService.Stub.stream_telemetry(channel, timeout: :infinity)
-    rescue
-      exception ->
-        {:error, {:invalid_channel, exception}}
-    end
+    BridgeService.Stub.stream_telemetry(channel, timeout: :infinity)
+  rescue
+    exception ->
+      {:error, {:invalid_channel, exception}}
   end
 
   defp normalize_stream_response({:ok, %GRPC.Client.Stream{} = stream}), do: {:ok, stream}
@@ -475,14 +471,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
     Enum.reduce_while(measurements, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
       case Naming.measurement_key(key) do
         {:ok, atom_key} ->
-          val =
-            case value.value do
-              {:int_value, v} -> v
-              {:float_value, v} -> v
-              {:string_value, v} -> v
-              nil -> nil
-            end
-
+          val = extract_measurement_value(value.value)
           {:cont, {:ok, Map.put(acc, atom_key, val)}}
 
         {:error, reason} ->
@@ -490,6 +479,11 @@ defmodule Snakepit.Telemetry.GrpcStream do
       end
     end)
   end
+
+  defp extract_measurement_value({:int_value, v}), do: v
+  defp extract_measurement_value({:float_value, v}), do: v
+  defp extract_measurement_value({:string_value, v}), do: v
+  defp extract_measurement_value(nil), do: nil
 
   defp blank_to_nil(""), do: nil
   defp blank_to_nil(value), do: value

@@ -15,8 +15,8 @@ defmodule Snakepit.TestAdapters.QueueProbeAdapter do
 
   @behaviour Snakepit.Adapter
 
-  alias Snakepit.TestAdapters.MockGRPCAdapter, as: Mock
   alias MapSet
+  alias Snakepit.TestAdapters.MockGRPCAdapter, as: Mock
 
   @counter_key {:snakepit, :queue_probe_counter}
   @delay_key {:snakepit, :queue_probe_delay}
@@ -61,12 +61,10 @@ defmodule Snakepit.TestAdapters.QueueProbeAdapter do
   @impl true
   def script_args, do: Mock.script_args()
 
-  @impl true
   def supported_commands do
     [@slow_probe_command | Mock.supported_commands()]
   end
 
-  @impl true
   def validate_command(@slow_probe_command, _args), do: :ok
   def validate_command(command, args), do: Mock.validate_command(command, args)
 

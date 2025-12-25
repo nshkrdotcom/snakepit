@@ -8,9 +8,9 @@ defmodule Snakepit.Telemetry.Control do
 
   alias Snakepit.Bridge.{
     TelemetryControl,
-    TelemetryToggle,
+    TelemetryEventFilter,
     TelemetrySamplingUpdate,
-    TelemetryEventFilter
+    TelemetryToggle
   }
 
   @doc """

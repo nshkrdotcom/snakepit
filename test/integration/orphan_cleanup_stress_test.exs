@@ -113,30 +113,21 @@ defmodule Snakepit.Integration.OrphanCleanupStressTest do
 
   defp assert_no_orphan_python_processes(current_run_id) do
     python_pids = ProcessKiller.find_python_processes()
-
-    offenders =
-      Enum.reduce(python_pids, [], fn pid, acc ->
-        case ProcessKiller.get_process_command(pid) do
-          {:ok, cmd} ->
-            if String.contains?(cmd, "grpc_server.py") do
-              case Snakepit.RunID.extract_from_command(cmd) do
-                {:ok, run_id} when run_id != current_run_id ->
-                  [{pid, cmd} | acc]
-
-                _ ->
-                  acc
-              end
-            else
-              acc
-            end
-
-          _ ->
-            acc
-        end
-      end)
+    offenders = Enum.flat_map(python_pids, &check_for_orphan(&1, current_run_id))
 
     assert offenders == [],
            "Found grpc_server processes from another run: #{inspect(offenders)}"
+  end
+
+  defp check_for_orphan(pid, current_run_id) do
+    with {:ok, cmd} <- ProcessKiller.get_process_command(pid),
+         true <- String.contains?(cmd, "grpc_server.py"),
+         {:ok, run_id} <- Snakepit.RunID.extract_from_command(cmd),
+         true <- run_id != current_run_id do
+      [{pid, cmd}]
+    else
+      _ -> []
+    end
   end
 
   defp configure_pooling do

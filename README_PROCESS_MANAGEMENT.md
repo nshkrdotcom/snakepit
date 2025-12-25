@@ -1,8 +1,10 @@
 # Snakepit Process Management & Reliability
 
+> Updated for Snakepit v0.7.2
+
 ## Overview
 
-Snakepit v0.3.3+ includes enhanced process management with persistent tracking and automatic orphan cleanup. This ensures that Python worker processes are always properly managed, even after unexpected BEAM VM crashes.
+Snakepit includes enhanced process management with persistent tracking and automatic orphan cleanup. This ensures that Python worker processes are always properly managed, even after unexpected BEAM VM crashes.
 
 ## Key Features
 

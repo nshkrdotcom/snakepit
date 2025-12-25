@@ -9,7 +9,9 @@ defmodule Snakepit.Config.StartupFailFastTest do
   require Logger
   import ExUnit.CaptureLog
 
+  alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.ProcessKiller
+  alias Snakepit.Test.FakeDoctor
 
   setup do
     original_level = Logger.level()
@@ -26,7 +28,7 @@ defmodule Snakepit.Config.StartupFailFastTest do
     }
 
     on_exit(fn ->
-      Snakepit.Test.FakeDoctor.reset()
+      FakeDoctor.reset()
       Application.stop(:snakepit)
       restore_env(prev_env)
       {:ok, _} = Application.ensure_all_started(:snakepit)
@@ -71,8 +73,8 @@ defmodule Snakepit.Config.StartupFailFastTest do
       end
 
       ensure_registry_started()
-      assert %{total_registered: 0} = Snakepit.Pool.ProcessRegistry.get_stats()
-      assert {:ok, dets_size} = Snakepit.Pool.ProcessRegistry.dets_table_size()
+      assert %{total_registered: 0} = ProcessRegistry.get_stats()
+      assert {:ok, dets_size} = ProcessRegistry.dets_table_size()
       assert dets_size <= 1
     end)
   end
@@ -130,7 +132,8 @@ defmodule Snakepit.Config.StartupFailFastTest do
         }
       ])
 
-      {:ok, socket} = :gen_tcp.listen(50051, [:binary, packet: 0, active: false, reuseaddr: true])
+      {:ok, socket} =
+        :gen_tcp.listen(50_051, [:binary, packet: 0, active: false, reuseaddr: true])
 
       result = Application.ensure_all_started(:snakepit)
       assert port_conflict_error?(result)
@@ -144,8 +147,8 @@ defmodule Snakepit.Config.StartupFailFastTest do
     capture_log(fn ->
       Application.stop(:snakepit)
 
-      Snakepit.Test.FakeDoctor.reset()
-      Snakepit.Test.FakeDoctor.configure(pid: self())
+      FakeDoctor.reset()
+      FakeDoctor.configure(pid: self())
 
       Application.put_env(:snakepit, :env_doctor_module, Snakepit.Test.FakeDoctor)
       Application.put_env(:snakepit, :pooling_enabled, true)
@@ -169,8 +172,8 @@ defmodule Snakepit.Config.StartupFailFastTest do
     capture_log(fn ->
       Application.stop(:snakepit)
 
-      Snakepit.Test.FakeDoctor.reset()
-      Snakepit.Test.FakeDoctor.configure(pid: self(), action: {:raise, "doctor failure"})
+      FakeDoctor.reset()
+      FakeDoctor.configure(pid: self(), action: {:raise, "doctor failure"})
 
       Application.put_env(:snakepit, :env_doctor_module, Snakepit.Test.FakeDoctor)
       Application.put_env(:snakepit, :pooling_enabled, true)
@@ -227,18 +230,16 @@ defmodule Snakepit.Config.StartupFailFastTest do
        do: reason
 
   defp await_ready_result(timeout \\ 1_000) do
-    try do
-      Snakepit.Pool.await_ready(Snakepit.Pool, timeout)
-    catch
-      :exit, {:no_workers_started, _} -> {:error, :no_workers_started}
-      :exit, :no_workers_started -> {:error, :no_workers_started}
-      :exit, reason -> {:error, reason}
-    end
+    Snakepit.Pool.await_ready(Snakepit.Pool, timeout)
+  catch
+    :exit, {:no_workers_started, _} -> {:error, :no_workers_started}
+    :exit, :no_workers_started -> {:error, :no_workers_started}
+    :exit, reason -> {:error, reason}
   end
 
   defp ensure_registry_started do
-    case Process.whereis(Snakepit.Pool.ProcessRegistry) do
-      nil -> start_supervised!(Snakepit.Pool.ProcessRegistry)
+    case Process.whereis(ProcessRegistry) do
+      nil -> start_supervised!(ProcessRegistry)
       _ -> :ok
     end
   end

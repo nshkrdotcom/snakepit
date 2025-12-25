@@ -129,12 +129,10 @@ defmodule Snakepit.ProcessKillerTest do
   end
 
   defp safe_close_port(port) when is_port(port) do
-    try do
-      Port.close(port)
-    catch
-      :exit, _ -> :ok
-      :error, _ -> :ok
-    end
+    Port.close(port)
+  catch
+    :exit, _ -> :ok
+    :error, _ -> :ok
   end
 
   describe "kill_with_escalation/2" do

@@ -255,14 +255,12 @@ defmodule Snakepit.Bridge.ToolRegistry do
   defp validate_metadata(%{} = metadata), do: enforce_metadata_constraints(metadata)
 
   defp validate_metadata(metadata) when is_list(metadata) do
-    try do
-      metadata
-      |> Enum.into(%{})
-      |> enforce_metadata_constraints()
-    rescue
-      ArgumentError ->
-        {:error, {:invalid_metadata, :duplicate_keys}}
-    end
+    metadata
+    |> Enum.into(%{})
+    |> enforce_metadata_constraints()
+  rescue
+    ArgumentError ->
+      {:error, {:invalid_metadata, :duplicate_keys}}
   end
 
   defp validate_metadata(_), do: {:error, {:invalid_metadata, :unsupported_type}}
@@ -290,24 +288,30 @@ defmodule Snakepit.Bridge.ToolRegistry do
   end
 
   defp build_remote_specs(tool_specs) do
-    Enum.reduce_while(tool_specs, {:ok, [], MapSet.new()}, fn spec, {:ok, acc, names} ->
-      case build_remote_tool_spec(spec) do
-        {:ok, tool_spec} ->
-          if MapSet.member?(names, tool_spec.name) do
-            {:halt, {:error, {:duplicate_tool, tool_spec.name}}}
-          else
-            {:cont, {:ok, [tool_spec | acc], MapSet.put(names, tool_spec.name)}}
-          end
+    tool_specs
+    |> Enum.reduce_while({:ok, [], MapSet.new()}, &accumulate_remote_spec/2)
+    |> finalize_remote_specs()
+  end
 
-        {:error, reason} ->
-          {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, specs, _names} -> {:ok, Enum.reverse(specs)}
-      {:error, reason} -> {:error, reason}
+  defp accumulate_remote_spec(spec, {:ok, acc, names}) do
+    with {:ok, tool_spec} <- build_remote_tool_spec(spec),
+         :ok <- check_duplicate_name(tool_spec.name, names) do
+      {:cont, {:ok, [tool_spec | acc], MapSet.put(names, tool_spec.name)}}
+    else
+      {:error, reason} -> {:halt, {:error, reason}}
     end
   end
+
+  defp check_duplicate_name(name, names) do
+    if MapSet.member?(names, name) do
+      {:error, {:duplicate_tool, name}}
+    else
+      :ok
+    end
+  end
+
+  defp finalize_remote_specs({:ok, specs, _names}), do: {:ok, Enum.reverse(specs)}
+  defp finalize_remote_specs({:error, reason}), do: {:error, reason}
 
   defp build_remote_tool_spec(spec) do
     metadata = Map.get(spec, :metadata, %{})
@@ -338,22 +342,28 @@ defmodule Snakepit.Bridge.ToolRegistry do
   end
 
   defp insert_tool_batch(session_id, specs) do
-    Enum.reduce_while(specs, {:ok, []}, fn spec, {:ok, inserted_names} ->
-      case :ets.insert_new(@table_name, {{session_id, spec.name}, spec}) do
-        true ->
-          {:cont, {:ok, [spec.name | inserted_names]}}
+    specs
+    |> Enum.reduce_while({:ok, []}, &insert_tool_spec(session_id, &1, &2))
+    |> finalize_tool_batch()
+  end
 
-        false ->
-          Enum.each(inserted_names, fn name ->
-            :ets.delete(@table_name, {session_id, name})
-          end)
+  defp insert_tool_spec(session_id, spec, {:ok, inserted_names}) do
+    case :ets.insert_new(@table_name, {{session_id, spec.name}, spec}) do
+      true ->
+        {:cont, {:ok, [spec.name | inserted_names]}}
 
-          {:halt, {:error, {:duplicate_tool, spec.name}}}
-      end
-    end)
-    |> case do
-      {:ok, names} -> {:ok, Enum.reverse(names)}
-      {:error, reason} -> {:error, reason}
+      false ->
+        rollback_inserted_tools(session_id, inserted_names)
+        {:halt, {:error, {:duplicate_tool, spec.name}}}
     end
   end
+
+  defp rollback_inserted_tools(session_id, inserted_names) do
+    Enum.each(inserted_names, fn name ->
+      :ets.delete(@table_name, {session_id, name})
+    end)
+  end
+
+  defp finalize_tool_batch({:ok, names}), do: {:ok, Enum.reverse(names)}
+  defp finalize_tool_batch({:error, reason}), do: {:error, reason}
 end

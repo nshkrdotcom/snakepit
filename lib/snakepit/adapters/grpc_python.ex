@@ -42,8 +42,9 @@ defmodule Snakepit.Adapters.GRPCPython do
   @behaviour Snakepit.Adapter
 
   require Logger
-  alias Snakepit.Logger, as: SLog
   alias Snakepit.Bridge.ToolChunk
+  alias Snakepit.GRPC.Client
+  alias Snakepit.Logger, as: SLog
 
   @impl true
   def executable_path do
@@ -127,67 +128,7 @@ defmodule Snakepit.Adapters.GRPCPython do
     end
   end
 
-  @impl true
-  def supported_commands do
-    # Check if we're using DSPy adapter
-    pool_config = Application.get_env(:snakepit, :pool_config, %{})
-    adapter_args = Map.get(pool_config, :adapter_args, [])
-
-    base_commands = [
-      "ping",
-      "echo",
-      "compute",
-      "info",
-      # Enhanced Python API
-      "call",
-      "store",
-      "retrieve",
-      "list_stored",
-      "delete_stored"
-    ]
-
-    streaming_commands = [
-      "batch_inference",
-      "process_large_dataset",
-      "tail_and_analyze"
-    ]
-
-    dspy_commands = [
-      "configure_lm",
-      "create_program",
-      "create_gemini_program",
-      "execute_program",
-      "execute_gemini_program",
-      "list_programs",
-      "delete_program",
-      "get_stats",
-      "cleanup",
-      "reset_state",
-      "get_program_info",
-      "cleanup_session",
-      "shutdown"
-    ]
-
-    # Include DSPy commands if using DSPy adapter
-    if Enum.any?(adapter_args, &String.contains?(&1, "dspy")) do
-      base_commands ++ streaming_commands ++ dspy_commands
-    else
-      base_commands ++ streaming_commands
-    end
-  end
-
-  @impl true
-  def validate_command(command, _args) do
-    supported = supported_commands()
-
-    if command in supported do
-      :ok
-    else
-      {:error, "Unsupported command: #{command}"}
-    end
-  end
-
-  # Optional callbacks for gRPC-specific functionality
+  # gRPC-specific functionality
 
   @doc """
   Get the gRPC port for this adapter instance.
@@ -223,12 +164,12 @@ defmodule Snakepit.Adapters.GRPCPython do
   external process startup timing is non-deterministic.
   """
   def init_grpc_connection(port) do
-    unless grpc_available?() do
-      {:error, :grpc_not_available}
-    else
+    if grpc_available?() do
       # Retry up to 5 times with exponential backoff + jitter
       # This handles the startup race condition gracefully
       retry_connect(port, 5, 50, 1)
+    else
+      {:error, :grpc_not_available}
     end
   end
 
@@ -242,7 +183,7 @@ defmodule Snakepit.Adapters.GRPCPython do
   end
 
   defp retry_connect(port, retries_left, base_delay, backoff) do
-    case Snakepit.GRPC.Client.connect(port) do
+    case Client.connect(port) do
       {:ok, channel} ->
         # Connection successful!
         SLog.debug("gRPC connection established to port #{port}")
@@ -282,16 +223,16 @@ defmodule Snakepit.Adapters.GRPCPython do
   Execute a command via gRPC.
   """
   def grpc_execute(connection, session_id, command, args, timeout \\ 30_000) do
-    unless grpc_available?() do
-      {:error, :grpc_not_available}
-    else
-      Snakepit.GRPC.Client.execute_tool(
+    if grpc_available?() do
+      Client.execute_tool(
         connection.channel,
         session_id,
         command,
         args,
         timeout: timeout
       )
+    else
+      {:error, :grpc_not_available}
     end
   end
 
@@ -300,17 +241,17 @@ defmodule Snakepit.Adapters.GRPCPython do
   """
   def grpc_execute_stream(connection, session_id, command, args, callback_fn, timeout \\ 300_000)
       when is_function(callback_fn, 1) do
-    unless grpc_available?() do
-      {:error, :grpc_not_available}
-    else
+    if grpc_available?() do
       connection.channel
-      |> Snakepit.GRPC.Client.execute_streaming_tool(
+      |> Client.execute_streaming_tool(
         session_id,
         command,
         args,
         timeout: timeout
       )
       |> consume_stream(callback_fn)
+    else
+      {:error, :grpc_not_available}
     end
   end
 
@@ -319,14 +260,6 @@ defmodule Snakepit.Adapters.GRPCPython do
   Returns true only if gRPC dependencies are actually available.
   """
   def uses_grpc?, do: grpc_available?()
-
-  # Compatibility functions for existing adapter interface
-
-  @impl true
-  def prepare_args(_command, args), do: args
-
-  @impl true
-  def process_response(_command, response), do: {:ok, response}
 
   @impl true
   # 5 minutes for ML inference

@@ -2,8 +2,10 @@ defmodule Snakepit.GRPC.HeartbeatEndToEndTest do
   use ExUnit.Case, async: false
   import Snakepit.TestHelpers
 
-  alias Snakepit.Pool.WorkerSupervisor
+  alias Snakepit.Adapters.GRPCPython
+  alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.Pool.Registry, as: PoolRegistry
+  alias Snakepit.Pool.WorkerSupervisor
 
   @moduletag :python_integration
   @moduletag timeout: 120_000
@@ -37,7 +39,7 @@ defmodule Snakepit.GRPC.HeartbeatEndToEndTest do
   end
 
   test "python heartbeat pongs reach Elixir monitor" do
-    python_exec = Snakepit.Adapters.GRPCPython.executable_path()
+    python_exec = GRPCPython.executable_path()
 
     assert python_exec, "Expected Python executable for heartbeat integration test"
     assert File.exists?(python_exec), "Python executable not found at #{inspect(python_exec)}"
@@ -138,7 +140,7 @@ defmodule Snakepit.GRPC.HeartbeatEndToEndTest do
       {:ok, worker_pid} = PoolRegistry.get_worker_pid(worker_id)
       worker_ref = Process.monitor(worker_pid)
 
-      {:ok, worker_info} = Snakepit.Pool.ProcessRegistry.get_worker_info(worker_id)
+      {:ok, worker_info} = ProcessRegistry.get_worker_info(worker_id)
       assert is_integer(worker_info.process_pid) and worker_info.process_pid > 0
       os_pid = worker_info.process_pid
 
@@ -155,7 +157,7 @@ defmodule Snakepit.GRPC.HeartbeatEndToEndTest do
 
       refute Process.alive?(worker_pid)
 
-      assert_eventually(fn -> not Snakepit.Pool.ProcessRegistry.worker_registered?(worker_id) end,
+      assert_eventually(fn -> not ProcessRegistry.worker_registered?(worker_id) end,
         timeout: 5_000,
         interval: 100
       )

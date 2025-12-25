@@ -56,6 +56,7 @@ defmodule Snakepit.Pool.Worker.Starter do
   use Supervisor
   require Logger
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Pool.Worker.StarterRegistry
 
   @doc """
   Starts a worker starter supervisor.
@@ -100,7 +101,7 @@ defmodule Snakepit.Pool.Worker.Starter do
   Returns a via tuple for this starter supervisor.
   """
   def via_name(worker_id) do
-    Snakepit.Pool.Worker.StarterRegistry.via_tuple(worker_id)
+    StarterRegistry.via_tuple(worker_id)
   end
 
   @impl true
@@ -172,14 +173,12 @@ defmodule Snakepit.Pool.Worker.Starter do
 
   defp maybe_put_pool_identifier(opts, pool_name, worker_config) do
     identifier =
-      cond do
-        is_map(worker_config) ->
-          worker_config
-          |> Map.get(:pool_identifier)
-          |> normalize_identifier()
-
-        true ->
-          normalize_identifier(pool_name)
+      if is_map(worker_config) do
+        worker_config
+        |> Map.get(:pool_identifier)
+        |> normalize_identifier()
+      else
+        normalize_identifier(pool_name)
       end
 
     if identifier do
@@ -198,11 +197,9 @@ defmodule Snakepit.Pool.Worker.Starter do
   end
 
   defp normalize_identifier(value) when is_binary(value) do
-    try do
-      normalize_identifier(String.to_existing_atom(value))
-    rescue
-      ArgumentError -> nil
-    end
+    normalize_identifier(String.to_existing_atom(value))
+  rescue
+    ArgumentError -> nil
   end
 
   defp normalize_identifier(_), do: nil

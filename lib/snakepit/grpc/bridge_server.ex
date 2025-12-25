@@ -7,39 +7,39 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   use GRPC.Server, service: Snakepit.Bridge.BridgeService.Service
 
-  alias Snakepit.Bridge.SessionStore
-  alias Snakepit.Bridge.ToolRegistry
-  alias Snakepit.GRPCWorker
-  alias Snakepit.GRPC.Client, as: GRPCClient
-  alias Snakepit.Pool.Registry, as: PoolRegistry
-  alias Snakepit.Telemetry.Correlation
+  require Logger
+
+  alias Google.Protobuf.{Any, Timestamp}
 
   alias Snakepit.Bridge.{
-    PingRequest,
-    PingResponse,
-    InitializeSessionResponse,
     CleanupSessionRequest,
     CleanupSessionResponse,
+    ExecuteElixirToolRequest,
+    ExecuteElixirToolResponse,
+    ExecuteToolRequest,
+    ExecuteToolResponse,
+    GetExposedElixirToolsRequest,
+    GetExposedElixirToolsResponse,
     GetSessionRequest,
     GetSessionResponse,
     HeartbeatRequest,
     HeartbeatResponse,
-    ExecuteToolRequest,
-    ExecuteToolResponse,
+    InitializeSessionResponse,
+    ParameterSpec,
+    PingRequest,
+    PingResponse,
     RegisterToolsRequest,
     RegisterToolsResponse,
-    GetExposedElixirToolsRequest,
-    GetExposedElixirToolsResponse,
-    ExecuteElixirToolRequest,
-    ExecuteElixirToolResponse,
-    ToolSpec,
-    ParameterSpec
+    ToolSpec
   }
 
-  alias Google.Protobuf.{Any, Timestamp}
-
-  require Logger
+  alias Snakepit.Bridge.SessionStore
+  alias Snakepit.Bridge.ToolRegistry
+  alias Snakepit.GRPC.Client, as: GRPCClient
+  alias Snakepit.GRPCWorker
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Pool.Registry, as: PoolRegistry
+  alias Snakepit.Telemetry.Correlation
 
   # Health & Session Management
 
@@ -75,8 +75,9 @@ defmodule Snakepit.GRPC.BridgeServer do
   def cleanup_session(%CleanupSessionRequest{session_id: session_id, force: _force}, _stream) do
     SLog.info("Cleaning up session: #{session_id}")
 
-    # TODO: Implement force flag when supported by SessionStore
-    # SessionStore.delete_session always returns :ok
+    # NOTE: The force flag is not currently used. SessionStore.delete_session is always idempotent
+    # and immediately deletes the session regardless of state. Future enhancements could add
+    # soft-delete or cleanup verification if needed.
     SessionStore.delete_session(session_id)
 
     %CleanupSessionResponse{
@@ -260,12 +261,10 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   defp merge_binary_parameters(decoded, binary_params) when is_map(binary_params) do
     Enum.reduce_while(binary_params, {:ok, decoded}, fn {key, value}, {:ok, acc} ->
-      cond do
-        is_binary(value) ->
-          {:cont, {:ok, Map.put(acc, normalize_param_key(key), {:binary, value})}}
-
-        true ->
-          {:halt, {:error, {:invalid_parameter, normalize_param_key(key), :not_binary}}}
+      if is_binary(value) do
+        {:cont, {:ok, Map.put(acc, normalize_param_key(key), {:binary, value})}}
+      else
+        {:halt, {:error, {:invalid_parameter, normalize_param_key(key), :not_binary}}}
       end
     end)
   end
@@ -309,11 +308,9 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   defp create_worker_channel(port) do
-    try do
-      GRPC.Stub.connect("localhost:#{port}")
-    rescue
-      error -> {:error, "Failed to connect to worker: #{inspect(error)}"}
-    end
+    GRPC.Stub.connect("localhost:#{port}")
+  rescue
+    error -> {:error, "Failed to connect to worker: #{inspect(error)}"}
   end
 
   defp forward_tool_to_worker(channel, request, session_id, decoded_params, correlation_id) do
@@ -429,33 +426,33 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   defp get_existing_worker_channel(worker_id) do
-    case PoolRegistry.fetch_worker(worker_id) do
-      {:ok, pid, metadata} when is_pid(pid) ->
-        case Map.get(metadata, :worker_module, GRPCWorker) do
-          module when module == GRPCWorker ->
-            case GRPCWorker.get_channel(pid) do
-              {:ok, channel} -> {:ok, channel}
-              {:error, reason} -> {:error, reason}
-            end
-
-          _ ->
-            {:error, :unsupported_worker_module}
-        end
-
-      {:error, _} ->
-        {:error, "Worker not found: #{worker_id}"}
+    with {:ok, pid, metadata} <- fetch_worker_safely(worker_id),
+         :ok <- validate_worker_module(metadata) do
+      GRPCWorker.get_channel(pid)
     end
   rescue
     _ -> {:error, :channel_unavailable}
   end
 
-  defp disconnect_channel(channel) do
-    try do
-      _ = GRPC.Stub.disconnect(channel)
-      :ok
-    rescue
-      _ -> :ok
+  defp fetch_worker_safely(worker_id) do
+    case PoolRegistry.fetch_worker(worker_id) do
+      {:ok, pid, metadata} when is_pid(pid) -> {:ok, pid, metadata}
+      {:error, _} -> {:error, "Worker not found: #{worker_id}"}
     end
+  end
+
+  defp validate_worker_module(metadata) do
+    case Map.get(metadata, :worker_module, GRPCWorker) do
+      module when module == GRPCWorker -> :ok
+      _ -> {:error, :unsupported_worker_module}
+    end
+  end
+
+  defp disconnect_channel(channel) do
+    _ = GRPC.Stub.disconnect(channel)
+    :ok
+  rescue
+    _ -> :ok
   end
 
   def execute_streaming_tool(%ExecuteToolRequest{} = request, _stream) do
@@ -510,42 +507,17 @@ defmodule Snakepit.GRPC.BridgeServer do
   def register_tools(%RegisterToolsRequest{} = request, _stream) do
     SLog.info("RegisterTools for session #{request.session_id}, worker: #{request.worker_id}")
 
-    with {:ok, _session} <- SessionStore.get_session(request.session_id) do
-      # Convert proto ToolRegistration to internal format
-      tool_specs =
-        Enum.map(request.tools, fn tool_reg ->
-          %{
-            name: tool_reg.name,
-            description: tool_reg.description,
-            parameters: tool_reg.parameters,
-            metadata:
-              Map.put(
-                tool_reg.metadata,
-                "supports_streaming",
-                to_string(tool_reg.supports_streaming)
-              ),
-            worker_id: request.worker_id
-          }
-        end)
+    with {:ok, _session} <- SessionStore.get_session(request.session_id),
+         tool_specs <- convert_proto_tools_to_specs(request.tools, request.worker_id),
+         {:ok, registered_names} <- ToolRegistry.register_tools(request.session_id, tool_specs) do
+      tool_ids =
+        Map.new(registered_names, fn name -> {name, "#{request.session_id}:#{name}"} end)
 
-      case ToolRegistry.register_tools(request.session_id, tool_specs) do
-        {:ok, registered_names} ->
-          tool_ids =
-            Map.new(registered_names, fn name -> {name, "#{request.session_id}:#{name}"} end)
-
-          %RegisterToolsResponse{
-            success: true,
-            tool_ids: tool_ids,
-            error_message: nil
-          }
-
-        {:error, reason} ->
-          %RegisterToolsResponse{
-            success: false,
-            tool_ids: %{},
-            error_message: format_error(reason)
-          }
-      end
+      %RegisterToolsResponse{
+        success: true,
+        tool_ids: tool_ids,
+        error_message: nil
+      }
     else
       {:error, reason} ->
         %RegisterToolsResponse{
@@ -554,6 +526,23 @@ defmodule Snakepit.GRPC.BridgeServer do
           error_message: format_error(reason)
         }
     end
+  end
+
+  defp convert_proto_tools_to_specs(tools, worker_id) do
+    Enum.map(tools, fn tool_reg ->
+      %{
+        name: tool_reg.name,
+        description: tool_reg.description,
+        parameters: tool_reg.parameters,
+        metadata:
+          Map.put(
+            tool_reg.metadata,
+            "supports_streaming",
+            to_string(tool_reg.supports_streaming)
+          ),
+        worker_id: worker_id
+      }
+    end)
   end
 
   def get_exposed_elixir_tools(%GetExposedElixirToolsRequest{session_id: session_id}, _stream) do
@@ -641,26 +630,30 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   defp encode_parameter_specs(params) when is_list(params) do
-    Enum.map(params, fn param ->
-      # Convert atom keys to strings
-      param =
-        case param do
-          %{} -> Map.new(param, fn {k, v} -> {to_string(k), v} end)
-          _ -> param
-        end
-
-      %ParameterSpec{
-        name: Map.get(param, "name", ""),
-        type: to_string(Map.get(param, "type", "any")),
-        description: to_string(Map.get(param, "description", "")),
-        required: Map.get(param, "required", false),
-        default_value: encode_default_value(Map.get(param, "default")),
-        validation_json: Jason.encode!(Map.get(param, "validation", %{}))
-      }
-    end)
+    Enum.map(params, &encode_single_parameter_spec/1)
   end
 
   defp encode_parameter_specs(_), do: []
+
+  defp encode_single_parameter_spec(param) do
+    # Convert atom keys to strings
+    normalized_param = normalize_param_map(param)
+
+    %ParameterSpec{
+      name: Map.get(normalized_param, "name", ""),
+      type: to_string(Map.get(normalized_param, "type", "any")),
+      description: to_string(Map.get(normalized_param, "description", "")),
+      required: Map.get(normalized_param, "required", false),
+      default_value: encode_default_value(Map.get(normalized_param, "default")),
+      validation_json: Jason.encode!(Map.get(normalized_param, "validation", %{}))
+    }
+  end
+
+  defp normalize_param_map(%{} = param) do
+    Map.new(param, fn {k, v} -> {to_string(k), v} end)
+  end
+
+  defp normalize_param_map(param), do: param
 
   defp encode_default_value(nil), do: nil
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env elixir
 
 # Snakepit Bridge Test Runner
-# 
+#
 # This script provides a unified way to run all bridge-related tests
 # including unit tests, integration tests, and property-based tests.
 #
@@ -63,10 +63,10 @@ defmodule BridgeTestRunner do
       )
 
     # Default to all if no specific type is selected
-    if not (opts[:unit] or opts[:integration] or opts[:property]) do
-      Keyword.put(opts, :all, true)
-    else
+    if opts[:unit] or opts[:integration] or opts[:property] do
       opts
+    else
+      Keyword.put(opts, :all, true)
     end
   end
 
@@ -153,7 +153,7 @@ defmodule BridgeTestRunner do
 
     # Add include tags
     args =
-      if config[:tags] && length(config[:tags]) > 0 do
+      if config[:tags] && not Enum.empty?(config[:tags]) do
         Enum.reduce(config[:tags], args, fn tag, acc ->
           acc ++ ["--include", to_string(tag)]
         end)
@@ -163,10 +163,10 @@ defmodule BridgeTestRunner do
 
     # Exclude performance tests unless explicitly requested
     args =
-      if not options[:performance] do
-        args ++ ["--exclude", "performance"]
-      else
+      if options[:performance] do
         args
+      else
+        args ++ ["--exclude", "performance"]
       end
 
     # Add verbosity

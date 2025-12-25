@@ -1,6 +1,7 @@
 defmodule Snakepit.GRPCWorkerMockTest do
   use Snakepit.TestCase
 
+  alias Snakepit.Test.MockGRPCWorker
   alias Snakepit.TestAdapters.MockGRPCAdapter
 
   @moduledoc """
@@ -30,10 +31,10 @@ defmodule Snakepit.GRPCWorkerMockTest do
 
       # Create a mock worker
       {:ok, worker} =
-        Snakepit.Test.MockGRPCWorker.start_link(
+        MockGRPCWorker.start_link(
           id: worker_id,
           adapter: MockGRPCAdapter,
-          port: 60000,
+          port: 60_000,
           test_pid: self()
         )
 
@@ -53,15 +54,15 @@ defmodule Snakepit.GRPCWorkerMockTest do
       worker_id = "mock_stats_#{System.unique_integer([:positive])}"
 
       {:ok, worker} =
-        Snakepit.Test.MockGRPCWorker.start_link(
+        MockGRPCWorker.start_link(
           id: worker_id,
           adapter: MockGRPCAdapter,
-          port: 60001,
+          port: 60_001,
           test_pid: self()
         )
 
       # Wait for grpc_ready from mock
-      assert_receive {:grpc_ready, 60001}, 100
+      assert_receive {:grpc_ready, 60_001}, 100
 
       # Execute commands
       for _ <- 1..3 do
@@ -86,15 +87,15 @@ defmodule Snakepit.GRPCWorkerMockTest do
 
       # Start worker
       {:ok, worker} =
-        Snakepit.Test.MockGRPCWorker.start_link(
+        MockGRPCWorker.start_link(
           id: worker_id,
           adapter: MockGRPCAdapter,
-          port: 60002,
+          port: 60_002,
           test_pid: self()
         )
 
       # Wait for grpc_ready from mock
-      assert_receive {:grpc_ready, 60002}, 100
+      assert_receive {:grpc_ready, 60_002}, 100
 
       # Should be registered
       assert [{^worker, _meta}] = Registry.lookup(Snakepit.Pool.Registry, worker_id)

@@ -156,91 +156,105 @@ defmodule Snakepit.Pool.WorkerSupervisor do
          backoff \\ @cleanup_retry_interval
        ) do
     if retries > 0 do
-      port_to_probe = port_probe_target(current_port, requested_port)
-      probe_port? = should_probe_port?(requested_port) and port_to_probe not in [nil, 0]
-
-      if probe_port? and retries == @cleanup_max_retries do
-        initial_delay = min(backoff, 50)
-
-        receive do
-        after
-          initial_delay -> :ok
-        end
-      end
-
-      port_released? =
-        cond do
-          not probe_port? ->
-            if retries == @cleanup_max_retries do
-              SLog.info(
-                "Skipping port availability probe for #{worker_id}; worker requested an ephemeral port"
-              )
-            end
-
-            true
-
-          true ->
-            SLog.debug("Probing port #{port_to_probe} before restarting #{worker_id}")
-            port_available?(port_to_probe)
-        end
-
-      if port_released? and registry_cleaned?(worker_id) do
-        SLog.debug("Resources released for #{worker_id}, safe to restart")
-        :ok
-      else
-        # Resources still in use - exponential backoff with cap at 200ms
-        delay = min(backoff, 200)
-
-        # OTP-idiomatic non-blocking wait
-        receive do
-        after
-          delay -> :ok
-        end
-
-        wait_for_resource_cleanup(
-          worker_id,
-          current_port,
-          requested_port,
-          retries - 1,
-          backoff * 2
-        )
-      end
+      check_and_wait_for_cleanup(worker_id, current_port, requested_port, retries, backoff)
     else
-      SLog.warning(
-        "Resource cleanup timeout for #{worker_id} after #{@cleanup_max_retries} retries, " <>
-          "proceeding with restart anyway"
-      )
-
-      {:error, :cleanup_timeout}
+      handle_cleanup_timeout(worker_id)
     end
+  end
+
+  defp check_and_wait_for_cleanup(worker_id, current_port, requested_port, retries, backoff) do
+    port_to_probe = port_probe_target(current_port, requested_port)
+    probe_port? = should_probe_port?(requested_port) and port_to_probe not in [nil, 0]
+
+    maybe_delay_initial_probe(probe_port?, retries, backoff)
+
+    port_released? = check_port_released(worker_id, port_to_probe, probe_port?, retries)
+
+    if port_released? and registry_cleaned?(worker_id) do
+      SLog.debug("Resources released for #{worker_id}, safe to restart")
+      :ok
+    else
+      retry_cleanup_check(worker_id, current_port, requested_port, retries, backoff)
+    end
+  end
+
+  defp maybe_delay_initial_probe(probe_port?, retries, backoff) do
+    if probe_port? and retries == @cleanup_max_retries do
+      initial_delay = min(backoff, 50)
+
+      receive do
+      after
+        initial_delay -> :ok
+      end
+    end
+  end
+
+  defp check_port_released(worker_id, port_to_probe, probe_port?, retries) do
+    if probe_port? do
+      SLog.debug("Probing port #{port_to_probe} before restarting #{worker_id}")
+      port_available?(port_to_probe)
+    else
+      log_ephemeral_port_skip(worker_id, retries)
+      true
+    end
+  end
+
+  defp log_ephemeral_port_skip(worker_id, retries) do
+    if retries == @cleanup_max_retries do
+      SLog.info(
+        "Skipping port availability probe for #{worker_id}; worker requested an ephemeral port"
+      )
+    end
+  end
+
+  defp retry_cleanup_check(worker_id, current_port, requested_port, retries, backoff) do
+    delay = min(backoff, 200)
+
+    receive do
+    after
+      delay -> :ok
+    end
+
+    wait_for_resource_cleanup(
+      worker_id,
+      current_port,
+      requested_port,
+      retries - 1,
+      backoff * 2
+    )
+  end
+
+  defp handle_cleanup_timeout(worker_id) do
+    SLog.warning(
+      "Resource cleanup timeout for #{worker_id} after #{@cleanup_max_retries} retries, " <>
+        "proceeding with restart anyway"
+    )
+
+    {:error, :cleanup_timeout}
   end
 
   defp get_worker_port_info(worker_pid) do
-    try do
-      case GenServer.call(worker_pid, :get_port_metadata, 1000) do
-        {:ok, %{current_port: port} = info} ->
-          %{
-            current_port: port,
-            requested_port: Map.get(info, :requested_port)
-          }
+    case GenServer.call(worker_pid, :get_port_metadata, 1000) do
+      {:ok, %{current_port: port} = info} ->
+        %{
+          current_port: port,
+          requested_port: Map.get(info, :requested_port)
+        }
 
-        _ ->
-          legacy_port_info(worker_pid)
-      end
-    catch
-      :exit, _ -> %{current_port: nil, requested_port: nil}
+      _ ->
+        legacy_port_info(worker_pid)
     end
+  catch
+    :exit, _ -> %{current_port: nil, requested_port: nil}
   end
 
   defp legacy_port_info(worker_pid) do
-    try do
-      case GenServer.call(worker_pid, :get_port, 1000) do
-        {:ok, port} -> %{current_port: port, requested_port: port}
-        _ -> %{current_port: nil, requested_port: nil}
-      end
-    catch
-      :exit, _ -> %{current_port: nil, requested_port: nil}
+    case GenServer.call(worker_pid, :get_port, 1000) do
+      {:ok, port} -> %{current_port: port, requested_port: port}
+      _ -> %{current_port: nil, requested_port: nil}
     end
+  catch
+    :exit, _ -> %{current_port: nil, requested_port: nil}
   end
 
   defp port_available?(port) when is_integer(port) do

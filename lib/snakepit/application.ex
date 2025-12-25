@@ -15,6 +15,7 @@ defmodule Snakepit.Application do
   require Logger
   alias Snakepit.Logger, as: SLog
   alias Snakepit.PythonThreadLimits
+  alias Snakepit.Telemetry.OpenTelemetry
 
   @runtime_env Application.compile_env(:snakepit, :environment, :prod)
 
@@ -61,7 +62,7 @@ defmodule Snakepit.Application do
 
     if Application.get_env(:snakepit, :enable_otlp?, false) do
       SLog.info("OTLP telemetry enabled (SNAKEPIT_ENABLE_OTLP=true)")
-      Snakepit.Telemetry.OpenTelemetry.setup()
+      OpenTelemetry.setup()
     else
       SLog.debug("OTLP telemetry disabled (set SNAKEPIT_ENABLE_OTLP=true to enable)")
     end
@@ -71,7 +72,7 @@ defmodule Snakepit.Application do
     )
 
     # Get gRPC config for the Elixir server
-    grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
+    grpc_port = Application.get_env(:snakepit, :grpc_port, 50_051)
 
     # Always start SessionStore as it's needed for tests and bridge functionality
     telemetry_children = Snakepit.TelemetryMetrics.reporter_children()
@@ -89,6 +90,10 @@ defmodule Snakepit.Application do
         SLog.info("🚀 Starting Snakepit with pooling enabled (size: #{pool_size})")
 
         [
+          # GRPC client supervisor - required for connecting to Python workers
+          # Must be started before any gRPC client connections are attempted
+          {GRPC.Client.Supervisor, []},
+
           # Start the central gRPC server that manages state
           # DIAGNOSTIC: Increase backlog to handle high concurrent connection load (200+ workers)
           # Default Cowboy backlog is ~128, which causes connection refusals during startup

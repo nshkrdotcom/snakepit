@@ -1,5 +1,7 @@
 # Snakepit gRPC Streaming Guide
 
+> Updated for Snakepit v0.7.2
+
 ## Overview
 
 This guide covers Snakepit's gRPC streaming implementation - a modern replacement for stdin/stdout communication that enables real-time progress updates, progressive results, and superior performance for ML and data processing workflows.

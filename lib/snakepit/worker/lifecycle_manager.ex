@@ -534,17 +534,15 @@ defmodule Snakepit.Worker.LifecycleManager do
   defp get_worker_memory_mb(worker_pid) do
     # Try to get memory usage from worker
     # This requires worker to expose memory info
-    try do
-      case GenServer.call(worker_pid, :get_memory_usage, 1000) do
-        {:ok, memory_bytes} ->
-          {:ok, div(memory_bytes, 1024 * 1024)}
+    case GenServer.call(worker_pid, :get_memory_usage, 1000) do
+      {:ok, memory_bytes} ->
+        {:ok, div(memory_bytes, 1024 * 1024)}
 
-        _ ->
-          {:error, :not_available}
-      end
-    catch
-      :exit, _ -> {:error, :worker_not_responding}
+      _ ->
+        {:error, :not_available}
     end
+  catch
+    :exit, _ -> {:error, :worker_not_responding}
   end
 
   defp count_workers_near_ttl(workers) do

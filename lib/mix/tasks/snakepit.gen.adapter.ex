@@ -33,9 +33,7 @@ defmodule Mix.Tasks.Snakepit.Gen.Adapter do
     Mix.shell().info("✅ Adapter created at #{adapter_dir}")
     Mix.shell().info("Configure it with:")
 
-    Mix.shell().info(
-      "  adapter_args: [\"--adapter\", \"#{name}.adapter.#{adapter_class(name)}\"]"
-    )
+    Mix.shell().info(~s(  adapter_args: ["--adapter", "#{name}.adapter.#{adapter_class(name)}"]))
   end
 
   defp adapter_class(name) do

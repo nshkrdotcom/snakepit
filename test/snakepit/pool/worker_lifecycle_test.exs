@@ -9,6 +9,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
 
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.Worker.LifecycleConfig
+  alias Snakepit.Worker.LifecycleManager
 
   defmodule TestLifecycleWorker do
     use GenServer
@@ -282,10 +283,10 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
 
   describe "memory recycling" do
     test "recycles workers when memory threshold exceeded and preserves config" do
-      manager = Process.whereis(Snakepit.Worker.LifecycleManager)
+      manager = Process.whereis(LifecycleManager)
       worker_id = "mem_recycle_#{System.unique_integer([:positive])}"
       pool_name = :"test_pool_#{System.unique_integer([:positive])}"
-      initial_counts = Snakepit.Worker.LifecycleManager.memory_recycle_counts()
+      initial_counts = LifecycleManager.memory_recycle_counts()
       initial_pool_count = Map.get(initial_counts, pool_name, 0)
 
       handler_id = "memory-recycle-test-#{System.unique_integer([:positive])}"
@@ -323,7 +324,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
         test_pid: self()
       }
 
-      Snakepit.Worker.LifecycleManager.track_worker(pool_name, worker_id, worker_pid, config)
+      LifecycleManager.track_worker(pool_name, worker_id, worker_pid, config)
 
       TestLifecycleWorker.set_memory(worker_pid, 3 * 1_048_576)
 
@@ -345,16 +346,16 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
       assert started_config.worker_profile == TestProfile
       assert started_config.test_pid == self()
 
-      counts = Snakepit.Worker.LifecycleManager.memory_recycle_counts()
+      counts = LifecycleManager.memory_recycle_counts()
       assert Map.get(counts, pool_name) == initial_pool_count + 1
 
-      Snakepit.Worker.LifecycleManager.untrack_worker(new_worker_id)
+      LifecycleManager.untrack_worker(new_worker_id)
       send(new_worker_pid, :stop)
       assert_receive {:worker_terminated, ^new_worker_id, ^new_worker_pid}, 5_000
     end
 
     test "logs when memory probe fails and skips recycling" do
-      manager = Process.whereis(Snakepit.Worker.LifecycleManager)
+      manager = Process.whereis(LifecycleManager)
       worker_id = "mem_probe_fail_#{System.unique_integer([:positive])}"
 
       {:ok, worker_pid} =
@@ -374,7 +375,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
         test_pid: self()
       }
 
-      Snakepit.Worker.LifecycleManager.track_worker(:test_pool, worker_id, worker_pid, config)
+      LifecycleManager.track_worker(:test_pool, worker_id, worker_pid, config)
       TestLifecycleWorker.fail_memory_probe(worker_pid)
 
       log =
@@ -391,7 +392,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
 
       refute_receive {:worker_terminated, ^worker_id, ^worker_pid}, 200
 
-      Snakepit.Worker.LifecycleManager.untrack_worker(worker_id)
+      LifecycleManager.untrack_worker(worker_id)
       send(worker_pid, :stop)
       assert_receive {:worker_terminated, ^worker_id, ^worker_pid}, 5_000
     end
@@ -421,9 +422,9 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
       test_pid: self()
     }
 
-    Snakepit.Worker.LifecycleManager.track_worker(:test_pool, worker_id, worker_pid, config)
+    LifecycleManager.track_worker(:test_pool, worker_id, worker_pid, config)
 
-    %{workers: workers} = :sys.get_state(Snakepit.Worker.LifecycleManager)
+    %{workers: workers} = :sys.get_state(LifecycleManager)
 
     assert %{
              ^worker_id => %{
@@ -438,7 +439,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
              }
            } = Map.take(workers, [worker_id])
 
-    Snakepit.Worker.LifecycleManager.untrack_worker(worker_id)
+    LifecycleManager.untrack_worker(worker_id)
     send(worker_pid, :stop)
     assert_receive {:worker_terminated, ^worker_id, ^worker_pid}, 5_000
   end

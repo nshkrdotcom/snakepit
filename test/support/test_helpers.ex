@@ -5,7 +5,9 @@ defmodule Snakepit.TestHelpers do
 
   import ExUnit.Assertions
 
-  @base_test_port 52000
+  alias Snakepit.Test.MockGRPCWorker
+
+  @base_test_port 52_000
   @port_range 1000
 
   @doc """
@@ -59,7 +61,7 @@ defmodule Snakepit.TestHelpers do
       ] ++ opts
 
     # Use mock worker for tests
-    {:ok, pid} = Snakepit.Test.MockGRPCWorker.start_link(worker_opts)
+    {:ok, pid} = MockGRPCWorker.start_link(worker_opts)
     {pid, worker_id, port}
   end
 

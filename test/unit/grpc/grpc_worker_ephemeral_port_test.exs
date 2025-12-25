@@ -2,6 +2,7 @@ defmodule Snakepit.GRPCWorkerEphemeralPortTest do
   use Snakepit.TestCase, async: false
 
   alias Snakepit.GRPCWorker
+  alias Snakepit.TestAdapters.EphemeralPortGRPCAdapter
 
   defmodule PoolStub do
     use GenServer
@@ -62,7 +63,7 @@ defmodule Snakepit.GRPCWorkerEphemeralPortTest do
     {:ok, worker} =
       GRPCWorker.start_link(
         id: worker_id,
-        adapter: Snakepit.TestAdapters.EphemeralPortGRPCAdapter,
+        adapter: EphemeralPortGRPCAdapter,
         pool_name: pool_pid,
         worker_config: %{
           heartbeat: %{
@@ -71,7 +72,7 @@ defmodule Snakepit.GRPCWorkerEphemeralPortTest do
         }
       )
 
-    expected_port = Snakepit.TestAdapters.EphemeralPortGRPCAdapter.actual_port()
+    expected_port = EphemeralPortGRPCAdapter.actual_port()
 
     assert_eventually(
       fn ->
@@ -95,7 +96,7 @@ defmodule Snakepit.GRPCWorkerEphemeralPortTest do
     {:ok, worker} =
       GRPCWorker.start_link(
         id: worker_id,
-        adapter: Snakepit.TestAdapters.EphemeralPortGRPCAdapter,
+        adapter: EphemeralPortGRPCAdapter,
         pool_name: pool_pid,
         worker_config: %{
           heartbeat: %{enabled: false}

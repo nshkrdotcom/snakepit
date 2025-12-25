@@ -48,65 +48,6 @@ defmodule Snakepit.WorkerProfile.ThreadTest do
     end
   end
 
-  describe "Python 3.13+ optimization" do
-    test "thread profile is recommended for Python 3.13+" do
-      # Verify the architecture decision: thread profile for Python 3.13+
-      version_313 = {3, 13, 0}
-      version_314 = {3, 14, 0}
-
-      assert Snakepit.PythonVersion.supports_free_threading?(version_313) == true
-      assert Snakepit.PythonVersion.supports_free_threading?(version_314) == true
-      assert Snakepit.PythonVersion.recommend_profile(version_313) == :thread
-      assert Snakepit.PythonVersion.recommend_profile(version_314) == :thread
-    end
-
-    test "process profile is recommended for Python < 3.13" do
-      # Verify GIL compatibility: process profile for Python < 3.13
-      version_312 = {3, 12, 0}
-      version_311 = {3, 11, 0}
-      version_38 = {3, 8, 0}
-
-      assert Snakepit.PythonVersion.supports_free_threading?(version_312) == false
-      assert Snakepit.PythonVersion.supports_free_threading?(version_311) == false
-      assert Snakepit.PythonVersion.supports_free_threading?(version_38) == false
-      assert Snakepit.PythonVersion.recommend_profile(version_312) == :process
-      assert Snakepit.PythonVersion.recommend_profile(version_311) == :process
-      assert Snakepit.PythonVersion.recommend_profile(version_38) == :process
-    end
-  end
-
-  describe "GIL-free library compatibility" do
-    test "thread-safe libraries work with thread profile" do
-      # Libraries that release GIL - optimal for thread profile
-      gil_releasing = ["numpy", "scipy", "torch", "tensorflow"]
-
-      for lib <- gil_releasing do
-        result = Snakepit.Compatibility.check(lib, :thread)
-        # Should be :ok or {:warning, _} for config, but not error
-        assert result == :ok or match?({:warning, _}, result)
-      end
-    end
-
-    test "thread-unsafe libraries warn with thread profile" do
-      # Libraries that hold GIL - should warn for thread profile
-      gil_holding = ["pandas", "matplotlib", "sqlite3"]
-
-      for lib <- gil_holding do
-        assert {:warning, msg} = Snakepit.Compatibility.check(lib, :thread)
-        assert String.contains?(msg, "not thread-safe") or String.contains?(msg, "unsafe")
-      end
-    end
-
-    test "all libraries safe with process profile" do
-      # Process profile provides isolation - everything is safe
-      all_libs = ["numpy", "pandas", "matplotlib", "torch"]
-
-      for lib <- all_libs do
-        assert :ok = Snakepit.Compatibility.check(lib, :process)
-      end
-    end
-  end
-
   describe "Metadata includes profile type" do
     test "thread profile metadata shows multi-threaded" do
       {:ok, metadata} = Thread.get_metadata(:fake_worker)

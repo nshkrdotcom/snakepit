@@ -21,6 +21,7 @@ defmodule Snakepit.EnvDoctor do
   ]
 
   @runtime_checks [:python_exec, :grpc_import, :grpc_server, :adapter_imports]
+  alias Snakepit.Adapters.GRPCPython
 
   @doc """
   Run the full doctor suite. Returns `{:ok, results}` or `{:error, results}`.
@@ -43,8 +44,7 @@ defmodule Snakepit.EnvDoctor do
         message =
           results
           |> Enum.filter(&(&1.status == :error))
-          |> Enum.map(&"* #{&1.message}")
-          |> Enum.join("\n")
+          |> Enum.map_join("\n", &"* #{&1.message}")
 
         raise RuntimeError,
               "Python environment is not ready:\n" <> message
@@ -75,7 +75,7 @@ defmodule Snakepit.EnvDoctor do
         Application.get_env(:snakepit, :bootstrap_project_root) ||
         File.cwd!()
 
-    python_path = opts[:python_path] || Snakepit.Adapters.GRPCPython.executable_path()
+    python_path = opts[:python_path] || GRPCPython.executable_path()
 
     runner =
       opts[:runner] ||
@@ -104,15 +104,17 @@ defmodule Snakepit.EnvDoctor do
   end
 
   defp run_check(:grpc_import, state) do
-    with {:ok, _} <- python_path_for_check(state) do
-      run_python(
-        state,
-        ["-c", "import grpc"],
-        :grpc_import,
-        "Importing grpc failed. Run mix snakepit.setup (or make bootstrap)."
-      )
-    else
-      {:error, message} -> error(:grpc_import, message)
+    case python_path_for_check(state) do
+      {:ok, _} ->
+        run_python(
+          state,
+          ["-c", "import grpc"],
+          :grpc_import,
+          "Importing grpc failed. Run mix snakepit.setup (or make bootstrap)."
+        )
+
+      {:error, message} ->
+        error(:grpc_import, message)
     end
   end
 
@@ -151,45 +153,49 @@ defmodule Snakepit.EnvDoctor do
   end
 
   defp run_check(:grpc_server, state) do
-    with {:ok, _} <- python_path_for_check(state) do
-      script = Path.join(state.project_root, "priv/python/grpc_server.py")
+    case python_path_for_check(state) do
+      {:ok, _} ->
+        script = Path.join(state.project_root, "priv/python/grpc_server.py")
 
-      unless File.exists?(script) do
-        error(
-          :grpc_server,
-          "priv/python/grpc_server.py missing. Run mix snakepit.setup (or make bootstrap) to regenerate assets."
-        )
-      else
-        args = [script, "--health-check"] ++ default_adapter_args()
+        if File.exists?(script) do
+          args = [script, "--health-check"] ++ default_adapter_args()
 
-        run_python(
-          state,
-          args,
-          :grpc_server,
-          "gRPC server health check failed. Regenerate stubs or reinstall deps."
-        )
-      end
-    else
-      {:error, message} -> error(:grpc_server, message)
+          run_python(
+            state,
+            args,
+            :grpc_server,
+            "gRPC server health check failed. Regenerate stubs or reinstall deps."
+          )
+        else
+          error(
+            :grpc_server,
+            "priv/python/grpc_server.py missing. Run mix snakepit.setup (or make bootstrap) to regenerate assets."
+          )
+        end
+
+      {:error, message} ->
+        error(:grpc_server, message)
     end
   end
 
   defp run_check(:adapter_imports, state) do
-    with {:ok, python_path} <- python_path_for_check(state) do
-      adapters = configured_adapter_paths()
+    case python_path_for_check(state) do
+      {:ok, python_path} ->
+        adapters = configured_adapter_paths()
 
-      case adapters do
-        [] ->
-          warning(
-            :adapter_imports,
-            "No adapter configured; default ShowcaseAdapter will be used."
-          )
+        case adapters do
+          [] ->
+            warning(
+              :adapter_imports,
+              "No adapter configured; default ShowcaseAdapter will be used."
+            )
 
-        _ ->
-          check_adapter_imports(state, python_path, adapters)
-      end
-    else
-      {:error, message} -> error(:adapter_imports, message)
+          _ ->
+            check_adapter_imports(state, python_path, adapters)
+        end
+
+      {:error, message} ->
+        error(:adapter_imports, message)
     end
   end
 
@@ -291,7 +297,7 @@ defmodule Snakepit.EnvDoctor do
   defp ensure_default_adapter(adapters) do
     case adapters do
       [] ->
-        default = parse_adapter_from_args(Snakepit.Adapters.GRPCPython.script_args() || [])
+        default = parse_adapter_from_args(GRPCPython.script_args() || [])
 
         if default do
           [default]
@@ -327,11 +333,9 @@ defmodule Snakepit.EnvDoctor do
 
       _ ->
         failures =
-          failed_adapters
-          |> Enum.map(fn {adapter, reason} ->
+          Enum.map_join(failed_adapters, ", ", fn {adapter, reason} ->
             "#{adapter} (#{format_reason(reason)})"
           end)
-          |> Enum.join(", ")
 
         error(
           :adapter_imports,
@@ -341,7 +345,7 @@ defmodule Snakepit.EnvDoctor do
   end
 
   defp default_adapter_args do
-    Snakepit.Adapters.GRPCPython.script_args()
+    GRPCPython.script_args()
   end
 
   defp ok(name, message), do: %{name: name, status: :ok, message: message}

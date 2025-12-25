@@ -97,11 +97,8 @@ defmodule Snakepit.MultiPoolExecutionTest do
       # Start Snakepit
       {:ok, _apps} = Application.ensure_all_started(:snakepit)
 
-      # Wait for pools to initialize - use assert_eventually to avoid race conditions
-      # TODO: This will fail - await_ready doesn't support named pools
-      # :ok = Snakepit.Pool.await_ready(:pool_a, 15_000)
-      # :ok = Snakepit.Pool.await_ready(:pool_b, 15_000)
-
+      # NOTE: Pool.await_ready/2 does not support named pools. It only works with the default pool.
+      # Multi-pool support is a future enhancement.
       # For now, wait for default pool with longer timeout for Python server startup
       assert_eventually(
         fn ->
@@ -111,22 +108,19 @@ defmodule Snakepit.MultiPoolExecutionTest do
         interval: 1_000
       )
 
-      # Execute on pool_a
-      # TODO: This will fail - execute doesn't route to named pools yet
-      # Current: Snakepit.execute(command, args) only
-      # Needed: Snakepit.execute(pool_name, command, args)
+      # NOTE: Snakepit.execute/3 does not support routing to named pools.
+      # Current signature: Snakepit.execute(command, args, opts)
+      # Future enhancement would add: Snakepit.execute(pool_name, command, args, opts)
       {:ok, result_a} = Snakepit.execute("ping", %{message: "to_pool_a"})
       assert is_map(result_a)
 
-      # Execute on pool_b
-      # TODO: This SHOULD execute on different pool but currently uses same pool
+      # NOTE: This executes on the same (default) pool as above, not on pool_b.
+      # Pool routing is not yet implemented.
       {:ok, result_b} = Snakepit.execute("ping", %{message: "to_pool_b"})
       assert is_map(result_b)
 
-      # TODO: Verify they used different pools
-      # Need: way to check which pool handled request
-      # Currently: No way to verify pool routing
-
+      # NOTE: Unable to verify which pool handled each request without pool routing support
+      # and pool identification in responses. This is a known limitation.
       assert true, "Test structure works but can't verify multi-pool yet"
     end
 
@@ -151,17 +145,14 @@ defmodule Snakepit.MultiPoolExecutionTest do
         interval: 1_000
       )
 
-      # Get workers from pool_a
-      # TODO: This will fail - list_workers doesn't support named pools
-      # Current: Snakepit.Pool.list_workers() returns all workers
-      # Needed: Snakepit.Pool.list_workers(:pool_a)
+      # NOTE: Pool.list_workers/0 does not support querying workers from named pools.
+      # Current: Snakepit.Pool.list_workers() returns all workers from the default pool.
+      # Future enhancement: Snakepit.Pool.list_workers(pool_name) to query specific pools.
       workers = Snakepit.Pool.list_workers()
 
-      # TODO: Can't verify pool separation yet
-      # Should be: pool_a has 3, pool_b has 5
-      # Currently: Gets all workers from single pool
-
-      assert length(workers) > 0, "Workers started"
+      # NOTE: Unable to verify pool separation. The current implementation only manages
+      # a single pool (the first configured pool), not multiple independent pools.
+      assert not Enum.empty?(workers), "Workers started"
     end
 
     test "pools can have different profiles (process vs thread)" do
@@ -191,16 +182,12 @@ defmodule Snakepit.MultiPoolExecutionTest do
         interval: 1_000
       )
 
-      # TODO: This signature doesn't exist
-      # Current: execute(command, args, opts)
-      # Needed: execute(pool_name, command, args, opts)
-
-      # For now, can only execute on default
+      # NOTE: Pool routing by name is not implemented.
+      # Current signature: execute(command, args, opts)
+      # Future enhancement: execute(pool_name, command, args, opts)
+      # For now, can only execute on default pool
       {:ok, result} = Snakepit.execute("ping", %{})
       assert is_map(result)
-
-      # TODO: When implemented, should be:
-      # {:ok, result} = Snakepit.execute(:named_pool, "ping", %{})
     end
 
     test "can execute on :pool_a and :pool_b independently" do

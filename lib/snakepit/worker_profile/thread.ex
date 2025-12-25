@@ -56,6 +56,7 @@ defmodule Snakepit.WorkerProfile.Thread do
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Logger.Redaction
   alias Snakepit.Pool.Registry, as: PoolRegistry
+  alias Snakepit.Pool.WorkerSupervisor
   alias Snakepit.WorkerProfile.Thread.CapacityStore
 
   @impl true
@@ -83,7 +84,7 @@ defmodule Snakepit.WorkerProfile.Thread do
       |> Map.put(:adapter_env, adapter_env)
 
     # Start the worker via WorkerSupervisor with full config
-    case Snakepit.Pool.WorkerSupervisor.start_worker(
+    case WorkerSupervisor.start_worker(
            worker_id,
            worker_module,
            adapter_module,
@@ -113,7 +114,7 @@ defmodule Snakepit.WorkerProfile.Thread do
 
     case PoolRegistry.get_worker_id_by_pid(worker_pid) do
       {:ok, worker_id} ->
-        case Snakepit.Pool.WorkerSupervisor.stop_worker(worker_id) do
+        case WorkerSupervisor.stop_worker(worker_id) do
           {:error, :worker_not_found} -> :ok
           other -> other
         end

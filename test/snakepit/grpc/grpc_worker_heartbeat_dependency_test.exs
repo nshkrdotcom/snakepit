@@ -88,11 +88,9 @@ defmodule Snakepit.GRPCWorkerHeartbeatDependencyTest do
   end
 
   defp start_worker_catching_exit(fun) when is_function(fun, 0) do
-    try do
-      fun.()
-    catch
-      :exit, reason -> {:exit, reason}
-    end
+    fun.()
+  catch
+    :exit, reason -> {:exit, reason}
   end
 
   defp normalize_shutdown_reason({:shutdown, {:shutdown, inner}}), do: inner

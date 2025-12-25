@@ -7,6 +7,7 @@ defmodule Snakepit.Bootstrap do
   application will use at runtime.
   """
 
+  alias Snakepit.Adapters.GRPCPython
   alias Snakepit.Bootstrap.Runner
 
   @requirements_path ["priv", "python", "requirements.txt"]
@@ -36,11 +37,9 @@ defmodule Snakepit.Bootstrap do
   end
 
   defp run_with_lock(lock, fun) do
-    try do
-      fun.()
-    after
-      :global.del_lock(lock, [node()])
-    end
+    fun.()
+  after
+    :global.del_lock(lock, [node()])
   end
 
   defp do_run(opts) do
@@ -89,13 +88,12 @@ defmodule Snakepit.Bootstrap do
   defp ensure_primary_python(%{project_root: root, runner: runner}) do
     requirements = Path.join([root | @requirements_path])
 
-    unless File.exists?(requirements) do
-      return_missing(:requirements, requirements)
-    else
-      with :ok <- create_primary_venv(root, runner),
-           :ok <- install_requirements(root, requirements, runner) do
-        :ok
+    if File.exists?(requirements) do
+      with :ok <- create_primary_venv(root, runner) do
+        install_requirements(root, requirements, runner)
       end
+    else
+      return_missing(:requirements, requirements)
     end
   end
 
@@ -105,22 +103,30 @@ defmodule Snakepit.Bootstrap do
     if File.dir?(venv_dir) do
       :ok
     else
-      python = discover_python()
+      create_new_venv(root, runner)
+    end
+  end
 
-      unless python do
-        {:error, :python_not_found}
-      else
-        Mix.shell().info("🐍 Creating .venv with #{python}")
+  defp create_new_venv(root, runner) do
+    python = discover_python()
 
-        case runner.cmd(python, ["-m", "venv", ".venv"], cd: root) do
-          :ok ->
-            Mix.shell().info("✅ .venv created successfully")
-            :ok
+    if python do
+      create_venv_with_python(root, runner, python)
+    else
+      {:error, :python_not_found}
+    end
+  end
 
-          error ->
-            error
-        end
-      end
+  defp create_venv_with_python(root, runner, python) do
+    Mix.shell().info("🐍 Creating .venv with #{python}")
+
+    case runner.cmd(python, ["-m", "venv", ".venv"], cd: root) do
+      :ok ->
+        Mix.shell().info("✅ .venv created successfully")
+        :ok
+
+      error ->
+        error
     end
   end
 
@@ -133,11 +139,11 @@ defmodule Snakepit.Bootstrap do
   defp run_script(%{project_root: root, runner: runner}, parts, step) do
     script = Path.join([root | parts])
 
-    unless File.exists?(script) do
-      return_missing(step, script)
-    else
+    if File.exists?(script) do
       Mix.shell().info("▶️  #{describe_step(step)}")
       runner.cmd(script, [], cd: root)
+    else
+      return_missing(step, script)
     end
   end
 
@@ -145,7 +151,7 @@ defmodule Snakepit.Bootstrap do
   defp describe_step(:generate_grpc), do: "priv/python/generate_grpc.sh"
 
   defp print_python_summary do
-    python = Snakepit.Adapters.GRPCPython.executable_path()
+    python = GRPCPython.executable_path()
 
     if python do
       Mix.shell().info("🐍 Detected Python interpreter: #{python}")
@@ -200,13 +206,11 @@ defmodule Snakepit.Bootstrap do
 
       @impl true
       def mix(task, args) do
-        try do
-          Mix.Task.run(task, args)
-          :ok
-        catch
-          kind, reason ->
-            {:error, {kind, reason}}
-        end
+        Mix.Task.run(task, args)
+        :ok
+      catch
+        kind, reason ->
+          {:error, {kind, reason}}
       end
 
       @impl true

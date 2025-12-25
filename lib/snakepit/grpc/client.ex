@@ -5,6 +5,7 @@ defmodule Snakepit.GRPC.Client do
   """
 
   require Logger
+  alias Snakepit.GRPC.ClientImpl
   # Uncomment when logging is added to this module:
   # alias Snakepit.Logger, as: SLog
 
@@ -13,58 +14,50 @@ defmodule Snakepit.GRPC.Client do
   end
 
   def connect(address) when is_binary(address) do
-    Snakepit.GRPC.ClientImpl.connect(address)
+    ClientImpl.connect(address)
   end
 
   def ping(channel, message, opts \\ []) do
-    if not mock_channel?(channel) do
-      Snakepit.GRPC.ClientImpl.ping(channel, message, opts)
-    else
+    if mock_channel?(channel) do
       # Mock implementation
       {:ok, %{message: "Pong: #{message}", server_time: DateTime.utc_now()}}
+    else
+      ClientImpl.ping(channel, message, opts)
     end
   end
 
   def initialize_session(channel, session_id, config \\ %{}, opts \\ []) do
-    if not mock_channel?(channel) do
-      Snakepit.GRPC.ClientImpl.initialize_session(channel, session_id, config, opts)
-    else
+    if mock_channel?(channel) do
       # Mock implementation
       {:ok, %{success: true, available_tools: %{}}}
+    else
+      ClientImpl.initialize_session(channel, session_id, config, opts)
     end
   end
 
   def cleanup_session(channel, session_id, force \\ false, opts \\ []) do
-    if not mock_channel?(channel) do
-      Snakepit.GRPC.ClientImpl.cleanup_session(channel, session_id, force, opts)
-    else
+    if mock_channel?(channel) do
       # Mock implementation
       {:ok, %{success: true, resources_cleaned: 2}}
+    else
+      ClientImpl.cleanup_session(channel, session_id, force, opts)
     end
   end
 
   def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
-    if not mock_channel?(channel) do
-      Snakepit.GRPC.ClientImpl.execute_tool(channel, session_id, tool_name, parameters, opts)
-    else
+    if mock_channel?(channel) do
       if test_pid = Map.get(channel, :test_pid) do
         send(test_pid, {:grpc_client_execute_tool, session_id, tool_name, parameters, opts})
       end
 
       {:ok, %{success: true, result: %{}, error_message: ""}}
+    else
+      ClientImpl.execute_tool(channel, session_id, tool_name, parameters, opts)
     end
   end
 
   def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
-    if not mock_channel?(channel) do
-      Snakepit.GRPC.ClientImpl.execute_streaming_tool(
-        channel,
-        session_id,
-        tool_name,
-        parameters,
-        opts
-      )
-    else
+    if mock_channel?(channel) do
       if test_pid = Map.get(channel, :test_pid) do
         send(
           test_pid,
@@ -86,6 +79,14 @@ defmodule Snakepit.GRPC.Client do
         end)
 
       {:ok, stream}
+    else
+      ClientImpl.execute_streaming_tool(
+        channel,
+        session_id,
+        tool_name,
+        parameters,
+        opts
+      )
     end
   end
 
@@ -109,20 +110,20 @@ defmodule Snakepit.GRPC.Client do
   end
 
   def get_session(channel, session_id, opts \\ []) do
-    if not mock_channel?(channel) do
-      Snakepit.GRPC.ClientImpl.get_session(channel, session_id, opts)
-    else
+    if mock_channel?(channel) do
       # Mock implementation
       {:ok, %{session: %{id: session_id, active: true}}}
+    else
+      ClientImpl.get_session(channel, session_id, opts)
     end
   end
 
   def heartbeat(channel, session_id, opts \\ []) do
-    if not mock_channel?(channel) do
-      Snakepit.GRPC.ClientImpl.heartbeat(channel, session_id, opts)
-    else
+    if mock_channel?(channel) do
       # Mock implementation
       {:ok, %{success: true}}
+    else
+      ClientImpl.heartbeat(channel, session_id, opts)
     end
   end
 

@@ -6,6 +6,7 @@ defmodule Snakepit.Pool.RandomWorkerFlowTest do
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Pool.WorkerSupervisor
+  alias Snakepit.Test.MockGRPCWorker
 
   @moduletag :capture_log
   @worker_count 3
@@ -58,7 +59,7 @@ defmodule Snakepit.Pool.RandomWorkerFlowTest do
     {:ok, _pid} =
       WorkerSupervisor.start_worker(
         worker_id,
-        Snakepit.Test.MockGRPCWorker,
+        MockGRPCWorker,
         Snakepit.TestAdapters.MockGRPCAdapter,
         Snakepit.Pool,
         %{heartbeat: %{enabled: false}, pool_identifier: :property_pool}
@@ -78,7 +79,7 @@ defmodule Snakepit.Pool.RandomWorkerFlowTest do
     worker_id = Enum.random(worker_ids)
 
     Task.async(fn ->
-      Snakepit.Test.MockGRPCWorker.execute(worker_id, "ping", %{}, 5_000)
+      MockGRPCWorker.execute(worker_id, "ping", %{}, 5_000)
     end)
     |> Task.await(5_000)
   end

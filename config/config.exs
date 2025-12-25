@@ -1,6 +1,22 @@
 # This file is responsible for configuring Snakepit
 import Config
 
+# Configure Logger metadata
+config :logger, :console,
+  metadata: [
+    :request_id,
+    :worker_id,
+    :pool_name,
+    :event_parts,
+    :reason,
+    :status,
+    :headers,
+    :enabled,
+    :rate,
+    :patterns,
+    :channel_type
+  ]
+
 # Default configuration for Snakepit
 config :snakepit,
   # Logging level for Snakepit internal logs

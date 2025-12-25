@@ -59,11 +59,8 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
       # Start application
       {:ok, _apps} = Application.ensure_all_started(:snakepit)
 
-      # TODO: This will fail because Pool doesn't have list_pools/0
-      # pools = Snakepit.Pool.list_pools()
-      # assert :pool_a in pools
-      # assert :pool_b in pools
-
+      # NOTE: Pool.list_pools/0 is not implemented. Pool currently processes only the first
+      # configured pool from the :pools config list. Multi-pool support is a future enhancement.
       # For now, just verify app started
       assert Process.whereis(Snakepit.Pool) != nil
     end
@@ -79,13 +76,9 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
 
       {:ok, _} = Application.ensure_all_started(:snakepit)
 
-      # TODO: This signature doesn't exist yet
-      # Snakepit.execute(:test_pool, "ping", %{})
-
-      # Current signature only: Snakepit.execute("ping", %{})
-      # Doesn't support pool selection
-
-      # For now, test that default still works
+      # NOTE: Snakepit.execute/3 does not support pool_name parameter for routing to named pools.
+      # The current signature is: Snakepit.execute(command, args, opts)
+      # Pool selection is a future enhancement. For now, test that default pool still works.
       assert_eventually(
         fn ->
           Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
@@ -130,10 +123,8 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
         interval: 1_000
       )
 
-      # If WorkerProfile is being used, it would pass adapter_env to worker
-      # If not, it's ignored
-      # TODO: Need way to verify worker got the env var
-
+      # NOTE: Unable to verify worker received adapter_env configuration without
+      # introspection capabilities. This is a known limitation for testing worker configuration.
       # For now, just verify pool started
       assert Process.whereis(Snakepit.Pool) != nil
     end

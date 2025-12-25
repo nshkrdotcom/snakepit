@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+> Updated for Snakepit v0.7.2
+
 ## Project Structure & Module Organization
 Snakepit is an Elixir OTP application under `lib/`, split into supervisors, gRPC adapters, and bridge utilities. Shared configs live in `config/` and generated assets land in `_build/`. Protocol buffers reside in `priv/proto/`; Python bridge code and fixtures are under `priv/python/` with pytest suites in `priv/python/tests/`. Integration samples sit in `examples/`, load-testing setups in `bench/`, while `specs/` contains design references. Use `docs/` and `guides/` for architecture and operations notes, and keep reusable scripts inside `scripts/`.
 

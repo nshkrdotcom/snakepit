@@ -303,71 +303,6 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         ):
             return await self._proxy_to_elixir("Heartbeat", request, metadata=metadata)
 
-    # Variable Operations - All proxied to Elixir
-
-    async def RegisterVariable(self, request, context):
-        metadata = context.invocation_metadata()
-        with telemetry.otel_span(
-            "BridgeService/RegisterVariable",
-            context_metadata=metadata,
-            attributes={"snakepit.variable": request.name},
-        ):
-            return await self._proxy_to_elixir("RegisterVariable", request, metadata=metadata)
-
-    async def GetVariable(self, request, context):
-        metadata = context.invocation_metadata()
-        with telemetry.otel_span(
-            "BridgeService/GetVariable",
-            context_metadata=metadata,
-            attributes={"snakepit.variable": request.variable_identifier},
-        ):
-            return await self._proxy_to_elixir("GetVariable", request, metadata=metadata)
-
-    async def SetVariable(self, request, context):
-        metadata = context.invocation_metadata()
-        with telemetry.otel_span(
-            "BridgeService/SetVariable",
-            context_metadata=metadata,
-            attributes={"snakepit.variable": request.variable_identifier},
-        ):
-            return await self._proxy_to_elixir("SetVariable", request, metadata=metadata)
-
-    async def GetVariables(self, request, context):
-        metadata = context.invocation_metadata()
-        with telemetry.otel_span(
-            "BridgeService/GetVariables",
-            context_metadata=metadata,
-            attributes={"snakepit.variable_count": len(request.variable_identifiers)},
-        ):
-            return await self._proxy_to_elixir("GetVariables", request, metadata=metadata)
-
-    async def SetVariables(self, request, context):
-        metadata = context.invocation_metadata()
-        with telemetry.otel_span(
-            "BridgeService/SetVariables",
-            context_metadata=metadata,
-            attributes={"snakepit.variable_count": len(request.updates)},
-        ):
-            return await self._proxy_to_elixir("SetVariables", request, metadata=metadata)
-
-    async def ListVariables(self, request, context):
-        metadata = context.invocation_metadata()
-        with telemetry.otel_span(
-            "BridgeService/ListVariables",
-            context_metadata=metadata,
-            attributes={"snakepit.pattern": request.pattern},
-        ):
-            return await self._proxy_to_elixir("ListVariables", request, metadata=metadata)
-
-    async def DeleteVariable(self, request, context):
-        metadata = context.invocation_metadata()
-        with telemetry.otel_span(
-            "BridgeService/DeleteVariable",
-            context_metadata=metadata,
-            attributes={"snakepit.variable": request.variable_identifier},
-        ):
-            return await self._proxy_to_elixir("DeleteVariable", request, metadata=metadata)
-
     # Tool Execution - Thread-safe concurrent execution
 
     async def ExecuteTool(self, request, context):
@@ -677,59 +612,6 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
         finally:
             self._record_request_end()
-
-    # Placeholder methods
-
-    async def WatchVariables(self, request, context):
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('WatchVariables not implemented')
-        return
-        yield
-
-    async def AddDependency(self, request, context):
-        metadata = context.invocation_metadata()
-        logger.debug("Proxying AddDependency (threaded)")
-        with telemetry.otel_span(
-            "BridgeService/AddDependency",
-            context_metadata=metadata,
-        ):
-            return await self._proxy_to_elixir("AddDependency", request, metadata=metadata)
-
-    async def StartOptimization(self, request, context):
-        metadata = context.invocation_metadata()
-        logger.debug("Proxying StartOptimization (threaded)")
-        with telemetry.otel_span(
-            "BridgeService/StartOptimization",
-            context_metadata=metadata,
-        ):
-            return await self._proxy_to_elixir("StartOptimization", request, metadata=metadata)
-
-    async def StopOptimization(self, request, context):
-        metadata = context.invocation_metadata()
-        logger.debug("Proxying StopOptimization (threaded)")
-        with telemetry.otel_span(
-            "BridgeService/StopOptimization",
-            context_metadata=metadata,
-        ):
-            return await self._proxy_to_elixir("StopOptimization", request, metadata=metadata)
-
-    async def GetVariableHistory(self, request, context):
-        metadata = context.invocation_metadata()
-        logger.debug("Proxying GetVariableHistory (threaded)")
-        with telemetry.otel_span(
-            "BridgeService/GetVariableHistory",
-            context_metadata=metadata,
-        ):
-            return await self._proxy_to_elixir("GetVariableHistory", request, metadata=metadata)
-
-    async def RollbackVariable(self, request, context):
-        metadata = context.invocation_metadata()
-        logger.debug("Proxying RollbackVariable (threaded)")
-        with telemetry.otel_span(
-            "BridgeService/RollbackVariable",
-            context_metadata=metadata,
-        ):
-            return await self._proxy_to_elixir("RollbackVariable", request, metadata=metadata)
 
     def set_server(self, server):
         """Set server reference for graceful shutdown"""

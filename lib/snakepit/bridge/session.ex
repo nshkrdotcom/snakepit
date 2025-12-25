@@ -98,37 +98,53 @@ defmodule Snakepit.Bridge.Session do
   """
   @spec validate(t()) :: :ok | {:error, term()}
   def validate(%__MODULE__{} = session) do
-    cond do
-      not is_binary(session.id) or session.id == "" ->
-        {:error, :invalid_id}
-
-      not is_map(session.programs) ->
-        {:error, :invalid_programs}
-
-      not is_map(session.metadata) ->
-        {:error, :invalid_metadata}
-
-      not is_integer(session.created_at) ->
-        {:error, :invalid_created_at}
-
-      not is_integer(session.last_accessed) ->
-        {:error, :invalid_last_accessed}
-
-      not (is_binary(session.last_worker_id) or is_nil(session.last_worker_id)) ->
-        {:error, :invalid_last_worker_id}
-
-      not is_integer(session.ttl) or session.ttl < 0 ->
-        {:error, :invalid_ttl}
-
-      session.last_accessed < session.created_at ->
-        {:error, :invalid_timestamps}
-
-      true ->
-        :ok
+    with :ok <- validate_basic_fields(session),
+         :ok <- validate_time_fields(session) do
+      validate_worker_field(session.last_worker_id)
     end
   end
 
   def validate(_), do: {:error, :not_a_session}
+
+  defp validate_basic_fields(session) do
+    with :ok <- validate_id(session.id),
+         :ok <- validate_programs(session.programs) do
+      validate_metadata_field(session.metadata)
+    end
+  end
+
+  defp validate_time_fields(session) do
+    with :ok <- validate_created_at(session.created_at),
+         :ok <- validate_last_accessed(session.last_accessed),
+         :ok <- validate_ttl(session.ttl) do
+      validate_timestamps(session.created_at, session.last_accessed)
+    end
+  end
+
+  defp validate_worker_field(nil), do: :ok
+  defp validate_worker_field(id) when is_binary(id), do: :ok
+  defp validate_worker_field(_), do: {:error, :invalid_last_worker_id}
+
+  defp validate_id(id) when is_binary(id) and id != "", do: :ok
+  defp validate_id(_), do: {:error, :invalid_id}
+
+  defp validate_programs(programs) when is_map(programs), do: :ok
+  defp validate_programs(_), do: {:error, :invalid_programs}
+
+  defp validate_metadata_field(metadata) when is_map(metadata), do: :ok
+  defp validate_metadata_field(_), do: {:error, :invalid_metadata}
+
+  defp validate_created_at(created_at) when is_integer(created_at), do: :ok
+  defp validate_created_at(_), do: {:error, :invalid_created_at}
+
+  defp validate_last_accessed(last_accessed) when is_integer(last_accessed), do: :ok
+  defp validate_last_accessed(_), do: {:error, :invalid_last_accessed}
+
+  defp validate_ttl(ttl) when is_integer(ttl) and ttl >= 0, do: :ok
+  defp validate_ttl(_), do: {:error, :invalid_ttl}
+
+  defp validate_timestamps(created_at, last_accessed) when last_accessed >= created_at, do: :ok
+  defp validate_timestamps(_, _), do: {:error, :invalid_timestamps}
 
   @doc """
   Adds or updates a program in the session.
@@ -150,10 +166,10 @@ defmodule Snakepit.Bridge.Session do
     programs = Map.put(session.programs, program_id, program_data)
 
     stats =
-      if not is_update do
-        %{session.stats | program_count: session.stats.program_count + 1}
-      else
+      if is_update do
         session.stats
+      else
+        %{session.stats | program_count: session.stats.program_count + 1}
       end
 
     %{session | programs: programs, stats: stats}

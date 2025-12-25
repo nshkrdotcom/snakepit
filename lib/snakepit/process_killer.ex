@@ -181,19 +181,7 @@ defmodule Snakepit.ProcessKiller do
     case File.ls("/proc") do
       {:ok, entries} ->
         entries
-        |> Enum.reduce([], fn entry, acc ->
-          case Integer.parse(entry) do
-            {pid, ""} ->
-              if python_command?(pid) do
-                [pid | acc]
-              else
-                acc
-              end
-
-            _ ->
-              acc
-          end
-        end)
+        |> Enum.reduce([], &collect_python_pid/2)
         |> Enum.uniq()
 
       {:error, _} ->
@@ -201,25 +189,33 @@ defmodule Snakepit.ProcessKiller do
     end
   end
 
+  defp collect_python_pid(entry, acc) do
+    case Integer.parse(entry) do
+      {pid, ""} ->
+        if python_command?(pid), do: [pid | acc], else: acc
+
+      _ ->
+        acc
+    end
+  end
+
   defp python_command?(pid) do
     comm_path = "/proc/#{pid}/comm"
     cmdline_path = "/proc/#{pid}/cmdline"
 
-    cond do
-      File.exists?(comm_path) ->
-        case File.read(comm_path) do
-          {:ok, comm} ->
-            comm
-            |> String.trim()
-            |> String.downcase()
-            |> String.contains?("python")
+    if File.exists?(comm_path) do
+      case File.read(comm_path) do
+        {:ok, comm} ->
+          comm
+          |> String.trim()
+          |> String.downcase()
+          |> String.contains?("python")
 
-          _ ->
-            python_cmdline?(cmdline_path)
-        end
-
-      true ->
-        python_cmdline?(cmdline_path)
+        _ ->
+          python_cmdline?(cmdline_path)
+      end
+    else
+      python_cmdline?(cmdline_path)
     end
   rescue
     _ -> false
@@ -357,11 +353,9 @@ defmodule Snakepit.ProcessKiller do
   end
 
   defp run_command(path, args) when is_binary(path) and is_list(args) do
-    try do
-      {output, status} = System.cmd(path, args, stderr_to_stdout: true)
-      {:ok, output, status}
-    rescue
-      error -> {:error, error}
-    end
+    {output, status} = System.cmd(path, args, stderr_to_stdout: true)
+    {:ok, output, status}
+  rescue
+    error -> {:error, error}
   end
 end

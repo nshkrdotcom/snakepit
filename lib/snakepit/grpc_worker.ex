@@ -31,11 +31,16 @@ defmodule Snakepit.GRPCWorker do
 
   use GenServer
   require Logger
+  alias Snakepit.Adapters.GRPCPython
   alias Snakepit.Error
-  alias Snakepit.Telemetry.Correlation
-  alias Snakepit.Logger.Redaction
+  alias Snakepit.GRPC.Client
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Logger.Redaction
+  alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.Pool.Registry, as: PoolRegistry
+  alias Snakepit.Telemetry.Correlation
+  alias Snakepit.Telemetry.GrpcStream
+  alias Snakepit.Worker.LifecycleManager
   require OpenTelemetry.Tracer, as: Tracer
 
   def child_spec(opts) when is_list(opts) do
@@ -86,33 +91,7 @@ defmodule Snakepit.GRPCWorker do
     worker_id = Keyword.get(opts, :id)
     pool_name = Keyword.get(opts, :pool_name, Snakepit.Pool)
 
-    pool_identifier =
-      case Keyword.get(opts, :pool_identifier) do
-        identifier when is_atom(identifier) ->
-          identifier
-
-        identifier when is_binary(identifier) ->
-          try do
-            String.to_existing_atom(identifier)
-          rescue
-            ArgumentError -> nil
-          end
-
-        _ ->
-          cond do
-            is_atom(pool_name) ->
-              pool_name
-
-            is_pid(pool_name) ->
-              case Process.info(pool_name, :registered_name) do
-                {:registered_name, name} when is_atom(name) -> name
-                _ -> nil
-              end
-
-            true ->
-              nil
-          end
-      end
+    pool_identifier = resolve_pool_identifier(opts, pool_name)
 
     metadata =
       %{worker_module: __MODULE__, pool_name: pool_name}
@@ -123,12 +102,7 @@ defmodule Snakepit.GRPCWorker do
       |> Keyword.put(:registry_metadata, metadata)
       |> maybe_put_pool_identifier_opt(pool_identifier)
 
-    name =
-      if worker_id do
-        {:via, Registry, {Snakepit.Pool.Registry, worker_id}}
-      else
-        nil
-      end
+    name = build_worker_name(worker_id)
 
     GenServer.start_link(__MODULE__, opts_with_metadata, name: name)
   end
@@ -221,6 +195,42 @@ defmodule Snakepit.GRPCWorker do
     GenServer.call(worker, :get_session_id)
   end
 
+  defp resolve_pool_identifier(opts, pool_name) do
+    case Keyword.get(opts, :pool_identifier) do
+      identifier when is_atom(identifier) ->
+        identifier
+
+      identifier when is_binary(identifier) ->
+        string_to_existing_atom_safe(identifier)
+
+      _ ->
+        infer_pool_identifier(pool_name)
+    end
+  end
+
+  defp string_to_existing_atom_safe(identifier) do
+    String.to_existing_atom(identifier)
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp infer_pool_identifier(pool_name) when is_atom(pool_name), do: pool_name
+
+  defp infer_pool_identifier(pool_name) when is_pid(pool_name) do
+    case Process.info(pool_name, :registered_name) do
+      {:registered_name, name} when is_atom(name) -> name
+      _ -> nil
+    end
+  end
+
+  defp infer_pool_identifier(_), do: nil
+
+  defp build_worker_name(nil), do: nil
+
+  defp build_worker_name(worker_id) do
+    {:via, Registry, {Snakepit.Pool.Registry, worker_id}}
+  end
+
   defp maybe_put_pool_identifier(metadata, nil), do: metadata
 
   defp maybe_put_pool_identifier(metadata, identifier),
@@ -278,11 +288,8 @@ defmodule Snakepit.GRPCWorker do
 
     adapter = Keyword.fetch!(opts, :adapter)
     worker_id = Keyword.fetch!(opts, :id)
-    # CRITICAL FIX: Get pool_name from opts so worker knows which pool to notify
-    # This can be an atom (registered name) or a PID
     pool_name = Keyword.get(opts, :pool_name, Snakepit.Pool)
     pool_identifier = Keyword.get(opts, :pool_identifier)
-    port = adapter.get_port()
 
     metadata =
       opts
@@ -291,202 +298,9 @@ defmodule Snakepit.GRPCWorker do
 
     maybe_attach_registry_metadata(worker_id, metadata)
 
-    # CRITICAL: Reserve the worker slot BEFORE spawning the process
-    # This ensures we can track the process even if we crash during spawn
-    case Snakepit.Pool.ProcessRegistry.reserve_worker(worker_id) do
+    case ProcessRegistry.reserve_worker(worker_id) do
       :ok ->
-        SLog.debug("Reserved worker slot for #{worker_id}")
-        # Generate unique session ID
-        session_id =
-          "session_#{:erlang.unique_integer([:positive, :monotonic])}_#{:erlang.system_time(:microsecond)}"
-
-        # Get the address of the central Elixir gRPC server
-        elixir_grpc_host = Application.get_env(:snakepit, :grpc_host, "localhost")
-        elixir_grpc_port = Application.get_env(:snakepit, :grpc_port, 50051)
-        elixir_address = "#{elixir_grpc_host}:#{elixir_grpc_port}"
-
-        # CRITICAL: Get worker_config FIRST to use per-worker adapter settings
-        worker_config =
-          opts
-          |> Keyword.get(:worker_config, %{})
-          |> normalize_worker_config(pool_name, adapter, pool_identifier)
-
-        heartbeat_config =
-          worker_config
-          |> get_worker_config_section(:heartbeat)
-          |> normalize_heartbeat_config()
-
-        # Start the gRPC server process non-blocking
-        executable = adapter.executable_path()
-
-        # Use worker-specific adapter_args if provided, else fall back to adapter defaults
-        # CRITICAL: Empty list [] is truthy, so check explicitly
-        worker_adapter_args = Map.get(worker_config, :adapter_args, [])
-
-        adapter_args =
-          if worker_adapter_args == [] do
-            adapter.script_args() || []
-          else
-            worker_adapter_args
-          end
-
-        adapter_env =
-          worker_config
-          |> Map.get(:adapter_env, [])
-          |> merge_with_default_adapter_env()
-
-        heartbeat_env_json = encode_heartbeat_env(heartbeat_config)
-
-        # Determine which script to use based on adapter_args (threaded vs process mode)
-        # If --max-workers is specified, use the threaded server
-        script_path =
-          if Enum.any?(adapter_args, fn arg ->
-               is_binary(arg) and String.contains?(arg, "--max-workers")
-             end) do
-            # Threaded mode
-            app_dir = Application.app_dir(:snakepit)
-            Path.join([app_dir, "priv", "python", "grpc_server_threaded.py"])
-          else
-            # Process mode (default)
-            adapter.script_path()
-          end
-
-        # Build args ensuring both port and elixir-address are included
-        args = adapter_args
-
-        # Add port if not already present
-        args =
-          if not Enum.any?(args, &String.contains?(&1, "--port")) do
-            args ++ ["--port", to_string(port)]
-          else
-            args
-          end
-
-        # Add elixir-address if not already present
-        args =
-          if not Enum.any?(args, &String.contains?(&1, "--elixir-address")) do
-            args ++ ["--elixir-address", elixir_address]
-          else
-            args
-          end
-
-        # Add short run-id for safer process cleanup
-        # This short 7-char ID will be visible in ps output and used for cleanup
-        # Use --snakepit-run-id to maintain compatibility with Python script
-        run_id = Snakepit.Pool.ProcessRegistry.get_beam_run_id()
-        args = args ++ ["--snakepit-run-id", run_id]
-
-        SLog.info(
-          "Starting gRPC server: #{executable} #{script_path || ""} #{Enum.join(args, " ")}"
-        )
-
-        # Spawn the Python executable directly. Cleanup is handled by ProcessKiller via run_id.
-        # CRITICAL: Do NOT use setsid wrapper - it exits immediately with status 0 while the
-        # actual Python process becomes an orphaned grandchild, causing the Port to think
-        # the process died when it's actually still running.
-        {spawn_args, port_opts} =
-          case script_path do
-            path when is_binary(path) and byte_size(path) > 0 ->
-              {
-                [path | args],
-                [
-                  :binary,
-                  :exit_status,
-                  :use_stdio,
-                  :stderr_to_stdout,
-                  {:cd, Path.dirname(path)}
-                ]
-              }
-
-            _ ->
-              {
-                args,
-                [
-                  :binary,
-                  :exit_status,
-                  :use_stdio,
-                  :stderr_to_stdout
-                ]
-              }
-          end
-
-        # Apply adapter_env to the spawned process if provided
-        env_entries =
-          adapter_env
-          |> maybe_put_heartbeat_env(heartbeat_env_json)
-
-        port_opts =
-          if env_entries != [] do
-            env_tuples = Enum.map(env_entries, &to_env_tuple/1)
-            port_opts ++ [{:env, env_tuples}]
-          else
-            port_opts
-          end
-
-        server_port =
-          Port.open({:spawn_executable, executable}, [{:args, spawn_args} | port_opts])
-
-        Port.monitor(server_port)
-
-        # Extract external process PID for cleanup registry
-        process_pid =
-          case Port.info(server_port, :os_pid) do
-            {:os_pid, pid} ->
-              SLog.info("Started gRPC server process, will listen on TCP port #{port}")
-              pid
-
-            error ->
-              SLog.error("Failed to get gRPC server process PID: #{inspect(error)}")
-              nil
-          end
-
-        # CRITICAL FIX: Register the Python PID immediately after spawning
-        # This prevents ApplicationCleanup from seeing it as an "orphan" during rapid shutdown
-        # Before this fix, the PID was only registered after wait_for_server_ready succeeded,
-        # causing a race condition where ApplicationCleanup would find "orphaned" processes
-        if process_pid do
-          case Snakepit.Pool.ProcessRegistry.activate_worker(
-                 worker_id,
-                 self(),
-                 process_pid,
-                 "grpc_worker"
-               ) do
-            :ok ->
-              SLog.debug(
-                "Registered Python PID #{process_pid} for worker #{worker_id} in ProcessRegistry"
-              )
-
-            {:error, reason} ->
-              SLog.error(
-                "Failed to register Python PID #{process_pid} for worker #{worker_id}: #{inspect(reason)}"
-              )
-          end
-        end
-
-        state = %{
-          id: worker_id,
-          pool_name: pool_name,
-          adapter: adapter,
-          port: port,
-          server_port: server_port,
-          process_pid: process_pid,
-          session_id: session_id,
-          requested_port: port,
-          worker_config: worker_config,
-          heartbeat_config: heartbeat_config,
-          heartbeat_monitor: nil,
-          # Will be established in handle_continue
-          connection: nil,
-          health_check_ref: nil,
-          stats: %{
-            requests: 0,
-            errors: 0,
-            start_time: System.monotonic_time()
-          }
-        }
-
-        # Return immediately and schedule the blocking work for later
-        {:ok, state, {:continue, :connect_and_wait}}
+        init_worker(opts, adapter, worker_id, pool_name, pool_identifier)
 
       {:error, reason} ->
         SLog.error("Failed to reserve worker slot for #{worker_id}: #{inspect(reason)}")
@@ -494,108 +308,312 @@ defmodule Snakepit.GRPCWorker do
     end
   end
 
-  @impl true
-  def handle_continue(:connect_and_wait, state) do
-    # Now we do the blocking work here, after init/1 has returned
-    case wait_for_server_ready(state.server_port, 30000) do
-      {:ok, actual_port} ->
-        case state.adapter.init_grpc_connection(actual_port) do
-          {:ok, connection} ->
-            # Python PID already registered in init/1, so just notify the pool
-            # and register with lifecycle manager
+  defp init_worker(opts, adapter, worker_id, pool_name, pool_identifier) do
+    SLog.debug("Reserved worker slot for #{worker_id}")
 
-            # CRITICAL: Check if Pool is alive first (test shutdown race condition)
-            pool_pid =
-              if is_atom(state.pool_name),
-                do: Process.whereis(state.pool_name),
-                else: state.pool_name
+    session_id = generate_session_id()
+    elixir_address = build_elixir_address()
+    port = adapter.get_port()
 
-            pool_alive = pool_pid != nil and Process.alive?(pool_pid)
+    worker_config =
+      opts
+      |> Keyword.get(:worker_config, %{})
+      |> normalize_worker_config(pool_name, adapter, pool_identifier)
 
-            if not pool_alive do
-              # Pool already dead - gracefully stop without crashing
-              SLog.debug(
-                "Worker #{state.id} finished starting but Pool is shut down. Stopping gracefully."
-              )
+    heartbeat_config =
+      worker_config
+      |> get_worker_config_section(:heartbeat)
+      |> normalize_heartbeat_config()
 
-              {:stop, :normal, state}
-            else
-              case notify_pool_ready(pool_pid, state.id) do
-                :ok ->
-                  # Schedule health checks
-                  health_ref = schedule_health_check()
+    spawn_config =
+      build_spawn_config(adapter, worker_config, heartbeat_config, port, elixir_address)
 
-                  # Register with lifecycle manager for automatic recycling
-                  Snakepit.Worker.LifecycleManager.track_worker(
-                    state.pool_name,
-                    state.id,
-                    self(),
-                    state.worker_config
-                  )
+    server_port = spawn_grpc_server(spawn_config)
+    process_pid = extract_and_log_pid(server_port, port)
 
-                  SLog.info("✅ gRPC worker #{state.id} initialization complete and acknowledged.")
+    register_worker_pid(worker_id, process_pid)
 
-                  maybe_initialize_session(connection, state.session_id)
+    state_params = %{
+      worker_id: worker_id,
+      pool_name: pool_name,
+      adapter: adapter,
+      port: port,
+      server_port: server_port,
+      process_pid: process_pid,
+      session_id: session_id,
+      worker_config: worker_config,
+      heartbeat_config: heartbeat_config
+    }
 
-                  # Register worker for telemetry streaming
-                  register_telemetry_stream(connection, state)
+    state = build_initial_state(state_params)
 
-                  # Emit worker spawned telemetry event
-                  start_time = Map.get(state.stats, :start_time, System.monotonic_time())
+    {:ok, state, {:continue, :connect_and_wait}}
+  end
 
-                  :telemetry.execute(
-                    [:snakepit, :pool, :worker, :spawned],
-                    %{
-                      duration: System.monotonic_time() - start_time,
-                      system_time: System.system_time()
-                    },
-                    %{
-                      node: node(),
-                      pool_name: state.pool_name,
-                      worker_id: state.id,
-                      worker_pid: self(),
-                      python_port: actual_port,
-                      python_pid: state.process_pid,
-                      mode: :process
-                    }
-                  )
+  defp generate_session_id do
+    "session_#{:erlang.unique_integer([:positive, :monotonic])}_#{:erlang.system_time(:microsecond)}"
+  end
 
-                  new_state =
-                    state
-                    |> Map.put(:connection, connection)
-                    |> Map.put(:port, actual_port)
-                    |> Map.put(:health_check_ref, health_ref)
-                    |> maybe_start_heartbeat_monitor()
+  defp build_elixir_address do
+    elixir_grpc_host = Application.get_env(:snakepit, :grpc_host, "localhost")
+    elixir_grpc_port = Application.get_env(:snakepit, :grpc_port, 50_051)
+    "#{elixir_grpc_host}:#{elixir_grpc_port}"
+  end
 
-                  {:noreply, new_state}
+  defp build_spawn_config(adapter, worker_config, heartbeat_config, port, elixir_address) do
+    executable = adapter.executable_path()
+    adapter_args = resolve_adapter_args(adapter, worker_config)
+    adapter_env = worker_config |> Map.get(:adapter_env, []) |> merge_with_default_adapter_env()
+    heartbeat_env_json = encode_heartbeat_env(heartbeat_config)
+    script_path = determine_script_path(adapter, adapter_args)
+    args = build_spawn_args(adapter_args, port, elixir_address)
 
-                {:error, reason} ->
-                  SLog.debug(
-                    "Pool handshake failed for worker #{state.id} (pool pid: #{inspect(pool_pid)}): #{inspect(reason)}"
-                  )
+    SLog.info("Starting gRPC server: #{executable} #{script_path || ""} #{Enum.join(args, " ")}")
 
-                  {:stop, :shutdown, state}
-              end
-            end
+    %{
+      executable: executable,
+      script_path: script_path,
+      args: args,
+      adapter_env: adapter_env,
+      heartbeat_env_json: heartbeat_env_json
+    }
+  end
 
-          {:error, reason} ->
-            SLog.error("Failed to connect to gRPC server: #{reason}")
-            {:stop, {:grpc_connection_failed, reason}, state}
-        end
+  defp resolve_adapter_args(adapter, worker_config) do
+    worker_adapter_args = Map.get(worker_config, :adapter_args, [])
+
+    if worker_adapter_args == [] do
+      adapter.script_args() || []
+    else
+      worker_adapter_args
+    end
+  end
+
+  defp determine_script_path(adapter, adapter_args) do
+    if Enum.any?(adapter_args, fn arg ->
+         is_binary(arg) and String.contains?(arg, "--max-workers")
+       end) do
+      app_dir = Application.app_dir(:snakepit)
+      Path.join([app_dir, "priv", "python", "grpc_server_threaded.py"])
+    else
+      adapter.script_path()
+    end
+  end
+
+  defp build_spawn_args(adapter_args, port, elixir_address) do
+    adapter_args
+    |> maybe_add_arg("--port", to_string(port))
+    |> maybe_add_arg("--elixir-address", elixir_address)
+    |> add_run_id_arg()
+  end
+
+  defp maybe_add_arg(args, flag, value) do
+    if Enum.any?(args, &String.contains?(&1, flag)) do
+      args
+    else
+      args ++ [flag, value]
+    end
+  end
+
+  defp add_run_id_arg(args) do
+    run_id = ProcessRegistry.get_beam_run_id()
+    args ++ ["--snakepit-run-id", run_id]
+  end
+
+  defp spawn_grpc_server(%{
+         executable: executable,
+         script_path: script_path,
+         args: args,
+         adapter_env: adapter_env,
+         heartbeat_env_json: heartbeat_env_json
+       }) do
+    {spawn_args, port_opts} = build_port_config(script_path, args)
+    port_opts = apply_env_to_port_opts(port_opts, adapter_env, heartbeat_env_json)
+
+    server_port = Port.open({:spawn_executable, executable}, [{:args, spawn_args} | port_opts])
+    Port.monitor(server_port)
+    server_port
+  end
+
+  defp build_port_config(script_path, args) do
+    case script_path do
+      path when is_binary(path) and byte_size(path) > 0 ->
+        {
+          [path | args],
+          [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:cd, Path.dirname(path)}]
+        }
+
+      _ ->
+        {args, [:binary, :exit_status, :use_stdio, :stderr_to_stdout]}
+    end
+  end
+
+  defp apply_env_to_port_opts(port_opts, adapter_env, heartbeat_env_json) do
+    env_entries = adapter_env |> maybe_put_heartbeat_env(heartbeat_env_json)
+
+    if env_entries != [] do
+      env_tuples = Enum.map(env_entries, &to_env_tuple/1)
+      port_opts ++ [{:env, env_tuples}]
+    else
+      port_opts
+    end
+  end
+
+  defp extract_and_log_pid(server_port, port) do
+    case Port.info(server_port, :os_pid) do
+      {:os_pid, pid} ->
+        SLog.info("Started gRPC server process, will listen on TCP port #{port}")
+        pid
+
+      error ->
+        SLog.error("Failed to get gRPC server process PID: #{inspect(error)}")
+        nil
+    end
+  end
+
+  defp register_worker_pid(_worker_id, nil), do: :ok
+
+  defp register_worker_pid(worker_id, process_pid) do
+    case ProcessRegistry.activate_worker(worker_id, self(), process_pid, "grpc_worker") do
+      :ok ->
+        SLog.debug(
+          "Registered Python PID #{process_pid} for worker #{worker_id} in ProcessRegistry"
+        )
 
       {:error, reason} ->
-        # Suppress error logs for expected shutdown signals (143=SIGTERM, 137=SIGKILL, 0=graceful)
-        case reason do
-          {:exit_status, status} when status in [0, 137, 143] ->
-            SLog.debug("gRPC server exited during startup with status #{status} (shutdown)")
+        SLog.error(
+          "Failed to register Python PID #{process_pid} for worker #{worker_id}: #{inspect(reason)}"
+        )
+    end
+  end
 
-          _ ->
-            SLog.error("Failed to start gRPC server: #{inspect(reason)}")
-        end
+  defp build_initial_state(%{
+         worker_id: worker_id,
+         pool_name: pool_name,
+         adapter: adapter,
+         port: port,
+         server_port: server_port,
+         process_pid: process_pid,
+         session_id: session_id,
+         worker_config: worker_config,
+         heartbeat_config: heartbeat_config
+       }) do
+    %{
+      id: worker_id,
+      pool_name: pool_name,
+      adapter: adapter,
+      port: port,
+      server_port: server_port,
+      process_pid: process_pid,
+      session_id: session_id,
+      requested_port: port,
+      worker_config: worker_config,
+      heartbeat_config: heartbeat_config,
+      heartbeat_monitor: nil,
+      connection: nil,
+      health_check_ref: nil,
+      stats: %{
+        requests: 0,
+        errors: 0,
+        start_time: System.monotonic_time()
+      }
+    }
+  end
 
+  defp resolve_pool_pid(pool_name) when is_atom(pool_name), do: Process.whereis(pool_name)
+  defp resolve_pool_pid(pool_name), do: pool_name
+
+  defp verify_pool_alive(nil, worker_id), do: {:error, {:pool_dead, worker_id}}
+
+  defp verify_pool_alive(pool_pid, worker_id) do
+    if Process.alive?(pool_pid) do
+      :ok
+    else
+      {:error, {:pool_dead, worker_id}}
+    end
+  end
+
+  defp complete_worker_initialization(state, connection, actual_port) do
+    health_ref = schedule_health_check()
+
+    LifecycleManager.track_worker(state.pool_name, state.id, self(), state.worker_config)
+
+    SLog.info("✅ gRPC worker #{state.id} initialization complete and acknowledged.")
+
+    maybe_initialize_session(connection, state.session_id)
+    register_telemetry_stream(connection, state)
+    emit_worker_spawned_telemetry(state, actual_port)
+
+    new_state =
+      state
+      |> Map.put(:connection, connection)
+      |> Map.put(:port, actual_port)
+      |> Map.put(:health_check_ref, health_ref)
+      |> maybe_start_heartbeat_monitor()
+
+    {:noreply, new_state}
+  end
+
+  defp emit_worker_spawned_telemetry(state, actual_port) do
+    start_time = Map.get(state.stats, :start_time, System.monotonic_time())
+
+    :telemetry.execute(
+      [:snakepit, :pool, :worker, :spawned],
+      %{
+        duration: System.monotonic_time() - start_time,
+        system_time: System.system_time()
+      },
+      %{
+        node: node(),
+        pool_name: state.pool_name,
+        worker_id: state.id,
+        worker_pid: self(),
+        python_port: actual_port,
+        python_pid: state.process_pid,
+        mode: :process
+      }
+    )
+  end
+
+  @impl true
+  def handle_continue(:connect_and_wait, state) do
+    with {:ok, actual_port} <- wait_for_server_ready(state.server_port, 30_000),
+         {:ok, connection} <-
+           wrap_grpc_connection_result(state.adapter.init_grpc_connection(actual_port)),
+         pool_pid <- resolve_pool_pid(state.pool_name),
+         :ok <- verify_pool_alive(pool_pid, state.id),
+         :ok <- notify_pool_ready(pool_pid, state.id) do
+      complete_worker_initialization(state, connection, actual_port)
+    else
+      {:error, {:exit_status, status}} when status in [0, 137, 143] ->
+        SLog.debug("gRPC server exited during startup with status #{status} (shutdown)")
+        {:stop, {:grpc_server_failed, {:exit_status, status}}, state}
+
+      {:error, {:pool_dead, _}} ->
+        SLog.debug(
+          "Worker #{state.id} finished starting but Pool is shut down. Stopping gracefully."
+        )
+
+        {:stop, :normal, state}
+
+      {:error, {:pool_handshake_failed, reason}} ->
+        SLog.debug("Pool handshake failed for worker #{state.id}: #{inspect(reason)}")
+        {:stop, :shutdown, state}
+
+      {:error, {:grpc_connection_failed, reason}} ->
+        SLog.error("Failed to connect to gRPC server: #{reason}")
+        {:stop, {:grpc_connection_failed, reason}, state}
+
+      {:error, reason} ->
+        SLog.error("Failed to start gRPC server: #{inspect(reason)}")
         {:stop, {:grpc_server_failed, reason}, state}
     end
   end
+
+  defp wrap_grpc_connection_result({:ok, connection}), do: {:ok, connection}
+
+  defp wrap_grpc_connection_result({:error, reason}),
+    do: {:error, {:grpc_connection_failed, reason}}
 
   @impl true
   def handle_call({:execute, command, args, timeout}, _from, state) do
@@ -814,7 +832,15 @@ defmodule Snakepit.GRPCWorker do
 
     SLog.debug("gRPC worker #{state.id} terminating: #{inspect(reason)}")
 
-    # Emit worker terminated telemetry event
+    emit_worker_terminated_telemetry(state, reason)
+    cleanup_heartbeat(state, reason)
+    kill_python_process(state.process_pid, reason)
+    cleanup_resources(state)
+
+    :ok
+  end
+
+  defp emit_worker_terminated_telemetry(state, reason) do
     start_time = Map.get(state.stats, :start_time, 0)
     total_commands = Map.get(state.stats, :requests, 0)
 
@@ -833,97 +859,91 @@ defmodule Snakepit.GRPCWorker do
         planned: reason in [:shutdown, :normal]
       }
     )
+  end
 
+  defp cleanup_heartbeat(state, reason) do
     maybe_stop_heartbeat_monitor(state.heartbeat_monitor)
     maybe_notify_test_pid(state.heartbeat_config, {:heartbeat_monitor_stopped, state.id, reason})
+  end
 
-    # ALWAYS kill the Python process, regardless of reason
-    # This is critical to prevent orphaned processes
-    if state.process_pid do
-      # Treat :shutdown and :normal as graceful shutdowns
-      # :normal occurs when pool dies during worker startup - we should still be graceful
-      if reason in [:shutdown, :normal] do
-        # Graceful shutdown - use SIGTERM with escalation
-        SLog.debug(
-          "Starting graceful shutdown of external gRPC process PID: #{state.process_pid}..."
-        )
+  defp kill_python_process(nil, _reason), do: :ok
 
-        case Snakepit.ProcessKiller.kill_with_escalation(
-               state.process_pid,
-               @graceful_shutdown_timeout
-             ) do
-          :ok ->
-            SLog.debug("✅ gRPC server PID #{state.process_pid} terminated gracefully")
+  defp kill_python_process(process_pid, reason) when reason in [:shutdown, :normal] do
+    SLog.debug("Starting graceful shutdown of external gRPC process PID: #{process_pid}...")
 
-          {:error, reason} ->
-            SLog.warning("Failed to gracefully kill #{state.process_pid}: #{inspect(reason)}")
-        end
-      else
-        # Non-graceful termination (crash, error, etc.) - immediate SIGKILL
-        SLog.warning(
-          "Non-graceful termination (#{inspect(reason)}), immediately killing PID #{state.process_pid}"
-        )
+    case Snakepit.ProcessKiller.kill_with_escalation(process_pid, @graceful_shutdown_timeout) do
+      :ok ->
+        SLog.debug("✅ gRPC server PID #{process_pid} terminated gracefully")
 
-        case Snakepit.ProcessKiller.kill_process(state.process_pid, :sigkill) do
-          :ok ->
-            SLog.debug("✅ Immediately killed gRPC server PID #{state.process_pid}")
-
-          {:error, reason} ->
-            SLog.warning("Failed to kill #{state.process_pid}: #{inspect(reason)}")
-        end
-      end
+      {:error, kill_reason} ->
+        SLog.warning("Failed to gracefully kill #{process_pid}: #{inspect(kill_reason)}")
     end
+  end
 
-    # Final resource cleanup (run regardless of shutdown reason)
+  defp kill_python_process(process_pid, reason) do
+    SLog.warning(
+      "Non-graceful termination (#{inspect(reason)}), immediately killing PID #{process_pid}"
+    )
+
+    case Snakepit.ProcessKiller.kill_process(process_pid, :sigkill) do
+      :ok ->
+        SLog.debug("✅ Immediately killed gRPC server PID #{process_pid}")
+
+      {:error, kill_reason} ->
+        SLog.warning("Failed to kill #{process_pid}: #{inspect(kill_reason)}")
+    end
+  end
+
+  defp cleanup_resources(state) do
     disconnect_connection(state.connection)
+    cancel_health_check_timer(state.health_check_ref)
+    close_server_port(state.server_port)
+    GrpcStream.unregister_worker(state.id)
+    ProcessRegistry.unregister_worker(state.id)
+  end
 
-    if state.health_check_ref do
-      Process.cancel_timer(state.health_check_ref)
-    end
+  defp cancel_health_check_timer(nil), do: :ok
 
-    # CRITICAL FIX: Defensively close port with comprehensive error handling
-    # This ensures cleanup runs even during brutal kills (:kill reason)
-    if state.server_port do
-      safe_close_port(state.server_port)
-    end
+  defp cancel_health_check_timer(health_check_ref) do
+    Process.cancel_timer(health_check_ref)
+  end
 
-    # Unregister from telemetry stream
-    Snakepit.Telemetry.GrpcStream.unregister_worker(state.id)
+  defp close_server_port(nil), do: :ok
 
-    # *** CRITICAL: Unregister from ProcessRegistry as the very last step ***
-    Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
-
-    :ok
+  defp close_server_port(server_port) do
+    safe_close_port(server_port)
   end
 
   defp notify_pool_ready(nil, worker_id),
-    do: {:error, Error.pool_error("Pool not found", %{worker_id: worker_id})}
+    do:
+      {:error,
+       {:pool_handshake_failed, Error.pool_error("Pool not found", %{worker_id: worker_id})}}
 
   defp notify_pool_ready(pool_pid, worker_id) when is_pid(pool_pid) do
-    try do
-      GenServer.call(pool_pid, {:worker_ready, worker_id}, 30_000)
-    catch
-      :exit, {:noproc, _} ->
-        {:error, Error.pool_error("Pool not found", %{worker_id: worker_id, pool_pid: pool_pid})}
+    GenServer.call(pool_pid, {:worker_ready, worker_id}, 30_000)
+  catch
+    :exit, {:noproc, _} ->
+      {:error,
+       {:pool_handshake_failed,
+        Error.pool_error("Pool not found", %{worker_id: worker_id, pool_pid: pool_pid})}}
 
-      :exit, {:shutdown, _} = reason ->
-        {:error, reason}
+    :exit, {:shutdown, _} = reason ->
+      {:error, {:pool_handshake_failed, reason}}
 
-      :exit, {:killed, _} = reason ->
-        {:error, reason}
+    :exit, {:killed, _} = reason ->
+      {:error, {:pool_handshake_failed, reason}}
 
-      :exit, {:timeout, _} = reason ->
-        {:error, reason}
+    :exit, {:timeout, _} = reason ->
+      {:error, {:pool_handshake_failed, reason}}
 
-      :exit, reason ->
-        {:error, reason}
-    else
-      :ok ->
-        :ok
+    :exit, reason ->
+      {:error, {:pool_handshake_failed, reason}}
+  else
+    :ok ->
+      :ok
 
-      other ->
-        {:error, {:unexpected_reply, other}}
-    end
+    other ->
+      {:error, {:pool_handshake_failed, {:unexpected_reply, other}}}
   end
 
   defp maybe_start_heartbeat_monitor(state) do
@@ -988,13 +1008,13 @@ defmodule Snakepit.GRPCWorker do
       result =
         cond do
           function_exported?(adapter, :grpc_heartbeat, 3) ->
-            apply(adapter, :grpc_heartbeat, [connection, session_id, config])
+            adapter.grpc_heartbeat(connection, session_id, config)
 
           function_exported?(adapter, :grpc_heartbeat, 2) ->
-            apply(adapter, :grpc_heartbeat, [connection, session_id])
+            adapter.grpc_heartbeat(connection, session_id)
 
           heartbeat_channel_available?(channel) ->
-            Snakepit.GRPC.Client.heartbeat(channel, session_id, timeout: config[:timeout_ms])
+            Client.heartbeat(channel, session_id, timeout: config[:timeout_ms])
 
           true ->
             {:error,
@@ -1020,7 +1040,7 @@ defmodule Snakepit.GRPCWorker do
 
     if heartbeat_channel_available?(channel) do
       try do
-        _ = Snakepit.GRPC.Client.initialize_session(channel, session_id, %{})
+        _ = Client.initialize_session(channel, session_id, %{})
         :ok
       rescue
         exception ->
@@ -1047,7 +1067,7 @@ defmodule Snakepit.GRPCWorker do
           python_pid: state.process_pid
         }
 
-        Snakepit.Telemetry.GrpcStream.register_worker(channel, worker_ctx)
+        GrpcStream.register_worker(channel, worker_ctx)
         SLog.debug("Registered telemetry stream for worker #{state.id}")
         :ok
       rescue
@@ -1175,13 +1195,11 @@ defmodule Snakepit.GRPCWorker do
   defp disconnect_connection(nil), do: :ok
 
   defp disconnect_connection(%{channel: %GRPC.Channel{} = channel}) do
-    try do
-      GRPC.Stub.disconnect(channel)
-    rescue
-      _ -> :ok
-    catch
-      :exit, _ -> :ok
-    end
+    GRPC.Stub.disconnect(channel)
+  rescue
+    _ -> :ok
+  catch
+    :exit, _ -> :ok
   end
 
   defp disconnect_connection(%{channel: channel}) when not is_nil(channel), do: :ok
@@ -1276,7 +1294,7 @@ defmodule Snakepit.GRPCWorker do
     interpreter =
       Application.get_env(:snakepit, :python_executable) ||
         System.get_env("SNAKEPIT_PYTHON") ||
-        Snakepit.Adapters.GRPCPython.executable_path()
+        GRPCPython.executable_path()
 
     []
     |> maybe_cons("PYTHONPATH", pythonpath)
@@ -1312,19 +1330,17 @@ defmodule Snakepit.GRPCWorker do
 
   # CRITICAL FIX: Defensive port cleanup that handles all exit scenarios
   defp safe_close_port(port) do
-    try do
-      Port.close(port)
-    rescue
-      # ArgumentError is raised if the port is already closed
-      ArgumentError -> :ok
-      # Catch any other exceptions
-      _ -> :ok
-    catch
-      # Handle exits (e.g., from brutal :kill)
-      :exit, _ -> :ok
-      # Handle throws
-      :throw, _ -> :ok
-    end
+    Port.close(port)
+  rescue
+    # ArgumentError is raised if the port is already closed
+    ArgumentError -> :ok
+    # Catch any other exceptions
+    _ -> :ok
+  catch
+    # Handle exits (e.g., from brutal :kill)
+    :exit, _ -> :ok
+    # Handle throws
+    :throw, _ -> :ok
   end
 
   # Private functions
@@ -1437,7 +1453,7 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp make_health_check(state) do
-    case Snakepit.GRPC.Client.health(state.connection.channel, inspect(self())) do
+    case Client.health(state.connection.channel, inspect(self())) do
       {:ok, health_response} ->
         {:ok, health_response}
 
@@ -1451,7 +1467,7 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp make_info_call(state) do
-    case Snakepit.GRPC.Client.get_info(state.connection.channel) do
+    case Client.get_info(state.connection.channel) do
       {:ok, info_response} ->
         {:ok, info_response}
     end

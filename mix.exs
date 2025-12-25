@@ -1,7 +1,7 @@
 defmodule Snakepit.MixProject do
   use Mix.Project
 
-  @version "0.7.1"
+  @version "0.7.2"
   @source_url "https://github.com/nshkrdotcom/snakepit"
 
   def project do
@@ -35,8 +35,8 @@ defmodule Snakepit.MixProject do
   defp deps do
     [
       {:jason, "~> 1.0"},
-      {:grpc, "~> 0.10.2"},
-      {:protobuf, "~> 0.14.1"},
+      {:grpc, "~> 0.11.5"},
+      {:protobuf, "~> 0.15.0"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:telemetry_metrics_prometheus, "~> 1.1"},
@@ -44,9 +44,10 @@ defmodule Snakepit.MixProject do
       {:opentelemetry_exporter, "~> 1.6"},
       {:opentelemetry_telemetry, "~> 1.0"},
       {:stream_data, "~> 1.0", only: [:test]},
-      {:supertester, "~> 0.2.0", only: :test},
+      {:supertester, "~> 0.3.1", only: :test},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -73,37 +74,43 @@ defmodule Snakepit.MixProject do
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
       },
       files: [
+        # Core library
         "lib",
         "priv/proto",
         "priv/python/*.py",
         "priv/python/requirements*.txt",
         "priv/python/setup.py",
         "priv/python/snakepit_bridge",
+        "priv/python/README_THREADING.md",
         "assets",
         "guides",
-        # Current documentation
+        # Documentation
         "docs/GRPC_QUICK_REFERENCE.md",
         "docs/TEST_AND_EXAMPLE_STATUS.md",
         "docs/EXAMPLE_TEST_RESULTS.md",
         "docs/ECOSYSTEM_ARCHITECTURE.md",
         "docs/DSPEX_PRODUCTION_STRATEGY.md",
+        "docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md",
+        "docs/migration_v0.5_to_v0.6.md",
+        "docs/performance_benchmarks.md",
+        "docs/telemetry_events.md",
+        "docs/guides",
         "docs/code-standards",
-        "docs/architecture",
         # Build configuration
         ".formatter.exs",
         "mix.exs",
         # Root documentation
         "README.md",
+        "ARCHITECTURE.md",
+        "DIAGRAMS.md",
+        "CHANGELOG.md",
+        "TELEMETRY.md",
+        "LOG_LEVEL_CONFIGURATION.md",
         "README_GRPC.md",
         "README_BIDIRECTIONAL_TOOL_BRIDGE.md",
         "README_PROCESS_MANAGEMENT.md",
         "README_TESTING.md",
-        "ARCHITECTURE.md",
-        "TELEMETRY.md",
-        "DIAGS.md",
-        "DIAGS2.md",
-        "LICENSE*",
-        "CHANGELOG.md"
+        "LICENSE*"
       ],
       exclude_patterns: [
         "**/__pycache__",
@@ -145,11 +152,11 @@ defmodule Snakepit.MixProject do
 
         # Getting started
         {"guides/INSTALLATION.md", title: "Installation Guide"},
+        {"docs/migration_v0.5_to_v0.6.md", title: "Migration Guide (v0.5 to v0.6)"},
 
         # Core documentation
         {"ARCHITECTURE.md", title: "System Architecture"},
-        {"DIAGS.md", title: "Performance Architecture"},
-        {"DIAGS2.md", title: "Architecture Diagrams"},
+        {"DIAGRAMS.md", title: "Architecture Diagrams"},
 
         # Feature documentation
         {"README_GRPC.md", title: "gRPC Streaming Guide"},
@@ -157,50 +164,54 @@ defmodule Snakepit.MixProject do
         {"README_PROCESS_MANAGEMENT.md", title: "Process Management"},
         {"README_TESTING.md", title: "Testing Guide"},
         {"TELEMETRY.md", title: "Telemetry & Observability"},
+        {"LOG_LEVEL_CONFIGURATION.md", title: "Log Level Configuration"},
 
         # Reference documentation
         {"docs/GRPC_QUICK_REFERENCE.md", title: "gRPC Quick Reference"},
-        {"docs/TEST_AND_EXAMPLE_STATUS.md", title: "Test & Example Status"},
-        {"docs/EXAMPLE_TEST_RESULTS.md", title: "Example Test Results"},
-        {"docs/ECOSYSTEM_ARCHITECTURE.md", title: "Ecosystem Architecture"},
-        {"docs/DSPEX_PRODUCTION_STRATEGY.md", title: "DSPex Production Strategy"},
-
-        # v0.6.0 Documentation
-        {"docs/migration_v0.5_to_v0.6.md", title: "Migration Guide (v0.5 to v0.6)"},
-        {"docs/performance_benchmarks.md", title: "Performance Benchmarks"},
         {"docs/telemetry_events.md", title: "Telemetry Events Reference"},
+        {"docs/performance_benchmarks.md", title: "Performance Benchmarks"},
+        {"docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md", title: "Production Deployment Checklist"},
+
+        # Guides
         {"docs/guides/writing_thread_safe_adapters.md", title: "Writing Thread-Safe Adapters"},
         {"priv/python/README_THREADING.md", title: "Python Threading Guide"},
 
-        # Advanced topics
+        # Testing
+        {"docs/TEST_AND_EXAMPLE_STATUS.md", title: "Test & Example Status"},
+        {"docs/EXAMPLE_TEST_RESULTS.md", title: "Example Test Results"},
         {"docs/code-standards/test-architecture-supertester.md", title: "Test Architecture"},
-        {"docs/architecture/adr-001-worker-starter-supervision-pattern.md",
-         title: "ADR-001: Worker Starter Pattern"},
 
-        # Archived documentation
+        # Ecosystem
+        {"docs/ECOSYSTEM_ARCHITECTURE.md", title: "Ecosystem Architecture"},
+        {"docs/DSPEX_PRODUCTION_STRATEGY.md", title: "DSPex Production Strategy"},
+
+        # Archive
         {"docs/archive/design-process/README_UNIFIED_GRPC_BRIDGE.md",
-         title: "Unified gRPC Bridge (Archived)"}
+         title: "Unified gRPC Bridge (Archived)"},
+
+        # License
+        "LICENSE"
       ],
       groups_for_extras: [
         "Getting Started": [
+          "README.md",
           "guides/INSTALLATION.md",
           "docs/migration_v0.5_to_v0.6.md"
-        ],
-        Guides: [
-          "README.md",
-          "docs/guides/writing_thread_safe_adapters.md",
-          "priv/python/README_THREADING.md"
         ],
         Features: [
           "README_GRPC.md",
           "README_BIDIRECTIONAL_TOOL_BRIDGE.md",
           "README_PROCESS_MANAGEMENT.md",
-          "TELEMETRY.md"
+          "TELEMETRY.md",
+          "LOG_LEVEL_CONFIGURATION.md"
         ],
         Architecture: [
           "ARCHITECTURE.md",
-          "DIAGS.md",
-          "DIAGS2.md"
+          "DIAGRAMS.md"
+        ],
+        Guides: [
+          "docs/guides/writing_thread_safe_adapters.md",
+          "priv/python/README_THREADING.md"
         ],
         Testing: [
           "README_TESTING.md",
@@ -212,14 +223,17 @@ defmodule Snakepit.MixProject do
           "docs/GRPC_QUICK_REFERENCE.md",
           "docs/telemetry_events.md",
           "docs/performance_benchmarks.md",
+          "docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md"
+        ],
+        Ecosystem: [
           "docs/ECOSYSTEM_ARCHITECTURE.md",
           "docs/DSPEX_PRODUCTION_STRATEGY.md"
         ],
-        Advanced: [
-          "docs/architecture/adr-001-worker-starter-supervision-pattern.md"
-        ],
         "Release Notes": [
           "CHANGELOG.md"
+        ],
+        License: [
+          "LICENSE"
         ],
         Archive: [
           "docs/archive/design-process/README_UNIFIED_GRPC_BRIDGE.md"
@@ -228,8 +242,7 @@ defmodule Snakepit.MixProject do
       groups_for_modules: [
         "Core API": [
           Snakepit,
-          Snakepit.Adapter,
-          Snakepit.SessionHelpers
+          Snakepit.Adapter
         ],
         "Pool Management": [
           Snakepit.Pool,
@@ -271,8 +284,9 @@ defmodule Snakepit.MixProject do
           Snakepit.TelemetryMetrics
         ],
         Utilities: [
-          Snakepit.Utils,
-          Snakepit.RunID
+          Snakepit.RunID,
+          Snakepit.Config,
+          Snakepit.Error
         ]
       ],
       before_closing_head_tag: &docs_before_closing_head_tag/1,

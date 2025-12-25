@@ -9,6 +9,7 @@ defmodule Snakepit.Telemetry.SafeMetadata do
   remains as strings.
   """
 
+  alias Snakepit.Telemetry.Naming
   # Metadata keys that are safe to convert to atoms
   @allowed_atom_keys [
     :node,
@@ -99,7 +100,7 @@ defmodule Snakepit.Telemetry.SafeMetadata do
   def measurements(measurements) when is_map(measurements) do
     result =
       Enum.reduce_while(measurements, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
-        case Snakepit.Telemetry.Naming.measurement_key(key) do
+        case Naming.measurement_key(key) do
           {:ok, atom_key} ->
             {:cont, {:ok, Map.put(acc, atom_key, value)}}
 
@@ -122,17 +123,15 @@ defmodule Snakepit.Telemetry.SafeMetadata do
   end
 
   defp safe_key(key) when is_binary(key) do
-    try do
-      atom_key = String.to_existing_atom(key)
+    atom_key = String.to_existing_atom(key)
 
-      if atom_key in @allowed_atom_keys do
-        atom_key
-      else
-        key
-      end
-    rescue
-      ArgumentError -> key
+    if atom_key in @allowed_atom_keys do
+      atom_key
+    else
+      key
     end
+  rescue
+    ArgumentError -> key
   end
 
   defp safe_key(key), do: to_string(key)

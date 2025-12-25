@@ -16,10 +16,8 @@ defmodule Snakepit.StreamingRegressionTest do
     @impl true
     def script_args, do: []
 
-    @impl true
     def supported_commands, do: []
 
-    @impl true
     def validate_command(_command, _args), do: :ok
 
     def uses_grpc?, do: false

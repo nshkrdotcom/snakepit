@@ -110,7 +110,8 @@ defmodule Snakepit.SessionAffinityTest do
       # All should succeed
       assert length(results) == 10
 
-      # TODO: Verify they used same worker (would need worker_id in response)
+      # NOTE: Unable to verify all requests used the same worker without worker_id in response.
+      # This is a known limitation of the current response format.
     end
   end
 

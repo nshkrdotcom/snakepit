@@ -1,24 +1,25 @@
 defmodule Snakepit.GRPC.BridgeServerTest do
   use Snakepit.TestCase, async: false
 
+  alias GRPC.Status
+
+  alias Google.Protobuf.{Any, Timestamp}
+
+  alias Snakepit.Bridge.{
+    ExecuteElixirToolRequest,
+    ExecuteElixirToolResponse,
+    ExecuteToolRequest,
+    ExecuteToolResponse,
+    InitializeSessionRequest,
+    InitializeSessionResponse,
+    PingRequest,
+    PingResponse
+  }
+
   alias Snakepit.Bridge.SessionStore
   alias Snakepit.Bridge.ToolRegistry
   alias Snakepit.GRPC.BridgeServer
   alias Snakepit.GRPCWorker
-
-  alias Snakepit.Bridge.{
-    PingRequest,
-    PingResponse,
-    InitializeSessionRequest,
-    InitializeSessionResponse,
-    ExecuteToolRequest,
-    ExecuteToolResponse,
-    ExecuteElixirToolRequest,
-    ExecuteElixirToolResponse
-  }
-
-  alias Google.Protobuf.{Timestamp, Any}
-  alias GRPC.Status
 
   setup do
     # Start SessionStore

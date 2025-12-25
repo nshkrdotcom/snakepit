@@ -19,8 +19,6 @@ defmodule Snakepit.Bridge.SessionStore do
   # 1 hour
   @default_ttl 3600
   @default_max_sessions 10_000
-  @default_max_programs_per_session 200
-  @default_max_global_programs 10_000
 
   ## Client API
 
@@ -107,7 +105,7 @@ defmodule Snakepit.Bridge.SessionStore do
   ## Examples
 
       {:ok, session} = SessionStore.update_session("session_123", fn session ->
-        Session.put_program(session, "prog_1", %{data: "example"})
+        Map.put(session, :data, %{key: "value"})
       end)
   """
   @spec update_session(String.t(), (Session.t() -> Session.t())) ::
@@ -217,83 +215,20 @@ defmodule Snakepit.Bridge.SessionStore do
     GenServer.call(server, {:session_exists, session_id})
   end
 
-  ## Global Program Storage API
-
   @doc """
-  Stores a program globally, accessible to any worker.
-
-  This is used for anonymous operations where programs need to be
-  accessible across different pool workers.
-
-  ## Parameters
-
-  - `program_id` - Unique program identifier
-  - `program_data` - Program data to store
-
-  ## Returns
-
-  `:ok` if successful, `{:error, reason}` if failed.
+  Stores worker-session affinity mapping.
   """
-  @spec store_global_program(String.t(), map()) :: :ok | {:error, term()}
-  def store_global_program(program_id, program_data) when is_binary(program_id) do
-    store_global_program(__MODULE__, program_id, program_data)
-  end
-
-  @spec store_global_program(GenServer.server(), String.t(), map()) :: :ok | {:error, term()}
-  def store_global_program(server, program_id, program_data) when is_binary(program_id) do
-    GenServer.call(server, {:store_global_program, program_id, program_data})
-  end
-
-  @doc """
-  Retrieves a globally stored program.
-
-  ## Parameters
-
-  - `program_id` - The program identifier
-
-  ## Returns
-
-  `{:ok, program_data}` if found, `{:error, :not_found}` if not found.
-  """
-  @spec get_global_program(String.t()) :: {:ok, map()} | {:error, :not_found}
-  def get_global_program(program_id) when is_binary(program_id) do
-    get_global_program(__MODULE__, program_id)
-  end
-
-  @spec get_global_program(GenServer.server(), String.t()) :: {:ok, map()} | {:error, :not_found}
-  def get_global_program(server, program_id) when is_binary(program_id) do
-    GenServer.call(server, {:get_global_program, program_id})
-  end
-
-  @doc """
-  Deletes a globally stored program.
-
-  ## Parameters
-
-  - `program_id` - The program identifier
-
-  ## Returns
-
-  `:ok` always (idempotent operation).
-  """
-  @spec delete_global_program(String.t()) :: :ok
-  def delete_global_program(program_id) when is_binary(program_id) do
-    delete_global_program(__MODULE__, program_id)
-  end
-
-  @spec delete_global_program(GenServer.server(), String.t()) :: :ok
-  def delete_global_program(server, program_id) when is_binary(program_id) do
-    GenServer.call(server, {:delete_global_program, program_id})
+  @spec store_worker_session(String.t(), String.t()) :: :ok
+  def store_worker_session(session_id, worker_id) do
+    GenServer.call(__MODULE__, {:upsert_worker_session, session_id, worker_id})
   end
 
   ## GenServer Callbacks
 
   @impl true
   def init(opts) do
-    # Get table name from options or use default
     table_name = Keyword.get(opts, :table_name, @default_table_name)
 
-    # Create ETS table with optimized concurrency settings
     table =
       :ets.new(table_name, [
         :set,
@@ -304,107 +239,42 @@ defmodule Snakepit.Bridge.SessionStore do
         {:decentralized_counters, true}
       ])
 
-    # Create global programs table
-    global_programs_table_name = :"#{table_name}_global_programs"
-
-    global_programs_table =
-      :ets.new(global_programs_table_name, [
-        :set,
-        :protected,
-        :named_table,
-        {:read_concurrency, true},
-        {:write_concurrency, true},
-        {:decentralized_counters, true}
-      ])
-
     cleanup_interval = Keyword.get(opts, :cleanup_interval, @cleanup_interval)
     default_ttl = Keyword.get(opts, :default_ttl, @default_ttl)
-    # 1 hour default
-    global_program_ttl = Keyword.get(opts, :global_program_ttl, 3600)
 
     quota_config = Application.get_env(:snakepit, :session_store, %{})
+    max_sessions = resolve_quota(opts, quota_config, :max_sessions, @default_max_sessions)
 
-    max_sessions =
-      resolve_quota(opts, quota_config, :max_sessions, @default_max_sessions)
-
-    max_programs_per_session =
-      resolve_quota(
-        opts,
-        quota_config,
-        :max_programs_per_session,
-        @default_max_programs_per_session
-      )
-
-    max_global_programs =
-      resolve_quota(opts, quota_config, :max_global_programs, @default_max_global_programs)
-
-    # Schedule periodic cleanup
     Process.send_after(self(), :cleanup_expired_sessions, cleanup_interval)
 
     state = %{
       table: table,
       table_name: table_name,
-      global_programs_table: global_programs_table,
-      global_programs_table_name: global_programs_table_name,
       cleanup_interval: cleanup_interval,
       default_ttl: default_ttl,
-      global_program_ttl: global_program_ttl,
       max_sessions: max_sessions,
-      max_programs_per_session: max_programs_per_session,
-      max_global_programs: max_global_programs,
       stats: %{
         sessions_created: 0,
         sessions_deleted: 0,
         sessions_expired: 0,
-        cleanup_runs: 0,
-        global_programs_stored: 0,
-        global_programs_deleted: 0,
-        global_programs_expired: 0
+        cleanup_runs: 0
       }
     }
 
-    SLog.info(
-      "SessionStore started with table #{table} and global programs table #{global_programs_table}"
-    )
+    SLog.info("SessionStore started with table #{table}")
 
     {:ok, state}
   end
 
   @impl true
   def handle_call({:create_session, session_id, opts}, _from, state) do
-    # Set default TTL if not provided
     opts = Keyword.put_new(opts, :ttl, state.default_ttl)
     session = Session.new(session_id, opts)
 
-    case Session.validate(session) do
-      :ok ->
-        # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
-        ets_record = {session_id, {session.last_accessed, session.ttl, session}}
-
-        cond do
-          session_quota_reached?(state) ->
-            {:reply, {:error, :session_quota_exceeded}, state}
-
-          true ->
-            # Atomic insert-if-not-exists
-            case :ets.insert_new(state.table, ets_record) do
-              true ->
-                # We created the session
-                SLog.debug("Created new session: #{session_id}")
-                new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
-                {:reply, {:ok, session}, %{state | stats: new_stats}}
-
-              false ->
-                # Session already exists - return the existing one
-                SLog.debug("Session #{session_id} already exists - reusing (concurrent init)")
-
-                [{^session_id, {_last_accessed, _ttl, existing_session}}] =
-                  :ets.lookup(state.table, session_id)
-
-                {:reply, {:ok, existing_session}, state}
-            end
-        end
-
+    with :ok <- Session.validate(session),
+         :ok <- check_session_quota(state) do
+      insert_new_session(session_id, session, state)
+    else
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
@@ -419,9 +289,8 @@ defmodule Snakepit.Bridge.SessionStore do
 
           case Session.validate(updated_session) do
             :ok ->
-              # Touch the session to update last_accessed
               touched_session = Session.touch(updated_session)
-              # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
+
               ets_record =
                 {session_id,
                  {touched_session.last_accessed, touched_session.ttl, touched_session}}
@@ -468,9 +337,8 @@ defmodule Snakepit.Bridge.SessionStore do
   def handle_call({:get_session, session_id}, _from, state) do
     case :ets.lookup(state.table, session_id) do
       [{^session_id, {_last_accessed, _ttl, session}}] ->
-        # Touch the session to update last_accessed
         touched_session = Session.touch(session)
-        # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
+
         ets_record =
           {session_id, {touched_session.last_accessed, touched_session.ttl, touched_session}}
 
@@ -507,83 +375,14 @@ defmodule Snakepit.Bridge.SessionStore do
   end
 
   @impl true
-  def handle_call({:store_global_program, program_id, program_data}, _from, state) do
-    # Store with timestamp for potential TTL cleanup
-    timestamp = System.monotonic_time(:second)
-    program_entry = {program_id, program_data, timestamp}
-
-    case :ets.lookup(state.global_programs_table, program_id) do
-      [{^program_id, _existing, _old_timestamp}] ->
-        :ets.insert(state.global_programs_table, program_entry)
-        {:reply, :ok, state}
-
-      [] ->
-        if global_program_quota_reached?(state) do
-          {:reply, {:error, :global_program_quota_exceeded}, state}
-        else
-          :ets.insert(state.global_programs_table, program_entry)
-          new_stats = Map.update!(state.stats, :global_programs_stored, &(&1 + 1))
-          {:reply, :ok, %{state | stats: new_stats}}
-        end
-    end
-  end
-
-  @impl true
-  def handle_call({:get_global_program, program_id}, _from, state) do
-    case :ets.lookup(state.global_programs_table, program_id) do
-      [{^program_id, program_data, _timestamp}] ->
-        {:reply, {:ok, program_data}, state}
-
-      [] ->
-        {:reply, {:error, :not_found}, state}
-    end
-  end
-
-  @impl true
-  def handle_call({:delete_global_program, program_id}, _from, state) do
-    :ets.delete(state.global_programs_table, program_id)
-
-    new_stats = Map.update!(state.stats, :global_programs_deleted, &(&1 + 1))
-    {:reply, :ok, %{state | stats: new_stats}}
-  end
-
-  @impl true
-  def handle_call({:store_program, session_id, program_id, program_data}, _from, state) do
-    case :ets.lookup(state.table, session_id) do
-      [{^session_id, {_last_accessed, _ttl, session}}] ->
-        is_update = Map.has_key?(session.programs, program_id)
-
-        if is_update or not program_quota_reached?(session, state.max_programs_per_session) do
-          updated_session =
-            session
-            |> Session.put_program(program_id, program_data)
-            |> Session.touch()
-
-          ets_record =
-            {session_id, {updated_session.last_accessed, updated_session.ttl, updated_session}}
-
-          :ets.insert(state.table, ets_record)
-          {:reply, :ok, state}
-        else
-          {:reply, {:error, {:program_quota_exceeded, session_id}}, state}
-        end
-
-      [] ->
-        {:reply, {:error, :not_found}, state}
-    end
-  end
-
-  @impl true
   def handle_call({:upsert_worker_session, session_id, worker_id}, _from, state) do
     case :ets.lookup(state.table, session_id) do
       [{^session_id, {_last_accessed, _ttl, session}}] ->
-        # Session exists, update it
         updated_session =
           session
           |> Map.put(:last_worker_id, worker_id)
           |> Session.touch()
 
-        # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
         ets_record =
           {session_id, {updated_session.last_accessed, updated_session.ttl, updated_session}}
 
@@ -591,7 +390,6 @@ defmodule Snakepit.Bridge.SessionStore do
         {:reply, :ok, state}
 
       [] ->
-        # Session doesn't exist, create it with worker affinity
         opts = [ttl: state.default_ttl]
 
         session =
@@ -600,14 +398,12 @@ defmodule Snakepit.Bridge.SessionStore do
 
         case Session.validate(session) do
           :ok ->
-            # Store as {session_id, {last_accessed, ttl, session}} for efficient cleanup
             ets_record = {session_id, {session.last_accessed, session.ttl, session}}
             :ets.insert(state.table, ets_record)
             new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
             {:reply, :ok, %{state | stats: new_stats}}
 
           {:error, reason} ->
-            # Session affinity is best-effort; log validation errors but don't fail
             SLog.warning("Failed to validate session for worker affinity: #{inspect(reason)}")
             {:reply, :ok, state}
         end
@@ -617,18 +413,8 @@ defmodule Snakepit.Bridge.SessionStore do
   @impl true
   def handle_info(:cleanup_expired_sessions, state) do
     {_expired_count, new_stats} = do_cleanup_expired_sessions(state.table, state.stats)
-
-    {_expired_global_count, newer_stats} =
-      do_cleanup_expired_global_programs(
-        state.global_programs_table,
-        state.global_program_ttl,
-        new_stats
-      )
-
-    # Schedule next cleanup
     Process.send_after(self(), :cleanup_expired_sessions, state.cleanup_interval)
-
-    {:noreply, %{state | stats: newer_stats}}
+    {:noreply, %{state | stats: new_stats}}
   end
 
   @impl true
@@ -637,62 +423,11 @@ defmodule Snakepit.Bridge.SessionStore do
     {:noreply, state}
   end
 
-  @doc """
-  Stores a program in a session.
-  """
-  @spec store_program(String.t(), String.t(), map()) :: :ok | {:error, term()}
-  def store_program(session_id, program_id, program_data) do
-    store_program(__MODULE__, session_id, program_id, program_data)
-  end
-
-  @spec store_program(GenServer.server(), String.t(), String.t(), map()) :: :ok | {:error, term()}
-  def store_program(server, session_id, program_id, program_data)
-      when is_binary(session_id) and is_binary(program_id) do
-    GenServer.call(server, {:store_program, session_id, program_id, program_data})
-  end
-
-  @doc """
-  Updates a program in a session.
-  """
-  @spec update_program(String.t(), String.t(), map()) :: :ok | {:error, term()}
-  def update_program(session_id, program_id, program_data) do
-    store_program(session_id, program_id, program_data)
-  end
-
-  @doc """
-  Gets a program from a session.
-  """
-  @spec get_program(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found}
-  def get_program(session_id, program_id) do
-    case get_session(session_id) do
-      {:ok, session} ->
-        programs = Map.get(session, :programs, %{})
-
-        case Map.get(programs, program_id) do
-          nil -> {:error, :not_found}
-          program_data -> {:ok, program_data}
-        end
-
-      {:error, :not_found} ->
-        {:error, :not_found}
-    end
-  end
-
-  @doc """
-  Stores worker-session affinity mapping.
-  """
-  @spec store_worker_session(String.t(), String.t()) :: :ok
-  def store_worker_session(session_id, worker_id) do
-    GenServer.call(__MODULE__, {:upsert_worker_session, session_id, worker_id})
-  end
-
   ## Private Functions
 
   defp do_cleanup_expired_sessions(table, stats) do
     current_time = System.monotonic_time(:second)
 
-    # High-performance cleanup using ETS select_delete with optimized storage format
-    # Match on {session_id, {last_accessed, ttl, _session}} where last_accessed + ttl < current_time
     match_spec = [
       {{:_, {:"$1", :"$2", :_}},
        [
@@ -700,8 +435,6 @@ defmodule Snakepit.Bridge.SessionStore do
        ], [true]}
     ]
 
-    # Atomically find and delete all expired sessions using native ETS operations
-    # This runs in C code and doesn't block the GenServer process
     expired_count = :ets.select_delete(table, match_spec)
 
     if expired_count > 0 do
@@ -714,29 +447,6 @@ defmodule Snakepit.Bridge.SessionStore do
       stats
       |> Map.update(:sessions_expired, expired_count, &(&1 + expired_count))
       |> Map.update(:cleanup_runs, 1, &(&1 + 1))
-
-    {expired_count, new_stats}
-  end
-
-  # Clean up expired global programs using efficient ETS select_delete
-  defp do_cleanup_expired_global_programs(table, ttl, stats) do
-    current_time = System.monotonic_time(:second)
-    expiration_time = current_time - ttl
-
-    # Match spec: {program_id, _program_data, timestamp} where timestamp < expiration_time
-    # In the tuple: program_id is at element 1, program_data is at element 2, timestamp is at element 3
-    match_spec = [
-      {{:_, :_, :"$1"}, [{:<, :"$1", expiration_time}], [true]}
-    ]
-
-    # Atomically find and delete all expired global programs
-    expired_count = :ets.select_delete(table, match_spec)
-
-    if expired_count > 0 do
-      SLog.debug("Cleaned up #{expired_count} expired global programs")
-    end
-
-    new_stats = Map.update(stats, :global_programs_expired, expired_count, &(&1 + expired_count))
 
     {expired_count, new_stats}
   end
@@ -765,16 +475,30 @@ defmodule Snakepit.Bridge.SessionStore do
     :ets.info(state.table, :size) >= state.max_sessions
   end
 
-  defp global_program_quota_reached?(%{max_global_programs: :infinity}), do: false
-
-  defp global_program_quota_reached?(state) do
-    :ets.info(state.global_programs_table, :size) >= state.max_global_programs
+  defp check_session_quota(state) do
+    if session_quota_reached?(state) do
+      {:error, :session_quota_exceeded}
+    else
+      :ok
+    end
   end
 
-  defp program_quota_reached?(_session, :infinity), do: false
+  defp insert_new_session(session_id, session, state) do
+    ets_record = {session_id, {session.last_accessed, session.ttl, session}}
 
-  defp program_quota_reached?(session, limit) do
-    programs = Map.get(session, :programs, %{})
-    map_size(programs) >= limit
+    case :ets.insert_new(state.table, ets_record) do
+      true ->
+        SLog.debug("Created new session: #{session_id}")
+        new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
+        {:reply, {:ok, session}, %{state | stats: new_stats}}
+
+      false ->
+        SLog.debug("Session #{session_id} already exists - reusing (concurrent init)")
+
+        [{^session_id, {_last_accessed, _ttl, existing_session}}] =
+          :ets.lookup(state.table, session_id)
+
+        {:reply, {:ok, existing_session}, state}
+    end
   end
 end

@@ -7,6 +7,8 @@ defmodule Snakepit.Test.MockGRPCWorker do
   use Supertester.TestableGenServer
   require Logger
 
+  alias Snakepit.Pool.ProcessRegistry
+
   # Module interface expected by Pool
   def execute(worker_id, command, args, timeout) do
     case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
@@ -54,7 +56,7 @@ defmodule Snakepit.Test.MockGRPCWorker do
       {:ok, connection} ->
         # Register with ProcessRegistry for consistency with GRPCWorker
         # Use nil for process_pid since mock doesn't spawn external process
-        Snakepit.Pool.ProcessRegistry.register_worker(
+        ProcessRegistry.register_worker(
           worker_id,
           self(),
           nil,
@@ -108,7 +110,7 @@ defmodule Snakepit.Test.MockGRPCWorker do
     Registry.unregister(Snakepit.Pool.Registry, state.id)
 
     # Unregister from ProcessRegistry for consistency with GRPCWorker
-    Snakepit.Pool.ProcessRegistry.unregister_worker(state.id)
+    ProcessRegistry.unregister_worker(state.id)
 
     :ok
   end

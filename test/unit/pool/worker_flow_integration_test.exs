@@ -5,6 +5,8 @@ defmodule Snakepit.Pool.WorkerFlowIntegrationTest do
 
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.Pool.Registry, as: PoolRegistry
+  alias Snakepit.Pool.WorkerSupervisor
+  alias Snakepit.Test.MockGRPCWorker
 
   setup do
     worker_id = "integration_worker_#{System.unique_integer([:positive])}"
@@ -15,9 +17,9 @@ defmodule Snakepit.Pool.WorkerFlowIntegrationTest do
     }
 
     {:ok, _starter_pid} =
-      Snakepit.Pool.WorkerSupervisor.start_worker(
+      WorkerSupervisor.start_worker(
         worker_id,
-        Snakepit.Test.MockGRPCWorker,
+        MockGRPCWorker,
         Snakepit.TestAdapters.MockGRPCAdapter,
         self(),
         worker_config
@@ -29,14 +31,14 @@ defmodule Snakepit.Pool.WorkerFlowIntegrationTest do
     )
 
     on_exit(fn ->
-      Snakepit.Pool.WorkerSupervisor.stop_worker(worker_id)
+      WorkerSupervisor.stop_worker(worker_id)
     end)
 
     {:ok, %{worker_id: worker_id}}
   end
 
   test "worker executes requests and remains tracked", %{worker_id: worker_id} do
-    {:ok, result} = Snakepit.Test.MockGRPCWorker.execute(worker_id, "ping", %{}, 5_000)
+    {:ok, result} = MockGRPCWorker.execute(worker_id, "ping", %{}, 5_000)
     assert result["status"] == "pong"
 
     assert ProcessRegistry.worker_registered?(worker_id)
@@ -58,7 +60,7 @@ defmodule Snakepit.Pool.WorkerFlowIntegrationTest do
       interval: 50
     )
 
-    {:ok, result} = Snakepit.Test.MockGRPCWorker.execute(worker_id, "ping", %{}, 5_000)
+    {:ok, result} = MockGRPCWorker.execute(worker_id, "ping", %{}, 5_000)
     assert result["status"] == "pong"
     assert ProcessRegistry.worker_registered?(worker_id)
   end

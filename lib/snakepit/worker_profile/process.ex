@@ -39,6 +39,7 @@ defmodule Snakepit.WorkerProfile.Process do
   require Logger
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.Registry, as: PoolRegistry
+  alias Snakepit.Pool.WorkerSupervisor
 
   @impl true
   def start_worker(config) do
@@ -51,7 +52,7 @@ defmodule Snakepit.WorkerProfile.Process do
     config_with_env = apply_adapter_env(config)
 
     # Start the worker via the WorkerSupervisor, passing worker_config for lifecycle management
-    case Snakepit.Pool.WorkerSupervisor.start_worker(
+    case WorkerSupervisor.start_worker(
            worker_id,
            worker_module,
            adapter_module,
@@ -71,7 +72,7 @@ defmodule Snakepit.WorkerProfile.Process do
   def stop_worker(worker_pid) when is_pid(worker_pid) do
     case PoolRegistry.get_worker_id_by_pid(worker_pid) do
       {:ok, worker_id} ->
-        case Snakepit.Pool.WorkerSupervisor.stop_worker(worker_id) do
+        case WorkerSupervisor.stop_worker(worker_id) do
           {:error, :worker_not_found} -> :ok
           other -> other
         end
@@ -83,7 +84,7 @@ defmodule Snakepit.WorkerProfile.Process do
   end
 
   def stop_worker(worker_id) when is_binary(worker_id) do
-    Snakepit.Pool.WorkerSupervisor.stop_worker(worker_id)
+    WorkerSupervisor.stop_worker(worker_id)
   end
 
   @impl true

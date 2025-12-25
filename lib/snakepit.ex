@@ -20,16 +20,9 @@ defmodule Snakepit do
 
       # Session-based execution with worker affinity
       {:ok, result} = Snakepit.execute_in_session("my_session", "command", %{})
-
-  ## Domain-Specific Helpers
-
-  For ML/DSP workflows with program management, see `Snakepit.SessionHelpers`:
-
-      # ML program creation and execution
-      {:ok, result} = Snakepit.SessionHelpers.execute_program_command(
-        "session_id", "create_program", %{signature: "input -> output"}
-      )
   """
+
+  alias Snakepit.Pool.ProcessRegistry
 
   # Type definitions
   @type command :: String.t()
@@ -65,7 +58,6 @@ defmodule Snakepit do
   the same worker when possible for state continuity.
 
   Args are passed through unchanged - no domain-specific enhancement.
-  For ML/DSP program workflows, use `Snakepit.SessionHelpers.execute_program_command/4`.
   """
   @spec execute_in_session(session_id(), command(), args(), keyword()) ::
           {:ok, result()} | {:error, Snakepit.Error.t()}
@@ -125,13 +117,13 @@ defmodule Snakepit do
 
     adapter = Application.get_env(:snakepit, :adapter_module)
 
-    unless function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+    if function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+      Snakepit.Pool.execute_stream(command, args, callback_fn, opts)
+    else
       {:error,
        Snakepit.Error.validation_error("Streaming not supported by adapter", %{
          adapter: adapter
        })}
-    else
-      Snakepit.Pool.execute_stream(command, args, callback_fn, opts)
     end
   end
 
@@ -145,14 +137,14 @@ defmodule Snakepit do
 
     adapter = Application.get_env(:snakepit, :adapter_module)
 
-    unless function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+    if function_exported?(adapter, :uses_grpc?, 0) and adapter.uses_grpc?() do
+      opts_with_session = Keyword.put(opts, :session_id, session_id)
+      Snakepit.Pool.execute_stream(command, args, callback_fn, opts_with_session)
+    else
       {:error,
        Snakepit.Error.validation_error("Streaming not supported by adapter", %{
          adapter: adapter
        })}
-    else
-      opts_with_session = Keyword.put(opts, :session_id, session_id)
-      Snakepit.Pool.execute_stream(command, args, callback_fn, opts_with_session)
     end
   end
 
@@ -329,11 +321,9 @@ defmodule Snakepit do
   end
 
   defp safe_beam_run_id do
-    try do
-      Snakepit.Pool.ProcessRegistry.get_beam_run_id()
-    catch
-      _, _ -> nil
-    end
+    ProcessRegistry.get_beam_run_id()
+  catch
+    _, _ -> nil
   end
 
   defp maybe_cleanup_orphaned_workers(nil, _timeout_ms), do: :ok
@@ -442,6 +432,4 @@ defmodule Snakepit do
       value -> String.downcase(String.trim(value)) in ["1", "true", "yes", "y", "on"]
     end
   end
-
-  # Note: For ML/DSP program management functionality, see Snakepit.SessionHelpers
 end
