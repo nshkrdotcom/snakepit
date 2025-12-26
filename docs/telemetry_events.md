@@ -1,6 +1,6 @@
 # Snakepit Telemetry Events
 
-Comprehensive reference for all telemetry events emitted by Snakepit v0.6.0+.
+Comprehensive reference for all telemetry events emitted by Snakepit v0.7.4+.
 
 ## Overview
 
@@ -77,6 +77,152 @@ Emitted when a worker successfully starts (future enhancement).
   pool: :hpc_pool,
   profile: :process | :thread,
   capacity: 1 | 16  # Depends on profile
+}
+```
+
+#### `[:snakepit, :worker, :crash]`
+
+Emitted when a worker crash is detected and classified by the crash barrier.
+
+**Measurements:**
+- (none)
+
+**Metadata:**
+```elixir
+%{
+  worker_id: "pool_worker_123",
+  pool: :hpc_pool,
+  reason: term(),
+  exit_code: integer() | nil,
+  device: :cuda | nil
+}
+```
+
+#### `[:snakepit, :worker, :tainted]`
+
+Emitted when a worker is tainted after a crash.
+
+**Measurements:**
+- `duration_ms: integer()` - Taint duration
+
+**Metadata:**
+```elixir
+%{
+  worker_id: "pool_worker_123",
+  pool: :hpc_pool,
+  reason: term(),
+  exit_code: integer() | nil,
+  device: :cuda | nil
+}
+```
+
+#### `[:snakepit, :worker, :restarted]`
+
+Emitted when a tainted worker is restarted.
+
+**Measurements:**
+- (none)
+
+**Metadata:**
+```elixir
+%{
+  worker_id: "pool_worker_123",
+  pool: :hpc_pool,
+  reason: term(),
+  exit_code: integer() | nil,
+  device: :cuda | nil
+}
+```
+
+---
+
+### Zero-Copy Events
+
+#### `[:snakepit, :zero_copy, :export]`
+
+Emitted when a zero-copy handle is exported.
+
+**Measurements:**
+- `duration_ms: float()`
+- `bytes: integer()` - Payload size when available
+
+**Metadata:**
+```elixir
+%{
+  kind: :dlpack | :arrow,
+  device: :cpu | :cuda | term(),
+  dtype: atom() | String.t(),
+  shape: tuple() | list()
+}
+```
+
+#### `[:snakepit, :zero_copy, :import]`
+
+Emitted when a zero-copy handle is imported.
+
+**Measurements:**
+- `duration_ms: float()`
+- `bytes: integer()` - Payload size when available
+
+**Metadata:**
+```elixir
+%{
+  kind: :dlpack | :arrow,
+  device: :cpu | :cuda | term(),
+  dtype: atom() | String.t(),
+  shape: tuple() | list()
+}
+```
+
+#### `[:snakepit, :zero_copy, :fallback]`
+
+Emitted when zero-copy is unavailable and a copy fallback is used.
+
+**Measurements:**
+- `duration_ms: float()`
+- `bytes: integer()` - Payload size when available
+
+**Metadata:**
+```elixir
+%{
+  kind: :dlpack | :arrow,
+  device: :cpu | :cuda | term(),
+  dtype: atom() | String.t(),
+  shape: tuple() | list()
+}
+```
+
+### Python Exception Translation
+
+#### `[:snakepit, :python, :exception, :mapped]`
+
+Emitted when a Python exception is mapped to a specific `Snakepit.Error.*` struct.
+
+**Measurements:**
+- (none)
+
+**Metadata:**
+```elixir
+%{
+  python_type: "ValueError",
+  library: "numpy",
+  function: "mean"
+}
+```
+
+#### `[:snakepit, :python, :exception, :unmapped]`
+
+Emitted when a Python exception falls back to `Snakepit.Error.PythonException`.
+
+**Measurements:**
+- (none)
+
+**Metadata:**
+```elixir
+%{
+  python_type: "CustomError",
+  library: "custom_lib",
+  function: "run"
 }
 ```
 

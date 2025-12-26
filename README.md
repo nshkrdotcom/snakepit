@@ -21,6 +21,10 @@ Snakepit is an Elixir library for managing pools of external language workers (P
 - **Bidirectional tool bridge** allowing Python to call Elixir functions and vice versa
 - **Production-ready process management** with automatic orphan cleanup
 - **Comprehensive telemetry** with OpenTelemetry support
+- **Zero-copy data interop** via DLPack and Arrow (optional)
+- **Crash barrier** with tainting and idempotent retries (optional)
+- **Hermetic Python runtime** via uv-managed installs (optional)
+- **Structured exception translation** for Python errors (pattern-matchable)
 
 ## Installation
 
@@ -29,7 +33,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.7.3"}
+    {:snakepit, "~> 0.7.4"}
   ]
 end
 ```
@@ -52,7 +56,10 @@ config :snakepit,
   pooling_enabled: true,
   adapter_module: Snakepit.Adapters.GRPCPython,
   adapter_args: ["--adapter", "your_adapter_module"],
-  pool_size: 10
+  pool_size: 10,
+  zero_copy: [enabled: true],
+  crash_barrier: [enabled: true, max_retries: 1, taint_ms: 5_000],
+  python: [strategy: :uv, managed: true, python_version: "3.12.3"]
 ```
 
 ### Basic Usage
@@ -195,6 +202,59 @@ OpenTelemetry integration for distributed tracing:
 
 ```elixir
 config :snakepit, :opentelemetry, %{enabled: true}
+```
+
+### Zero-Copy Interop
+Use `Snakepit.ZeroCopy` for DLPack/Arrow handle lifecycle:
+
+```elixir
+{:ok, dlpack} = Snakepit.ZeroCopy.to_dlpack(tensor)
+{:ok, tensor} = Snakepit.ZeroCopy.from_dlpack(dlpack)
+:ok = Snakepit.ZeroCopy.close(dlpack)
+```
+
+### Crash Barrier & Idempotent Retries
+Crash barrier classifies worker crashes, taints unstable workers, and retries
+idempotent calls when allowed:
+
+```elixir
+config :snakepit, :crash_barrier,
+  enabled: true,
+  retry: :idempotent,
+  max_retries: 1,
+  taint_ms: 5_000
+
+case Snakepit.execute("load_model", %{idempotent: true, model_id: "v1"}) do
+  {:ok, result} -> result
+  {:error, error} -> raise "Call failed: #{Exception.message(error)}"
+end
+```
+
+### Hermetic Python Runtime
+Use uv-managed installs for deterministic Python runtimes:
+
+```elixir
+config :snakepit, :python,
+  strategy: :uv,
+  managed: true,
+  python_version: "3.12.3",
+  runtime_dir: "priv/snakepit/python"
+
+mix snakepit.setup
+mix snakepit.doctor
+```
+
+### Exception Translation
+Python exceptions map to pattern-matchable Elixir structs:
+
+```elixir
+case Snakepit.execute("error_demo", %{error_type: "value"}) do
+  {:error, %Snakepit.Error.ValueError{message: message}} ->
+    IO.puts("ValueError: #{message}")
+
+  {:error, %Snakepit.Error.PythonException{python_type: type}} ->
+    IO.puts("Unhandled Python error: #{type}")
+end
 ```
 
 ### Process Management

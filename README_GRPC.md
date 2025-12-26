@@ -1,6 +1,6 @@
 # Snakepit gRPC Streaming Guide
 
-> Updated for Snakepit v0.7.2
+> Updated for Snakepit v0.7.4
 
 ## Overview
 
@@ -88,6 +88,18 @@ pip install grpcio>=1.50.0 protobuf>=4.0.0 grpcio-tools>=1.50.0
 
 # Option 3: All features
 pip install -e ".[all]"  # Includes gRPC + MessagePack
+```
+
+### Hermetic Python (uv-managed)
+
+If you want a fully managed runtime, configure uv and let `mix snakepit.setup`
+install the interpreter:
+
+```elixir
+config :snakepit, :python,
+  strategy: :uv,
+  managed: true,
+  python_version: "3.12.3"
 ```
 
 ### Development Setup
@@ -253,6 +265,39 @@ end
 ```
 
 > **Invalid payloads**: When a tool parameter is encoded as malformed JSON the bridge returns `{:error, {:invalid_parameter, key, message}}` before contacting the worker. See `test/snakepit/grpc/bridge_server_test.exs` for real examples.
+
+### Structured Python Exceptions
+
+Python exceptions are mapped into `Snakepit.Error.*` structs so callers can
+pattern-match without string parsing:
+
+```elixir
+case Snakepit.execute("error_demo", %{error_type: "value"}) do
+  {:error, %Snakepit.Error.ValueError{message: message}} ->
+    IO.puts("ValueError: #{message}")
+
+  {:error, %Snakepit.Error.PythonException{python_type: type}} ->
+    IO.puts("Unhandled Python error: #{type}")
+end
+```
+
+### Zero-Copy Payloads
+
+When zero-copy is enabled, `Snakepit.ZeroCopyRef` values can be passed through
+`args` or `kwargs`. The bridge attempts to import/export via DLPack/Arrow and
+falls back to serialization with a telemetry event when zero-copy is unavailable.
+
+### SnakeBridge Runtime Contract
+
+SnakeBridge wrappers send payloads through `snakebridge.call` and `snakebridge.stream` and must include:
+
+- `kwargs` (even when empty)
+- `call_type` for class/method/attr calls
+- `idempotent` for crash barrier retries
+- optional `payload_version` when schemas evolve
+
+Zero-copy handles (`Snakepit.ZeroCopyRef`) can be passed through `args`/`kwargs`
+and are unpacked by the Python adapter.
 
 ## Streaming Examples
 

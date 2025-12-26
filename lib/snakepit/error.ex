@@ -3,6 +3,9 @@ defmodule Snakepit.Error do
   Structured error type for Snakepit operations.
 
   Provides detailed context for debugging cross-language and distributed system issues.
+  Python exceptions translated from the gRPC bridge are returned as
+  `Snakepit.Error.*` exception structs (see `Snakepit.Error.PythonException`).
+  `Snakepit.Error` remains the structured error type for Snakepit runtime failures.
 
   ## Error Categories
 

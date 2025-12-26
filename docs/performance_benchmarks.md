@@ -1,7 +1,7 @@
-# Performance Benchmarks: Snakepit v0.6.0
+# Performance Benchmarks: Snakepit v0.7.4
 
-**Document Version**: 1.0
-**Date**: 2025-10-11
+**Document Version**: 1.1
+**Date**: 2025-12-25
 **Test Environment**: 8-core CPU, 32GB RAM, Ubuntu 22.04, Python 3.13
 
 ---
@@ -60,6 +60,15 @@
 └────────────────────────────────────────────────────────┘
 ```
 
+### 0.7.4 Runtime Notes
+
+- Benchmarks were collected with zero-copy disabled; enabling DLPack/Arrow can
+  reduce serialization overhead for large tensors.
+- Crash barrier, hermetic Python runtime selection, and exception translation
+  are designed to keep steady-state overhead minimal.
+- When measuring latency, ensure crash barrier retries are disabled unless you
+  explicitly want retry behavior in the latency distribution.
+
 ---
 
 ## Test Methodology
@@ -77,7 +86,7 @@ Software:
   Elixir: 1.18
   Erlang/OTP: 27
   Python: 3.13.0 (free-threading enabled)
-  Snakepit: v0.6.0
+  Snakepit: v0.7.4
 ```
 
 ### Test Configurations
@@ -614,7 +623,7 @@ Process:                Thread:
 
 ### For Existing v0.5.1 Users
 
-1. **No changes required** - Process profile maintains v0.5.1 behavior
+1. **No changes required** - Process profile maintains v0.5.1 behavior through v0.7.4
 2. **Add worker recycling** - Prevent memory leaks:
    ```elixir
    worker_ttl: {3600, :seconds}

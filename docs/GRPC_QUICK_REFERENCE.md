@@ -21,6 +21,9 @@ streaming behaviour end-to-end.
   iterators into gRPC streams using an `asyncio.Queue`.
 - ✅ Regression coverage lives in `test/snakepit/streaming_regression_test.exs` with supplemental unit tests for quotas, channel reuse, and logging redaction.
 - ✅ A runnable showcase lives in `examples/stream_progress_demo.exs`.
+- ✅ Runtime payloads now include `kwargs`, `call_type`, `idempotent`, and optional `payload_version`.
+- ✅ Zero-copy handles flow through payloads as `Snakepit.ZeroCopyRef` when enabled.
+- ✅ Python exceptions map to `Snakepit.Error.*` structs with telemetry events.
 
 ## Adapter Entry Points
 
@@ -124,3 +127,12 @@ Use the `"is_final"` flag to trigger completion handlers without relying on the
 stream returning an empty chunk. When the bridge cannot decode `ToolChunk.data`
 as JSON it exposes a `"raw_data_base64"` field instead, so you can still inspect
 the payload safely.
+
+## Runtime Contract Fields
+
+When integrating with SnakeBridge wrappers, expect these fields in payloads:
+
+- `kwargs` (always present, may be empty)
+- `call_type` (`:function`, `:class`, `:method`, `:attr`)
+- `idempotent` (used by crash barrier retry policy)
+- `payload_version` (optional schema evolution marker)

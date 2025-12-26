@@ -72,7 +72,7 @@ defmodule AdvancedExample do
             {:ok, result}
 
           {:error, reason} ->
-            IO.puts("  ✗ #{name}: #{inspect(reason)}")
+            IO.puts("  ✗ #{name}: #{Snakepit.Examples.Bootstrap.format_error(reason)}")
             {:error, reason}
         end
       end)
@@ -90,7 +90,9 @@ defmodule AdvancedExample do
         IO.puts("    Unexpected success: #{inspect(unexpected)}")
 
       {:error, reason} ->
-        IO.puts("    ✅ Gracefully handled error: #{inspect(reason)}")
+        IO.puts(
+          "    ✅ Gracefully handled error: #{Snakepit.Examples.Bootstrap.format_error(reason)}"
+        )
     end
 
     IO.puts("\n  Testing successful operation after error:")
@@ -100,7 +102,7 @@ defmodule AdvancedExample do
         IO.puts("    ✅ System recovered, ping successful")
 
       {:error, reason} ->
-        IO.puts("    ✗ Failed: #{inspect(reason)}")
+        IO.puts("    ✗ Failed: #{Snakepit.Examples.Bootstrap.format_error(reason)}")
     end
   end
 

@@ -17,6 +17,7 @@ import pickle
 import numpy as np
 from typing import Any, Dict, Union, Tuple, Optional
 from google.protobuf import any_pb2
+from snakepit_bridge.zero_copy import ZeroCopyRef
 
 # Size threshold for using binary serialization (10KB)
 BINARY_THRESHOLD = 10_240
@@ -86,11 +87,15 @@ class TypeSerializer:
             value = TypeSerializer._deserialize_json(json_str)
 
             # Convert to appropriate Python type
-            return TypeSerializer._deserialize_value(value, var_type)
+            decoded = TypeSerializer._deserialize_value(value, var_type)
+            return TypeSerializer._maybe_zero_copy(decoded)
     
     @staticmethod
     def _normalize_value(value: Any, var_type: str) -> Any:
         """Normalize Python values for consistency."""
+        if isinstance(value, ZeroCopyRef):
+            return value.to_payload()
+
         if var_type == 'float':
             if isinstance(value, (int, float)):
                 return float(value)
@@ -137,6 +142,12 @@ class TypeSerializer:
             
         else:
             return value
+
+    @staticmethod
+    def _maybe_zero_copy(value: Any) -> Any:
+        if isinstance(value, dict) and value.get("__snakepit_zero_copy__"):
+            return ZeroCopyRef.from_payload(value)
+        return value
     
     @staticmethod
     def _serialize_value(value: Any, var_type: str) -> str:

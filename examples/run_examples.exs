@@ -46,6 +46,20 @@ defmodule ExampleRunner do
         }
       ]
     },
+    prime: %{
+      name: "Prime Runtime (v0.7.4)",
+      description: "Structured exception translation and runtime upgrades",
+      scripts: [
+        %{
+          id: "structured_errors",
+          name: "Structured Errors",
+          file: "structured_errors.exs",
+          description: "Pattern-matchable Python exception translation",
+          duration: "< 1 minute",
+          highlight: true
+        }
+      ]
+    },
     gil: %{
       name: "GIL & Threading (v0.6.0)",
       description: "Dual-mode parallelism and Python 3.13+ features",
@@ -207,7 +221,7 @@ defmodule ExampleRunner do
       IO.puts("     #{category.description}")
     end)
 
-    IO.puts("\nQuick Start (v0.6.0 Features):")
+    IO.puts("\nQuick Start (Core Features):")
 
     IO.puts(
       "  1. Process vs Thread comparison:  mix run --no-start examples/run_examples.exs --run comparison"
@@ -225,10 +239,17 @@ defmodule ExampleRunner do
       "  4. Telemetry integration:         mix run --no-start examples/run_examples.exs --run telemetry"
     )
 
+    IO.puts("\nPrime Runtime (v0.7.4):")
+
+    IO.puts(
+      "  5. Structured errors:             mix run --no-start examples/run_examples.exs --run structured_errors"
+    )
+
     IO.puts("\nRun by category:")
     IO.puts("  mix run --no-start examples/run_examples.exs --category gil")
     IO.puts("  mix run --no-start examples/run_examples.exs --category basics")
     IO.puts("  mix run --no-start examples/run_examples.exs --category advanced")
+    IO.puts("  mix run --no-start examples/run_examples.exs --category prime")
 
     IO.puts("\nOther options:")
     IO.puts("  --list    List all available examples")
@@ -257,6 +278,7 @@ defmodule ExampleRunner do
 
     Categories:
       basics      - Basic Snakepit usage
+      prime       - Prime runtime upgrades (v0.7.4)
       gil         - v0.6.0 dual-mode parallelism (GIL removal)
       lifecycle   - Worker recycling and lifecycle
       monitoring  - Telemetry and diagnostics
@@ -277,6 +299,7 @@ defmodule ExampleRunner do
       advanced    - Advanced features
       tools       - Bidirectional tools
       tools_auto  - Bidirectional tools (auto)
+      structured_errors - Structured exception translation
 
     Examples:
       # Interactive mode
@@ -322,7 +345,7 @@ defmodule ExampleRunner do
       end)
     end)
 
-    IO.puts("⭐ = Recommended for v0.6.0 users")
+    IO.puts("⭐ = Recommended starting points")
     IO.puts("")
   end
 
@@ -412,12 +435,13 @@ defmodule ExampleRunner do
     # Sort order for categories
     case name do
       "Basic Examples" -> 1
-      "GIL & Threading (v0.6.0)" -> 2
-      "Worker Lifecycle (v0.6.0)" -> 3
-      "Monitoring & Observability (v0.6.0)" -> 4
-      "Advanced Usage" -> 5
-      "Bidirectional Tools" -> 6
-      "Performance & Stress Tests" -> 7
+      "Prime Runtime (v0.7.4)" -> 2
+      "GIL & Threading (v0.6.0)" -> 3
+      "Worker Lifecycle (v0.6.0)" -> 4
+      "Monitoring & Observability (v0.6.0)" -> 5
+      "Advanced Usage" -> 6
+      "Bidirectional Tools" -> 7
+      "Performance & Stress Tests" -> 8
       _ -> 99
     end
   end

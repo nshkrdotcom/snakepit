@@ -1,6 +1,6 @@
 # Snakepit Telemetry
 
-> Updated for Snakepit v0.7.2
+> Updated for Snakepit v0.7.4
 
 Snakepit provides a comprehensive distributed telemetry system that enables observability across your Elixir cluster and Python workers. All telemetry flows through Elixir's standard `:telemetry` library, providing a unified interface for monitoring, metrics, and tracing.
 
@@ -137,6 +137,24 @@ Snakepit emits events across three layers:
 - `[:snakepit, :grpc, :connection, :established]` - gRPC channel connected
 - `[:snakepit, :grpc, :connection, :lost]` - gRPC connection lost
 - `[:snakepit, :grpc, :connection, :reconnected]` - gRPC reconnected after failure
+
+### Runtime Enhancements
+
+**Zero-Copy:**
+- `[:snakepit, :zero_copy, :export]` - zero-copy handle exported
+- `[:snakepit, :zero_copy, :import]` - zero-copy handle imported
+- `[:snakepit, :zero_copy, :fallback]` - zero-copy unavailable, copy fallback used
+
+**Crash Barrier:**
+- `[:snakepit, :worker, :crash]` - worker crash classified
+- `[:snakepit, :worker, :tainted]` - worker tainted after crash
+- `[:snakepit, :worker, :restarted]` - worker restarted after crash
+
+**Exception Translation:**
+- `[:snakepit, :python, :exception, :mapped]` - Python error mapped to Elixir struct
+- `[:snakepit, :python, :exception, :unmapped]` - Python error mapped to generic struct
+
+For the full event schema (measurements + metadata), see `docs/telemetry_events.md`.
 
 ## Usage Patterns
 

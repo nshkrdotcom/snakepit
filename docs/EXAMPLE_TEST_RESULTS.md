@@ -1,7 +1,7 @@
 # Example Test Results
 
-**Date**: 2025-12-21
-**Snakepit Version**: 0.6.11
+**Date**: 2025-12-25
+**Snakepit Version**: 0.7.4
 **Python Environment**: Project virtualenv (.venv)
 **Python Version**: 3.12.3
 **gRPC Version**: 1.76.0
@@ -23,7 +23,7 @@ All root-level examples executed successfully using `./examples/run_all.sh` (mix
 | `examples/grpc_streaming_demo.exs` | ✅ PASS | Streaming demo with progress chunks |
 | `examples/grpc_advanced.exs` | ✅ PASS | Pipeline + recovery paths |
 | `examples/stream_progress_demo.exs` | ✅ PASS | `stream_progress` callback demo |
-| `examples/structured_errors.exs` | ✅ PASS | Python errors shown as legacy strings |
+| `examples/structured_errors.exs` | ✅ PASS | Structured exception translation demo |
 | `examples/telemetry_basic.exs` | ✅ PASS | Worker spawn + call telemetry |
 | `examples/telemetry_advanced.exs` | ✅ PASS | Correlation IDs + sampling |
 | `examples/telemetry_metrics_integration.exs` | ✅ PASS | Metrics + dashboard output |
@@ -34,7 +34,7 @@ All root-level examples executed successfully using `./examples/run_all.sh` (mix
 | `examples/dual_mode/gil_aware_selection.exs` | ✅ PASS | Informational (profile selection) |
 | `examples/dual_mode/hybrid_pools.exs` | ✅ PASS | Informational (hybrid config) |
 | `examples/dual_mode/process_vs_thread_comparison.exs` | ✅ PASS | Informational (capacity/memory) |
-| `examples/bidirectional_tools_demo.exs` | ✅ PASS | Auto-exit via newline |
+| `examples/bidirectional_tools_demo.exs` | ✅ PASS | Auto-stop via `SNAKEPIT_DEMO_DURATION_MS` |
 | `examples/bidirectional_tools_demo_auto.exs` | ✅ PASS | Auto-stop via `SNAKEPIT_DEMO_DURATION_MS=3000` |
 
 ### Standalone Projects

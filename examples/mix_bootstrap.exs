@@ -141,4 +141,21 @@ defmodule Snakepit.Examples.Bootstrap do
     :gen_tcp.close(socket)
     port
   end
+
+  @spec format_error(term()) :: String.t()
+  def format_error(%{__struct__: mod, message: message} = error) when is_binary(message) do
+    type = mod |> Module.split() |> List.last()
+    python_type = Map.get(error, :python_type)
+
+    label =
+      if is_binary(python_type) and python_type != "" and python_type != type do
+        "#{type}(#{python_type})"
+      else
+        type
+      end
+
+    "#{label}: #{message}"
+  end
+
+  def format_error(reason), do: inspect(reason)
 end

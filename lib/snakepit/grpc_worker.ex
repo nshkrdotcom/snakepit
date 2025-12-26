@@ -1296,9 +1296,17 @@ defmodule Snakepit.GRPCWorker do
         System.get_env("SNAKEPIT_PYTHON") ||
         GRPCPython.executable_path()
 
-    []
-    |> maybe_cons("PYTHONPATH", pythonpath)
-    |> maybe_cons("SNAKEPIT_PYTHON", interpreter)
+    base =
+      []
+      |> maybe_cons("PYTHONPATH", pythonpath)
+      |> maybe_cons("SNAKEPIT_PYTHON", interpreter)
+
+    extra_env =
+      Snakepit.PythonRuntime.config()
+      |> Map.get(:extra_env, %{})
+      |> normalize_adapter_env_entries()
+
+    base ++ extra_env ++ Snakepit.PythonRuntime.runtime_env()
   end
 
   defp maybe_cons(acc, _key, value) when value in [nil, ""], do: acc

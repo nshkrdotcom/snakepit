@@ -77,6 +77,13 @@ defmodule ThreadedProfileDemo do
       {:error, :python_not_found} ->
         IO.puts("  ✗ Python not found - please install Python 3.8+")
         System.halt(1)
+
+      {:error, reason} ->
+        IO.puts(
+          "  ⚠️  Python version check failed: #{Snakepit.Examples.Bootstrap.format_error(reason)}"
+        )
+
+        IO.puts("    Threaded profile demo continues with configuration-only output\n")
     end
   end
 

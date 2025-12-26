@@ -18,6 +18,8 @@ defmodule Snakepit.Pool.RandomWorkerFlowTest do
   end
 
   setup do
+    {:ok, _} = Application.ensure_all_started(:snakepit)
+
     initial_workers =
       for _ <- 1..@worker_count do
         start_test_worker()

@@ -1,7 +1,7 @@
 # Test & Example Status Report
 
-**Date**: 2025-12-21
-**Snakepit Version**: 0.6.11
+**Date**: 2025-12-25
+**Snakepit Version**: 0.7.4
 
 ---
 
@@ -9,10 +9,12 @@
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| **Elixir Test Suite** | ✅ PASS | `mix test` (294 tests, 0 failures, 50 excluded, 3 skipped) |
-| **Python Integration Tests** | ✅ PASS | `mix test --only python_integration` (294 tests, 0 failures, 271 excluded) |
-| **Python Bridge Tests** | ✅ PASS | `./test_python.sh -q` (55 passed) |
+| **Elixir Test Suite** | ✅ PASS | `mix test` (counts vary by environment) |
+| **Integration Suite** | ✅ PASS | `mix test --include integration` |
+| **Python Bridge Tests** | ✅ PASS | `./test_python.sh` (57 passed) |
 | **Dialyzer** | ✅ PASS | `mix dialyzer` |
+| **Credo** | ✅ PASS | `mix credo --strict` |
+| **Format** | ✅ PASS | `mix format --check-formatted` |
 | **Examples** | ✅ PASS | See `docs/EXAMPLE_TEST_RESULTS.md` |
 
 ---
@@ -26,28 +28,25 @@ mix test
 ```
 
 **Result**:
-- 7 doctests, 294 tests, 0 failures
-- 50 excluded (`:performance`, `:python_integration`, `:slow`)
-- 3 skipped
+- PASS (counts vary by environment)
 
-### `mix test --only python_integration`
+### `mix test --include integration`
 
 ```bash
-mix test --only python_integration
+mix test --include integration
 ```
 
 **Result**:
-- 7 doctests, 294 tests, 0 failures
-- 271 excluded
+- PASS
 
-### `./test_python.sh -q`
+### `./test_python.sh`
 
 ```bash
-./test_python.sh -q
+./test_python.sh
 ```
 
 **Result**:
-- 55 tests passed (pytest)
+- 57 tests passed (pytest)
 
 ### `mix dialyzer`
 

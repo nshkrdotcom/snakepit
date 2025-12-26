@@ -71,6 +71,11 @@ defmodule ProcessVsThreadComparison do
       {:error, :python_not_found} ->
         IO.puts("  ✗ Python not found")
         IO.puts("    This demo shows configuration patterns only")
+
+      {:error, reason} ->
+        IO.puts(
+          "  ⚠️  Python version check failed: #{Snakepit.Examples.Bootstrap.format_error(reason)}"
+        )
     end
 
     IO.puts("")

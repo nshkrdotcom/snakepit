@@ -54,6 +54,7 @@ loaded_program = mlflow.dspy.load_model(model_uri)
 - Solution: Use Snakepit to bridge to Python MLflow
 - Store compiled DSPy programs as artifacts
 - Load and execute in Elixir runtime
+- Snakepit 0.7.4 adds crash barrier + exception translation for safer MLflow calls
 
 **Implementation**:
 ```elixir

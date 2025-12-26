@@ -121,6 +121,8 @@ defmodule Snakepit.Telemetry.Naming do
   # Valid measurement keys (atom-safe)
   @measurement_keys [
     :duration,
+    :duration_ms,
+    :bytes,
     :system_time,
     :queue_depth,
     :queue_time,

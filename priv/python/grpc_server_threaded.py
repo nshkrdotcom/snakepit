@@ -69,6 +69,34 @@ def _ensure_event_loop() -> asyncio.AbstractEventLoop:
         return loop
 
 
+def _extract_callsite_context(arguments: Optional[Dict[str, object]], request) -> Dict[str, object]:
+    context = {
+        "tool_name": getattr(request, "tool_name", None),
+        "session_id": getattr(request, "session_id", None),
+    }
+
+    if isinstance(arguments, dict):
+        for key in ("library", "python_module", "function", "call_type", "payload_version"):
+            if key in arguments:
+                context[key] = arguments[key]
+
+    return {k: v for k, v in context.items() if v is not None}
+
+
+def _build_error_payload(exc: Exception, request, arguments: Optional[Dict[str, object]] = None):
+    exc_type = type(exc).__name__
+    message = str(exc)
+    stacktrace = traceback.format_exception(type(exc), exc, exc.__traceback__)
+
+    return {
+        "type": exc_type,
+        "message": message,
+        "stacktrace": stacktrace,
+        "traceback": "".join(stacktrace),
+        "context": _extract_callsite_context(arguments, request),
+    }
+
+
 class ThreadSafetyMonitor:
     """
     Monitor for tracking thread safety issues during execution.
@@ -420,7 +448,9 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             logger.error(f"[{thread_name}] ExecuteTool #{request_id} failed: {e}", exc_info=True)
             response = pb2.ExecuteToolResponse()
             response.success = False
-            response.error_message = str(e)
+            response.error_message = json.dumps(
+                _build_error_payload(e, request, locals().get("arguments"))
+            )
             return response
 
         finally:
@@ -602,13 +632,19 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                             item,
                             exc_info=True,
                         )
-                        await context.abort(grpc.StatusCode.INTERNAL, str(item))
+                        await context.abort(
+                            grpc.StatusCode.INTERNAL,
+                            json.dumps(_build_error_payload(item, request, locals().get("arguments"))),
+                        )
                         return
                     yield item
 
         except Exception as e:
             logger.error(f"[{thread_name}] ExecuteStreamingTool #{request_id} failed: {e}", exc_info=True)
-            await context.abort(grpc.StatusCode.INTERNAL, str(e))
+            await context.abort(
+                grpc.StatusCode.INTERNAL,
+                json.dumps(_build_error_payload(e, request, locals().get("arguments"))),
+            )
 
         finally:
             self._record_request_end()

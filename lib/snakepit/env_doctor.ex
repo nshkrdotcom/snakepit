@@ -22,6 +22,7 @@ defmodule Snakepit.EnvDoctor do
 
   @runtime_checks [:python_exec, :grpc_import, :grpc_server, :adapter_imports]
   alias Snakepit.Adapters.GRPCPython
+  alias Snakepit.PythonRuntime
 
   @doc """
   Run the full doctor suite. Returns `{:ok, results}` or `{:error, results}`.
@@ -75,6 +76,7 @@ defmodule Snakepit.EnvDoctor do
         Application.get_env(:snakepit, :bootstrap_project_root) ||
         File.cwd!()
 
+    python_runtime = PythonRuntime.config()
     python_path = opts[:python_path] || GRPCPython.executable_path()
 
     runner =
@@ -93,6 +95,7 @@ defmodule Snakepit.EnvDoctor do
     %{
       project_root: project_root,
       python_path: python_path,
+      python_runtime: python_runtime,
       runner: runner,
       require_python_313?: require_python_313?,
       grpc_port: grpc_port
@@ -121,37 +124,49 @@ defmodule Snakepit.EnvDoctor do
     end
   end
 
-  defp run_check(:venv, %{project_root: root}) do
-    case File.dir?(Path.join(root, ".venv")) do
-      true ->
-        ok(:venv, ".venv present (Python 3.12)")
+  defp run_check(:venv, %{project_root: root, python_runtime: runtime}) do
+    if PythonRuntime.managed?(runtime) do
+      warning(:venv, "Managed Python enabled; .venv check skipped.")
+    else
+      case File.dir?(Path.join(root, ".venv")) do
+        true ->
+          ok(:venv, ".venv present (Python 3.12)")
 
-      false ->
-        error(
-          :venv,
-          ".venv missing. Run mix snakepit.setup (or make bootstrap) to create the default Python environment."
-        )
+        false ->
+          error(
+            :venv,
+            ".venv missing. Run mix snakepit.setup (or make bootstrap) to create the default Python environment."
+          )
+      end
     end
   end
 
-  defp run_check(:venv_py313, %{project_root: root, require_python_313?: required?}) do
-    path = Path.join(root, ".venv-py313")
+  defp run_check(:venv_py313, %{
+         project_root: root,
+         require_python_313?: required?,
+         python_runtime: runtime
+       }) do
+    if PythonRuntime.managed?(runtime) do
+      warning(:venv_py313, "Managed Python enabled; .venv-py313 check skipped.")
+    else
+      path = Path.join(root, ".venv-py313")
 
-    cond do
-      File.dir?(path) ->
-        ok(:venv_py313, ".venv-py313 ready (Python 3.13)")
+      cond do
+        File.dir?(path) ->
+          ok(:venv_py313, ".venv-py313 ready (Python 3.13)")
 
-      required? ->
-        error(
-          :venv_py313,
-          ".venv-py313 missing. Run mix snakepit.setup (or make bootstrap) to enable free-threaded tests."
-        )
+        required? ->
+          error(
+            :venv_py313,
+            ".venv-py313 missing. Run mix snakepit.setup (or make bootstrap) to enable free-threaded tests."
+          )
 
-      true ->
-        warning(
-          :venv_py313,
-          ".venv-py313 missing. Thread-profile tests will be skipped until you run mix snakepit.setup (or make bootstrap)."
-        )
+        true ->
+          warning(
+            :venv_py313,
+            ".venv-py313 missing. Thread-profile tests will be skipped until you run mix snakepit.setup (or make bootstrap)."
+          )
+      end
     end
   end
 
@@ -372,9 +387,15 @@ defmodule Snakepit.EnvDoctor do
     end
   end
 
-  defp python_path_for_check(%{python_path: nil}) do
-    {:error,
-     "Python not configured. Run mix snakepit.setup (or make bootstrap) or set SNAKEPIT_PYTHON=/path/to/python."}
+  defp python_path_for_check(%{python_path: nil, python_runtime: runtime}) do
+    case PythonRuntime.missing_reason(runtime) do
+      {:error, message} ->
+        {:error, message}
+
+      _ ->
+        {:error,
+         "Python not configured. Run mix snakepit.setup (or make bootstrap) or set SNAKEPIT_PYTHON=/path/to/python."}
+    end
   end
 
   defp python_path_for_check(%{python_path: path}) do

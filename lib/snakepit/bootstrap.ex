@@ -9,6 +9,7 @@ defmodule Snakepit.Bootstrap do
 
   alias Snakepit.Adapters.GRPCPython
   alias Snakepit.Bootstrap.Runner
+  alias Snakepit.PythonRuntime
 
   @requirements_path ["priv", "python", "requirements.txt"]
   @setup_script ["scripts", "setup_test_pythons.sh"]
@@ -46,6 +47,7 @@ defmodule Snakepit.Bootstrap do
     state = build_state(opts)
 
     with :ok <- fetch_mix_deps(state),
+         :ok <- ensure_managed_python(state),
          :ok <- ensure_primary_python(state),
          :ok <- run_script(state, @setup_script, :setup_pythons),
          :ok <- run_script(state, @grpc_script, :generate_grpc) do
@@ -94,6 +96,13 @@ defmodule Snakepit.Bootstrap do
       end
     else
       return_missing(:requirements, requirements)
+    end
+  end
+
+  defp ensure_managed_python(%{project_root: root, runner: runner}) do
+    case PythonRuntime.install_managed(runner, project_root: root) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 

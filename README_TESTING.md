@@ -1,6 +1,6 @@
 # Snakepit Testing Guide
 
-> Updated for Snakepit v0.7.2
+> Updated for Snakepit v0.7.4
 
 This guide covers the testing approach for the Snakepit project, including test organization, running tests, and understanding test output.
 
@@ -13,6 +13,7 @@ Snakepit contains comprehensive test coverage for:
 - Bridge server implementation
 - Worker lifecycle hardening (port persistence, channel reuse, ETS/DETS protections, logging redaction)
 - Python integration
+- Zero-copy handle lifecycle, crash barrier policy, hermetic runtime selection, and exception translation
 
 ## Running Tests
 
@@ -41,6 +42,9 @@ mix test --only python_integration
 mix test --include slow
 mix test --only slow
 
+# Optional GPU coverage
+# Set SNAKEPIT_GPU_TESTS=true to enable GPU-tagged suites when present.
+
 # Run specific test files
 mix test test/snakepit/bridge/session_store_test.exs
 mix test test/snakepit/streaming_regression_test.exs  # gRPC streaming regression
@@ -57,13 +61,18 @@ mix test test/unit/logger/redaction_test.exs                          # Log reda
 # run without extra configuration.
 ```
 
-### Reliability Regression Targets (v0.6.6)
+### Reliability Regression Targets (v0.7.4)
 
 - `test/unit/grpc/grpc_worker_ephemeral_port_test.exs` – verifies workers persist negotiated ports and survive pool shutdown races.
 - `test/snakepit/grpc/bridge_server_test.exs` – asserts BridgeServer reuses worker channels and surfaces invalid parameter errors.
 - `test/unit/pool/process_registry_security_test.exs` – prevents direct DETS writes and confirms registry APIs enforce visibility.
 - `test/unit/logger/redaction_test.exs` – exercises the redaction summaries that keep secrets out of logs.
 - `test/unit/bridge/session_store_test.exs` – covers per-session and global quotas plus safe reuse of existing program slots.
+- `test/snakepit/zero_copy_test.exs` – validates zero-copy handle lifecycle and fallback telemetry.
+- `test/snakepit/crash_barrier_test.exs` – covers tainting and retry policy behavior.
+- `test/snakepit/python_runtime_test.exs` – exercises uv-managed runtime selection and metadata.
+- `test/snakepit/exception_translation_test.exs` – verifies Python errors map to `Snakepit.Error.*`.
+- `test/integration/runtime_contract_test.exs` – ensures kwargs/call_type/idempotent payloads are accepted.
 
 ### Fail-fast Experiment Suites
 

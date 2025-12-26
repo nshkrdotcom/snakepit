@@ -38,7 +38,7 @@ defmodule Snakepit.Telemetry do
     session_events() ++
       program_events() ++
       heartbeat_events() ++
-      pool_events() ++ python_events() ++ grpc_events()
+      pool_events() ++ python_events() ++ grpc_events() ++ runtime_events()
   end
 
   ## Layer 0: Session Store & Heartbeat (Legacy)
@@ -142,6 +142,22 @@ defmodule Snakepit.Telemetry do
       [:snakepit, :grpc, :connection, :established],
       [:snakepit, :grpc, :connection, :lost],
       [:snakepit, :grpc, :connection, :reconnected]
+    ]
+  end
+
+  @doc """
+  Runtime enhancement events (zero-copy, crash barrier, exception translation).
+  """
+  def runtime_events do
+    [
+      [:snakepit, :zero_copy, :export],
+      [:snakepit, :zero_copy, :import],
+      [:snakepit, :zero_copy, :fallback],
+      [:snakepit, :worker, :crash],
+      [:snakepit, :worker, :tainted],
+      [:snakepit, :worker, :restarted],
+      [:snakepit, :python, :exception, :mapped],
+      [:snakepit, :python, :exception, :unmapped]
     ]
   end
 

@@ -1,10 +1,13 @@
 # Bidirectional Tool Bridge - Technical Documentation
 
-> Updated for Snakepit v0.7.2
+> Updated for Snakepit v0.7.4
 
 ## Overview
 
 The Bidirectional Tool Bridge enables seamless cross-language function execution between Elixir and Python in the Snakepit framework. This allows developers to leverage the strengths of both languages within a single application, calling Python functions from Elixir and Elixir functions from Python transparently through gRPC.
+
+Snakepit 0.7.4 adds structured exception translation and zero-copy handle support, so Python errors are pattern-matchable in Elixir and DLPack/Arrow handles can flow through tool payloads when enabled.
+SnakeBridge runtime payloads now include `kwargs`, `call_type`, `idempotent`, and optional `payload_version` fields to support crash-barrier retries and schema evolution.
 
 ## Architecture
 
@@ -184,6 +187,7 @@ The bridge supports these parameter types:
 | array | list() | list | JSON serialization |
 | object | map() | dict | JSON serialization |
 | null | nil | None | Direct mapping |
+| zero_copy | Snakepit.ZeroCopyRef | ZeroCopyRef | DLPack/Arrow handles (optional) |
 
 **Complex Type Example:**
 ```python
@@ -214,6 +218,17 @@ def risky_operation(params) do
     {:error, reason} ->
       {:error, "Validation failed: #{reason}"}
   end
+end
+```
+
+```elixir
+# Elixir calls into Python: structured exception translation
+case Snakepit.execute("error_demo", %{error_type: "value"}) do
+  {:error, %Snakepit.Error.ValueError{message: message}} ->
+    IO.puts("ValueError: #{message}")
+
+  {:error, %Snakepit.Error.PythonException{python_type: type}} ->
+    IO.puts("Unhandled Python error: #{type}")
 end
 ```
 
@@ -344,7 +359,7 @@ Typical overhead for cross-language calls:
 2. **Serialization Errors**
    - Ensure all return values are JSON-serializable
    - Use basic types (string, number, boolean, array, object)
-   - For binary data, base64 encode it first
+   - For binary data, prefer zero-copy handles or binary parameters; base64 is a fallback
 
 3. **Connection Refused**
    - Verify gRPC server is running: `lsof -i :50051`
@@ -391,9 +406,8 @@ config :logger, level: :debug
        print(f"Progress: {progress.percent}%")
    ```
 
-2. **Binary Data Optimization**: Direct binary transfer without JSON encoding
-3. **Connection Pooling**: Reuse gRPC connections for better performance
-4. **Automatic Retries**: With exponential backoff for transient failures
+2. **Connection Pooling**: Reuse gRPC connections for better performance
+3. **Remote Worker Support**: Allow Python workers to connect from other nodes
 
 ## Examples
 

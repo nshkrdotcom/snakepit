@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2025-12-25
+
+### Added
+- **Zero-copy interop** – `Snakepit.ZeroCopy` + `Snakepit.ZeroCopyRef` handle DLPack/Arrow exports/imports with explicit `close/1` and telemetry for export/import/fallback flows.
+- **Crash barrier** – Worker crash classification, taint tracking, and idempotent retry policy with new crash/taint/restart telemetry events.
+- **Hermetic Python runtime support** – uv-managed interpreter selection, bootstrap integration, and runtime identity metadata propagation.
+- **Exception translation** – Structured Python error payloads mapped into `Snakepit.Error.*` exception structs with telemetry for mapped/unmapped translations.
+- **Runtime contract coverage** – Integration test coverage for `kwargs`, `call_type`, and payload version fields.
+
+### Changed
+- **gRPC bridge error payloads** – Python gRPC servers now return JSON-structured error payloads for tooling failures.
+- **Telemetry catalog** – Added runtime event listings for zero-copy, crash barrier, and exception translation.
+
+### Fixed
+- **Queue resiliency** – Tainted workers no longer drive queued requests; queue dispatch selects non-tainted workers when available.
+
 ## [0.7.3] - 2025-12-25
 
 ### Fixed

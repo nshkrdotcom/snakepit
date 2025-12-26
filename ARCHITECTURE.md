@@ -1,6 +1,6 @@
 # Snakepit Architecture
 
-> System Architecture for Snakepit v0.7.2
+> System Architecture for Snakepit v0.7.4
 
 ## Overview
 
@@ -43,6 +43,7 @@ The pool manages worker availability and request distribution.
   - Session affinity cache
   - Capacity-aware scheduling (`:pool`, `:profile`, `:hybrid` strategies)
   - Statistics and metrics
+  - Crash barrier coordination for tainting and retries
 
 **Pool State:**
 ```elixir
@@ -84,6 +85,17 @@ Pool.WorkerSupervisor (DynamicSupervisor)
 6. GRPCWorker connects to Python's gRPC server
 7. Connection verified with ping, worker registered as available
 
+### Crash Barrier
+
+Crash barrier logic is centralized in `Snakepit.CrashBarrier` and invoked by the pool
+when a worker exits abnormally. It classifies crash reasons, taints unstable workers,
+and retries idempotent calls when configured.
+
+Key pieces:
+- `Snakepit.CrashBarrier` for policy + classification
+- `Snakepit.Worker.TaintRegistry` for taint tracking and expiry
+- `pool.ex` retry hooks honoring `idempotent` payloads
+
 ### 4. gRPC Bridge (`lib/snakepit/grpc/`)
 
 Bidirectional communication between Elixir and Python.
@@ -97,12 +109,19 @@ Bidirectional communication between Elixir and Python.
 - Connects to Python worker's gRPC server
 - Methods: `connect`, `ping`, `initialize_session`, `execute_tool`, `execute_streaming_tool`
 - Automatic reconnection with exponential backoff
+- Runtime metadata attached to requests (Python runtime hash, version, platform)
 
 **GRPCWorker (grpc_worker.ex):**
 - GenServer managing a single Python process
 - Handles request/response and streaming
 - Monitors Python process via port
 - Emits telemetry events for observability
+
+**Runtime Contract:**
+- `kwargs` (always present, may be empty)
+- `call_type` for class/method/attr dispatch
+- `idempotent` for crash barrier retries
+- `payload_version` for schema evolution
 
 ### 5. Session System (`lib/snakepit/bridge/`)
 
@@ -186,9 +205,10 @@ Adapters define how to spawn external processes.
 
 **GRPCPython Adapter:**
 - Default Python adapter
-- Discovers Python: config > env > venv > system
+- Discovers Python: config > env > venv > system (or uv-managed runtime)
 - Selects server script: process or threaded
 - Configurable per-command timeouts
+- Injects runtime identity into worker environment
 
 ### 9. Process Management
 
@@ -292,6 +312,7 @@ config :snakepit,
 - `base_adapter.py` - Base class with `@tool` decorator
 - `session_context.py` - Session management, Elixir tool calls
 - `serialization.py` - JSON/binary serialization with orjson
+- `zero_copy.py` - DLPack/Arrow handle support
 - `heartbeat.py` - Health check client
 - `telemetry/` - Event emission and streaming
 
@@ -304,6 +325,8 @@ config :snakepit,
 5. **Exponential Backoff**: Prevents thundering herd on reconnection
 6. **Correlation IDs**: Cross-language request tracing
 7. **Graceful Degradation**: Workers can be recycled without service interruption
+8. **Zero-Copy When Available**: DLPack/Arrow handle paths avoid extra copies, with
+   safe fallbacks to serialized payloads
 
 ## Performance Characteristics
 
@@ -321,6 +344,15 @@ config :snakepit,
 - `:validation_error` - Invalid input
 - `:timeout` - Operation exceeded time limit
 - `:grpc_error` - Communication failures
+
+## Prime Runtime Enhancements
+
+Snakepit 0.7.4 adds runtime capabilities for ML workloads:
+
+- **Zero-copy interop** via `Snakepit.ZeroCopy` and `Snakepit.ZeroCopyRef` (DLPack + Arrow).
+- **Crash barrier** with worker tainting, idempotent retry policy, and crash telemetry.
+- **Hermetic Python runtime** with uv-managed interpreter selection and runtime identity metadata.
+- **Exception translation** mapping Python exceptions to Elixir structs in `Snakepit.Error.*`.
 
 **Timeout Hierarchy:**
 | Operation | Default | Configurable |

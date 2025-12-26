@@ -1,6 +1,6 @@
 # Snakepit Process Management & Reliability
 
-> Updated for Snakepit v0.7.2
+> Updated for Snakepit v0.7.4
 
 ## Overview
 
@@ -69,6 +69,25 @@ telemetry with `reason: :memory_threshold`, `memory_mb`, and `memory_threshold_m
 These events feed the `Memory Recycles` counter in the profile inspector so
 operators can see when BEAM memory pressure is triggering restarts. Python-side
 memory sampling will be layered on via telemetry in a future release.
+
+### 6. **Crash Barrier (Taint + Retry)**
+
+Worker crashes are classified and can trigger tainting plus optional retries
+for idempotent calls. Configure `config :snakepit, :crash_barrier` to control
+retry policy, taint duration, and exit-code classifications.
+
+```elixir
+config :snakepit, :crash_barrier,
+  enabled: true,
+  retry: :idempotent,
+  max_retries: 1,
+  taint_ms: 5_000,
+  classify_exit_codes: %{137 => :oom, 139 => :segfault}
+```
+
+Idempotent calls must set `idempotent: true` in the tool payload (or use
+SnakeBridge wrappers that include it automatically) so the retry policy knows
+which calls are safe to replay.
 
 ## Architecture
 

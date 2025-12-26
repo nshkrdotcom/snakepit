@@ -1,130 +1,106 @@
-# Production Deployment Checklist
+# Production Deployment Checklist (Snakepit v0.7.4)
 
-## Pre-Deployment Tasks
-
-### 1. Remove Debug Logging
-
-**Python (priv/python/grpc_server.py):**
-- [ ] Remove all `/tmp/python_worker_debug.log` writes
-- [ ] Remove signal reception logging (lines 767-770)
-- [ ] Remove tombstone message (lines 799-803)
-- [ ] Change logging level from INFO to WARNING
-
-**Elixir:**
-- [ ] Remove `IO.inspect` calls in lib/snakepit/process_killer.ex (lines 28-29, 109-110, 113-116)
-- [ ] Remove `IO.inspect` calls in lib/snakepit/pool/application_cleanup.ex (lines 39-40, 43-44)
-- [ ] Remove `IO.inspect` calls in lib/snakepit/application.ex (lines 21-26, 43-45, 76, 81-83)
-- [ ] Remove "!!! GRPCWorker.terminate/2 CALLED !!!" in lib/snakepit/grpc_worker.ex (lines 448-449)
-
-### 2. Fix Compiler Warnings
-
-- [ ] Add `@impl true` to `Application.stop/1` (lib/snakepit/application.ex:80)
-- [ ] Rename `_worker_id` to `worker_id` in lib/snakepit/pool/process_registry.ex:496
-
-### 3. Final Verification
-
-```bash
-# Clean state
-rm -rf priv/data/*.dets
-
-# Run test suite
-mix test
-# Expected: 60 tests, 0 failures
-
-# Test basic example
-mix run --no-start examples/grpc_basic.exs
-# Expected: "✅ No orphaned processes"
-
-# Stress test with 100 workers
-mix run --no-start examples/grpc_concurrent.exs 100
-# Expected: Zero orphans after completion
-
-# Verify no orphans
-sleep 3
-ps aux | grep grpc_server.py | grep -v grep
-# Expected: No output (zero processes)
-```
-
-### 4. Update Documentation
-
-- [ ] Update README.md with zero orphans achievement
-- [ ] Add deployment notes about monitoring
-- [ ] Document the trap_exit requirement
-
-## Production Monitoring
-
-### Key Metrics
-
-**1. ApplicationCleanup Orphan Count**
-```elixir
-# Should be 0 in normal operation
-:telemetry.attach(
-  "orphan-monitor",
-  [:snakepit, :application_cleanup, :orphaned_processes_found],
-  fn _event, %{count: count}, _metadata, _config ->
-    if count > 0 do
-      Logger.error("ALERT: Found #{count} orphaned processes!")
-    end
-  end,
-  nil
-)
-```
-
-**2. Worker Restart Rate**
-```bash
-# Monitor supervisor restarts
-watch -n 5 'ps aux | grep grpc_server.py | wc -l'
-# Should stay constant (= pool_size)
-```
-
-**3. Process Count**
-```bash
-# Total Python processes should equal pool_size
-ps aux | grep grpc_server.py | wc -l
-```
-
-**4. DETS File Size**
-```bash
-# Should stay small (< 100KB typically)
-ls -lh priv/data/*.dets
-```
-
-### Alerts to Configure
-
-1. **Orphan Detection:** Alert if ApplicationCleanup finds any orphans
-2. **High Restart Rate:** Alert if >10 worker restarts/minute
-3. **Process Count Mismatch:** Alert if Python process count != pool_size
-4. **DETS Growth:** Alert if DETS file >1MB (indicates cleanup not running)
-
-## Deployment Steps
-
-1. **Remove debug logging** (see above)
-2. **Fix warnings** (see above)
-3. **Run final tests** (see above)
-4. **Deploy to staging**
-5. **Monitor for 24 hours**
-6. **Verify zero orphans in staging**
-7. **Deploy to production**
-8. **Monitor ApplicationCleanup telemetry**
-
-## Success Criteria
-
-✅ Test suite passes (60/60)
-✅ All examples show zero orphans
-✅ 100-worker stress test shows zero orphans
-✅ No ApplicationCleanup emergency activations in production
-✅ Process count stable over time
-
-## Rollback Plan
-
-If orphans appear in production:
-1. Check ApplicationCleanup telemetry logs
-2. Verify GRPCWorker.terminate/2 being called (add temporary logging)
-3. Check BEAM OS PID tracking in DETS
-4. Review supervision tree configuration
-5. If critical, rollback and investigate
+Use this checklist before shipping Snakepit-backed services to production. It
+covers the 0.7.4 runtime upgrades (zero-copy, crash barrier, hermetic Python,
+exception translation) plus operational readiness.
 
 ---
 
-**Status:** Ready for production deployment after debug logging removal
-**Confidence:** HIGH - Zero orphans verified across all scenarios
+## Pre-Deployment
+
+### 1) Runtime Selection (Hermetic Python)
+
+- [ ] Decide Python strategy:
+  - `:uv` managed runtime (recommended for reproducibility)
+  - `:system` + `SNAKEPIT_PYTHON` when using an external interpreter
+- [ ] If using uv:
+  ```elixir
+  config :snakepit, :python,
+    strategy: :uv,
+    managed: true,
+    python_version: "3.12.3",
+    runtime_dir: "priv/snakepit/python"
+  ```
+- [ ] Run `mix snakepit.setup` and `mix snakepit.doctor` on the build host.
+- [ ] Confirm runtime identity is present in environment metadata:
+  `SNAKEPIT_PYTHON_RUNTIME_HASH`, `SNAKEPIT_PYTHON_VERSION`, `SNAKEPIT_PYTHON_PLATFORM`.
+
+### 2) Crash Barrier & Idempotency
+
+- [ ] Configure crash barrier to match your reliability policy:
+  ```elixir
+  config :snakepit, :crash_barrier,
+    enabled: true,
+    retry: :idempotent,
+    max_retries: 1,
+    taint_ms: 5_000
+  ```
+- [ ] Ensure calls that are safe to retry include `idempotent: true` in payloads
+  (or use SnakeBridge wrappers that include it automatically).
+- [ ] Confirm exit-code classifications if you rely on hardware-specific exits
+  (OOM, SIGKILL, etc.).
+
+### 3) Zero-Copy Readiness (Optional)
+
+- [ ] Enable zero-copy only when your adapter/runtime supports it:
+  ```elixir
+  config :snakepit, :zero_copy, enabled: true
+  ```
+- [ ] Validate DLPack/Arrow support in Python (`torch`, `pyarrow`, or equivalent).
+- [ ] Confirm fallback telemetry is acceptable when zero-copy is unavailable.
+
+### 4) Telemetry & Logging
+
+- [ ] Attach telemetry handlers for pool lifecycle, crash barrier, zero-copy,
+  and exception translation events.
+- [ ] Optional: enable OpenTelemetry exporter for distributed tracing.
+- [ ] Set Snakepit log level for production:
+  ```elixir
+  config :snakepit, log_level: :warning
+  ```
+- [ ] Ensure log redaction is enabled for payloads (default behaviour).
+
+### 5) Pool Sizing & Resource Limits
+
+- [ ] Review pool size and startup batch settings.
+- [ ] Configure Python thread limits to prevent fork storms:
+  ```elixir
+  config :snakepit, :python_thread_limits, %{openblas: 1, omp: 1, mkl: 1}
+  ```
+- [ ] Configure worker TTL or max requests if you need periodic recycling.
+
+### 6) Validation & Smoke Tests
+
+- [ ] `mix test`
+- [ ] `mix dialyzer`
+- [ ] `mix credo --strict`
+- [ ] `mix format --check-formatted`
+- [ ] `./test_python.sh`
+- [ ] Run an example smoke test: `mix run --no-start examples/grpc_basic.exs`
+
+---
+
+## Post-Deployment
+
+### Health Checks
+
+- [ ] Monitor `:snakepit, :pool, :status` for queue depth and availability.
+- [ ] Monitor crash barrier events (`:worker, :crash`, `:worker, :tainted`).
+- [ ] Validate exception translation rates (`:python, :exception, :mapped`).
+
+### Alerts
+
+1. Crash barrier taint rate above threshold.
+2. Queue depth > capacity for sustained window.
+3. Repeated worker restarts per minute.
+4. Zero-copy fallbacks spiking unexpectedly.
+
+---
+
+## Rollback Plan
+
+If instability appears:
+1. Disable crash barrier retries (set `retry: :never` or `max_retries: 0`).
+2. Disable zero-copy (`zero_copy: [enabled: false]`).
+3. Switch to system Python if uv runtime integrity is suspect.
+4. Roll back to the previous Snakepit release once traffic is drained.

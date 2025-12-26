@@ -154,6 +154,20 @@ mix run --no-start examples/threaded_profile_demo.exs
 
 ---
 
+## 🆕 Prime Runtime (v0.7.4)
+
+#### `structured_errors.exs`
+**Structured exception translation**
+- Pattern-matchable Python exceptions
+- Callsite context + traceback metadata
+- Legacy error compatibility
+
+```bash
+mix run --no-start examples/structured_errors.exs
+```
+
+---
+
 ## 🆕 New in v0.6.7: Telemetry & Observability
 
 ### 📊 Telemetry Basics
@@ -235,29 +249,6 @@ mix run --no-start examples/telemetry_metrics_integration.exs
 
 ---
 
-## 🆕 New in v0.6.7: Structured Errors
-
-### ❌ Error Handling
-
-#### `structured_errors.exs` ⭐
-**New structured error types**
-- `Snakepit.Error` struct with detailed context
-- Error categories for better handling
-- Python traceback propagation
-- Pattern matching on errors
-
-```bash
-mix run --no-start examples/structured_errors.exs
-```
-
-**What you'll learn:**
-- Understanding the new `Snakepit.Error` struct
-- Pattern matching on error categories
-- Extracting debugging information
-- Handling Python exceptions
-
----
-
 ## 🔧 Utility Scripts
 
 #### `mix_bootstrap.exs`
@@ -329,8 +320,12 @@ All examples include proper error handling patterns:
 case Snakepit.execute("command", params) do
   {:ok, result} ->
     # Handle success
+  {:error, %Snakepit.Error.ValueError{} = error} ->
+    # Handle mapped Python ValueError (v0.7.4+)
+  {:error, %Snakepit.Error.PythonException{} = error} ->
+    # Handle unmapped Python exceptions
   {:error, %Snakepit.Error{} = error} ->
-    # Handle structured error (v0.6.7+)
+    # Handle Snakepit runtime error
   {:error, reason} ->
     # Handle legacy error
 end

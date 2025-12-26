@@ -5,8 +5,11 @@ defmodule Snakepit.GRPC.ClientImpl do
 
   require Logger
   alias Snakepit.Bridge
+  alias Snakepit.Error.PythonTranslation
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.PythonRuntime
   alias Snakepit.Telemetry.Correlation
+  alias Snakepit.ZeroCopyRef
 
   @default_timeout 30_000
 
@@ -247,7 +250,10 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   defp handle_tool_response(%Bridge.ExecuteToolResponse{success: false, error_message: error}) do
-    {:error, error}
+    case PythonTranslation.from_error_message(error) do
+      {:ok, translated} -> {:error, translated}
+      :error -> {:error, error}
+    end
   end
 
   defp binary_payload?(binary) when is_binary(binary), do: byte_size(binary) > 0
@@ -265,7 +271,7 @@ defmodule Snakepit.GRPC.ClientImpl do
 
   defp decode_any(%Google.Protobuf.Any{value: value}) when is_binary(value) do
     case Jason.decode(value) do
-      {:ok, decoded} -> decoded
+      {:ok, decoded} -> ZeroCopyRef.maybe_from_map(decoded)
       {:error, _} -> value
     end
   end
@@ -404,6 +410,7 @@ defmodule Snakepit.GRPC.ClientImpl do
 
   defp build_request_metadata(correlation_id) when is_binary(correlation_id) do
     %{"correlation_id" => correlation_id}
+    |> Map.merge(PythonRuntime.runtime_metadata())
   end
 
   defp maybe_put_correlation_metadata(call_opts, correlation_id) when is_binary(correlation_id) do

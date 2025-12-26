@@ -9,6 +9,8 @@ defmodule Snakepit.Pool.WorkerFlowIntegrationTest do
   alias Snakepit.Test.MockGRPCWorker
 
   setup do
+    {:ok, _} = Application.ensure_all_started(:snakepit)
+
     worker_id = "integration_worker_#{System.unique_integer([:positive])}"
 
     worker_config = %{

@@ -76,15 +76,16 @@ These are dependency-free utilities used by everything above.
 
 The BEAM-native infrastructure that makes everything else production-ready.
 
-#### **Core: snakepit** (v0.4.2, 8⭐)
+#### **Core: snakepit** (v0.7.4, 8⭐)
 ```
 Purpose: High-performance Python/external language bridge
 Key Features:
-  - 1000x faster worker initialization
-  - gRPC streaming
-  - Bidirectional tool bridge
-  - Session affinity
-  - Persistent process tracking
+  - gRPC streaming + bidirectional tool bridge
+  - Session affinity and persistent process tracking
+  - Zero-copy interop (DLPack/Arrow)
+  - Crash barrier with tainting + idempotent retries
+  - Hermetic Python runtime selection (uv-managed)
+  - Structured exception translation
 
 Dependencies: jason, grpc, protobuf, supertester
 Dependents: DSPex (Python bridge), foundation (external workers)

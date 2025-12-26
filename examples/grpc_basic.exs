@@ -38,7 +38,7 @@ defmodule BasicExample do
 
     case Snakepit.execute("ping", %{}) do
       {:ok, result} -> IO.inspect(result, label: "Ping result")
-      {:error, reason} -> IO.puts("Error: #{inspect(reason)}")
+      {:error, reason} -> IO.puts("Error: #{Snakepit.Examples.Bootstrap.format_error(reason)}")
     end
 
     # 2. Echo command with data
@@ -47,7 +47,7 @@ defmodule BasicExample do
 
     case Snakepit.execute("echo", echo_data) do
       {:ok, result} -> IO.inspect(result, label: "Echo result")
-      {:error, reason} -> IO.puts("Error: #{inspect(reason)}")
+      {:error, reason} -> IO.puts("Error: #{Snakepit.Examples.Bootstrap.format_error(reason)}")
     end
 
     # 3. Add command (simple calculation)
@@ -55,7 +55,7 @@ defmodule BasicExample do
 
     case Snakepit.execute("add", %{a: 2, b: 2}) do
       {:ok, result} -> IO.inspect(result, label: "Add result")
-      {:error, reason} -> IO.puts("Error: #{inspect(reason)}")
+      {:error, reason} -> IO.puts("Error: #{Snakepit.Examples.Bootstrap.format_error(reason)}")
     end
 
     # 4. Get adapter info
@@ -63,15 +63,18 @@ defmodule BasicExample do
 
     case Snakepit.execute("adapter_info", %{}) do
       {:ok, result} -> IO.inspect(result, label: "Adapter info")
-      {:error, reason} -> IO.puts("Error: #{inspect(reason)}")
+      {:error, reason} -> IO.puts("Error: #{Snakepit.Examples.Bootstrap.format_error(reason)}")
     end
 
     # 5. Error handling example
     IO.puts("\n5. Error handling:")
 
     case Snakepit.execute("nonexistent_tool", %{}) do
-      {:ok, result} -> IO.inspect(result, label: "Unexpected success")
-      {:error, reason} -> IO.puts("Expected error: #{inspect(reason)}")
+      {:ok, result} ->
+        IO.inspect(result, label: "Unexpected success")
+
+      {:error, reason} ->
+        IO.puts("Expected error: #{Snakepit.Examples.Bootstrap.format_error(reason)}")
     end
   end
 end

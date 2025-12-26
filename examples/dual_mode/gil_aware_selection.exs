@@ -81,6 +81,11 @@ defmodule GILAwareSelection do
         IO.puts("  ✗ Python not found")
         IO.puts("     → Install Python 3.8+ to use Snakepit")
         IO.puts("     → Python 3.13+ recommended for thread profile")
+
+      {:error, reason} ->
+        IO.puts(
+          "  ⚠️  Python version check failed: #{Snakepit.Examples.Bootstrap.format_error(reason)}"
+        )
     end
 
     IO.puts("")

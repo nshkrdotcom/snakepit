@@ -2,7 +2,7 @@
 
 **Guide Version**: 1.0
 **Date**: 2025-10-11
-**Snakepit Version**: v0.6.0+
+**Snakepit Version**: v0.7.4+
 
 ---
 
@@ -81,9 +81,9 @@ python3.13 --version
 python3.13 -c "import sys; print(hasattr(sys, '_is_gil_enabled'))"
 # => True
 
-# Snakepit v0.6.0+
+# Snakepit v0.7.4+
 mix deps | grep snakepit
-# => * snakepit 0.6.0
+# => * snakepit 0.7.4
 ```
 
 ### Test Environment Setup

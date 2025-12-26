@@ -3,6 +3,11 @@ defmodule Snakepit.Pool.ProcessRegistryCleanupTest do
 
   alias Snakepit.Pool.ProcessRegistry
 
+  setup do
+    {:ok, _} = Application.ensure_all_started(:snakepit)
+    :ok
+  end
+
   test "manual orphan cleanup removes stale DETS entries but keeps current run" do
     state = :sys.get_state(ProcessRegistry)
     dets = state.dets_table

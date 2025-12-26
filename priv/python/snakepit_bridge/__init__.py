@@ -11,10 +11,12 @@ __author__ = "Snakepit Team"
 # Import core components for easy access
 from .session_context import SessionContext
 from .heartbeat import HeartbeatClient, HeartbeatConfig
+from .zero_copy import ZeroCopyRef
 
 __all__ = [
     "SessionContext",
     "HeartbeatClient",
     "HeartbeatConfig",
+    "ZeroCopyRef",
     "__version__"
 ]

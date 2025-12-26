@@ -65,6 +65,34 @@ def run_health_check(adapter_path: str):
     sys.exit(0)
 
 
+def _extract_callsite_context(arguments: Optional[Dict[str, Any]], request) -> Dict[str, Any]:
+    context: Dict[str, Any] = {
+        "tool_name": getattr(request, "tool_name", None),
+        "session_id": getattr(request, "session_id", None),
+    }
+
+    if isinstance(arguments, dict):
+        for key in ("library", "python_module", "function", "call_type", "payload_version"):
+            if key in arguments:
+                context[key] = arguments[key]
+
+    return {k: v for k, v in context.items() if v is not None}
+
+
+def _build_error_payload(exc: Exception, request, arguments: Optional[Dict[str, Any]] = None):
+    exc_type = type(exc).__name__
+    message = str(exc)
+    stacktrace = traceback.format_exception(type(exc), exc, exc.__traceback__)
+
+    return {
+        "type": exc_type,
+        "message": message,
+        "stacktrace": stacktrace,
+        "traceback": "".join(stacktrace),
+        "context": _extract_callsite_context(arguments, request),
+    }
+
+
 def _resolve_heartbeat_options(cli_options: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
     """Merge CLI-provided heartbeat overrides with Elixir-sourced env config."""
 
@@ -450,7 +478,8 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                 logger.error(f"ExecuteTool failed: {e}", exc_info=True)
                 response = pb2.ExecuteToolResponse()
                 response.success = False
-                response.error_message = str(e)
+                payload = _build_error_payload(e, request, locals().get("arguments"))
+                response.error_message = json.dumps(payload)
                 return response
     
     async def ExecuteStreamingTool(self, request, context):
@@ -627,13 +656,15 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                             item,
                             exc_info=True,
                         )
-                        await context.abort(grpc.StatusCode.INTERNAL, str(item))
+                        payload = _build_error_payload(item, request, locals().get("arguments"))
+                        await context.abort(grpc.StatusCode.INTERNAL, json.dumps(payload))
                         return
                     yield item
 
             except Exception as e:
                 logger.error(f"ExecuteStreamingTool failed: {e}", exc_info=True)
-                await context.abort(grpc.StatusCode.INTERNAL, str(e))
+                payload = _build_error_payload(e, request, locals().get("arguments"))
+                await context.abort(grpc.StatusCode.INTERNAL, json.dumps(payload))
 
     async def _ensure_tools_registered(self, session_id: str, adapter) -> None:
         if session_id in self._registered_sessions:

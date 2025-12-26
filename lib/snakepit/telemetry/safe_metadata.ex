@@ -39,13 +39,25 @@ defmodule Snakepit.Telemetry.SafeMetadata do
     :direction,
     :is_final,
     :tool,
+    :library,
+    :function,
+    :python_type,
     :model,
     :operation,
     :timestamp_ns,
     :worker_module,
     :adapter_module,
     :size,
-    :failure_reason
+    :failure_reason,
+    :kind,
+    :device,
+    :dtype,
+    :shape,
+    :exit_code,
+    :payload_version,
+    :call_type,
+    :idempotent,
+    :retry
   ]
 
   @doc """
