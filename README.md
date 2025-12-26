@@ -24,6 +24,7 @@ Snakepit is an Elixir library for managing pools of external language workers (P
 - **Zero-copy data interop** via DLPack and Arrow (optional)
 - **Crash barrier** with tainting and idempotent retries (optional)
 - **Hermetic Python runtime** via uv-managed installs (optional)
+- **Python package management** with uv/pip installers (optional)
 - **Structured exception translation** for Python errors (pattern-matchable)
 
 ## Installation
@@ -33,7 +34,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.7.4"}
+    {:snakepit, "~> 0.7.5"}
   ]
 end
 ```
@@ -242,6 +243,31 @@ config :snakepit, :python,
 
 mix snakepit.setup
 mix snakepit.doctor
+```
+
+### Python Package Management
+Provision packages into the resolved Python runtime:
+
+```elixir
+Snakepit.PythonPackages.ensure!({:list, ["numpy~=1.26", "scipy~=1.11"]})
+
+case Snakepit.PythonPackages.check_installed(["numpy~=1.26"]) do
+  {:ok, :all_installed} -> :ok
+  {:ok, {:missing, packages}} -> IO.inspect(packages, label: "Missing")
+end
+```
+
+Configure the installer and environment:
+
+```elixir
+config :snakepit, :python_packages,
+  installer: :auto,
+  timeout: 300_000,
+  env: %{
+    "PYTHONNOUSERSITE" => "1",
+    "PIP_DISABLE_PIP_VERSION_CHECK" => "1",
+    "PIP_NO_INPUT" => "1"
+  }
 ```
 
 ### Exception Translation

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2025-12-25
+
+### Added
+- `Snakepit.PythonPackages` module for uv/pip package management.
+- `Snakepit.PackageError` structured error type for package operations.
+- `:python_packages` application config for installer, timeout, and env settings.
+- `Snakepit.PythonPackages.ensure!/2` for provisioning required packages.
+- `Snakepit.PythonPackages.check_installed/2` for verifying package presence.
+- `Snakepit.PythonPackages.lock_metadata/2` for lockfile package metadata.
+- `Snakepit.PythonPackages.installer/0` for reporting the active installer.
+- `Snakepit.PythonPackages.install!/2` for direct requirement installs.
+
 ## [0.7.4] - 2025-12-25
 
 ### Added

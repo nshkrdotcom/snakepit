@@ -117,6 +117,18 @@ config :snakepit,
     grpc_poll_threads: 1
   }
 
+config :snakepit, :python_packages,
+  installer: :auto,
+  timeout: 300_000,
+  env: %{
+    "PYTHONNOUSERSITE" => "1",
+    "PIP_DISABLE_PIP_VERSION_CHECK" => "1",
+    "PIP_NO_INPUT" => "1",
+    "PIP_NO_WARN_SCRIPT_LOCATION" => "1",
+    "UV_NO_PROGRESS" => "1",
+    "PYTHONDONTWRITEBYTECODE" => "1"
+  }
+
 enable_otlp_env =
   System.get_env("SNAKEPIT_ENABLE_OTLP", "false")
   |> String.downcase()
