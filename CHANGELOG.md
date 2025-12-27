@@ -9,7 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.7] - 2025-12-26
 
+### Changed
+- Pool GenServer initialization redesigned for OTP compliance. Worker startup now uses an async `spawn_link` pattern instead of blocking `receive` in `handle_continue`, keeping the GenServer responsive to shutdown signals during batch initialization.
+- Multi-pool configuration now correctly isolates `pool_size` per pool. Each pool in `:pools` config uses its own `pool_size` value; the global `pool_config[:pool_size]` is only used in legacy single-pool mode.
+- Test harness improvements: `after_suite` now monitors the supervisor and waits for actual termination before returning, preventing orphaned process warnings between test runs.
+- ProcessRegistry defers unregistration when external OS processes are still alive, with automatic retry cleanup after process termination.
 
+### Fixed
+- Pool no longer crashes during application shutdown when WorkerSupervisor terminates before batch initialization completes. Added supervisor health checks before starting each worker batch.
+- ProcessKiller `process_alive?/1` on Linux now detects zombie processes by reading `/proc/{pid}/stat` state, preventing false positives for terminated-but-not-reaped processes.
+- Test configuration pollution fixed: tests that modify `:pools` config now properly save and restore `:pool_config` to prevent pool_size leakage between tests.
+
+### Added
+- `README_TESTING.md` updated with test isolation patterns, application lifecycle documentation, and multi-pool configuration examples for integration tests.
+- `REMEDIATION_PLAN.md` documenting the root cause analysis and fixes for test harness race conditions.
 
 ## [0.7.6] - 2025-12-26
 
