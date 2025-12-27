@@ -6,7 +6,6 @@ defmodule Snakepit.Config.StartupFailFastTest do
   use ExUnit.Case, async: false
   @moduletag capture_log: true
   @moduletag :slow
-  require Logger
   import ExUnit.CaptureLog
 
   alias Snakepit.Pool.ProcessRegistry
@@ -14,9 +13,6 @@ defmodule Snakepit.Config.StartupFailFastTest do
   alias Snakepit.Test.FakeDoctor
 
   setup do
-    original_level = Logger.level()
-    Logger.configure(level: :error)
-
     prev_env = %{
       pooling_enabled: Application.get_env(:snakepit, :pooling_enabled),
       pools: Application.get_env(:snakepit, :pools),
@@ -32,7 +28,6 @@ defmodule Snakepit.Config.StartupFailFastTest do
       Application.stop(:snakepit)
       restore_env(prev_env)
       {:ok, _} = Application.ensure_all_started(:snakepit)
-      Logger.configure(level: original_level)
     end)
 
     :ok

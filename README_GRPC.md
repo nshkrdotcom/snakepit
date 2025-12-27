@@ -170,7 +170,7 @@ To provide your own correlation ID, include `correlation_id` in tool args or pas
 
 ### Connection lifecycle & channel reuse
 
-- Workers store the OS-negotiated port after `GRPC_READY`, so registry lookups always return the live endpoint even when the adapter requested port `0`.
+- Workers store the OS-negotiated port after the readiness file (`SNAKEPIT_READY_FILE`) is written, so registry lookups always return the live endpoint even when the adapter requested port `0`.
 - `BridgeServer` first asks the worker for its already-open `GRPC.Stub` and only dials a new channel as a fallback—cutting handshake latency and ensuring sockets are torn down after use.
 - Tests: `test/unit/grpc/grpc_worker_ephemeral_port_test.exs` (port persistence) and `test/snakepit/grpc/bridge_server_test.exs` (channel reuse) guard the behaviour.
 
@@ -197,7 +197,7 @@ end)
 
 ### Logging redaction & diagnostics
 
-- \Snakepit.Logger.Redaction (internal helper) now collapses sensitive payloads into short summaries before anything hits the log pipeline, preventing credential or large blob leaks during gRPC debugging.
+- The internal redaction helper collapses sensitive payloads into short summaries before anything hits the log pipeline, preventing credential or large blob leaks during gRPC debugging.
 - Bridge telemetry ties the redaction summaries to execution spans so you still get useful context without sacrificing safety.
 - Guarded by `test/unit/logger/redaction_test.exs`, which asserts both redaction coverage and fallback behaviour.
 
@@ -1040,6 +1040,8 @@ end
 
 ```elixir
 # Enable debug logging
+Application.put_env(:snakepit, :log_level, :debug)
+Application.put_env(:snakepit, :log_categories, [:grpc, :bridge])
 Logger.configure(level: :debug)
 
 # Trace gRPC worker

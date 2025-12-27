@@ -17,7 +17,6 @@ import sys
 import os
 import json
 import asyncio
-import logging
 import argparse
 from typing import Dict, Any
 
@@ -25,14 +24,17 @@ from typing import Dict, Any
 sys.path.insert(0, '..')
 sys.path.insert(0, 'priv/python')
 
+from snakepit_bridge import configure_logging, get_logger
+
+if __name__ == "__main__":
+    configure_logging()
+
 import grpc
 from snakepit_bridge_pb2_grpc import BridgeServiceStub
 from snakepit_bridge_pb2 import InitializeSessionRequest
 from snakepit_bridge.session_context import SessionContext
 from snakepit_bridge.base_adapter import BaseAdapter, tool
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _default_port() -> int:

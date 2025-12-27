@@ -52,7 +52,13 @@ defmodule Snakepit.Application do
     System.put_env("PYTHONUNBUFFERED", "1")
 
     SLog.info(
-      "🧵 Set Python thread limits: OPENBLAS=#{thread_limits[:openblas]}, OMP=#{thread_limits[:omp]}, MKL=#{thread_limits[:mkl]}, NUMEXPR=#{thread_limits[:numexpr]}, GRPC=single-threaded"
+      :startup,
+      "Set Python thread limits",
+      openblas: thread_limits[:openblas],
+      omp: thread_limits[:omp],
+      mkl: thread_limits[:mkl],
+      numexpr: thread_limits[:numexpr],
+      grpc_poll_strategy: "poll"
     )
 
     # Check if pooling is enabled (default: false to prevent auto-start issues)
@@ -63,14 +69,17 @@ defmodule Snakepit.Application do
     end
 
     if Application.get_env(:snakepit, :enable_otlp?, false) do
-      SLog.info("OTLP telemetry enabled (SNAKEPIT_ENABLE_OTLP=true)")
+      SLog.info(:startup, "OTLP telemetry enabled", enabled: true)
       OpenTelemetry.setup()
     else
-      SLog.debug("OTLP telemetry disabled (set SNAKEPIT_ENABLE_OTLP=true to enable)")
+      SLog.debug(:startup, "OTLP telemetry disabled", enabled: false)
     end
 
     SLog.debug(
-      "Snakepit.Application.start/2: pooling_enabled=#{pooling_enabled}, env=#{@runtime_env}"
+      :startup,
+      "Snakepit.Application.start/2",
+      pooling_enabled: pooling_enabled,
+      environment: @runtime_env
     )
 
     # Get gRPC config for the Elixir server
@@ -94,7 +103,7 @@ defmodule Snakepit.Application do
         pool_config = Application.get_env(:snakepit, :pool_config, %{})
         pool_size = Map.get(pool_config, :pool_size, System.schedulers_online() * 2)
 
-        SLog.info("🚀 Starting Snakepit with pooling enabled (size: #{pool_size})")
+        SLog.info(:startup, "Starting Snakepit with pooling enabled", pool_size: pool_size)
 
         [
           # GRPC client supervisor - required for connecting to Python workers
@@ -139,7 +148,7 @@ defmodule Snakepit.Application do
           {Snakepit.Pool, [size: pool_size]}
         ]
       else
-        SLog.info("🔧 Starting Snakepit with pooling disabled")
+        SLog.info(:startup, "Starting Snakepit with pooling disabled", pooling_enabled: false)
         []
       end
 
@@ -147,13 +156,20 @@ defmodule Snakepit.Application do
 
     opts = [strategy: :one_for_one, name: Snakepit.Supervisor]
     result = Supervisor.start_link(children, opts)
-    SLog.debug("Snakepit.Application started at: #{System.monotonic_time(:millisecond)}")
+
+    SLog.debug(:startup, "Snakepit.Application started",
+      started_at_ms: System.monotonic_time(:millisecond)
+    )
+
     result
   end
 
   @impl true
   def stop(_state) do
-    SLog.debug("Snakepit.Application.stop/1 called at: #{System.monotonic_time(:millisecond)}")
+    SLog.debug(:shutdown, "Snakepit.Application.stop/1",
+      stopped_at_ms: System.monotonic_time(:millisecond)
+    )
+
     maybe_cleanup_on_stop()
     :ok
   end
@@ -171,10 +187,10 @@ defmodule Snakepit.Application do
           )
         rescue
           error ->
-            SLog.warning("Shutdown cleanup failed: #{inspect(error)}")
+            SLog.warning(:shutdown, "Shutdown cleanup failed", error: error)
         catch
           :exit, reason ->
-            SLog.warning("Shutdown cleanup exited: #{inspect(reason)}")
+            SLog.warning(:shutdown, "Shutdown cleanup exited", reason: reason)
         end
       end
     end

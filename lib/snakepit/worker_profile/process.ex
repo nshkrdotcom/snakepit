@@ -36,10 +36,10 @@ defmodule Snakepit.WorkerProfile.Process do
 
   @behaviour Snakepit.WorkerProfile
 
-  require Logger
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Pool.WorkerSupervisor
+  @log_category :worker
 
   @impl true
   def start_worker(config) do
@@ -60,7 +60,7 @@ defmodule Snakepit.WorkerProfile.Process do
            config_with_env
          ) do
       {:ok, pid} ->
-        SLog.debug("Process profile started worker #{worker_id}: #{inspect(pid)}")
+        SLog.debug(@log_category, "Process profile started worker #{worker_id}: #{inspect(pid)}")
         {:ok, pid}
 
       error ->

@@ -28,7 +28,6 @@ Usage:
 """
 
 import threading
-import logging
 import time
 import functools
 from typing import Any, Dict, Optional, Callable
@@ -36,8 +35,9 @@ from contextlib import contextmanager
 from collections import defaultdict
 
 from snakepit_bridge.base_adapter import BaseAdapter, tool, ToolMetadata
+from snakepit_bridge.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ThreadLocalStorage:

@@ -81,7 +81,7 @@ Pool.WorkerSupervisor (DynamicSupervisor)
 2. DynamicSupervisor starts a `Worker.Starter` for this worker
 3. Starter spawns `GRPCWorker` as its child
 4. GRPCWorker opens OS port to spawn Python process
-5. Python binds to ephemeral port, prints `GRPC_READY:{port}`
+5. Python binds to an ephemeral port, writes the port to the readiness file (`SNAKEPIT_READY_FILE`)
 6. GRPCWorker connects to Python's gRPC server
 7. Connection verified with ping, worker registered as available
 

@@ -378,13 +378,20 @@ Typical overhead for cross-language calls:
 Enable detailed logging:
 
 ```python
-# Python
-import logging
-logging.getLogger('snakepit_bridge').setLevel(logging.DEBUG)
+# Python (call before other imports that might log)
+import os
+os.environ["SNAKEPIT_LOG_LEVEL"] = "debug"
+
+from snakepit_bridge import configure_logging, get_logger
+configure_logging(force=True)
+
+logger = get_logger("bidirectional_demo")
 ```
 
 ```elixir
 # Elixir - in config.exs
+config :snakepit, log_level: :debug
+config :snakepit, log_categories: [:grpc, :bridge]
 config :logger, level: :debug
 ```
 

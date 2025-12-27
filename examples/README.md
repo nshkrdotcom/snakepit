@@ -383,13 +383,14 @@ mix run --no-start examples/grpc_streaming.exs 10
 SNAKEPIT_LOG_LEVEL=debug mix run --no-start examples/grpc_basic.exs
 ```
 
-### Suppressing Logs
+### Logging
 
-Most examples already suppress internal Snakepit logs for clean output. To enable debug logs:
+Most examples run with `log_level: :error` for clean output. To enable verbose logs:
 
 ```elixir
 # In the example file, change:
 Application.put_env(:snakepit, :log_level, :debug)
+Application.put_env(:snakepit, :log_categories, [:grpc, :pool])
 ```
 
 ### Error Handling

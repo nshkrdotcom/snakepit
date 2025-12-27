@@ -23,7 +23,7 @@ Usage:
     with ThreadSafetyChecker(enabled=True) as checker:
         # Run concurrent operations
         results = run_concurrent_tests()
-        print(checker.get_report())
+        report = checker.get_report()
 """
 
 import threading
@@ -35,9 +35,12 @@ import functools
 from typing import Set, Dict, List, Optional, Callable, Any
 from collections import defaultdict
 from contextlib import contextmanager
-import logging
+from snakepit_bridge.logging_config import configure_logging, get_logger
 
-logger = logging.getLogger(__name__)
+if __name__ == "__main__":
+    configure_logging()
+
+logger = get_logger("thread_safety_checker")
 
 
 class ThreadSafetyChecker:
@@ -450,27 +453,33 @@ def check_common_pitfalls(adapter_instance) -> List[str]:
 
 
 def print_thread_safety_report():
-    """Print a formatted thread safety report"""
+    """Log a formatted thread safety report."""
     report = _global_checker.get_report()
 
-    print("\n" + "="*70)
-    print("Thread Safety Analysis Report")
-    print("="*70)
+    lines = [
+        "",
+        "=" * 70,
+        "Thread Safety Analysis Report",
+        "=" * 70,
+        "",
+        "Execution Summary:",
+        f"  Total Runtime: {report['total_runtime']:.2f}s",
+        f"  Threads Detected: {report['total_threads_seen']}",
+        f"  Methods Tracked: {report['total_methods_tracked']}",
+        f"  Warnings Issued: {report['warnings_issued']}",
+    ]
 
-    print(f"\nExecution Summary:")
-    print(f"  Total Runtime: {report['total_runtime']:.2f}s")
-    print(f"  Threads Detected: {report['total_threads_seen']}")
-    print(f"  Methods Tracked: {report['total_methods_tracked']}")
-    print(f"  Warnings Issued: {report['warnings_issued']}")
+    if report["concurrent_accesses"]:
+        lines.append("")
+        lines.append("Concurrent Accesses Detected:")
+        for method, count in report["concurrent_accesses"].items():
+            lines.append(f"  - {method}: {count} threads")
 
-    if report['concurrent_accesses']:
-        print(f"\nConcurrent Accesses Detected:")
-        for method, count in report['concurrent_accesses'].items():
-            print(f"  - {method}: {count} threads")
+    if report["recommendations"]:
+        lines.append("")
+        lines.append("Recommendations:")
+        for rec in report["recommendations"]:
+            lines.append(f"  {rec}")
 
-    if report['recommendations']:
-        print(f"\nRecommendations:")
-        for rec in report['recommendations']:
-            print(f"  {rec}")
-
-    print("\n" + "="*70 + "\n")
+    lines.extend(["", "=" * 70, ""])
+    logger.info("\n".join(lines))

@@ -6,12 +6,11 @@ defmodule Snakepit.ZeroCopy do
   fallbacks when unavailable.
   """
 
-  require Logger
-
   alias Snakepit.Logger, as: SLog
   alias Snakepit.ZeroCopyRef
 
   @table :snakepit_zero_copy_handles
+  @log_category :bridge
 
   @default_config %{
     enabled: false,
@@ -56,6 +55,7 @@ defmodule Snakepit.ZeroCopy do
 
       config.allow_fallback ->
         SLog.warning(
+          @log_category,
           "Zero-copy #{kind} unavailable; falling back to copy (reason: :zero_copy_unavailable)"
         )
 

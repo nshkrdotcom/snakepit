@@ -1,7 +1,7 @@
 defmodule Snakepit.MixProject do
   use Mix.Project
 
-  @version "0.8.0"
+  @version "0.8.1"
   @source_url "https://github.com/nshkrdotcom/snakepit"
 
   def project do
@@ -26,7 +26,7 @@ defmodule Snakepit.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger],
+      extra_applications: [:logger, :telemetry],
       mod: {Snakepit.Application, []}
     ]
   end

@@ -34,7 +34,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.8.0"}
+    {:snakepit, "~> 0.8.1"}
   ]
 end
 ```
@@ -77,6 +77,25 @@ Snakepit.execute_stream("batch_process", %{items: items}, fn chunk ->
   IO.puts("Progress: #{chunk.progress}%")
 end)
 ```
+
+### Logging
+
+Snakepit is silent by default (errors only). Tune verbosity and categories via config:
+
+```elixir
+config :snakepit, log_level: :error
+config :snakepit, log_level: :debug, log_categories: [:grpc, :pool]
+config :snakepit, log_level: :none
+```
+
+Python workers respect `SNAKEPIT_LOG_LEVEL` and require explicit setup in entrypoints:
+
+```python
+from snakepit_bridge import configure_logging
+configure_logging()
+```
+
+Snakepit sets `SNAKEPIT_LOG_LEVEL` for spawned workers; standalone scripts can set it manually.
 
 ### Script Mode
 

@@ -15,6 +15,7 @@ defmodule Snakepit.RuntimeCleanup do
   @telemetry_start [:snakepit, :cleanup, :start]
   @telemetry_success [:snakepit, :cleanup, :success]
   @telemetry_timeout [:snakepit, :cleanup, :timeout]
+  @log_category :shutdown
 
   def cleanup_current_run(opts \\ []) do
     run_id = ProcessRegistry.get_beam_run_id()
@@ -46,6 +47,7 @@ defmodule Snakepit.RuntimeCleanup do
         :ok
       else
         SLog.warning(
+          @log_category,
           "Cleanup timeout after #{timeout_ms}ms; escalating to SIGKILL for #{length(remaining)} processes"
         )
 
@@ -83,7 +85,10 @@ defmodule Snakepit.RuntimeCleanup do
           :ok
 
         {:error, reason} ->
-          SLog.warning("Failed to send #{signal} to #{format_target(target)}: #{inspect(reason)}")
+          SLog.warning(
+            @log_category,
+            "Failed to send #{signal} to #{format_target(target)}: #{inspect(reason)}"
+          )
       end
     end)
   end
@@ -150,7 +155,10 @@ defmodule Snakepit.RuntimeCleanup do
   defp log_incomplete_cleanup([]), do: :ok
 
   defp log_incomplete_cleanup(still_alive) do
-    SLog.warning("Cleanup incomplete: #{length(still_alive)} processes still alive after SIGKILL")
+    SLog.warning(
+      @log_category,
+      "Cleanup incomplete: #{length(still_alive)} processes still alive after SIGKILL"
+    )
   end
 
   defp format_target(%{worker_id: worker_id, process_pid: pid})

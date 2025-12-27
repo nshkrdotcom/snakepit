@@ -7,8 +7,6 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   use GRPC.Server, service: Snakepit.Bridge.BridgeService.Service
 
-  require Logger
-
   alias Google.Protobuf.{Any, Timestamp}
 
   alias Snakepit.Bridge.{
@@ -40,11 +38,12 @@ defmodule Snakepit.GRPC.BridgeServer do
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Telemetry.Correlation
+  @log_category :grpc
 
   # Health & Session Management
 
   def ping(%PingRequest{message: message}, _stream) do
-    SLog.debug("Ping received: #{message}")
+    SLog.debug(@log_category, "Ping received", message: message)
 
     %PingResponse{
       message: "pong: #{message}",
@@ -53,7 +52,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def initialize_session(request, _stream) do
-    SLog.info("Initializing session: #{request.session_id}")
+    SLog.info(@log_category, "Initializing session", session_id: request.session_id)
 
     case SessionStore.create_session(request.session_id, metadata: request.metadata) do
       {:ok, _session} ->
@@ -73,7 +72,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def cleanup_session(%CleanupSessionRequest{session_id: session_id, force: _force}, _stream) do
-    SLog.info("Cleaning up session: #{session_id}")
+    SLog.info(@log_category, "Cleaning up session", session_id: session_id)
 
     # NOTE: The force flag is not currently used. SessionStore.delete_session is always idempotent
     # and immediately deletes the session regardless of state. Future enhancements could add
@@ -87,7 +86,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def get_session(%GetSessionRequest{session_id: session_id}, _stream) do
-    SLog.debug("GetSession: #{session_id}")
+    SLog.debug(@log_category, "GetSession", session_id: session_id)
 
     case SessionStore.get_session(session_id) do
       {:ok, session} ->
@@ -111,7 +110,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def heartbeat(%HeartbeatRequest{session_id: session_id, client_time: _client_time}, _stream) do
-    SLog.debug("Heartbeat: #{session_id}")
+    SLog.debug(@log_category, "Heartbeat", session_id: session_id)
 
     # Check if session exists and update last_accessed
     session_valid =
@@ -133,7 +132,10 @@ defmodule Snakepit.GRPC.BridgeServer do
   # Tool Execution
 
   def execute_tool(%ExecuteToolRequest{} = request, stream) do
-    SLog.info("ExecuteTool: #{request.tool_name} for session #{request.session_id}")
+    SLog.info(@log_category, "ExecuteTool",
+      tool_name: request.tool_name,
+      session_id: request.session_id
+    )
 
     start_time = System.monotonic_time(:millisecond)
     correlation_id = resolve_request_correlation_id(request, stream)
@@ -182,7 +184,10 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   defp execute_tool_handler(%{type: :remote} = tool, request, session_id, correlation_id) do
     # Forward to Python worker
-    SLog.debug("Executing remote tool #{tool.name} on worker #{tool.worker_id}")
+    SLog.debug(@log_category, "Executing remote tool",
+      tool_name: tool.name,
+      worker_id: tool.worker_id
+    )
 
     with {:ok, params} <- decode_tool_parameters(request.parameters, request.binary_parameters),
          {:ok, channel, cleanup} <- ensure_worker_channel(tool.worker_id) do
@@ -198,7 +203,12 @@ defmodule Snakepit.GRPC.BridgeServer do
           {:ok, response}
 
         {:error, reason} ->
-          SLog.error("Failed to execute remote tool #{tool.name}: #{inspect(reason)}")
+          SLog.error(@log_category, "Failed to execute remote tool",
+            tool_name: tool.name,
+            worker_id: tool.worker_id,
+            reason: reason
+          )
+
           {:error, {:remote_execution_failed, reason}}
       end
     else
@@ -206,7 +216,12 @@ defmodule Snakepit.GRPC.BridgeServer do
         error
 
       {:error, reason} ->
-        SLog.error("Failed to execute remote tool #{tool.name}: #{inspect(reason)}")
+        SLog.error(@log_category, "Failed to execute remote tool",
+          tool_name: tool.name,
+          worker_id: tool.worker_id,
+          reason: reason
+        )
+
         {:error, {:remote_execution_failed, reason}}
     end
   end
@@ -462,7 +477,9 @@ defmodule Snakepit.GRPC.BridgeServer do
         "See docs/20251026/SNAKEPIT_STREAMING_PROMPT.md for enablement steps."
 
     SLog.warning(
-      "Streaming request received for #{request.tool_name} but streaming support is disabled. Returning UNIMPLEMENTED."
+      @log_category,
+      "Streaming request received but streaming support is disabled. Returning UNIMPLEMENTED.",
+      tool_name: request.tool_name
     )
 
     raise GRPC.RPCError,
@@ -505,7 +522,10 @@ defmodule Snakepit.GRPC.BridgeServer do
   # Tool Registration & Discovery
 
   def register_tools(%RegisterToolsRequest{} = request, _stream) do
-    SLog.info("RegisterTools for session #{request.session_id}, worker: #{request.worker_id}")
+    SLog.info(@log_category, "RegisterTools",
+      session_id: request.session_id,
+      worker_id: request.worker_id
+    )
 
     with {:ok, _session} <- SessionStore.get_session(request.session_id),
          tool_specs <- convert_proto_tools_to_specs(request.tools, request.worker_id),
@@ -546,7 +566,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def get_exposed_elixir_tools(%GetExposedElixirToolsRequest{session_id: session_id}, _stream) do
-    SLog.debug("GetExposedElixirTools for session #{session_id}")
+    SLog.debug(@log_category, "GetExposedElixirTools", session_id: session_id)
 
     tools = ToolRegistry.list_exposed_elixir_tools(session_id)
 
@@ -585,7 +605,10 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   def execute_elixir_tool(%ExecuteElixirToolRequest{} = request, _stream) do
-    SLog.info("ExecuteElixirTool: #{request.tool_name} for session #{request.session_id}")
+    SLog.info(@log_category, "ExecuteElixirTool",
+      tool_name: request.tool_name,
+      session_id: request.session_id
+    )
 
     start_time = System.monotonic_time(:millisecond)
 

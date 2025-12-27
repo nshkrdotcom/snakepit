@@ -6,7 +6,7 @@ Snakepit provides fine-grained control over its internal logging to keep your ap
 
 ```elixir
 # In your config/config.exs or application code
-config :snakepit, log_level: :warning  # Only show warnings and errors
+config :snakepit, log_level: :error  # Only show errors (default)
 ```
 
 ## Available Log Levels
@@ -14,10 +14,23 @@ config :snakepit, log_level: :warning  # Only show warnings and errors
 | Level | Description | When to Use |
 |-------|-------------|-------------|
 | `:debug` | Show all logs including detailed diagnostics | Development, troubleshooting |
-| `:info` | Show informational messages (default) | Development |
+| `:info` | Show informational messages | Development |
 | `:warning` | Only show warnings and errors | Production, demos, clean output |
-| `:error` | Only show errors | Production (minimal logging) |
+| `:error` | Only show errors (default) | Production (minimal logging) |
 | `:none` | Suppress all Snakepit logs | When you want complete silence |
+
+## Category Filtering (Debug/Info Only)
+
+Category filters apply only to `:debug` and `:info`. Warnings and errors bypass
+categories (unless `log_level: :none`).
+
+```elixir
+config :snakepit, log_level: :debug
+config :snakepit, log_categories: [:grpc, :pool, :bridge]
+```
+
+Available categories:
+`:lifecycle`, `:pool`, `:grpc`, `:bridge`, `:worker`, `:startup`, `:shutdown`, `:telemetry`, `:general`.
 
 ## Configuration Examples
 
@@ -26,7 +39,7 @@ config :snakepit, log_level: :warning  # Only show warnings and errors
 ```elixir
 # config/config.exs
 config :snakepit,
-  log_level: :warning,  # Suppress info and debug logs
+  log_level: :error,  # Suppress info, debug, and warnings
   pooling_enabled: true,
   pool_config: %{pool_size: 4}
 ```
@@ -35,7 +48,7 @@ config :snakepit,
 
 ```elixir
 # examples/my_script.exs
-Application.put_env(:snakepit, :log_level, :warning)
+Application.put_env(:snakepit, :log_level, :error)
 Application.put_env(:snakepit, :pooling_enabled, true)
 
 Mix.install([{:snakepit, path: "."}])
@@ -54,7 +67,7 @@ Application.put_env(:snakepit, :log_level, :none)   # Silence everything
 
 ## What Gets Suppressed?
 
-When you set `log_level: :warning`, Snakepit will suppress:
+When you set `log_level: :error`, Snakepit will suppress:
 
 - ✅ Pool initialization messages
 - ✅ Worker startup notifications
@@ -63,16 +76,15 @@ When you set `log_level: :warning`, Snakepit will suppress:
 - ✅ Session creation logs
 - ✅ Tool registration messages
 - ✅ Debug diagnostics
-- ❌ Warnings (still shown)
 - ❌ Errors (still shown)
 
 ## Use Cases
 
 ### Production Deployment
 ```elixir
-config :snakepit, log_level: :warning
+config :snakepit, log_level: :error
 ```
-Keep logs clean while still seeing important warnings and errors.
+Keep logs clean while still seeing errors.
 
 ### Development
 ```elixir
@@ -97,7 +109,10 @@ Complete silence - only your application output.
 This only affects **Snakepit's internal logs**. It does not affect:
 - Your application's logs
 - Elixir's Logger configuration
-- Python worker output (configure separately with `PYTHONUNBUFFERED`)
+- Python worker logs (controlled by `SNAKEPIT_LOG_LEVEL` and `snakepit_bridge.configure_logging()`)
+
+When Snakepit spawns Python workers it sets `SNAKEPIT_LOG_LEVEL` automatically.
+Standalone Python entrypoints should call `configure_logging()` early to opt in.
 
 ## Redaction helpers
 
@@ -118,7 +133,7 @@ This only affects **Snakepit's internal logs**. It does not affect:
 Ping result: %{"message" => "pong"}
 ```
 
-### After (`:warning` level):
+### After (`:error` level):
 ```
 Ping result: %{"message" => "pong"}
 ```

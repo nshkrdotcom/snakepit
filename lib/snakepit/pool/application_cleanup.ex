@@ -7,10 +7,10 @@ defmodule Snakepit.Pool.ApplicationCleanup do
   """
 
   use GenServer
-  require Logger
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.ProcessKiller
+  @log_category :shutdown
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -23,7 +23,7 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     # Register for VM shutdown notifications
     :erlang.process_flag(:priority, :high)
 
-    SLog.info("🛡️ Application cleanup handler started")
+    SLog.info(@log_category, "🛡️ Application cleanup handler started")
     {:ok, %{}}
   end
 
@@ -38,23 +38,29 @@ defmodule Snakepit.Pool.ApplicationCleanup do
   #
   # If this handler finds orphans, it indicates a bug in the supervision tree.
   def terminate(reason, _state) do
-    SLog.info("🔍 Emergency cleanup check (shutdown reason: #{inspect(reason)})")
-    SLog.debug("ApplicationCleanup.terminate/2 called at: #{System.monotonic_time(:millisecond)}")
-    SLog.debug("ApplicationCleanup process info: #{inspect(Process.info(self()))}")
+    SLog.info(@log_category, "🔍 Emergency cleanup check (shutdown reason: #{inspect(reason)})")
+
+    SLog.debug(
+      @log_category,
+      "ApplicationCleanup.terminate/2 called at: #{System.monotonic_time(:millisecond)}"
+    )
+
+    SLog.debug(@log_category, "ApplicationCleanup process info: #{inspect(Process.info(self()))}")
 
     beam_run_id = ProcessRegistry.get_beam_run_id()
     orphaned_pids = find_orphaned_processes(beam_run_id)
 
     if Enum.empty?(orphaned_pids) do
-      SLog.info("✅ No orphaned processes - supervision tree cleaned up correctly")
+      SLog.info(@log_category, "✅ No orphaned processes - supervision tree cleaned up correctly")
       emit_telemetry(:cleanup_success, 0)
     else
       # These are normal during test shutdown - workers that were still starting
       SLog.debug(
+        @log_category,
         "Cleanup: Found #{length(orphaned_pids)} processes still starting during shutdown"
       )
 
-      SLog.debug("Cleanup: Orphaned PIDs: #{inspect(orphaned_pids)}")
+      SLog.debug(@log_category, "Cleanup: Orphaned PIDs: #{inspect(orphaned_pids)}")
 
       emit_telemetry(:orphaned_processes_found, length(orphaned_pids))
 
@@ -62,7 +68,7 @@ defmodule Snakepit.Pool.ApplicationCleanup do
       kill_count = emergency_kill_processes(beam_run_id)
 
       if kill_count > 0 do
-        SLog.debug("Cleanup: Killed #{kill_count} orphaned processes")
+        SLog.debug(@log_category, "Cleanup: Killed #{kill_count} orphaned processes")
         emit_telemetry(:emergency_cleanup, kill_count)
       end
     end
@@ -120,7 +126,7 @@ defmodule Snakepit.Pool.ApplicationCleanup do
 
       nil ->
         # Not in registry at all - this IS an orphan
-        SLog.warning("PID #{os_pid} not in ProcessRegistry - true orphan")
+        SLog.warning(@log_category, "PID #{os_pid} not in ProcessRegistry - true orphan")
         true
     end
   end
@@ -132,6 +138,7 @@ defmodule Snakepit.Pool.ApplicationCleanup do
 
     if not is_orphan do
       SLog.debug(
+        @log_category,
         "Skipping PID #{os_pid} - Elixir GenServer #{inspect(elixir_pid)} still alive, " <>
           "supervision tree will handle cleanup"
       )

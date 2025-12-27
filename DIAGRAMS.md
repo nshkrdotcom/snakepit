@@ -145,6 +145,7 @@ sequenceDiagram
     participant Starter as Worker.Starter
     participant GW as GRPCWorker
     participant Port as OS Port
+    participant Ready as Ready File
     participant Py as Python Process
 
     Pool->>WS: start_worker(worker_id, config)
@@ -154,8 +155,8 @@ sequenceDiagram
     GW->>Port: open_port({:spawn, "python3 grpc_server.py"})
     Port->>Py: spawn process
     Py->>Py: bind to ephemeral port
-    Py-->>Port: GRPC_READY:50001
-    Port-->>GW: {:data, "GRPC_READY:50001"}
+    Py-->>Ready: write port (SNAKEPIT_READY_FILE)
+    GW->>Ready: read port
 
     GW->>Py: gRPC connect to :50001
     GW->>Py: ping()

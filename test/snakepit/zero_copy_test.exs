@@ -28,6 +28,16 @@ defmodule Snakepit.ZeroCopyTest do
 
   test "falls back with warning when zero-copy is disabled" do
     Application.put_env(:snakepit, :zero_copy, %{enabled: false, allow_fallback: true})
+    original_log_level = Application.get_env(:snakepit, :log_level)
+    Application.put_env(:snakepit, :log_level, :warning)
+
+    on_exit(fn ->
+      if is_nil(original_log_level) do
+        Application.delete_env(:snakepit, :log_level)
+      else
+        Application.put_env(:snakepit, :log_level, original_log_level)
+      end
+    end)
 
     log =
       capture_log(fn ->

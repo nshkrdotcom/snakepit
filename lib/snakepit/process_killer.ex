@@ -8,11 +8,11 @@ defmodule Snakepit.ProcessKiller do
   features like pkill.
   """
 
-  require Logger
   alias Snakepit.Logger, as: SLog
 
   @kill_command_candidates ["/bin/kill", "/usr/bin/kill"]
   @ps_command_candidates ["/bin/ps", "/usr/bin/ps"]
+  @log_category :shutdown
 
   @doc """
   Returns true if the platform supports process group kill semantics.
@@ -65,6 +65,7 @@ defmodule Snakepit.ProcessKiller do
     caller = Process.info(self(), :registered_name)
 
     SLog.debug(
+      @log_category,
       "ProcessKiller.kill_process: PID=#{os_pid}, signal=#{signal}, caller=#{inspect(caller)}"
     )
 
@@ -85,7 +86,7 @@ defmodule Snakepit.ProcessKiller do
       end
     else
       {:error, reason} ->
-        SLog.warning("Failed to execute kill command: #{inspect(reason)}")
+        SLog.warning(@log_category, "Failed to execute kill command: #{inspect(reason)}")
         {:error, reason}
     end
   end
@@ -117,7 +118,7 @@ defmodule Snakepit.ProcessKiller do
       end
     else
       {:error, reason} ->
-        SLog.warning("Failed to execute kill command: #{inspect(reason)}")
+        SLog.warning(@log_category, "Failed to execute kill command: #{inspect(reason)}")
         {:error, reason}
     end
   end
@@ -292,10 +293,10 @@ defmodule Snakepit.ProcessKiller do
   Pure Erlang implementation, no pkill.
   """
   def kill_by_run_id(run_id) when is_binary(run_id) do
-    SLog.warning("🔪 Killing all processes with run_id: #{run_id}")
-    SLog.debug("kill_by_run_id called at: #{System.monotonic_time(:millisecond)}")
+    SLog.warning(@log_category, "🔪 Killing all processes with run_id: #{run_id}")
+    SLog.debug(@log_category, "kill_by_run_id called at: #{System.monotonic_time(:millisecond)}")
     caller_info = Process.info(self(), [:registered_name, :current_stacktrace])
-    SLog.debug("Called from: #{inspect(caller_info)}")
+    SLog.debug(@log_category, "Called from: #{inspect(caller_info)}")
 
     # Get all Python processes
     python_pids = find_python_processes()
@@ -318,7 +319,7 @@ defmodule Snakepit.ProcessKiller do
         end
       end)
 
-    SLog.info("Found #{length(matching_pids)} processes to kill")
+    SLog.info(@log_category, "Found #{length(matching_pids)} processes to kill")
 
     # Kill with escalation
     killed_count =
@@ -328,7 +329,7 @@ defmodule Snakepit.ProcessKiller do
             acc + 1
 
           {:error, reason} ->
-            SLog.warning("Failed to kill #{pid}: #{inspect(reason)}")
+            SLog.warning(@log_category, "Failed to kill #{pid}: #{inspect(reason)}")
             acc
         end
       end)
@@ -421,7 +422,7 @@ defmodule Snakepit.ProcessKiller do
       |> Enum.reverse()
     else
       {:error, {:executable_not_found, _cmd}} ->
-        SLog.warning("ps command not available; skipping python process discovery")
+        SLog.warning(@log_category, "ps command not available; skipping python process discovery")
         []
 
       _ ->
@@ -450,11 +451,11 @@ defmodule Snakepit.ProcessKiller do
       :ok ->
         # Wait for process to die
         if wait_for_death(os_pid, timeout_ms) do
-          SLog.debug("✅ Process #{os_pid} terminated gracefully")
+          SLog.debug(@log_category, "✅ Process #{os_pid} terminated gracefully")
           :ok
         else
           # Escalate to SIGKILL
-          SLog.warning("⏰ Process #{os_pid} didn't die, escalating to SIGKILL")
+          SLog.warning(@log_category, "⏰ Process #{os_pid} didn't die, escalating to SIGKILL")
           kill_process(os_pid, :sigkill)
         end
 
@@ -470,10 +471,10 @@ defmodule Snakepit.ProcessKiller do
     case kill_process_group(pgid, :sigterm) do
       :ok ->
         if wait_for_death(pgid, timeout_ms) do
-          SLog.debug("✅ Process group #{pgid} terminated gracefully")
+          SLog.debug(@log_category, "✅ Process group #{pgid} terminated gracefully")
           :ok
         else
-          SLog.warning("⏰ Process group #{pgid} didn't die, escalating to SIGKILL")
+          SLog.warning(@log_category, "⏰ Process group #{pgid} didn't die, escalating to SIGKILL")
           kill_process_group(pgid, :sigkill)
         end
 

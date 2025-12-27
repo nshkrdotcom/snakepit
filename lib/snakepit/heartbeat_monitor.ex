@@ -8,11 +8,12 @@ defmodule Snakepit.HeartbeatMonitor do
   """
 
   use GenServer
-  require Logger
+  alias Snakepit.Logger, as: SLog
 
   @default_ping_interval 2_000
   @default_timeout 10_000
   @default_max_missed 3
+  @log_category :worker
 
   @type start_option ::
           {:worker_pid, pid()}
@@ -158,7 +159,11 @@ defmodule Snakepit.HeartbeatMonitor do
         {:noreply, new_state}
 
       {:error, reason} ->
-        Logger.warning("Heartbeat ping failed for #{state.worker_id}: #{inspect(reason)}")
+        SLog.warning(
+          @log_category,
+          "Heartbeat ping failed for #{state.worker_id}: #{inspect(reason)}"
+        )
+
         handle_worker_failure(state, :ping_failed)
     end
   end
@@ -178,9 +183,9 @@ defmodule Snakepit.HeartbeatMonitor do
         "Worker #{state.worker_id} missed #{missed} heartbeat(s); initiating termination"
 
       if state.dependent do
-        Logger.error(log_message)
+        SLog.error(@log_category, log_message)
       else
-        Logger.warning("#{log_message} (worker configured as heartbeat-independent)")
+        SLog.warning(@log_category, "#{log_message} (worker configured as heartbeat-independent)")
       end
 
       handle_worker_failure(
@@ -198,13 +203,17 @@ defmodule Snakepit.HeartbeatMonitor do
 
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, reason}, %{worker_pid: pid} = state) do
-    Logger.debug("Heartbeat monitor observed worker #{state.worker_id} exit: #{inspect(reason)}")
+    SLog.debug(
+      @log_category,
+      "Heartbeat monitor observed worker #{state.worker_id} exit: #{inspect(reason)}"
+    )
+
     {:stop, {:worker_down, reason}, state}
   end
 
   @impl true
   def handle_info(message, state) do
-    Logger.debug("Unhandled heartbeat monitor message: #{inspect(message)}")
+    SLog.debug(@log_category, "Unhandled heartbeat monitor message: #{inspect(message)}")
     {:noreply, state}
   end
 
@@ -252,7 +261,8 @@ defmodule Snakepit.HeartbeatMonitor do
       Process.exit(state.worker_pid, {:shutdown, reason})
       {:stop, {:shutdown, reason}, state}
     else
-      Logger.debug(
+      SLog.debug(
+        @log_category,
         "Heartbeat monitor for #{state.worker_id} suppressing termination (independent worker, reason=#{inspect(reason)})"
       )
 

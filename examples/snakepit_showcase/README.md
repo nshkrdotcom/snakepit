@@ -178,6 +178,8 @@ Required packages:
 
 Enable debug logging:
 ```elixir
+config :snakepit, log_level: :debug
+config :snakepit, log_categories: [:grpc, :pool, :bridge]
 config :logger, level: :debug
 ```
 

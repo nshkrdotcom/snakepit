@@ -12,13 +12,13 @@ defmodule Snakepit.Pool.ProcessRegistry do
   """
 
   use GenServer
-  require Logger
   alias Snakepit.Logger, as: SLog
 
   @table_name :snakepit_pool_process_registry
   @cleanup_interval 30_000
   @unregister_cleanup_delay 500
   @unregister_cleanup_attempts 10
+  @log_category :pool
 
   defstruct [
     :table,
@@ -246,7 +246,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
           table
 
         {:error, reason} ->
-          SLog.error("Failed to open DETS file: #{inspect(reason)}. Deleting and recreating...")
+          SLog.error(
+            @log_category,
+            "Failed to open DETS file: #{inspect(reason)}. Deleting and recreating..."
+          )
+
           File.rm(dets_file)
 
           {:ok, table} =
@@ -269,6 +273,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
       ])
 
     SLog.info(
+      @log_category,
       "Snakepit Pool Process Registry started with BEAM run ID: #{beam_run_id}, BEAM OS PID: #{beam_os_pid}"
     )
 
@@ -310,6 +315,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     :dets.sync(state.dets_table)
 
     SLog.info(
+      @log_category,
       "✅ Registered worker #{worker_id} with external process PID #{process_pid} " <>
         "for BEAM run #{state.beam_run_id} in ProcessRegistry"
     )
@@ -329,13 +335,18 @@ defmodule Snakepit.Pool.ProcessRegistry do
           schedule_unregister_cleanup(worker_id, process_pid, @unregister_cleanup_attempts)
 
           SLog.debug(
+            @log_category,
             "Deferring unregister for #{worker_id}; external process #{process_pid} still alive"
           )
         else
           :ets.delete(state.table, worker_id)
           :dets.delete(state.dets_table, worker_id)
           :dets.sync(state.dets_table)
-          SLog.info("🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}")
+
+          SLog.info(
+            @log_category,
+            "🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}"
+          )
         end
 
       [] ->
@@ -345,6 +356,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
         # Defensive check: Only log at debug level for unknown workers
         # This is expected during certain race conditions and shouldn't be a warning
         SLog.debug(
+          @log_category,
           "Attempted to unregister unknown worker #{worker_id} - ignoring (worker may have failed to register)"
         )
     end
@@ -377,6 +389,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     :dets.sync(state.dets_table)
 
     SLog.debug(
+      @log_category,
       "🆕 Worker activated: #{worker_id} | PID #{process_pid} | " <>
         "BEAM run #{state.beam_run_id} | Elixir PID: #{inspect(elixir_pid)}"
     )
@@ -399,7 +412,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # Force immediate write to disk
     :dets.sync(state.dets_table)
 
-    SLog.info("Reserved worker slot #{worker_id} for BEAM run #{state.beam_run_id}")
+    SLog.info(
+      @log_category,
+      "Reserved worker slot #{worker_id} for BEAM run #{state.beam_run_id}"
+    )
+
     {:reply, :ok, state}
   end
 
@@ -468,7 +485,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @impl true
   def handle_call(:manual_orphan_cleanup, _from, state) do
-    SLog.info("Manual orphan cleanup triggered")
+    SLog.info(@log_category, "Manual orphan cleanup triggered")
     cleanup_orphaned_processes(state.dets_table, state.beam_run_id, state.beam_os_pid)
     {:reply, :ok, state}
   end
@@ -510,7 +527,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     dead_count = do_cleanup_dead_workers(state)
 
     if dead_count > 0 do
-      SLog.info("Cleaned up #{dead_count} dead worker entries")
+      SLog.info(@log_category, "Cleaned up #{dead_count} dead worker entries")
     end
 
     # Schedule next cleanup
@@ -534,7 +551,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @impl true
   def handle_info(msg, state) do
-    SLog.debug("ProcessRegistry received unexpected message: #{inspect(msg)}")
+    SLog.debug(@log_category, "ProcessRegistry received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -551,17 +568,24 @@ defmodule Snakepit.Pool.ProcessRegistry do
         :dets.delete(state.dets_table, worker_id)
         :dets.sync(state.dets_table)
 
-        SLog.info("🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}")
+        SLog.info(
+          @log_category,
+          "🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}"
+        )
     end
   end
 
   @impl true
   def terminate(reason, state) do
-    SLog.info("Snakepit Pool Process Registry terminating: #{inspect(reason)}")
+    SLog.info(@log_category, "Snakepit Pool Process Registry terminating: #{inspect(reason)}")
 
     # Log current state before closing
     all_entries = :dets.match_object(state.dets_table, :_)
-    SLog.info("ProcessRegistry terminating with #{length(all_entries)} entries in DETS")
+
+    SLog.info(
+      @log_category,
+      "ProcessRegistry terminating with #{length(all_entries)} entries in DETS"
+    )
 
     # Ensure DETS is properly synced and closed
     if state.dets_table do
@@ -590,20 +614,29 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   defp cleanup_orphaned_processes(dets_table, current_beam_run_id, current_beam_os_pid) do
     SLog.debug(
+      @log_category,
       "Starting orphan cleanup for BEAM run #{current_beam_run_id}, BEAM OS PID #{current_beam_os_pid}"
     )
 
     all_entries = :dets.match_object(dets_table, :_)
-    SLog.info("Total entries in DETS: #{length(all_entries)}")
+    SLog.info(@log_category, "Total entries in DETS: #{length(all_entries)}")
 
     stale_entries = find_stale_entries(all_entries, current_beam_run_id, current_beam_os_pid)
-    SLog.info("Found #{length(stale_entries)} stale entries to remove (from previous runs)")
+
+    SLog.info(
+      @log_category,
+      "Found #{length(stale_entries)} stale entries to remove (from previous runs)"
+    )
 
     old_run_orphans = find_old_run_orphans(dets_table, current_beam_run_id)
-    SLog.info("Found #{length(old_run_orphans)} active processes from previous BEAM runs")
+
+    SLog.info(
+      @log_category,
+      "Found #{length(old_run_orphans)} active processes from previous BEAM runs"
+    )
 
     abandoned_reservations = find_abandoned_reservations(all_entries, current_beam_run_id)
-    SLog.info("Found #{length(abandoned_reservations)} abandoned reservations")
+    SLog.info(@log_category, "Found #{length(abandoned_reservations)} abandoned reservations")
 
     killed_count = kill_orphaned_processes(old_run_orphans, current_beam_run_id)
     abandoned_killed = kill_abandoned_reservation_processes(abandoned_reservations)
@@ -647,7 +680,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     beam_dead = not Snakepit.ProcessKiller.process_alive?(info.beam_os_pid)
 
     if beam_dead do
-      SLog.info("Entry is stale: BEAM OS PID #{info.beam_os_pid} is dead")
+      SLog.info(@log_category, "Entry is stale: BEAM OS PID #{info.beam_os_pid} is dead")
       true
     else
       check_same_beam_stale(info, current_beam_run_id, current_beam_os_pid)
@@ -702,13 +735,18 @@ defmodule Snakepit.Pool.ProcessRegistry do
       verify_and_kill_process(info.process_pid, info.beam_run_id, current_beam_run_id)
       acc + 1
     else
-      SLog.debug("Orphaned entry #{worker_id} with PID #{info.process_pid} already dead")
+      SLog.debug(
+        @log_category,
+        "Orphaned entry #{worker_id} with PID #{info.process_pid} already dead"
+      )
+
       acc
     end
   end
 
   defp log_orphan_found(process_pid, worker_id, beam_run_id) do
     SLog.warning(
+      @log_category,
       "Found orphaned process #{process_pid} (worker: #{worker_id}) from previous " <>
         "BEAM run #{beam_run_id}. Terminating..."
     )
@@ -720,7 +758,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
         handle_process_command(process_pid, cmd, expected_run_id, current_beam_run_id)
 
       {:error, _} ->
-        SLog.debug("Process #{process_pid} not found, already dead")
+        SLog.debug(@log_category, "Process #{process_pid} not found, already dead")
     end
   end
 
@@ -740,31 +778,39 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   defp log_pid_reuse_check(process_pid, expected_run_id, current_beam_run_id, cmd) do
     SLog.warning(
+      @log_category,
       "PID REUSE CHECK: PID #{process_pid} | Expected run_id: #{expected_run_id} | " <>
         "Current BEAM run_id: #{current_beam_run_id} | Process cmd: #{String.trim(cmd)}"
     )
   end
 
   defp kill_confirmed_orphan(process_pid) do
-    SLog.info("Confirmed PID #{process_pid} is a grpc_server process with matching run_id")
+    SLog.info(
+      @log_category,
+      "Confirmed PID #{process_pid} is a grpc_server process with matching run_id"
+    )
 
     case Snakepit.ProcessKiller.kill_with_escalation(process_pid) do
       :ok ->
-        SLog.info("Process #{process_pid} successfully terminated")
+        SLog.info(@log_category, "Process #{process_pid} successfully terminated")
 
       {:error, reason} ->
-        SLog.error("Failed to kill process #{process_pid}: #{inspect(reason)}")
+        SLog.error(@log_category, "Failed to kill process #{process_pid}: #{inspect(reason)}")
     end
   end
 
   defp log_pid_reuse_detected(process_pid, has_grpc_server, cmd) do
     if has_grpc_server do
       SLog.warning(
+        @log_category,
         "PID #{process_pid} is a grpc_server process but with DIFFERENT beam_run_id. " <>
           "OS reused PID for new worker! Skipping kill. Command: #{String.trim(cmd)}"
       )
     else
-      SLog.debug("PID #{process_pid} is not a grpc_server process, skipping: #{String.trim(cmd)}")
+      SLog.debug(
+        @log_category,
+        "PID #{process_pid} is not a grpc_server process, skipping: #{String.trim(cmd)}"
+      )
     end
   end
 
@@ -778,12 +824,13 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   defp kill_abandoned_reservation(worker_id, info) do
     SLog.debug(
+      @log_category,
       "Found abandoned reservation #{worker_id} from run #{info.beam_run_id}. " <>
         "Attempting cleanup..."
     )
 
     {:ok, count} = Snakepit.ProcessKiller.kill_by_run_id(info.beam_run_id)
-    SLog.info("Killed #{count} processes for run #{info.beam_run_id}")
+    SLog.info(@log_category, "Killed #{count} processes for run #{info.beam_run_id}")
     count
   end
 
@@ -806,6 +853,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
          entries_to_remove
        ) do
     SLog.info(
+      @log_category,
       "Orphan cleanup complete. Killed #{killed_count} orphaned processes, " <>
         "killed #{abandoned_killed} from abandoned reservations, " <>
         "killed #{rogue_killed} rogue processes, " <>
@@ -820,7 +868,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
       |> normalize_cleanup_config()
 
     if cleanup_config[:enabled] == false do
-      SLog.info("Skipping rogue process cleanup (disabled via :rogue_cleanup config)")
+      SLog.info(
+        @log_category,
+        "Skipping rogue process cleanup (disabled via :rogue_cleanup config)"
+      )
+
       0
     else
       do_cleanup_rogue_processes(current_beam_run_id, cleanup_config)
@@ -834,7 +886,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
     python_commands = get_python_commands()
     owned_processes = filter_owned_processes(python_commands, scripts, run_markers)
 
-    SLog.info("Found #{length(owned_processes)} snakepit grpc_server processes with run markers")
+    SLog.info(
+      @log_category,
+      "Found #{length(owned_processes)} snakepit grpc_server processes with run markers"
+    )
 
     rogue_processes =
       find_rogue_processes(owned_processes, current_beam_run_id, scripts, run_markers)
@@ -871,10 +926,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
     rogue_pids = Enum.map(rogue_processes, fn {pid, _cmd} -> pid end)
 
     SLog.warning(
+      @log_category,
       "Found #{length(rogue_processes)} rogue grpc_server processes not belonging to current run"
     )
 
-    SLog.warning("Rogue PIDs: #{inspect(rogue_pids)}")
+    SLog.warning(@log_category, "Rogue PIDs: #{inspect(rogue_pids)}")
   end
 
   defp kill_rogue_processes(rogue_processes) do
@@ -884,14 +940,14 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   defp kill_rogue_process(pid, cmd, acc) do
-    SLog.warning("Killing rogue process #{pid}: #{String.trim(cmd)}")
+    SLog.warning(@log_category, "Killing rogue process #{pid}: #{String.trim(cmd)}")
 
     case Snakepit.ProcessKiller.kill_with_escalation(pid) do
       :ok ->
         acc + 1
 
       {:error, reason} ->
-        SLog.error("Failed to kill rogue process #{pid}: #{inspect(reason)}")
+        SLog.error(@log_category, "Failed to kill rogue process #{pid}: #{inspect(reason)}")
         acc
     end
   end
@@ -951,7 +1007,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
       :ets.insert(ets_table, {worker_id, info})
     end)
 
-    SLog.info("Loaded #{length(current_processes)} processes from current BEAM run")
+    SLog.info(
+      @log_category,
+      "Loaded #{length(current_processes)} processes from current BEAM run"
+    )
   end
 
   # Delegate to ProcessKiller for process checking
@@ -977,6 +1036,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
           :dets.delete(state.dets_table, worker_id)
 
           SLog.info(
+            @log_category,
             "Cleaned up dead worker #{worker_id} with external process PID #{process_pid}"
           )
 

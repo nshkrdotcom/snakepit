@@ -280,7 +280,7 @@ defmodule Snakepit.EnvDoctor do
       |> Enum.uniq()
       |> Enum.join(path_sep)
 
-    [{"PYTHONPATH", path}]
+    [{"PYTHONPATH", path} | python_log_level_env()]
   end
 
   defp snakepit_priv_python do
@@ -298,6 +298,18 @@ defmodule Snakepit.EnvDoctor do
   end
 
   defp blank?(value), do: value in [nil, ""]
+
+  defp python_log_level_env do
+    level = Application.get_env(:snakepit, :log_level, :error)
+    [{"SNAKEPIT_LOG_LEVEL", elixir_to_python_level(level)}]
+  end
+
+  defp elixir_to_python_level(:debug), do: "debug"
+  defp elixir_to_python_level(:info), do: "info"
+  defp elixir_to_python_level(:warning), do: "warning"
+  defp elixir_to_python_level(:error), do: "error"
+  defp elixir_to_python_level(:none), do: "none"
+  defp elixir_to_python_level(_), do: "error"
 
   defp path_separator do
     case :os.type() do

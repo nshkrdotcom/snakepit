@@ -72,12 +72,48 @@ defmodule TestHelperShutdown do
   end
 end
 
-# Ensure env doctor is stubbed for tests (real doctor exercised via dedicated tests)
-Application.put_env(:snakepit, :env_doctor_module, Snakepit.Test.FakeDoctor)
-Snakepit.Test.FakeDoctor.reset()
+include_tags_from_args =
+  System.argv()
+  |> Enum.chunk_every(2, 1, :discard)
+  |> Enum.reduce([], fn
+    ["--include", tags], acc -> acc ++ String.split(tags, ",")
+    ["--only", tags], acc -> acc ++ String.split(tags, ",")
+    _pair, acc -> acc
+  end)
+  |> Enum.map(fn tag ->
+    tag
+    |> String.split(":", parts: 2)
+    |> List.first()
+  end)
 
-# Start ExUnit with performance tests excluded by default
-ExUnit.start(exclude: [:performance, :python_integration, :slow])
+serial_run? = Enum.any?(include_tags_from_args, &(&1 in ["python_integration", "performance"]))
+
+exunit_opts = [exclude: [:performance, :python_integration, :slow]]
+exunit_opts = if serial_run?, do: Keyword.put(exunit_opts, :max_cases, 1), else: exunit_opts
+
+# Start ExUnit with performance tests excluded by default.
+ExUnit.start(exunit_opts)
+
+include_tags = ExUnit.configuration()[:include] || []
+python_integration? = Keyword.has_key?(include_tags, :python_integration)
+
+if python_integration? do
+  # Ensure Python deps are available before starting Snakepit for integration tests.
+  :ok = Snakepit.Bootstrap.run()
+  Application.put_env(:snakepit, :env_doctor_module, Snakepit.EnvDoctor)
+
+  venv_python = Path.join(File.cwd!(), ".venv/bin/python3")
+
+  if is_nil(System.get_env("SNAKEPIT_PYTHON")) and
+       is_nil(Application.get_env(:snakepit, :python_executable)) and
+       File.exists?(venv_python) do
+    Application.put_env(:snakepit, :python_executable, venv_python)
+  end
+else
+  # Ensure env doctor is stubbed for unit tests (real doctor exercised via dedicated tests).
+  Application.put_env(:snakepit, :env_doctor_module, Snakepit.Test.FakeDoctor)
+  Snakepit.Test.FakeDoctor.reset()
+end
 
 # START THE APPLICATION FOR TESTS
 # Most tests need the app running with pooling_enabled: false (config/test.exs default)

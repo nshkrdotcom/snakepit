@@ -42,6 +42,16 @@ defmodule Snakepit.Pool.RegistryLookupTest do
 
   test "falls back to default and logs when metadata missing" do
     worker_id = "unparseable-worker-id"
+    original_log_level = Application.get_env(:snakepit, :log_level)
+    Application.put_env(:snakepit, :log_level, :warning)
+
+    on_exit(fn ->
+      if is_nil(original_log_level) do
+        Application.delete_env(:snakepit, :log_level)
+      else
+        Application.put_env(:snakepit, :log_level, original_log_level)
+      end
+    end)
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->

@@ -34,8 +34,8 @@ defmodule Snakepit.Error do
         {:ok, result} -> result
         {:error, %Snakepit.Error{category: :timeout}} -> retry()
         {:error, %Snakepit.Error{category: :python_error} = error} ->
-          Logger.error("Python error: \#{error.message}")
-          Logger.debug("Traceback: \#{error.python_traceback}")
+          Snakepit.Logger.error("Python error: \#{error.message}")
+          Snakepit.Logger.debug("Traceback: \#{error.python_traceback}")
         {:error, error} -> {:error, error}
       end
   """

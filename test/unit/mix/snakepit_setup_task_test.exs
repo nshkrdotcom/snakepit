@@ -5,6 +5,8 @@ defmodule MixSnakepitSetupTaskTest do
   alias Snakepit.Test.BootstrapRunner
 
   setup do
+    original_python_executable = Application.get_env(:snakepit, :python_executable)
+
     tmp =
       System.tmp_dir!()
       |> Path.join("snakepit_setup_task_test_#{System.unique_integer([:positive])}")
@@ -20,7 +22,6 @@ defmodule MixSnakepitSetupTaskTest do
 
     Application.put_env(:snakepit, :bootstrap_project_root, tmp)
     Application.put_env(:snakepit, :bootstrap_runner, BootstrapRunner)
-    Application.put_env(:snakepit, :python_executable, Path.join(tmp, ".venv/bin/python3"))
 
     Mix.shell(Mix.Shell.Process)
     BootstrapRunner.reset!()
@@ -28,7 +29,7 @@ defmodule MixSnakepitSetupTaskTest do
     on_exit(fn ->
       Application.delete_env(:snakepit, :bootstrap_project_root)
       Application.delete_env(:snakepit, :bootstrap_runner)
-      Application.delete_env(:snakepit, :python_executable)
+      restore_env(:python_executable, original_python_executable)
       File.rm_rf(tmp)
       Mix.shell(Mix.Shell.IO)
     end)
@@ -56,4 +57,7 @@ defmodule MixSnakepitSetupTaskTest do
   end
 
   defp requirements(tmp), do: Path.join(tmp, "priv/python/requirements.txt")
+
+  defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
 end

@@ -52,12 +52,12 @@ defmodule Snakepit.WorkerProfile.Thread do
 
   @behaviour Snakepit.WorkerProfile
 
-  require Logger
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Logger.Redaction
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Pool.WorkerSupervisor
   alias Snakepit.WorkerProfile.Thread.CapacityStore
+  @log_category :worker
 
   @impl true
   def start_worker(config) do
@@ -74,8 +74,12 @@ defmodule Snakepit.WorkerProfile.Thread do
     adapter_args = build_adapter_args(config)
     adapter_env = build_adapter_env(config)
 
-    SLog.info("Starting threaded worker #{worker_id} with #{threads_per_worker} threads")
-    SLog.debug("Thread worker adapter_args: #{Redaction.describe(adapter_args)}")
+    SLog.info(
+      @log_category,
+      "Starting threaded worker #{worker_id} with #{threads_per_worker} threads"
+    )
+
+    SLog.debug(@log_category, "Thread worker adapter_args: #{Redaction.describe(adapter_args)}")
 
     # Create enhanced worker config with thread profile settings
     worker_config =
@@ -95,13 +99,18 @@ defmodule Snakepit.WorkerProfile.Thread do
         :ok = CapacityStore.track_worker(pid, threads_per_worker)
 
         SLog.info(
+          @log_category,
           "Thread profile started worker #{worker_id}: #{inspect(pid)} with capacity #{threads_per_worker}"
         )
 
         {:ok, pid}
 
       error ->
-        SLog.error("Failed to start threaded worker #{worker_id}: #{inspect(error)}")
+        SLog.error(
+          @log_category,
+          "Failed to start threaded worker #{worker_id}: #{inspect(error)}"
+        )
+
         error
     end
   end
@@ -282,7 +291,7 @@ defmodule Snakepit.WorkerProfile.Thread do
         :ok
 
       {:error, reason} ->
-        SLog.warning("Capacity store failed to start: #{inspect(reason)}")
+        SLog.warning(@log_category, "Capacity store failed to start: #{inspect(reason)}")
         :ok
     end
   end
@@ -390,7 +399,7 @@ defmodule Snakepit.WorkerProfile.Thread do
         {:error, :at_capacity}
 
       {:error, :unknown_worker} ->
-        SLog.warning("Worker #{inspect(worker_pid)} not found in capacity store")
+        SLog.warning(@log_category, "Worker #{inspect(worker_pid)} not found in capacity store")
         :ok
     end
   end

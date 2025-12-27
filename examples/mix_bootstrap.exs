@@ -22,6 +22,8 @@ defmodule Snakepit.Examples.Bootstrap do
       Mix.install(deps)
     end
 
+    Application.ensure_all_started(:telemetry)
+
     maybe_apply_snakepit_log_level()
     configure_logger_from_snakepit()
 
@@ -55,7 +57,7 @@ defmodule Snakepit.Examples.Bootstrap do
 
   defp configure_logger_from_snakepit do
     level =
-      Application.get_env(:snakepit, :log_level, :info)
+      Application.get_env(:snakepit, :log_level, :error)
       |> map_snakepit_level()
 
     Logger.configure(level: level)

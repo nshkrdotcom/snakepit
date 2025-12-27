@@ -8,10 +8,11 @@ defmodule Snakepit.Bridge.SessionStore do
   """
 
   use GenServer
-  require Logger
   alias Snakepit.Logger, as: SLog
 
   alias Snakepit.Bridge.Session
+
+  @log_category :bridge
 
   @default_table_name :snakepit_sessions
   # 1 minute
@@ -261,7 +262,7 @@ defmodule Snakepit.Bridge.SessionStore do
       }
     }
 
-    SLog.info("SessionStore started with table #{table}")
+    SLog.info(@log_category, "SessionStore started with table #{table}")
 
     {:ok, state}
   end
@@ -303,7 +304,7 @@ defmodule Snakepit.Bridge.SessionStore do
           end
         rescue
           error ->
-            SLog.error("Error updating session #{session_id}: #{inspect(error)}")
+            SLog.error(@log_category, "Error updating session #{session_id}: #{inspect(error)}")
             {:reply, {:error, {:update_failed, error}}, state}
         end
 
@@ -404,7 +405,11 @@ defmodule Snakepit.Bridge.SessionStore do
             {:reply, :ok, %{state | stats: new_stats}}
 
           {:error, reason} ->
-            SLog.warning("Failed to validate session for worker affinity: #{inspect(reason)}")
+            SLog.warning(
+              @log_category,
+              "Failed to validate session for worker affinity: #{inspect(reason)}"
+            )
+
             {:reply, :ok, state}
         end
     end
@@ -419,7 +424,7 @@ defmodule Snakepit.Bridge.SessionStore do
 
   @impl true
   def handle_info(msg, state) do
-    SLog.warning("SessionStore received unexpected message: #{inspect(msg)}")
+    SLog.warning(@log_category, "SessionStore received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -439,6 +444,7 @@ defmodule Snakepit.Bridge.SessionStore do
 
     if expired_count > 0 do
       SLog.debug(
+        @log_category,
         "Cleaned up #{expired_count} expired sessions using high-performance select_delete"
       )
     end
@@ -488,12 +494,15 @@ defmodule Snakepit.Bridge.SessionStore do
 
     case :ets.insert_new(state.table, ets_record) do
       true ->
-        SLog.debug("Created new session: #{session_id}")
+        SLog.debug(@log_category, "Created new session: #{session_id}")
         new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
         {:reply, {:ok, session}, %{state | stats: new_stats}}
 
       false ->
-        SLog.debug("Session #{session_id} already exists - reusing (concurrent init)")
+        SLog.debug(
+          @log_category,
+          "Session #{session_id} already exists - reusing (concurrent init)"
+        )
 
         [{^session_id, {_last_accessed, _ttl, existing_session}}] =
           :ets.lookup(state.table, session_id)

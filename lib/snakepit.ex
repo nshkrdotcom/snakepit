@@ -22,6 +22,7 @@ defmodule Snakepit do
       {:ok, result} = Snakepit.execute_in_session("my_session", "command", %{})
   """
 
+  alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.ProcessRegistry
 
   # Type definitions
@@ -95,7 +96,7 @@ defmodule Snakepit do
   ## Examples
 
       Snakepit.execute_stream("batch_inference", %{items: [...]}, fn chunk ->
-        IO.puts("Received: \#{inspect(chunk)}")
+        handle_chunk(chunk)
       end)
 
   ## Options
@@ -184,7 +185,7 @@ defmodule Snakepit do
       # In a Mix task
       Snakepit.run_as_script(fn ->
         {:ok, result} = Snakepit.execute("my_command", %{data: "value"})
-        IO.inspect(result)
+        handle_result(result)
       end)
 
       # For demos or scripts
@@ -240,7 +241,7 @@ defmodule Snakepit do
             kind, reason ->
               {:error, {kind, reason, __STACKTRACE__}}
           after
-            IO.puts("\n[Snakepit] Script execution finished. Shutting down gracefully...")
+            SLog.info(:shutdown, "Script execution finished. Shutting down gracefully.")
 
             stop_snakepit(shutdown_timeout, label: "Shutdown")
             run_cleanup_with_timeout(beam_run_id, cleanup_timeout)
@@ -257,7 +258,10 @@ defmodule Snakepit do
         end
 
       {:error, %Snakepit.Error{category: :timeout}} ->
-        IO.puts("[Snakepit] Error: Pool failed to initialize within #{startup_timeout}ms")
+        SLog.error(:startup, "Pool failed to initialize within #{startup_timeout}ms",
+          timeout_ms: startup_timeout
+        )
+
         Application.stop(:snakepit)
         maybe_halt(halt, 1)
         {:error, :pool_initialization_timeout}
@@ -270,7 +274,7 @@ defmodule Snakepit do
 
   defp maybe_restart_snakepit(restart, shutdown_timeout, cleanup_timeout) do
     if should_restart?(restart) and snakepit_started?() do
-      IO.puts("[Snakepit] Restarting to apply script configuration...")
+      SLog.info(:startup, "Restarting to apply script configuration")
       beam_run_id = safe_beam_run_id()
       stop_snakepit(shutdown_timeout, label: "Restart cleanup")
       maybe_cleanup_orphaned_workers(beam_run_id, cleanup_timeout)
@@ -314,7 +318,7 @@ defmodule Snakepit do
       nil ->
         Application.stop(:snakepit)
         # Already shut down
-        IO.puts("[Snakepit] #{label} complete (supervisor already terminated).")
+        SLog.info(:shutdown, "#{label} complete (supervisor already terminated).")
 
       supervisor_pid ->
         ref = Process.monitor(supervisor_pid)
@@ -323,12 +327,13 @@ defmodule Snakepit do
         # Wait for :DOWN signal from BEAM - no guessing with sleep
         receive do
           {:DOWN, ^ref, :process, ^supervisor_pid, _reason} ->
-            IO.puts("[Snakepit] #{label} complete (confirmed via :DOWN signal).")
+            SLog.info(:shutdown, "#{label} complete (confirmed via :DOWN signal).")
         after
           shutdown_timeout ->
-            IO.puts(
-              "[Snakepit] Warning: #{label} confirmation timeout after #{shutdown_timeout}ms. " <>
-                "Proceeding anyway."
+            SLog.warning(
+              :shutdown,
+              "#{label} confirmation timeout after #{shutdown_timeout}ms. Proceeding anyway.",
+              shutdown_timeout_ms: shutdown_timeout
             )
         end
     end
@@ -347,15 +352,16 @@ defmodule Snakepit do
     if wait_for_run_id_shutdown(run_id, timeout_ms) do
       :ok
     else
-      IO.puts(
-        "[Snakepit] Warning: Worker processes still running after #{timeout_ms}ms. " <>
-          "Forcing cleanup..."
+      SLog.warning(
+        :shutdown,
+        "Worker processes still running after #{timeout_ms}ms. Forcing cleanup...",
+        timeout_ms: timeout_ms
       )
 
       Snakepit.ProcessKiller.kill_by_run_id(run_id)
 
       if not wait_for_run_id_shutdown(run_id, timeout_ms) do
-        IO.puts("[Snakepit] Warning: Worker processes still running after forced cleanup.")
+        SLog.warning(:shutdown, "Worker processes still running after forced cleanup.")
       end
     end
   end
@@ -416,19 +422,21 @@ defmodule Snakepit do
           :ok
 
         nil ->
-          IO.puts(
-            "[Snakepit] Warning: cleanup exceeded #{task_timeout}ms. Skipping remaining cleanup."
+          SLog.warning(
+            :shutdown,
+            "Cleanup exceeded #{task_timeout}ms. Skipping remaining cleanup.",
+            timeout_ms: task_timeout
           )
 
         {:exit, reason} ->
-          IO.puts("[Snakepit] Warning: cleanup crashed: #{inspect(reason)}")
+          SLog.warning(:shutdown, "Cleanup crashed: #{inspect(reason)}", reason: reason)
       end
     end
   end
 
   defp maybe_halt(true, status) do
     if status != 0 do
-      IO.puts("[Snakepit] Halting BEAM with status #{status}.")
+      SLog.error(:shutdown, "Halting BEAM with status #{status}.", status: status)
     end
 
     # Flush all IO before halting to ensure output is visible

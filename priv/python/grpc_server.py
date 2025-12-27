@@ -6,22 +6,31 @@ This server acts as a proxy for state operations (forwarding to Elixir)
 and as an execution environment for Python tools.
 """
 
+import json
+import functools
+import traceback
+import pickle
 import argparse
 import asyncio
-import grpc
+import inspect
+import importlib
 import logging
+import os
 import signal
 import sys
 import time
-import inspect
-import os
-import importlib
 from concurrent import futures
 from typing import Any, Dict, Mapping, Optional
+
+from snakepit_bridge.logging_config import configure_logging, get_logger
+
+if __name__ == "__main__":
+    configure_logging()
 
 # Add the package to Python path
 sys.path.insert(0, '.')
 
+import grpc
 import snakepit_bridge_pb2 as pb2
 import snakepit_bridge_pb2_grpc as pb2_grpc
 from snakepit_bridge.session_context import SessionContext
@@ -32,15 +41,6 @@ from snakepit_bridge.telemetry.stream import TelemetryStream
 from snakepit_bridge.telemetry.backends.grpc import GrpcBackend
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf import any_pb2
-import json
-import functools
-import traceback
-import pickle
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - [corr=%(correlation_id)s] %(message)s",
-    level=logging.INFO,
-)
 
 def maybe_create_process_group():
     enabled = os.environ.get("SNAKEPIT_PROCESS_GROUP", "").lower() in ("1", "true", "yes", "on")
@@ -60,11 +60,9 @@ def maybe_create_process_group():
 
 telemetry.setup_tracing()
 _log_filter = telemetry.correlation_filter()
-logger = logging.getLogger(__name__)
+logger = get_logger("grpc_server")
 logger.addFilter(_log_filter)
 logging.getLogger().addFilter(_log_filter)
-
-logger.info("Loaded grpc_server.py from %s", __file__)
 
 
 def run_health_check(adapter_path: str):
@@ -74,11 +72,30 @@ def run_health_check(adapter_path: str):
         adapter_module = importlib.import_module(module_name)
         getattr(adapter_module, class_name)
     except Exception as exc:
-        print(f"[health-check] Failed to import adapter '{adapter_path}': {exc}", file=sys.stderr)
+        logger.error("Health check failed to import adapter '%s': %s", adapter_path, exc)
         sys.exit(1)
 
-    print("[health-check] Python gRPC dependencies loaded successfully.")
+    logger.info("Health check passed: Python gRPC dependencies loaded successfully.")
     sys.exit(0)
+
+
+def _signal_ready(actual_port: int) -> None:
+    ready_file = os.environ.get("SNAKEPIT_READY_FILE")
+    if not ready_file:
+        logger.debug("SNAKEPIT_READY_FILE not set; readiness signal skipped.")
+        return
+
+    try:
+        tmp_path = f"{ready_file}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            handle.write(str(actual_port))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, ready_file)
+        logger.debug("Readiness file written: %s", ready_file)
+    except Exception as exc:
+        logger.error("Failed to write readiness file %s: %s", ready_file, exc)
+        raise
 
 
 def _extract_callsite_context(arguments: Optional[Dict[str, Any]], request) -> Dict[str, Any]:
@@ -970,11 +987,8 @@ async def serve_with_shutdown(
 
     await server.start()
 
-    logger.debug("Server started; announcing readiness on port %s", actual_port)
-
-    # Signal that the server is ready
-    # CRITICAL: Use logger instead of print() for reliable capture via :stderr_to_stdout
-    logger.info(f"GRPC_READY:{actual_port}")
+    logger.debug("Server started; writing readiness file for port %s", actual_port)
+    _signal_ready(actual_port)
 
     logger.info(f"gRPC server started on port {actual_port}")
     logger.info(f"Connected to Elixir backend at {elixir_address}")
@@ -1035,6 +1049,9 @@ async def shutdown(server):
 
 
 def main():
+    configure_logging()
+    logger.debug("Loaded grpc_server.py from %s", __file__)
+
     parser = argparse.ArgumentParser(description='DSPex gRPC Bridge Server')
     parser.add_argument('--port', type=int, default=0,
                         help='Port to listen on (0 for dynamic allocation)')

@@ -209,15 +209,11 @@ defmodule Snakepit.Pool.QueueSaturationRuntimeTest do
   @moduletag :slow
   @moduletag capture_log: true
   import ExUnit.CaptureLog
-  require Logger
 
   alias MapSet
   alias Snakepit.TestAdapters.QueueProbeAdapter
 
   setup do
-    original_level = Logger.level()
-    Logger.configure(level: :error)
-
     prev_env = capture_env()
 
     Application.stop(:snakepit)
@@ -234,7 +230,6 @@ defmodule Snakepit.Pool.QueueSaturationRuntimeTest do
       Application.stop(:snakepit)
       restore_env(prev_env)
       {:ok, _} = Application.ensure_all_started(:snakepit)
-      Logger.configure(level: original_level)
     end)
 
     {:ok, counter: counter}

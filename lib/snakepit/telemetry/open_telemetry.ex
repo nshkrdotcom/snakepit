@@ -8,14 +8,15 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
   spans are created but not shipped anywhere.
   """
 
-  require Logger
   require OpenTelemetry.Tracer, as: Tracer
 
   alias OpenTelemetry.Span
   alias OpentelemetryTelemetry, as: OTelBridge
+  alias Snakepit.Logger, as: SLog
 
   @grpc_handler_id "snakepit-otel-grpc-worker"
   @heartbeat_handler_id "snakepit-otel-heartbeat"
+  @log_category :telemetry
 
   @doc """
   Configures OpenTelemetry and attaches telemetry handlers when enabled.
@@ -34,7 +35,8 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
           :ok
 
         {:error, reason} ->
-          Logger.warning(
+          SLog.warning(
+            @log_category,
             "OpenTelemetry runtime unavailable (#{inspect(reason)}); continuing without spans"
           )
 
@@ -147,7 +149,8 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
     end
   rescue
     error ->
-      Logger.error(
+      SLog.error(
+        @log_category,
         "Failed to attach OpenTelemetry handler for GRPC worker: #{Exception.message(error)}"
       )
 
@@ -175,7 +178,8 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
     end
   rescue
     error ->
-      Logger.warning(
+      SLog.warning(
+        @log_category,
         "Failed to attach heartbeat OpenTelemetry handler: #{Exception.message(error)}"
       )
 
@@ -195,7 +199,7 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
     :ok
   rescue
     error ->
-      Logger.debug("OpenTelemetry start handler failed: #{Exception.message(error)}")
+      SLog.debug(@log_category, "OpenTelemetry start handler failed: #{Exception.message(error)}")
       :ok
   end
 
@@ -220,7 +224,7 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
     :ok
   rescue
     error ->
-      Logger.debug("OpenTelemetry stop handler failed: #{Exception.message(error)}")
+      SLog.debug(@log_category, "OpenTelemetry stop handler failed: #{Exception.message(error)}")
       :ok
   end
 
@@ -244,7 +248,11 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
     :ok
   rescue
     error ->
-      Logger.debug("OpenTelemetry exception handler failed: #{Exception.message(error)}")
+      SLog.debug(
+        @log_category,
+        "OpenTelemetry exception handler failed: #{Exception.message(error)}"
+      )
+
       :ok
   end
 
@@ -260,7 +268,11 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
     end
   rescue
     error ->
-      Logger.debug("Heartbeat OpenTelemetry event failed: #{Exception.message(error)}")
+      SLog.debug(
+        @log_category,
+        "Heartbeat OpenTelemetry event failed: #{Exception.message(error)}"
+      )
+
       :ok
   end
 

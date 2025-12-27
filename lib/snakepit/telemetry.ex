@@ -28,8 +28,8 @@ defmodule Snakepit.Telemetry do
       )
   """
 
-  require Logger
   alias Snakepit.Logger, as: SLog
+  @log_category :telemetry
 
   @doc """
   Lists all telemetry events used by Snakepit.
@@ -210,68 +210,87 @@ defmodule Snakepit.Telemetry do
 
   # Session event handlers
   defp handle_event([:snakepit, :session_store, :session, :created], _measurements, metadata, _) do
-    SLog.info("Session created: #{metadata.session_id}")
+    SLog.info(@log_category, "Session created: #{metadata.session_id}")
   end
 
   defp handle_event([:snakepit, :session_store, :session, :accessed], _measurements, metadata, _) do
-    SLog.debug("Session accessed: #{metadata.session_id}")
+    SLog.debug(@log_category, "Session accessed: #{metadata.session_id}")
   end
 
   defp handle_event([:snakepit, :session_store, :session, :deleted], _measurements, metadata, _) do
-    SLog.info("Session deleted: #{metadata.session_id}")
+    SLog.info(@log_category, "Session deleted: #{metadata.session_id}")
   end
 
   defp handle_event([:snakepit, :session_store, :session, :expired], measurements, _metadata, _) do
-    SLog.info("Sessions expired: count=#{measurements.count}")
+    SLog.info(@log_category, "Sessions expired: count=#{measurements.count}")
   end
 
   # Program event handlers
   defp handle_event([:snakepit, :session_store, :program, :stored], _measurements, metadata, _) do
-    SLog.debug("Program stored: #{metadata.program_id} in session #{metadata.session_id}")
+    SLog.debug(
+      @log_category,
+      "Program stored: #{metadata.program_id} in session #{metadata.session_id}"
+    )
   end
 
   defp handle_event([:snakepit, :session_store, :program, :retrieved], _measurements, metadata, _) do
-    SLog.debug("Program retrieved: #{metadata.program_id} from session #{metadata.session_id}")
+    SLog.debug(
+      @log_category,
+      "Program retrieved: #{metadata.program_id} from session #{metadata.session_id}"
+    )
   end
 
   defp handle_event([:snakepit, :session_store, :program, :deleted], _measurements, metadata, _) do
-    SLog.debug("Program deleted: #{metadata.program_id} from session #{metadata.session_id}")
+    SLog.debug(
+      @log_category,
+      "Program deleted: #{metadata.program_id} from session #{metadata.session_id}"
+    )
   end
 
   # Heartbeat events
   defp handle_event([:snakepit, :heartbeat, :monitor_started], _measurements, metadata, _) do
-    Logger.debug("Heartbeat monitor started for #{metadata.worker_id}")
+    SLog.debug(@log_category, "Heartbeat monitor started for #{metadata.worker_id}")
   end
 
   defp handle_event([:snakepit, :heartbeat, :monitor_stopped], _measurements, metadata, _) do
-    Logger.debug(
+    SLog.debug(
+      @log_category,
       "Heartbeat monitor stopped for #{metadata.worker_id} reason=#{inspect(metadata.reason)}"
     )
   end
 
   defp handle_event([:snakepit, :heartbeat, :monitor_failure], _measurements, metadata, _) do
-    Logger.warning(
+    SLog.warning(
+      @log_category,
       "Heartbeat monitor triggered failure for #{metadata.worker_id}: #{inspect(metadata.failure_reason)}"
     )
   end
 
   defp handle_event([:snakepit, :heartbeat, :ping_sent], measurements, metadata, _) do
-    Logger.debug("Heartbeat ping sent for #{metadata.worker_id} (count=#{measurements[:count]})")
+    SLog.debug(
+      @log_category,
+      "Heartbeat ping sent for #{metadata.worker_id} (count=#{measurements[:count]})"
+    )
   end
 
   defp handle_event([:snakepit, :heartbeat, :pong_received], measurements, metadata, _) do
-    Logger.debug(
+    SLog.debug(
+      @log_category,
       "Heartbeat pong received for #{metadata.worker_id} latency=#{measurements[:latency_ms]}ms"
     )
   end
 
   defp handle_event([:snakepit, :heartbeat, :heartbeat_timeout], measurements, metadata, _) do
-    Logger.warning("Heartbeat timeout for #{metadata.worker_id} missed=#{measurements[:count]}")
+    SLog.warning(
+      @log_category,
+      "Heartbeat timeout for #{metadata.worker_id} missed=#{measurements[:count]}"
+    )
   end
 
   # Catch-all handler for any unhandled events
   defp handle_event(event, measurements, metadata, _) do
     SLog.debug(
+      @log_category,
       "Telemetry event: #{inspect(event)} measurements=#{inspect(measurements)} metadata=#{inspect(metadata)}"
     )
   end

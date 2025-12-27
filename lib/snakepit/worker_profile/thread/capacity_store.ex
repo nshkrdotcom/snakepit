@@ -5,6 +5,7 @@ defmodule Snakepit.WorkerProfile.Thread.CapacityStore do
   alias Snakepit.Logger, as: SLog
 
   @table_name :snakepit_worker_capacity
+  @log_category :worker
 
   ## Client API
 
@@ -64,7 +65,7 @@ defmodule Snakepit.WorkerProfile.Thread.CapacityStore do
         {:read_concurrency, true}
       ])
 
-    SLog.debug("Thread capacity store started with ETS table #{inspect(table)}")
+    SLog.debug(@log_category, "Thread capacity store started with ETS table #{inspect(table)}")
 
     {:ok, %{table: table}}
   end

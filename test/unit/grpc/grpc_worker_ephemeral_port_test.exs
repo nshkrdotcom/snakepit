@@ -57,7 +57,7 @@ defmodule Snakepit.GRPCWorkerEphemeralPortTest do
     {:ok, pool: pool_pid}
   end
 
-  test "stores the actual GRPC_READY port discovered at runtime", %{pool: pool_pid} do
+  test "stores the actual readiness port discovered at runtime", %{pool: pool_pid} do
     worker_id = "ephemeral_port_worker_#{System.unique_integer([:positive])}"
 
     {:ok, worker} =

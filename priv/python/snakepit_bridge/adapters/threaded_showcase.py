@@ -27,13 +27,13 @@ import threading
 import time
 import random
 import hashlib
-import logging
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
 from snakepit_bridge.base_adapter_threaded import ThreadSafeAdapter, thread_safe_method, tool
+from snakepit_bridge.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Try to import NumPy for realistic CPU-bound operations
 try:

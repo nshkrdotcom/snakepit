@@ -56,7 +56,7 @@ exception translation) plus operational readiness.
 - [ ] Optional: enable OpenTelemetry exporter for distributed tracing.
 - [ ] Set Snakepit log level for production:
   ```elixir
-  config :snakepit, log_level: :warning
+  config :snakepit, log_level: :error
   ```
 - [ ] Ensure log redaction is enabled for payloads (default behaviour).
 

@@ -357,6 +357,17 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
     test "logs when memory probe fails and skips recycling" do
       manager = Process.whereis(LifecycleManager)
       worker_id = "mem_probe_fail_#{System.unique_integer([:positive])}"
+      original_log_level = Application.get_env(:snakepit, :log_level)
+
+      Application.put_env(:snakepit, :log_level, :warning)
+
+      on_exit(fn ->
+        if is_nil(original_log_level) do
+          Application.delete_env(:snakepit, :log_level)
+        else
+          Application.put_env(:snakepit, :log_level, original_log_level)
+        end
+      end)
 
       {:ok, worker_pid} =
         TestProfile.start_worker(%{

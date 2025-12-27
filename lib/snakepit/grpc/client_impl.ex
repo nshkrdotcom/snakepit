@@ -3,7 +3,6 @@ defmodule Snakepit.GRPC.ClientImpl do
   Real gRPC client implementation using generated stubs.
   """
 
-  require Logger
   alias Snakepit.Bridge
   alias Snakepit.Error.PythonTranslation
   alias Snakepit.Logger, as: SLog
@@ -12,6 +11,7 @@ defmodule Snakepit.GRPC.ClientImpl do
   alias Snakepit.ZeroCopyRef
 
   @default_timeout 30_000
+  @log_category :grpc
 
   def connect(port) when is_integer(port) do
     connect("localhost:#{port}")
@@ -202,7 +202,7 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   defp handle_error({:error, %GRPC.RPCError{} = error}) do
-    SLog.error("gRPC error: #{inspect(error)}")
+    SLog.error(@log_category, "gRPC error: #{inspect(error)}")
 
     case error.status do
       3 -> {:error, :invalid_argument}

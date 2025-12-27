@@ -97,7 +97,7 @@ defmodule Snakepit.Hardware do
 
       caps = Snakepit.Hardware.capabilities()
       if caps.cuda do
-        IO.puts("CUDA version: \#{caps.cuda_version}")
+        cuda_version = caps.cuda_version
       end
   """
   @spec capabilities() :: capabilities()
@@ -141,8 +141,8 @@ defmodule Snakepit.Hardware do
 
       # Request specific device
       case Snakepit.Hardware.select(:cuda) do
-        {:ok, {:cuda, 0}} -> IO.puts("Using CUDA device 0")
-        {:error, :device_not_available} -> IO.puts("CUDA not available")
+        {:ok, {:cuda, 0}} -> :ok
+        {:error, :device_not_available} -> :error
       end
   """
   @spec select(device_preference()) :: {:ok, device()} | {:error, :device_not_available}

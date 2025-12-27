@@ -4,9 +4,13 @@ import Config
 # Configure Logger metadata
 config :logger, :console,
   metadata: [
+    :category,
     :request_id,
     :worker_id,
+    :session_id,
+    :adapter,
     :pool_name,
+    :pool_identifier,
     :event_parts,
     :reason,
     :status,
@@ -21,8 +25,10 @@ config :logger, :console,
 config :snakepit,
   # Logging level for Snakepit internal logs
   # Options: :debug, :info, :warning, :error, :none
-  # Set to :warning or :none for clean output in production
-  log_level: :warning,
+  # Default: :error (silent-by-default)
+  log_level: :error,
+  # Optional category filtering for debug/info
+  # log_categories: [:lifecycle, :grpc],
   # Library mode defaults to quiet logging for embedded usage
   library_mode: true,
   # Suppress noisy gRPC logs by default

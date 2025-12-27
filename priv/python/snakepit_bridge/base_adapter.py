@@ -7,13 +7,13 @@ Provides tool discovery and registration functionality that all adapters should 
 import inspect
 from typing import List, Dict, Any, Callable, Optional
 from dataclasses import dataclass
-import logging
 import asyncio
 
 from snakepit_bridge_pb2 import ToolRegistration, ParameterSpec
 import snakepit_bridge_pb2 as pb2
+from snakepit_bridge.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

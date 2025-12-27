@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import logging
 import os
 import random
 import re
@@ -26,6 +25,7 @@ from google.protobuf.timestamp_pb2 import Timestamp
 
 import snakepit_bridge_pb2 as pb2
 from snakepit_bridge import telemetry
+from snakepit_bridge.logging_config import get_logger
 
 
 @dataclass(frozen=True)
@@ -143,7 +143,7 @@ class HeartbeatClient:
         self._last_ping_monotonic: Optional[float] = None
         self._last_success_monotonic: Optional[float] = None
 
-        self._logger = logging.getLogger(f"{__name__}.HeartbeatClient")
+        self._logger = get_logger(f"{__name__}.HeartbeatClient")
 
     @property
     def config(self) -> HeartbeatConfig:

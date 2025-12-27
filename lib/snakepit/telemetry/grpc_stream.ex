@@ -13,11 +13,12 @@ defmodule Snakepit.Telemetry.GrpcStream do
   """
 
   use GenServer
-  require Logger
+  alias Snakepit.Logger, as: SLog
 
   alias GRPC.Channel
   alias Snakepit.Bridge.{BridgeService, TelemetryEvent}
   alias Snakepit.Telemetry.{Control, Naming, SafeMetadata}
+  @log_category :telemetry
 
   @type worker_ctx :: %{
           worker_id: String.t(),
@@ -54,7 +55,8 @@ defmodule Snakepit.Telemetry.GrpcStream do
     if stream_capable_channel?(channel) do
       GenServer.cast(__MODULE__, {:register_worker, channel, worker_ctx})
     else
-      Logger.debug(
+      SLog.debug(
+        @log_category,
         "Skipping telemetry stream registration; channel unsupported",
         worker_id: worker_ctx.worker_id,
         pool_name: worker_ctx.pool_name,
@@ -126,7 +128,8 @@ defmodule Snakepit.Telemetry.GrpcStream do
       {:ok, stream_info} ->
         new_state = put_in(state, [:streams, worker_ctx.worker_id], stream_info)
 
-        Logger.info(
+        SLog.info(
+          @log_category,
           "Telemetry stream registered for worker #{worker_ctx.worker_id}",
           worker_id: worker_ctx.worker_id,
           pool_name: worker_ctx.pool_name
@@ -135,7 +138,8 @@ defmodule Snakepit.Telemetry.GrpcStream do
         {:noreply, new_state}
 
       {:error, reason} ->
-        Logger.warning(
+        SLog.warning(
+          @log_category,
           "Failed to register telemetry stream for worker #{worker_ctx.worker_id}: #{inspect(reason)}",
           worker_id: worker_ctx.worker_id,
           reason: reason
@@ -159,7 +163,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
         new_state = update_in(state, [:streams], &Map.delete(&1, worker_id))
 
-        Logger.debug("Telemetry stream unregistered for worker #{worker_id}",
+        SLog.debug(@log_category, "Telemetry stream unregistered for worker #{worker_id}",
           worker_id: worker_id
         )
 
@@ -171,7 +175,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
   def handle_cast({:update_sampling, worker_id, rate, patterns}, state) do
     case Map.get(state.streams, worker_id) do
       nil ->
-        Logger.debug("Cannot update sampling for unknown worker #{worker_id}")
+        SLog.debug(@log_category, "Cannot update sampling for unknown worker #{worker_id}")
         {:noreply, state}
 
       %{stream: stream} ->
@@ -180,7 +184,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
         new_state =
           case send_control_request(stream, control_msg) do
             {:ok, updated_stream} ->
-              Logger.debug("Updated sampling for worker #{worker_id} to #{rate}",
+              SLog.debug(@log_category, "Updated sampling for worker #{worker_id} to #{rate}",
                 worker_id: worker_id,
                 rate: rate,
                 patterns: patterns
@@ -189,7 +193,8 @@ defmodule Snakepit.Telemetry.GrpcStream do
               put_in(state, [:streams, worker_id, :stream], updated_stream)
 
             {:error, reason} ->
-              Logger.warning(
+              SLog.warning(
+                @log_category,
                 "Failed to update sampling for worker #{worker_id}: #{inspect(reason)}",
                 worker_id: worker_id,
                 reason: reason
@@ -214,7 +219,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
         new_state =
           case send_control_request(stream, control_msg) do
             {:ok, updated_stream} ->
-              Logger.debug("Toggled telemetry for worker #{worker_id} to #{enabled}",
+              SLog.debug(@log_category, "Toggled telemetry for worker #{worker_id} to #{enabled}",
                 worker_id: worker_id,
                 enabled: enabled
               )
@@ -222,7 +227,8 @@ defmodule Snakepit.Telemetry.GrpcStream do
               put_in(state, [:streams, worker_id, :stream], updated_stream)
 
             {:error, reason} ->
-              Logger.warning(
+              SLog.warning(
+                @log_category,
                 "Failed to toggle telemetry for worker #{worker_id}: #{inspect(reason)}",
                 worker_id: worker_id,
                 reason: reason
@@ -247,12 +253,15 @@ defmodule Snakepit.Telemetry.GrpcStream do
         new_state =
           case send_control_request(stream, control_msg) do
             {:ok, updated_stream} ->
-              Logger.debug("Updated filters for worker #{worker_id}", worker_id: worker_id)
+              SLog.debug(@log_category, "Updated filters for worker #{worker_id}",
+                worker_id: worker_id
+              )
 
               put_in(state, [:streams, worker_id, :stream], updated_stream)
 
             {:error, reason} ->
-              Logger.warning(
+              SLog.warning(
+                @log_category,
                 "Failed to update filters for worker #{worker_id}: #{inspect(reason)}",
                 worker_id: worker_id,
                 reason: reason
@@ -289,13 +298,17 @@ defmodule Snakepit.Telemetry.GrpcStream do
   @impl true
   def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
     # Task crashed or was killed
-    Logger.debug("Telemetry stream consumer task terminated: #{inspect(reason)}")
+    SLog.debug(@log_category, "Telemetry stream consumer task terminated: #{inspect(reason)}")
     {:noreply, state}
   end
 
   @impl true
   def handle_info({:gun_response, _pid, _stream_ref, _fin, status, headers}, state) do
-    Logger.debug("Telemetry stream HTTP response received", status: status, headers: headers)
+    SLog.debug(@log_category, "Telemetry stream HTTP response received",
+      status: status,
+      headers: headers
+    )
+
     {:noreply, state}
   end
 
@@ -307,13 +320,13 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
   @impl true
   def handle_info({:gun_down, _pid, _proto, _reason, _killed_streams, _}, state) do
-    Logger.debug("Telemetry stream HTTP connection closed by gun")
+    SLog.debug(@log_category, "Telemetry stream HTTP connection closed by gun")
     {:noreply, state}
   end
 
   @impl true
   def handle_info({:gun_error, _pid, _stream_ref, reason}, state) do
-    Logger.debug("Telemetry stream HTTP error from gun", reason: reason)
+    SLog.debug(@log_category, "Telemetry stream HTTP error from gun", reason: reason)
     {:noreply, state}
   end
 
@@ -381,19 +394,20 @@ defmodule Snakepit.Telemetry.GrpcStream do
             translate_and_emit(event, worker_ctx)
 
           {:error, reason} ->
-            Logger.warning(
+            SLog.warning(
+              @log_category,
               "Telemetry stream error for worker #{worker_ctx.worker_id}: #{inspect(reason)}",
               worker_id: worker_ctx.worker_id,
               reason: reason
             )
 
           {:trailers, trailers} ->
-            Logger.debug("Telemetry stream trailers: #{inspect(trailers)}",
+            SLog.debug(@log_category, "Telemetry stream trailers: #{inspect(trailers)}",
               worker_id: worker_ctx.worker_id
             )
         end)
 
-        Logger.debug("Telemetry stream completed for worker #{worker_ctx.worker_id}",
+        SLog.debug(@log_category, "Telemetry stream completed for worker #{worker_ctx.worker_id}",
           worker_id: worker_ctx.worker_id
         )
 
@@ -421,9 +435,10 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
   defp log_stream_closed(worker_ctx, reason) do
     log_fun =
-      if shutdown_reason?(reason), do: &Logger.debug/2, else: &Logger.warning/2
+      if shutdown_reason?(reason), do: &SLog.debug/3, else: &SLog.warning/3
 
     log_fun.(
+      @log_category,
       "Telemetry stream closed for worker #{worker_ctx.worker_id}: #{inspect(reason)}",
       worker_id: worker_ctx.worker_id,
       reason: reason
@@ -458,7 +473,8 @@ defmodule Snakepit.Telemetry.GrpcStream do
       :telemetry.execute(event_name, measurements, metadata)
     else
       {:error, reason} ->
-        Logger.debug(
+        SLog.debug(
+          @log_category,
           "Skipping telemetry event #{inspect(event.event_parts)}: #{inspect(reason)}",
           worker_id: worker_ctx.worker_id,
           event_parts: event.event_parts,

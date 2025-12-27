@@ -6,11 +6,11 @@ defmodule Snakepit.Telemetry.Handlers.Logger do
   state changes, GPU profiling, and error events.
   """
 
-  require Logger
-
+  alias Snakepit.Logger, as: SLog
   alias Snakepit.Telemetry.Events
 
   @handler_id "snakepit-ml-logger"
+  @log_category :telemetry
 
   @doc """
   Attaches the logger handler to all ML events.
@@ -198,7 +198,13 @@ defmodule Snakepit.Telemetry.Handlers.Logger do
   end
 
   defp log(level, message) do
-    Logger.log(level, message)
+    case level do
+      :debug -> SLog.debug(@log_category, message)
+      :info -> SLog.info(@log_category, message)
+      :warning -> SLog.warning(@log_category, message)
+      :error -> SLog.error(@log_category, message)
+      _ -> SLog.debug(@log_category, message)
+    end
   end
 
   defp log_level do

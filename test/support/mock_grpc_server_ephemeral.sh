@@ -22,8 +22,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-echo "GRPC_READY:${actual_port}"
-echo "REQUESTED_PORT:${requested_port}"
+ready_file="${SNAKEPIT_READY_FILE:-}"
+if [ -z "$ready_file" ]; then
+  exit 1
+fi
+
+printf "%s" "$actual_port" > "$ready_file"
 
 # Keep process alive so the BEAM Port stays open
 tail -f /dev/null

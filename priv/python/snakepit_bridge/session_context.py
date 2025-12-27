@@ -8,7 +8,6 @@ always best-effort—Elixir TTLs ultimately own session lifecycle—so deleting 
 Python should be treated as a hint rather than an authoritative command.
 """
 
-import logging
 from typing import Dict, Any, Optional
 
 from snakepit_bridge_pb2 import (
@@ -20,8 +19,9 @@ from snakepit_bridge_pb2_grpc import BridgeServiceStub
 from google.protobuf.struct_pb2 import Struct
 
 from .serialization import TypeSerializer
+from snakepit_bridge.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class SessionContext:

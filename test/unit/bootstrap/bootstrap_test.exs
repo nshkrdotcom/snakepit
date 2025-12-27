@@ -5,6 +5,8 @@ defmodule Snakepit.BootstrapTest do
   alias Snakepit.Test.BootstrapRunner
 
   setup do
+    original_python_executable = Application.get_env(:snakepit, :python_executable)
+
     tmp =
       System.tmp_dir!()
       |> Path.join("snakepit_bootstrap_test_#{System.unique_integer([:positive])}")
@@ -18,10 +20,8 @@ defmodule Snakepit.BootstrapTest do
     write_executable(Path.join(tmp, "scripts/setup_test_pythons.sh"))
     write_executable(Path.join(tmp, "priv/python/generate_grpc.sh"))
 
-    Application.put_env(:snakepit, :python_executable, Path.join(tmp, ".venv/bin/python3"))
-
     on_exit(fn ->
-      Application.delete_env(:snakepit, :python_executable)
+      restore_env(:python_executable, original_python_executable)
       File.rm_rf(tmp)
     end)
 
@@ -59,6 +59,9 @@ defmodule Snakepit.BootstrapTest do
   defp pip_cmd(tmp), do: Path.join(tmp, ".venv/bin/pip")
   defp requirements(tmp), do: Path.join(tmp, "priv/python/requirements.txt")
   defp script(tmp, rel), do: Path.join(tmp, rel)
+
+  defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
 
   defp write_executable(path) do
     File.write!(path, "#!/bin/bash\nexit 0\n")

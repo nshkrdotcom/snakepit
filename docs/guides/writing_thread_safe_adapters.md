@@ -884,22 +884,26 @@ python grpc_server_threaded.py \
 
 ```python
 # Enable detailed logging
-import logging
-logging.basicConfig(level=logging.DEBUG)
+import os
+from snakepit_bridge import configure_logging, get_logger
+
+os.environ["SNAKEPIT_LOG_LEVEL"] = "debug"
+configure_logging(force=True)
+logger = get_logger(__name__)
 
 # Check which thread is running
 import threading
-print(f"Thread: {threading.current_thread().name}")
+logger.debug("Thread: %s", threading.current_thread().name)
 
 # Track lock acquisitions
 class DebugAdapter(ThreadSafeAdapter):
     @thread_safe_method
     def compute(self, data):
-        print(f"[{threading.current_thread().name}] Acquiring lock...")
+        logger.debug("[%s] Acquiring lock...", threading.current_thread().name)
         with self.acquire_lock():
-            print(f"[{threading.current_thread().name}] Lock acquired!")
+            logger.debug("[%s] Lock acquired!", threading.current_thread().name)
             result = do_work(data)
-        print(f"[{threading.current_thread().name}] Lock released")
+        logger.debug("[%s] Lock released", threading.current_thread().name)
         return result
 ```
 

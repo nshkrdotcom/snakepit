@@ -19,45 +19,43 @@ Requirements:
 - Thread-safe ML libraries (NumPy, PyTorch, etc.)
 """
 
+import json
+import pickle
 import argparse
 import asyncio
 import inspect
-import grpc
 import logging
+import os
 import signal
 import sys
-import time
 import threading
+import time
 import traceback
-import os
+from collections import defaultdict
 from concurrent import futures
 from typing import Dict, Optional, Sequence, Tuple
-from collections import defaultdict
+
+from snakepit_bridge.logging_config import configure_logging, get_logger
+
+if __name__ == "__main__":
+    configure_logging()
 
 # Add the package to Python path
 sys.path.insert(0, '.')
 
+import grpc
 import snakepit_bridge_pb2 as pb2
 import snakepit_bridge_pb2_grpc as pb2_grpc
 from snakepit_bridge.session_context import SessionContext
 from snakepit_bridge.serialization import TypeSerializer
 from snakepit_bridge import telemetry
 from google.protobuf.timestamp_pb2 import Timestamp
-import json
-import pickle
-
-logging.basicConfig(
-    format='%(asctime)s - [%(threadName)s] - %(name)s - %(levelname)s - [corr=%(correlation_id)s] %(message)s',
-    level=logging.INFO
-)
 
 telemetry.setup_tracing()
 _log_filter = telemetry.correlation_filter()
-logger = logging.getLogger(__name__)
+logger = get_logger("grpc_server_threaded")
 logger.addFilter(_log_filter)
 logging.getLogger().addFilter(_log_filter)
-
-logger.info("Loaded grpc_server_threaded.py from %s", __file__)
 
 
 def maybe_create_process_group():
@@ -75,6 +73,25 @@ def maybe_create_process_group():
     except Exception as exc:
         logger.warning("Failed to create process group: %s", exc)
         return False
+
+
+def _signal_ready(actual_port: int) -> None:
+    ready_file = os.environ.get("SNAKEPIT_READY_FILE")
+    if not ready_file:
+        logger.debug("SNAKEPIT_READY_FILE not set; readiness signal skipped.")
+        return
+
+    try:
+        tmp_path = f"{ready_file}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            handle.write(str(actual_port))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, ready_file)
+        logger.debug("Readiness file written: %s", ready_file)
+    except Exception as exc:
+        logger.error("Failed to write readiness file %s: %s", ready_file, exc)
+        raise
 
 
 def _ensure_event_loop() -> asyncio.AbstractEventLoop:
@@ -760,7 +777,7 @@ async def serve_threaded(
     await server.start()
 
     # Signal ready
-    logger.info(f"GRPC_READY:{actual_port}")
+    _signal_ready(actual_port)
     logger.info(f"✅ Threaded gRPC server ready on port {actual_port} with {max_workers} worker threads")
 
     # Wait for shutdown
@@ -777,6 +794,9 @@ async def serve_threaded(
 
 
 def main():
+    configure_logging()
+    logger.debug("Loaded grpc_server_threaded.py from %s", __file__)
+
     parser = argparse.ArgumentParser(description='Snakepit Multi-Threaded gRPC Server')
     parser.add_argument('--port', type=int, default=0, help='Port to listen on')
     parser.add_argument('--adapter', type=str, required=True, help='Adapter class path')
@@ -814,8 +834,7 @@ def main():
             shutdown_event
         ))
     except BaseException as e:
-        logger.error(f"Unhandled exception: {type(e).__name__}: {e}")
-        traceback.print_exc()
+        logger.exception("Unhandled exception: %s: %s", type(e).__name__, e)
         sys.exit(1)
     finally:
         loop.close()

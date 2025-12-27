@@ -18,9 +18,10 @@ This is intentionally minimal to serve as a clean starting point.
 """
 
 from typing import Any, Dict, Optional
-import logging
 
-logger = logging.getLogger(__name__)
+from snakepit_bridge.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class TemplateAdapter:

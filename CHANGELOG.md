@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2025-12-27
+
+### Changed
+- **BREAKING**: Default log level changed from `:warning` to `:error` for silent-by-default behavior
+- Centralized all logging through `Snakepit.Logger` module
+- Python logging now respects `SNAKEPIT_LOG_LEVEL` environment variable
+- Replaced stdout `GRPC_READY` signaling with a non-console control channel
+- Removed all hardcoded `IO.puts` and Python `print()` statements
+
+### Added
+- Category-based logging: `:lifecycle`, `:pool`, `:grpc`, `:bridge`, `:worker`, `:startup`, `:shutdown`, `:telemetry`, `:general`
+- `config :snakepit, log_categories: [...]` to enable specific categories
+- `priv/python/snakepit_bridge/logging_config.py` for centralized Python logging
+
+### Fixed
+- Noisy startup messages no longer pollute console output
+- Health-check messages suppressed by default
+- gRPC server startup messages suppressed by default
+
+### Migration Guide
+If you relied on seeing startup logs, add to your config:
+```elixir
+config :snakepit, log_level: :info
+```
+
 ## [0.8.0] - 2025-12-27
 
 ### Added

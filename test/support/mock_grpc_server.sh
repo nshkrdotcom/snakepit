@@ -16,6 +16,12 @@ for i in "$@"; do
   esac
 done
 
-echo "GRPC_READY:$port"
+ready_file="${SNAKEPIT_READY_FILE:-}"
+if [ -z "$ready_file" ]; then
+  exit 1
+fi
+
+printf "%s" "$port" > "$ready_file"
+
 # Keep running to simulate a server
 tail -f /dev/null

@@ -5,22 +5,20 @@ defmodule Snakepit.LoggerDefaultsTest do
 
   setup do
     previous_level = Application.get_env(:snakepit, :log_level)
-    previous_library_mode = Application.get_env(:snakepit, :library_mode)
 
     on_exit(fn ->
       restore_env(:log_level, previous_level)
-      restore_env(:library_mode, previous_library_mode)
     end)
 
     :ok
   end
 
-  test "defaults to warning and still logs errors" do
+  test "defaults to error-only logging" do
     Application.delete_env(:snakepit, :log_level)
-    Application.put_env(:snakepit, :library_mode, true)
 
-    assert SLog.should_log?(:warning)
+    refute SLog.should_log?(:warning)
     refute SLog.should_log?(:info)
+    refute SLog.should_log?(:debug)
     assert SLog.should_log?(:error)
   end
 

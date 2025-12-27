@@ -9,10 +9,10 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   """
 
   use DynamicSupervisor
-  require Logger
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Pool.Worker.StarterRegistry
+  @log_category :pool
 
   @doc """
   Starts the worker supervisor.
@@ -55,18 +55,27 @@ defmodule Snakepit.Pool.WorkerSupervisor do
 
     case DynamicSupervisor.start_child(__MODULE__, child_spec) do
       {:ok, starter_pid} ->
-        SLog.info("Started worker starter for #{worker_id} with PID #{inspect(starter_pid)}")
+        SLog.info(
+          @log_category,
+          "Started worker starter for #{worker_id} with PID #{inspect(starter_pid)}"
+        )
+
         {:ok, starter_pid}
 
       {:error, {:already_started, starter_pid}} ->
         SLog.debug(
+          @log_category,
           "Worker starter for #{worker_id} already running with PID #{inspect(starter_pid)}"
         )
 
         {:ok, starter_pid}
 
       {:error, reason} = error ->
-        SLog.error("Failed to start worker starter for #{worker_id}: #{inspect(reason)}")
+        SLog.error(
+          @log_category,
+          "Failed to start worker starter for #{worker_id}: #{inspect(reason)}"
+        )
+
         error
     end
   end
@@ -176,7 +185,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
     port_released? = check_port_released(worker_id, port_to_probe, probe_port?, retries)
 
     if port_released? and registry_cleaned?(worker_id) do
-      SLog.debug("Resources released for #{worker_id}, safe to restart")
+      SLog.debug(@log_category, "Resources released for #{worker_id}, safe to restart")
       :ok
     else
       retry_cleanup_check(worker_id, current_port, requested_port, retries, backoff)
@@ -196,7 +205,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
 
   defp check_port_released(worker_id, port_to_probe, probe_port?, retries) do
     if probe_port? do
-      SLog.debug("Probing port #{port_to_probe} before restarting #{worker_id}")
+      SLog.debug(@log_category, "Probing port #{port_to_probe} before restarting #{worker_id}")
       port_available?(port_to_probe)
     else
       log_ephemeral_port_skip(worker_id, retries)
@@ -207,6 +216,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   defp log_ephemeral_port_skip(worker_id, retries) do
     if retries == cleanup_max_retries() do
       SLog.info(
+        @log_category,
         "Skipping port availability probe for #{worker_id}; worker requested an ephemeral port"
       )
     end
@@ -231,6 +241,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
 
   defp handle_cleanup_timeout(worker_id) do
     SLog.warning(
+      @log_category,
       "Resource cleanup timeout for #{worker_id} after #{cleanup_max_retries()} retries, " <>
         "proceeding with restart anyway"
     )

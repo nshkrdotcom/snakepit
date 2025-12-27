@@ -340,7 +340,7 @@ defmodule Snakepit.Config do
 
     case validate_pool_config(legacy_pool) do
       {:ok, config} ->
-        SLog.info("Converted legacy configuration to pool config for :default pool")
+        SLog.info(:startup, "Converted legacy configuration to pool config", pool_name: :default)
         {:ok, [config]}
 
       error ->

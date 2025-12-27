@@ -37,7 +37,6 @@ defmodule Snakepit.Bridge.ToolRegistry do
   """
 
   use GenServer
-  require Logger
   alias Snakepit.Logger, as: SLog
 
   alias Snakepit.Bridge.InternalToolSpec
@@ -47,6 +46,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
   @tool_name_pattern ~r/^[A-Za-z0-9][A-Za-z0-9_\-\.]*$/
   @max_metadata_entries 32
   @max_metadata_bytes 4_096
+  @log_category :bridge
 
   # Client API
 
@@ -141,7 +141,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
     # Create ETS table for fast lookups
     :ets.new(@table_name, [:named_table, :set, :protected, read_concurrency: true])
 
-    SLog.info("ToolRegistry started with ETS table: #{@table_name}")
+    SLog.info(@log_category, "ToolRegistry started with ETS table: #{@table_name}")
 
     {:ok, %{}}
   end
@@ -163,7 +163,11 @@ defmodule Snakepit.Bridge.ToolRegistry do
 
       case :ets.insert_new(@table_name, {{session_id, normalized_name}, tool_spec}) do
         true ->
-          SLog.debug("Registered Elixir tool: #{normalized_name} for session: #{session_id}")
+          SLog.debug(
+            @log_category,
+            "Registered Elixir tool: #{normalized_name} for session: #{session_id}"
+          )
+
           {:reply, :ok, state}
 
         false ->
@@ -195,7 +199,11 @@ defmodule Snakepit.Bridge.ToolRegistry do
 
       case :ets.insert_new(@table_name, {{session_id, normalized_name}, tool_spec}) do
         true ->
-          SLog.debug("Registered Python tool: #{normalized_name} for session: #{session_id}")
+          SLog.debug(
+            @log_category,
+            "Registered Python tool: #{normalized_name} for session: #{session_id}"
+          )
+
           {:reply, :ok, state}
 
         false ->
@@ -212,7 +220,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
     with {:ok, normalized_specs} <- build_remote_specs(tool_specs),
          :ok <- ensure_batch_not_registered(session_id, normalized_specs),
          {:ok, names} <- insert_tool_batch(session_id, normalized_specs) do
-      SLog.info("Registered #{length(names)} tools for session: #{session_id}")
+      SLog.info(@log_category, "Registered #{length(names)} tools for session: #{session_id}")
       {:reply, {:ok, names}, state}
     else
       {:error, reason} ->
@@ -226,7 +234,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
     num_deleted = :ets.match_object(@table_name, pattern) |> length()
     :ets.match_delete(@table_name, pattern)
 
-    SLog.debug("Cleaned up #{num_deleted} tools for session: #{session_id}")
+    SLog.debug(@log_category, "Cleaned up #{num_deleted} tools for session: #{session_id}")
 
     {:reply, :ok, state}
   end

@@ -27,7 +27,7 @@ Application.put_env(:snakepit, :grpc_port, 50051)
 Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 # Suppress Snakepit internal logs (options: :debug, :info, :warning, :error, :none)
-Application.put_env(:snakepit, :log_level, :warning)
+Application.put_env(:snakepit, :log_level, :error)
 
 defmodule BasicExample do
   def run do

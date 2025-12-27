@@ -27,7 +27,7 @@ defmodule Snakepit.Adapters.GRPCPython do
       Snakepit.execute_stream("batch_inference", %{
         batch_items: ["image1.jpg", "image2.jpg", "image3.jpg"]
       }, fn chunk ->
-        IO.puts("Processed: \#{chunk["item"]} - \#{chunk["confidence"]}")
+        handle_chunk(chunk)
       end)
       
       # Stream large dataset processing with progress
@@ -35,17 +35,17 @@ defmodule Snakepit.Adapters.GRPCPython do
         total_rows: 10000,
         chunk_size: 500
       }, fn chunk ->
-        IO.puts("Progress: \#{chunk["progress_percent"]}%")
+        handle_progress(chunk)
       end)
   """
 
   @behaviour Snakepit.Adapter
 
-  require Logger
   alias Snakepit.Bridge.ToolChunk
   alias Snakepit.GRPC.Client
   alias Snakepit.Logger, as: SLog
   alias Snakepit.PythonRuntime
+  @log_category :grpc
 
   @impl true
   def executable_path do
@@ -117,7 +117,8 @@ defmodule Snakepit.Adapters.GRPCPython do
   - Manual port range management
   - Port leak tracking
 
-  Python will bind to an OS-assigned port and report it back via GRPC_READY.
+  Python will bind to an OS-assigned port and report it back via the readiness file
+  (`SNAKEPIT_READY_FILE`).
   """
   def get_port do
     # Port 0 = "OS, please assign me any available port"
@@ -136,7 +137,7 @@ defmodule Snakepit.Adapters.GRPCPython do
   Called by GRPCWorker during initialization.
 
   CRITICAL FIX: This includes retry logic to handle the race condition where
-  the Python process signals GRPC_READY before the OS socket is fully bound
+  the Python process signals readiness before the OS socket is fully bound
   and accepting connections. This is common in polyglot systems where the
   external process startup timing is non-deterministic.
   """
@@ -155,7 +156,7 @@ defmodule Snakepit.Adapters.GRPCPython do
   # backoff: multiplier for exponential growth (doubles each retry)
   defp retry_connect(_port, 0, _base_delay, _backoff) do
     # All retries exhausted
-    SLog.error("gRPC connection failed after all retries")
+    SLog.error(@log_category, "gRPC connection failed after all retries")
     {:error, :connection_failed_after_retries}
   end
 
@@ -163,7 +164,7 @@ defmodule Snakepit.Adapters.GRPCPython do
     case Client.connect(port) do
       {:ok, channel} ->
         # Connection successful!
-        SLog.debug("gRPC connection established to port #{port}")
+        SLog.debug(@log_category, "gRPC connection established to port #{port}")
         {:ok, %{channel: channel, port: port}}
 
       {:error, reason} when reason in [:connection_refused, :unavailable, :internal] ->
@@ -174,6 +175,7 @@ defmodule Snakepit.Adapters.GRPCPython do
         actual_delay = delay + jitter
 
         SLog.debug(
+          @log_category,
           "gRPC connection to port #{port} #{reason}. " <>
             "Retrying in #{actual_delay}ms... (#{retries_left - 1} retries left)"
         )
@@ -189,6 +191,7 @@ defmodule Snakepit.Adapters.GRPCPython do
       {:error, reason} ->
         # For any other error, fail immediately (no retry)
         SLog.error(
+          @log_category,
           "gRPC connection to port #{port} failed with unexpected reason: #{inspect(reason)}"
         )
 

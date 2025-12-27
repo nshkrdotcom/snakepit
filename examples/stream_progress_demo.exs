@@ -11,7 +11,7 @@ Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
 Application.put_env(:snakepit, :grpc_port, 50051)
 Application.put_env(:snakepit, :grpc_host, "localhost")
-Application.put_env(:snakepit, :log_level, :warning)
+Application.put_env(:snakepit, :log_level, :error)
 Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 Snakepit.Examples.Bootstrap.run_example(fn ->

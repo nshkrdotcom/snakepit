@@ -20,10 +20,11 @@ defmodule Snakepit.Pool.Registry do
   `Snakepit.Pool.Registry.fetch_worker/1` so these keys stay authoritative.
   """
 
-  require Logger
+  alias Snakepit.Logger, as: SLog
 
   @registry_name __MODULE__
   @metadata_keys [:worker_module, :pool_name, :pool_identifier, :adapter_module]
+  @log_category :pool
 
   @doc """
   Returns the child spec for the registry.
@@ -114,7 +115,8 @@ defmodule Snakepit.Pool.Registry do
           :ok
 
         :error ->
-          Logger.debug(
+          SLog.debug(
+            @log_category,
             "Pool.Registry.put_metadata/2 attempted to update #{inspect(worker_id)} before registration"
           )
 
@@ -122,7 +124,8 @@ defmodule Snakepit.Pool.Registry do
       end
     rescue
       ArgumentError ->
-        Logger.debug(
+        SLog.debug(
+          @log_category,
           "Pool.Registry.put_metadata/2 attempted to update #{inspect(worker_id)} before registration"
         )
 

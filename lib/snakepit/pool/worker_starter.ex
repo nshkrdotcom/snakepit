@@ -54,9 +54,9 @@ defmodule Snakepit.Pool.Worker.Starter do
   """
 
   use Supervisor
-  require Logger
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.Worker.StarterRegistry
+  @log_category :pool
 
   @doc """
   Starts a worker starter supervisor.
@@ -126,7 +126,11 @@ defmodule Snakepit.Pool.Worker.Starter do
       case Process.whereis(Snakepit.Pool) do
         nil ->
           # Global pool is dead, don't start workers
-          SLog.debug("Aborting worker starter for #{worker_id} - Global pool is dead")
+          SLog.debug(
+            @log_category,
+            "Aborting worker starter for #{worker_id} - Global pool is dead"
+          )
+
           :ignore
 
         _pid ->
@@ -139,7 +143,10 @@ defmodule Snakepit.Pool.Worker.Starter do
   end
 
   defp do_init_worker(worker_id, worker_module, adapter_module, pool_name, worker_config) do
-    SLog.debug("Starting worker starter for #{worker_id} with module #{inspect(worker_module)}")
+    SLog.debug(
+      @log_category,
+      "Starting worker starter for #{worker_id} with module #{inspect(worker_module)}"
+    )
 
     adapter = adapter_module || Application.get_env(:snakepit, :adapter_module)
 
