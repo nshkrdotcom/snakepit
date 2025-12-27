@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2025-12-27
+
+### Added
+
+#### Hardware Abstraction Layer
+- **Hardware Detection** - New `Snakepit.Hardware` module providing automatic detection of CPU, NVIDIA CUDA, Apple MPS, and AMD ROCm accelerators.
+- **Hardware Detector** - `Snakepit.Hardware.Detector` with unified detection API and caching.
+- **CPU Detection** - `Snakepit.Hardware.CPUDetector` with cores, threads, model, and feature detection (AVX, AVX2, SSE4.2).
+- **CUDA Detection** - `Snakepit.Hardware.CUDADetector` for NVIDIA GPUs via nvidia-smi with version, driver, and memory info.
+- **MPS Detection** - `Snakepit.Hardware.MPSDetector` for Apple Metal Performance Shaders on macOS.
+- **ROCm Detection** - `Snakepit.Hardware.ROCmDetector` for AMD GPUs via rocm-smi.
+- **Device Selection** - `Snakepit.Hardware.Selector` with automatic selection and fallback strategies.
+
+#### Enhanced ML Telemetry
+- **Telemetry Events** - `Snakepit.Telemetry.Events` defining ML-specific telemetry events for hardware, errors, circuit breaker, and GPU profiling.
+- **Logger Handler** - `Snakepit.Telemetry.Handlers.Logger` for automatic logging of all ML telemetry events.
+- **Metrics Handler** - `Snakepit.Telemetry.Handlers.Metrics` with Prometheus-compatible metric definitions.
+- **GPU Profiler** - `Snakepit.Telemetry.GPUProfiler` GenServer for periodic GPU memory, utilization, temperature, and power sampling.
+- **Span Helper** - `Snakepit.Telemetry.Span` for convenient timing of operations with automatic start/stop telemetry.
+
+#### Structured Exception Protocol
+- **Shape Errors** - `Snakepit.Error.Shape` with `ShapeMismatch` and `DTypeMismatch` exceptions with dimension detection.
+- **Device Errors** - `Snakepit.Error.Device` with `DeviceMismatch` and `OutOfMemory` exceptions with recovery suggestions.
+- **Error Parser** - `Snakepit.Error.Parser` for automatic parsing of Python errors with pattern detection for shape, device, and OOM errors.
+
+#### Crash Barrier Supervision
+- **Circuit Breaker** - `Snakepit.CircuitBreaker` GenServer with closed/open/half-open states for fault tolerance.
+- **Health Monitor** - `Snakepit.HealthMonitor` for tracking crash patterns with rolling windows and health status.
+- **Retry Policy** - `Snakepit.RetryPolicy` with configurable exponential backoff, jitter, and retriable error filtering.
+- **Executor** - `Snakepit.Executor` with `execute_with_retry/2`, `execute_with_timeout/2`, `execute_with_circuit_breaker/3`, and batch execution.
+
+#### Documentation
+- New guide: `guides/hardware-detection.md` - Hardware detection usage and device selection.
+- New guide: `guides/crash-recovery.md` - Circuit breaker, health monitoring, and retry patterns.
+- New guide: `guides/error-handling.md` - ML-specific error types and parsing.
+- New guide: `guides/ml-telemetry.md` - ML telemetry events, GPU profiling, and metrics.
+
+### Changed
+- **ExDoc Configuration** - Added new module groups for Hardware, Reliability, ML Errors, and enhanced Telemetry.
+- **Telemetry Module Groups** - Expanded to include Events, GPUProfiler, Span, and Handlers submodules.
+
 ## [0.7.7] - 2025-12-26
 
 ### Changed
@@ -1104,6 +1145,18 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
+[0.8.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.0
+[0.7.7]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.7
+[0.7.6]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.6
+[0.7.5]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.5
+[0.7.4]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.4
+[0.7.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.3
+[0.7.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.2
+[0.7.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.1
+[0.7.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.0
+[0.6.11]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.11
+[0.6.10]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.10
+[0.6.9]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.9
 [0.6.8]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.8
 [0.6.7]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.7
 [0.5.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.5.1

@@ -108,6 +108,11 @@ EXAMPLE_SCRIPTS=(
   "examples/telemetry_monitoring.exs"
   "examples/telemetry_metrics_integration.exs"
   "examples/structured_errors.exs"
+  # v0.8.0 ML Features
+  "examples/hardware_detection.exs"
+  "examples/crash_recovery.exs"
+  "examples/ml_errors.exs"
+  "examples/ml_telemetry.exs"
 )
 
 EXAMPLE_DURATION_MS="${SNAKEPIT_EXAMPLE_DURATION_MS:-3000}"

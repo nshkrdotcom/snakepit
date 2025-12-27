@@ -1,7 +1,7 @@
 defmodule Snakepit.MixProject do
   use Mix.Project
 
-  @version "0.7.7"
+  @version "0.8.0"
   @source_url "https://github.com/nshkrdotcom/snakepit"
 
   def project do
@@ -158,6 +158,12 @@ defmodule Snakepit.MixProject do
         {"ARCHITECTURE.md", title: "System Architecture"},
         {"DIAGRAMS.md", title: "Architecture Diagrams"},
 
+        # ML Workload Guides
+        {"guides/hardware-detection.md", title: "Hardware Detection"},
+        {"guides/crash-recovery.md", title: "Crash Recovery"},
+        {"guides/error-handling.md", title: "Error Handling"},
+        {"guides/ml-telemetry.md", title: "ML Telemetry"},
+
         # Feature documentation
         {"README_GRPC.md", title: "gRPC Streaming Guide"},
         {"README_BIDIRECTIONAL_TOOL_BRIDGE.md", title: "Bidirectional Tool Bridge"},
@@ -208,6 +214,12 @@ defmodule Snakepit.MixProject do
         Architecture: [
           "ARCHITECTURE.md",
           "DIAGRAMS.md"
+        ],
+        "ML Workloads": [
+          "guides/hardware-detection.md",
+          "guides/crash-recovery.md",
+          "guides/error-handling.md",
+          "guides/ml-telemetry.md"
         ],
         Guides: [
           "docs/guides/writing_thread_safe_adapters.md",
@@ -274,13 +286,38 @@ defmodule Snakepit.MixProject do
           Snakepit.GRPC.Endpoint,
           Snakepit.Bridge.ToolRegistry
         ],
+        Hardware: [
+          Snakepit.Hardware,
+          Snakepit.Hardware.Detector,
+          Snakepit.Hardware.CPUDetector,
+          Snakepit.Hardware.CUDADetector,
+          Snakepit.Hardware.MPSDetector,
+          Snakepit.Hardware.ROCmDetector,
+          Snakepit.Hardware.Selector
+        ],
+        Reliability: [
+          Snakepit.CircuitBreaker,
+          Snakepit.HealthMonitor,
+          Snakepit.RetryPolicy,
+          Snakepit.Executor
+        ],
+        "ML Errors": [
+          Snakepit.Error.Shape,
+          Snakepit.Error.Device,
+          Snakepit.Error.Parser
+        ],
         Telemetry: [
           Snakepit.Telemetry,
+          Snakepit.Telemetry.Events,
           Snakepit.Telemetry.GrpcStream,
+          Snakepit.Telemetry.GPUProfiler,
+          Snakepit.Telemetry.Span,
           Snakepit.Telemetry.Naming,
           Snakepit.Telemetry.SafeMetadata,
           Snakepit.Telemetry.Control,
           Snakepit.Telemetry.Correlation,
+          Snakepit.Telemetry.Handlers.Logger,
+          Snakepit.Telemetry.Handlers.Metrics,
           Snakepit.TelemetryMetrics
         ],
         Utilities: [

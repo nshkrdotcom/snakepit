@@ -34,7 +34,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.7.7"}
+    {:snakepit, "~> 0.8.0"}
   ]
 end
 ```
@@ -290,6 +290,40 @@ Automatic cleanup prevents orphaned Python processes:
 - Cleans up orphans on application restart
 - Graceful shutdown with SIGTERM followed by SIGKILL if needed
 
+### ML Workload Support (v0.8.0+)
+
+Hardware detection for ML accelerators:
+
+```elixir
+info = Snakepit.Hardware.detect()
+# => %{accelerator: :cuda, cpu: %{cores: 8, ...}, cuda: %{devices: [...]}}
+
+{:ok, device} = Snakepit.Hardware.select(:auto)
+# => {:ok, {:cuda, 0}}
+```
+
+Fault tolerance with circuit breakers and health monitoring:
+
+```elixir
+{:ok, cb} = Snakepit.CircuitBreaker.start_link(failure_threshold: 5)
+
+Snakepit.Executor.execute_with_protection(cb, fn ->
+  model_inference()
+end, max_attempts: 3)
+```
+
+ML-specific error handling:
+
+```elixir
+case result do
+  {:error, %Snakepit.Error.ShapeMismatch{expected: exp, got: got}} ->
+    Logger.error("Shape mismatch: expected #{inspect(exp)}, got #{inspect(got)}")
+
+  {:error, %Snakepit.Error.OutOfMemory{suggestions: suggestions}} ->
+    Logger.error("OOM - try: #{Enum.join(suggestions, ", ")}")
+end
+```
+
 ## Documentation
 
 | Guide | Description |
@@ -302,6 +336,10 @@ Automatic cleanup prevents orphaned Python processes:
 | [Testing](README_TESTING.md) | Test organization and execution |
 | [Telemetry](TELEMETRY.md) | Observability and metrics |
 | [Log Configuration](LOG_LEVEL_CONFIGURATION.md) | Logging control |
+| [Hardware Detection](guides/hardware-detection.md) | ML accelerator detection |
+| [Crash Recovery](guides/crash-recovery.md) | Fault tolerance patterns |
+| [Error Handling](guides/error-handling.md) | ML-specific exceptions |
+| [ML Telemetry](guides/ml-telemetry.md) | GPU profiling and metrics |
 
 ## Requirements
 

@@ -168,6 +168,86 @@ mix run --no-start examples/structured_errors.exs
 
 ---
 
+## 🆕 New in v0.8.0: ML Workload Features
+
+### 🖥️ Hardware Detection
+
+#### `hardware_detection.exs`
+**Automatic hardware detection for ML workloads**
+- CPU, NVIDIA CUDA, Apple MPS, and AMD ROCm detection
+- Capability flags and feature detection
+- Device selection with fallback strategies
+- Hardware identity for reproducible environments
+
+```bash
+mix run --no-start examples/hardware_detection.exs
+```
+
+**What you'll learn:**
+- Detecting available accelerators automatically
+- Checking hardware capabilities (CUDA, AVX2, etc.)
+- Selecting devices with preference lists
+- Generating hardware identity for lock files
+
+### 🔒 Crash Recovery
+
+#### `crash_recovery.exs`
+**Fault tolerance patterns for ML workloads**
+- Circuit breaker for preventing cascading failures
+- Health monitoring with crash pattern tracking
+- Retry policies with exponential backoff
+- Executor helpers for protected execution
+
+```bash
+mix run --no-start examples/crash_recovery.exs
+```
+
+**What you'll learn:**
+- Using circuit breakers to protect external calls
+- Monitoring worker health and crash patterns
+- Configuring retry policies with jitter
+- Combining multiple protection strategies
+
+### 🐛 ML Error Handling
+
+#### `ml_errors.exs`
+**Structured exception handling for ML operations**
+- Shape mismatch errors with dimension detection
+- Device mismatch errors with transfer suggestions
+- Out of memory errors with recovery suggestions
+- Parsing Python errors into structured exceptions
+
+```bash
+mix run --no-start examples/ml_errors.exs
+```
+
+**What you'll learn:**
+- Creating and handling ML-specific exceptions
+- Parsing Python errors into Elixir structs
+- Pattern matching on different error types
+- Extracting shapes and memory values from messages
+
+### 📊 ML Telemetry
+
+#### `ml_telemetry.exs`
+**ML-specific telemetry and observability**
+- Hardware detection telemetry events
+- GPU profiler for memory/utilization sampling
+- Span helpers for timing operations
+- Prometheus-compatible metric definitions
+
+```bash
+mix run --no-start examples/ml_telemetry.exs
+```
+
+**What you'll learn:**
+- ML telemetry event catalog
+- Using span helpers for timing
+- Prometheus metrics for ML workloads
+- Emitting custom GPU/error events
+
+---
+
 ## 🆕 New in v0.6.7: Telemetry & Observability
 
 ### 📊 Telemetry Basics
@@ -355,6 +435,23 @@ The telemetry examples demonstrate these event types:
 - `[:snakepit, :grpc, :call, :stop]` - gRPC call completed
 - `[:snakepit, :grpc, :stream, :opened]` - Stream opened
 - `[:snakepit, :grpc, :connection, :established]` - Connection ready
+
+### ML Workload Events (v0.8.0+)
+- `[:snakepit, :hardware, :detect, :start]` - Hardware detection started
+- `[:snakepit, :hardware, :detect, :stop]` - Hardware detection completed
+- `[:snakepit, :hardware, :select, :start]` - Device selection started
+- `[:snakepit, :hardware, :select, :stop]` - Device selection completed
+- `[:snakepit, :circuit_breaker, :opened]` - Circuit breaker opened
+- `[:snakepit, :circuit_breaker, :closed]` - Circuit breaker closed
+- `[:snakepit, :circuit_breaker, :half_open]` - Circuit breaker half-open
+- `[:snakepit, :retry, :attempt]` - Retry attempt made
+- `[:snakepit, :retry, :success]` - Retry succeeded
+- `[:snakepit, :retry, :exhausted]` - Retries exhausted
+- `[:snakepit, :error, :shape_mismatch]` - Shape mismatch error
+- `[:snakepit, :error, :device]` - Device error
+- `[:snakepit, :error, :oom]` - Out of memory error
+- `[:snakepit, :gpu, :memory, :sampled]` - GPU memory sampled
+- `[:snakepit, :gpu, :utilization, :sampled]` - GPU utilization sampled
 
 See [`TELEMETRY.md`](../TELEMETRY.md) for the complete event catalog and integration patterns.
 
