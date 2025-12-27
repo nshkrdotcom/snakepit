@@ -307,7 +307,7 @@ defmodule Snakepit.MixProject do
     <script>
       document.addEventListener("DOMContentLoaded", function () {
         mermaid.initialize({
-          startOnLoad: true,
+          startOnLoad: false,
           theme: "default",
           themeVariables: {
             primaryColor: "#6366f1",
@@ -321,6 +321,19 @@ defmodule Snakepit.MixProject do
             tertiaryColor: "#f1f5f9"
           }
         });
+
+        // ExDoc renders ```mermaid blocks as <pre><code class="mermaid">
+        // Transform them into <div class="mermaid"> for proper rendering
+        document.querySelectorAll("pre code.mermaid").forEach(function (codeEl) {
+          var pre = codeEl.parentElement;
+          var div = document.createElement("div");
+          div.className = "mermaid";
+          div.textContent = codeEl.textContent;
+          pre.parentElement.replaceChild(div, pre);
+        });
+
+        // Now render all mermaid diagrams
+        mermaid.init(undefined, document.querySelectorAll(".mermaid"));
       });
     </script>
     """
