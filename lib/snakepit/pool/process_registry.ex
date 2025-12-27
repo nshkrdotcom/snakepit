@@ -17,6 +17,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @table_name :snakepit_pool_process_registry
   @cleanup_interval 30_000
+  @unregister_cleanup_delay 500
+  @unregister_cleanup_attempts 10
 
   defstruct [
     :table,
@@ -324,6 +326,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
           :ets.insert(state.table, {worker_id, updated})
           :dets.insert(state.dets_table, {worker_id, updated})
           :dets.sync(state.dets_table)
+          schedule_unregister_cleanup(worker_id, process_pid, @unregister_cleanup_attempts)
 
           SLog.debug(
             "Deferring unregister for #{worker_id}; external process #{process_pid} still alive"
@@ -517,9 +520,39 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @impl true
+  def handle_info({:unregister_retry, worker_id, process_pid, attempts_left}, state) do
+    case :ets.lookup(state.table, worker_id) do
+      [{^worker_id, %{process_pid: ^process_pid}}] ->
+        handle_unregister_retry_match(state, worker_id, process_pid, attempts_left)
+
+      _ ->
+        :ok
+    end
+
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info(msg, state) do
     SLog.debug("ProcessRegistry received unexpected message: #{inspect(msg)}")
     {:noreply, state}
+  end
+
+  defp handle_unregister_retry_match(state, worker_id, process_pid, attempts_left) do
+    cond do
+      process_alive?(process_pid) and attempts_left > 1 ->
+        schedule_unregister_cleanup(worker_id, process_pid, attempts_left - 1)
+
+      process_alive?(process_pid) ->
+        :ok
+
+      true ->
+        :ets.delete(state.table, worker_id)
+        :dets.delete(state.dets_table, worker_id)
+        :dets.sync(state.dets_table)
+
+        SLog.info("🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}")
+    end
   end
 
   @impl true
@@ -544,6 +577,15 @@ defmodule Snakepit.Pool.ProcessRegistry do
   defp schedule_cleanup do
     # Clean up dead workers every 30 seconds
     Process.send_after(self(), :cleanup_dead_workers, @cleanup_interval)
+  end
+
+  defp schedule_unregister_cleanup(worker_id, process_pid, attempts_left)
+       when attempts_left > 0 do
+    Process.send_after(
+      self(),
+      {:unregister_retry, worker_id, process_pid, attempts_left},
+      @unregister_cleanup_delay
+    )
   end
 
   defp cleanup_orphaned_processes(dets_table, current_beam_run_id, current_beam_os_pid) do

@@ -129,7 +129,7 @@ defmodule Snakepit.ProcessKiller do
   def process_alive?(os_pid) when is_integer(os_pid) do
     case :os.type() do
       {:unix, :linux} ->
-        File.exists?("/proc/#{os_pid}")
+        process_alive_via_proc(os_pid)
 
       {:unix, _} ->
         process_alive_via_ps(os_pid)
@@ -148,6 +148,37 @@ defmodule Snakepit.ProcessKiller do
       String.trim(output || "") != ""
     else
       _ -> false
+    end
+  end
+
+  defp process_alive_via_proc(os_pid) do
+    stat_path = "/proc/#{os_pid}/stat"
+
+    case File.read(stat_path) do
+      {:ok, content} ->
+        case parse_proc_state(content) do
+          {:ok, state} -> state not in ["Z", "X", "x"]
+          :error -> File.exists?(stat_path)
+        end
+
+      {:error, :enoent} ->
+        false
+
+      {:error, _} ->
+        File.exists?(stat_path)
+    end
+  end
+
+  defp parse_proc_state(content) when is_binary(content) do
+    case String.split(content, ") ", parts: 2) do
+      [_prefix, rest] ->
+        case String.split(rest, " ", parts: 2) do
+          [state | _] -> {:ok, state}
+          _ -> :error
+        end
+
+      _ ->
+        :error
     end
   end
 

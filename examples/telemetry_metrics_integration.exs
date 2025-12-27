@@ -302,15 +302,15 @@ defmodule TelemetryMetricsExample do
             tag_str = format_tags(tags)
 
             IO.puts(
-              "║   #{pad_left(short_name, 30)}#{tag_str}#{String.duplicate(" ", max(0, 24 - String.length(tag_str)))} ║"
+              "║   #{pad_left(short_name, 30)}#{tag_str}#{String.duplicate(" ", max(0, 24 - String.length(tag_str)))}       ║"
             )
 
             IO.puts(
-              "║     Count: #{pad_left(count, 10)}  Avg: #{pad_left(Float.round(avg, 2), 8)}ms          ║"
+              "║     Count: #{pad_left(count, 10)}  Avg: #{pad_left(Float.round(avg, 2), 8)}ms                         ║"
             )
 
             IO.puts(
-              "║     Min: #{pad_left(Float.round(min * 1.0, 2), 10)}ms Max: #{pad_left(Float.round(max * 1.0, 2), 8)}ms          ║"
+              "║     Min: #{pad_left(Float.round(min * 1.0, 2), 10)}ms Max: #{pad_left(Float.round(max * 1.0, 2), 8)}ms                          ║"
             )
           end)
 
@@ -324,7 +324,10 @@ defmodule TelemetryMetricsExample do
           Enum.each(counters, fn {{name, tags}, data} ->
             short_name = name |> metric_name_to_string() |> String.split(".") |> List.last()
             tag_str = format_tags(tags)
-            IO.puts("║   #{pad_left(short_name, 40)}#{tag_str}: #{pad_left(data.count, 10)} ║")
+
+            IO.puts(
+              "║   #{pad_left(short_name, 24)}#{pad_left(tag_str, 24)}: #{pad_left(data.count, 10)} ║"
+            )
           end)
 
           IO.puts("╠════════════════════════════════════════════════════════════════╣")
@@ -337,7 +340,10 @@ defmodule TelemetryMetricsExample do
           Enum.each(gauges, fn {{name, tags}, data} ->
             short_name = name |> metric_name_to_string() |> String.split(".") |> List.last()
             tag_str = format_tags(tags)
-            IO.puts("║   #{pad_left(short_name, 40)}#{tag_str}: #{pad_left(data.value, 10)} ║")
+
+            IO.puts(
+              "║   #{pad_left(short_name, 24)}#{pad_left(tag_str, 14)}: #{pad_left(data.count, 10)}           ║"
+            )
           end)
 
           IO.puts("╠════════════════════════════════════════════════════════════════╣")
@@ -348,7 +354,7 @@ defmodule TelemetryMetricsExample do
         IO.puts("║   # TYPE snakepit_grpc_worker_execute_duration_ms summary      ║")
         IO.puts("║   snakepit_grpc_worker_execute_duration_ms{command=\"add\"} 45.2 ║")
         IO.puts("║   # TYPE snakepit_grpc_worker_execute_count counter            ║")
-        IO.puts("║   snakepit_grpc_worker_execute_count{command=\"add\"} 5         ║")
+        IO.puts("║   snakepit_grpc_worker_execute_count{command=\"add\"} 5          ║")
         IO.puts("╚════════════════════════════════════════════════════════════════╝")
     after
       1000 -> IO.puts("⚠️  Timeout retrieving metrics")
@@ -406,7 +412,7 @@ defmodule TelemetryMetricsExample.PrometheusGuide do
     ║        {TelemetryMetricsPrometheus,                            ║
     ║         metrics: metrics(), port: 9568}                        ║
     ║      ]                                                         ║
-    ║      Supervisor.start_link(children, strategy: :one_for_one)  ║
+    ║      Supervisor.start_link(children, strategy: :one_for_one)   ║
     ║    end                                                         ║
     ║                                                                ║
     ║    defp metrics do                                             ║
@@ -418,20 +424,20 @@ defmodule TelemetryMetricsExample.PrometheusGuide do
     ║        counter("snakepit.grpc_worker.execute.stop.error_count",║
     ║          measurement: :errors,                                 ║
     ║          tags: [:command, :error_kind]),                       ║
-    ║        last_value("snakepit.pool.status.queue_depth")         ║
+    ║        last_value("snakepit.pool.status.queue_depth")          ║
     ║      ]                                                         ║
     ║    end                                                         ║
     ║                                                                ║
-    ║ 3. Access metrics at: http://localhost:9568/metrics           ║
+    ║ 3. Access metrics at: http://localhost:9568/metrics            ║
     ║                                                                ║
-    ║ 4. Configure Prometheus to scrape the endpoint                ║
+    ║ 4. Configure Prometheus to scrape the endpoint                 ║
     ║                                                                ║
     ╠════════════════════════════════════════════════════════════════╣
     ║        STATSD INTEGRATION                                      ║
     ╠════════════════════════════════════════════════════════════════╣
     ║                                                                ║
     ║ 1. Add to mix.exs:                                             ║
-    ║    {:telemetry_metrics_statsd, "~> 0.7"}                      ║
+    ║    {:telemetry_metrics_statsd, "~> 0.7"}                       ║
     ║                                                                ║
     ║ 2. In your application.ex:                                     ║
     ║                                                                ║
@@ -444,11 +450,11 @@ defmodule TelemetryMetricsExample.PrometheusGuide do
     ║        CUSTOM HANDLERS                                         ║
     ╠════════════════════════════════════════════════════════════════╣
     ║                                                                ║
-    ║ For custom integrations, attach directly:                     ║
+    ║ For custom integrations, attach directly:                      ║
     ║                                                                ║
     ║    :telemetry.attach(                                          ║
     ║      "my-custom-handler",                                      ║
-    ║      [:snakepit, :grpc_worker, :execute, :stop],              ║
+    ║      [:snakepit, :grpc_worker, :execute, :stop],               ║
     ║      &MyApp.handle_metric/4,                                   ║
     ║      nil                                                       ║
     ║    )                                                           ║

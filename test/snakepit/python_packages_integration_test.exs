@@ -8,7 +8,7 @@ defmodule Snakepit.PythonPackagesIntegrationTest do
     python = System.find_executable("python3") || System.find_executable("python")
 
     if is_nil(uv) or is_nil(python) do
-      {:skip, "uv or python not available"}
+      [skip: "uv or python not available"]
     else
       :ok
     end

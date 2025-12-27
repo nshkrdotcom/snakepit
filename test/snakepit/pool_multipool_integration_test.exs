@@ -1,4 +1,12 @@
 defmodule Snakepit.PoolMultiPoolIntegrationTest do
+  @moduledoc """
+  Integration tests for multi-pool functionality.
+
+  Tests verify that:
+  1. Pool.init correctly reads and uses multi-pool configuration
+  2. WorkerProfile is used correctly for each pool
+  3. Pools can be configured with different profiles
+  """
   use ExUnit.Case, async: false
   import Snakepit.TestHelpers
 
@@ -34,10 +42,8 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
   defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
   defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
 
-  describe "THE REAL TEST: Does multi-pool actually work?" do
+  describe "multi-pool configuration" do
     test "Pool.init accepts and uses multi-pool configuration" do
-      # THIS WILL FAIL - Pool.init doesn't read from Config.get_pool_configs yet
-
       # Configure multi-pool
       Application.put_env(:snakepit, :pools, [
         %{
@@ -59,26 +65,10 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
       # Start application
       {:ok, _apps} = Application.ensure_all_started(:snakepit)
 
-      # NOTE: Pool.list_pools/0 is not implemented. Pool currently processes only the first
-      # configured pool from the :pools config list. Multi-pool support is a future enhancement.
-      # For now, just verify app started
+      # Verify pool started
       assert Process.whereis(Snakepit.Pool) != nil
-    end
 
-    test "Can execute on named pool (not default)" do
-      # THIS WILL FAIL - Snakepit.execute doesn't accept pool_name parameter
-
-      Application.put_env(:snakepit, :pools, [
-        %{name: :test_pool, worker_profile: :process, pool_size: 1}
-      ])
-
-      Application.put_env(:snakepit, :pooling_enabled, true)
-
-      {:ok, _} = Application.ensure_all_started(:snakepit)
-
-      # NOTE: Snakepit.execute/3 does not support pool_name parameter for routing to named pools.
-      # The current signature is: Snakepit.execute(command, args, opts)
-      # Pool selection is a future enhancement. For now, test that default pool still works.
+      # Wait for workers to be ready
       assert_eventually(
         fn ->
           Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
@@ -87,26 +77,53 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
         interval: 1_000
       )
 
-      {:ok, _result} = Snakepit.execute("ping", %{})
+      # Verify we can list workers from each pool
+      workers_a = Snakepit.Pool.list_workers(Snakepit.Pool, :pool_a)
+      workers_b = Snakepit.Pool.list_workers(Snakepit.Pool, :pool_b)
+
+      assert length(workers_a) == 2, "pool_a should have 2 workers"
+      assert length(workers_b) == 2, "pool_b should have 2 workers"
+    end
+
+    test "can execute on named pool (not default)" do
+      Application.put_env(:snakepit, :pools, [
+        %{
+          name: :test_pool,
+          worker_profile: :process,
+          pool_size: 1,
+          adapter_module: Snakepit.Adapters.GRPCPython
+        }
+      ])
+
+      Application.put_env(:snakepit, :pooling_enabled, true)
+
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+
+      # Wait for pool to be ready
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 60_000,
+        interval: 1_000
+      )
+
+      # Execute on the named pool
+      {:ok, result} = Snakepit.execute("ping", %{}, pool_name: :test_pool)
+      assert is_map(result)
     end
   end
 
-  describe "THE REAL TEST: Does WorkerProfile get used?" do
-    test "Pool actually calls WorkerProfile.start_worker" do
-      # THIS IS THE CRITICAL INTEGRATION POINT
-      # Pool.start_workers_concurrently should call profile_module.start_worker
-      # Currently it calls WorkerSupervisor.start_worker directly
-
-      # We can't easily test this without instrumenting the code
-      # But we CAN test the outcome: does profile config get respected?
-
+  describe "WorkerProfile integration" do
+    test "Pool uses WorkerProfile.start_worker for profile-based pools" do
       Application.put_env(:snakepit, :pools, [
         %{
           name: :test,
           worker_profile: :process,
           pool_size: 1,
-          # Custom env
-          adapter_env: [{"TEST_VAR", "test_value"}]
+          # Custom env to verify it's passed through
+          adapter_env: [{"TEST_VAR", "test_value"}],
+          adapter_module: Snakepit.Adapters.GRPCPython
         }
       ])
 
@@ -123,10 +140,13 @@ defmodule Snakepit.PoolMultiPoolIntegrationTest do
         interval: 1_000
       )
 
-      # NOTE: Unable to verify worker received adapter_env configuration without
-      # introspection capabilities. This is a known limitation for testing worker configuration.
-      # For now, just verify pool started
-      assert Process.whereis(Snakepit.Pool) != nil
+      # Verify pool started and has workers
+      workers = Snakepit.Pool.list_workers(Snakepit.Pool, :test)
+      assert length(workers) == 1
+
+      # Execute a ping to verify the worker is functional
+      {:ok, result} = Snakepit.execute("ping", %{}, pool_name: :test)
+      assert is_map(result)
     end
   end
 end

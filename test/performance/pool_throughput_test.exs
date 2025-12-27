@@ -1,53 +1,84 @@
 defmodule Snakepit.PoolThroughputTest do
-  use Snakepit.TestCase, async: false
+  @moduledoc """
+  Performance tests for pool throughput and latency.
+
+  These tests use MockGRPCAdapter for fast, deterministic benchmarking
+  without the overhead of real Python processes.
+  """
+  use ExUnit.Case, async: false
+  import Snakepit.TestHelpers
 
   @moduletag :performance
 
+  setup do
+    prev_pools = Application.get_env(:snakepit, :pools)
+    prev_pooling = Application.get_env(:snakepit, :pooling_enabled)
+    prev_pool_config = Application.get_env(:snakepit, :pool_config)
+
+    Application.stop(:snakepit)
+    Application.load(:snakepit)
+
+    on_exit(fn ->
+      Application.stop(:snakepit)
+      restore_env(:pools, prev_pools)
+      restore_env(:pooling_enabled, prev_pooling)
+      restore_env(:pool_config, prev_pool_config)
+
+      assert_eventually(
+        fn -> Process.whereis(Snakepit.Pool) == nil end,
+        timeout: 5_000,
+        interval: 100
+      )
+    end)
+
+    :ok
+  end
+
+  defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
+
   describe "pool throughput benchmarks" do
     setup do
-      # Create larger pool for performance testing
-      pool_name = :"perf_pool_#{System.unique_integer([:positive])}"
+      # Configure pool with MockGRPCAdapter for fast benchmarking
+      Application.put_env(:snakepit, :pooling_enabled, true)
 
-      pool_config = %{
-        pool_size: 8,
-        adapter_module: Snakepit.TestAdapters.MockGRPCAdapter,
-        pool_name: pool_name
-      }
+      Application.put_env(:snakepit, :pools, [
+        %{
+          name: :default,
+          worker_profile: :process,
+          pool_size: 8,
+          adapter_module: Snakepit.TestAdapters.MockGRPCAdapter
+        }
+      ])
 
-      {:ok, pool_sup} = DynamicSupervisor.start_link(strategy: :one_for_one)
+      {:ok, _} = Application.ensure_all_started(:snakepit)
 
-      {:ok, pool_pid} =
-        DynamicSupervisor.start_child(pool_sup, {
-          Snakepit.Pool,
-          Map.put(pool_config, :name, pool_name)
-        })
-
-      # Wait for pool to be initialized (using Supertester pattern)
+      # Wait for pool to be ready
       assert_eventually(
         fn ->
-          Process.alive?(pool_pid) and :sys.get_state(pool_pid).initialized
+          case Snakepit.Pool.await_ready(Snakepit.Pool, 100) do
+            :ok -> true
+            _ -> false
+          end
         end,
-        timeout: 5_000
+        timeout: 10_000,
+        interval: 200
       )
 
-      on_exit(fn ->
-        DynamicSupervisor.stop(pool_sup)
-      end)
-
-      %{pool_name: pool_name}
+      :ok
     end
 
-    test "measure request latency", %{pool_name: pool_name} do
+    test "measure request latency" do
       # Warm up
       for _ <- 1..10 do
-        GenServer.call(pool_name, {:execute, "ping", %{}, [], 5_000})
+        Snakepit.execute("ping", %{}, timeout: 5_000)
       end
 
       # Measure latencies
       latencies =
         for _ <- 1..100 do
           start = System.monotonic_time(:microsecond)
-          {:ok, _} = GenServer.call(pool_name, {:execute, "ping", %{}, [], 5_000})
+          {:ok, _} = Snakepit.execute("ping", %{}, timeout: 5_000)
           System.monotonic_time(:microsecond) - start
         end
 
@@ -62,14 +93,14 @@ defmodule Snakepit.PoolThroughputTest do
       IO.puts("  Min: #{Float.round(min_latency / 1000, 2)}ms")
       IO.puts("  Max: #{Float.round(max_latency / 1000, 2)}ms")
 
-      # Assertions
+      # Assertions - mock adapter should be very fast
       # Average under 10ms
       assert avg_latency < 10_000
       # Max under 50ms
       assert max_latency < 50_000
     end
 
-    test "measure throughput under load", %{pool_name: pool_name} do
+    test "measure throughput under load" do
       # Number of concurrent clients
       client_count = 20
       requests_per_client = 50
@@ -82,13 +113,7 @@ defmodule Snakepit.PoolThroughputTest do
           Task.async(fn ->
             for req_id <- 1..requests_per_client do
               {:ok, _} =
-                GenServer.call(pool_name, {
-                  :execute,
-                  "echo",
-                  %{client: client_id, request: req_id},
-                  [],
-                  10_000
-                })
+                Snakepit.execute("echo", %{client: client_id, request: req_id}, timeout: 10_000)
             end
           end)
         end
@@ -110,7 +135,7 @@ defmodule Snakepit.PoolThroughputTest do
       assert throughput > 100
     end
 
-    test "pool saturation behavior", %{pool_name: pool_name} do
+    test "pool saturation behavior" do
       # Pool has 8 workers, send 20 slow requests
       slow_request_count = 20
       # 500ms each
@@ -122,16 +147,7 @@ defmodule Snakepit.PoolThroughputTest do
         for i <- 1..slow_request_count do
           Task.async(fn ->
             start = System.monotonic_time(:millisecond)
-
-            result =
-              GenServer.call(pool_name, {
-                :execute,
-                "slow_operation",
-                %{delay: delay, id: i},
-                [],
-                10_000
-              })
-
+            result = Snakepit.execute("slow_operation", %{delay: delay, id: i}, timeout: 10_000)
             wait_time = System.monotonic_time(:millisecond) - start
             {result, wait_time}
           end)

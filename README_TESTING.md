@@ -1,6 +1,6 @@
 # Snakepit Testing Guide
 
-> Updated for Snakepit v0.7.4
+> Updated for Snakepit v0.7.7
 
 This guide covers the testing approach for the Snakepit project, including test organization, running tests, and understanding test output.
 
@@ -140,6 +140,73 @@ test/
 ├── performance/           # Optional perf benchmarks (:performance tag)
 ├── support/               # Shared helpers and fixtures
 └── test_helper.exs        # Global test configuration
+```
+
+## Test Isolation Patterns
+
+### Application Lifecycle
+
+The test harness starts the Snakepit application once at the beginning of the test run (via `test/test_helper.exs`). By default, the app runs with `pooling_enabled: false` so no Python workers are spawned for unit tests.
+
+**For tests that need custom pooling configuration:**
+
+```elixir
+defmodule MyIntegrationTest do
+  use ExUnit.Case, async: false
+  import Snakepit.TestHelpers
+
+  setup do
+    # Save original env
+    prev_pools = Application.get_env(:snakepit, :pools)
+    prev_pooling = Application.get_env(:snakepit, :pooling_enabled)
+
+    # Stop app and reconfigure
+    Application.stop(:snakepit)
+    Application.load(:snakepit)
+
+    on_exit(fn ->
+      Application.stop(:snakepit)
+      restore_env(:pools, prev_pools)
+      restore_env(:pooling_enabled, prev_pooling)
+      # Wait for cleanup
+      assert_eventually(fn -> Process.whereis(Snakepit.Pool) == nil end)
+      # Restart for subsequent tests
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+    end)
+
+    :ok
+  end
+
+  defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
+end
+```
+
+### Multi-Pool Configuration
+
+When configuring multiple pools in tests, each pool uses its own `pool_size` from the `:pools` config. The global `:pool_config.pool_size` is only used for legacy (single-pool) configurations.
+
+```elixir
+# Multi-pool mode: each pool has its own pool_size
+Application.put_env(:snakepit, :pools, [
+  %{name: :small_pool, pool_size: 2, adapter_module: ...},
+  %{name: :large_pool, pool_size: 10, adapter_module: ...}
+])
+
+# Legacy mode: uses global pool_size
+Application.put_env(:snakepit, :pool_config, %{pool_size: 5})
+```
+
+### Pool Isolation in Tests
+
+Broken pools (e.g., using `FailingAdapter`) do not affect healthy pools. You can query workers from specific pools using:
+
+```elixir
+# List workers from a specific pool
+Snakepit.Pool.list_workers(Snakepit.Pool, :healthy_pool)
+
+# Execute on a specific pool
+Snakepit.execute("ping", %{}, pool_name: :my_pool)
 ```
 
 ## Key Test Categories

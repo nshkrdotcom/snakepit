@@ -283,7 +283,7 @@ defmodule TelemetryMonitoringExample do
             else: 100.0
 
         IO.puts("║ Performance Metrics:                           ║")
-        IO.puts("║   Total Calls: #{pad_right(metrics.call_count, 32)} ║")
+        IO.puts("║   Total Calls: #{pad_right(metrics.call_count, 31)} ║")
         IO.puts("║   Avg Duration: #{pad_right("#{avg_duration}ms", 30)} ║")
         IO.puts("║   Slow Calls: #{pad_right(metrics.slow_call_count, 32)} ║")
         IO.puts("║   SLA Compliance: #{pad_right("#{sla_compliance}%", 28)} ║")
@@ -322,7 +322,7 @@ defmodule TelemetryMonitoringExample do
           |> Enum.take(5)
           |> Enum.each(fn {event, count} ->
             short_event = String.slice(event, 0, 30)
-            IO.puts("║   #{pad_right("#{short_event}: #{count}", 45)} ║")
+            IO.puts("║   #{pad_right("#{short_event}: #{count}", 44)} ║")
           end)
         else
           IO.puts("║   No additional events tracked                 ║")

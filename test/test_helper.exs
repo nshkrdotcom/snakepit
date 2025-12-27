@@ -79,8 +79,18 @@ Snakepit.Test.FakeDoctor.reset()
 # Start ExUnit with performance tests excluded by default
 ExUnit.start(exclude: [:performance, :python_integration, :slow])
 
-# CRITICAL: Start the application ONCE for all tests
-# This prevents test contamination and port conflicts from async start/stop
+# START THE APPLICATION FOR TESTS
+# Most tests need the app running with pooling_enabled: false (config/test.exs default)
+# Tests that need pooling or specific config should:
+#   1. Stop the app in setup
+#   2. Configure as needed
+#   3. Restart the app
+#   4. Restore env and restart in on_exit callback
+#
+# This approach gives us:
+# - Fast startup for unit tests (no pool workers spawned)
+# - Isolation for integration tests (they manage their own lifecycle)
+# - Proper cleanup via after_suite
 IO.puts("\n=== Starting Snakepit application for test suite ===")
 Application.put_env(:tls_certificate_check, :log_level, :error)
 Application.ensure_all_started(:tls_certificate_check)
@@ -88,6 +98,8 @@ Application.ensure_all_started(:tls_certificate_check)
 IO.puts("Started applications: #{inspect(apps)}")
 
 # Ensure proper application shutdown after all tests complete
+# CRITICAL: Must wait for ACTUAL completion, not just initiate shutdown
+# See docs/20251226/test-harness-remediation/REMEDIATION_PLAN.md
 ExUnit.after_suite(fn _results ->
   IO.puts("\n=== Shutting down Snakepit application after test suite ===")
 
@@ -99,10 +111,26 @@ ExUnit.after_suite(fn _results ->
       _, _ -> nil
     end
 
-  # Stop the Snakepit application to trigger supervision tree shutdown
+  # Monitor the supervisor BEFORE stopping so we can wait for actual termination
+  sup_pid = Process.whereis(Snakepit.Supervisor)
+  sup_ref = if sup_pid && Process.alive?(sup_pid), do: Process.monitor(sup_pid)
+
+  # Initiate application shutdown
   Application.stop(:snakepit)
 
-  # Poll until workers shut down gracefully
+  # Wait for supervisor to ACTUALLY terminate (not just initiate)
+  # This prevents race conditions where after_suite returns while cleanup is still in progress
+  if sup_ref do
+    receive do
+      {:DOWN, ^sup_ref, :process, ^sup_pid, _reason} ->
+        IO.puts("✅ Supervisor terminated successfully")
+    after
+      10_000 ->
+        IO.puts(:stderr, "⚠️ Timeout waiting for supervisor termination (10s)")
+    end
+  end
+
+  # THEN wait for OS processes to clean up (workers may take time to exit)
   if beam_run_id do
     deadline = System.monotonic_time(:millisecond) + 5_000
     TestHelperShutdown.wait_for_worker_shutdown(beam_run_id, deadline)

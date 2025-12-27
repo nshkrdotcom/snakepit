@@ -1,4 +1,13 @@
 defmodule Snakepit.MultiPoolExecutionTest do
+  @moduledoc """
+  Tests for multi-pool execution and pool isolation.
+
+  These tests verify:
+  1. Multiple pools can be configured and run simultaneously
+  2. Broken pools don't affect healthy pools
+  3. Execution can be routed to specific pools via pool_name option
+  4. Each pool has independent worker sets
+  """
   use ExUnit.Case, async: false
   import Snakepit.TestHelpers
 
@@ -9,6 +18,7 @@ defmodule Snakepit.MultiPoolExecutionTest do
   setup do
     prev_pools = Application.get_env(:snakepit, :pools)
     prev_pooling = Application.get_env(:snakepit, :pooling_enabled)
+    prev_pool_config = Application.get_env(:snakepit, :pool_config)
 
     # Stop any running Snakepit
     Application.stop(:snakepit)
@@ -18,6 +28,7 @@ defmodule Snakepit.MultiPoolExecutionTest do
       Application.stop(:snakepit)
       restore_env(:pools, prev_pools)
       restore_env(:pooling_enabled, prev_pooling)
+      restore_env(:pool_config, prev_pool_config)
       # Wait for processes to actually stop
       assert_eventually(
         fn ->
@@ -55,6 +66,7 @@ defmodule Snakepit.MultiPoolExecutionTest do
 
       {:ok, _} = Application.ensure_all_started(:snakepit)
 
+      # Wait for at least one worker to be available (from the healthy pool)
       assert_eventually(
         fn ->
           Snakepit.Pool.list_workers()
@@ -64,19 +76,62 @@ defmodule Snakepit.MultiPoolExecutionTest do
         interval: 200
       )
 
+      # Execute on the healthy default pool should succeed
       assert {:ok, result} = Snakepit.execute("ping", %{}, pool_name: :default)
       assert is_map(result)
 
+      # Execute on the broken pool should fail with :pool_not_initialized
+      # (since all workers failed to start)
       assert {:error, :pool_not_initialized} =
                Snakepit.execute("ping", %{}, pool_name: :broken_pool)
     end
+
+    test "list_workers for healthy pool works even when broken pool exists" do
+      Application.put_env(:snakepit, :pooling_enabled, true)
+
+      Application.put_env(:snakepit, :pools, [
+        %{
+          name: :healthy,
+          worker_profile: :process,
+          pool_size: 2,
+          adapter_module: Snakepit.TestAdapters.MockGRPCAdapter
+        },
+        %{
+          name: :broken,
+          worker_profile: :process,
+          pool_size: 1,
+          adapter_module: Snakepit.TestAdapters.FailingAdapter
+        }
+      ])
+
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+
+      # Wait for healthy pool workers
+      assert_eventually(
+        fn ->
+          case Snakepit.Pool.list_workers(Snakepit.Pool, :healthy) do
+            [_ | _] = _workers -> true
+            _ -> false
+          end
+        end,
+        timeout: 15_000,
+        interval: 300
+      )
+
+      # Query workers from healthy pool - should not timeout or hang
+      healthy_workers = Snakepit.Pool.list_workers(Snakepit.Pool, :healthy)
+      assert is_list(healthy_workers)
+      assert length(healthy_workers) == 2
+
+      # Query workers from broken pool - should return empty or error
+      broken_result = Snakepit.Pool.list_workers(Snakepit.Pool, :broken)
+      assert is_list(broken_result) and Enum.empty?(broken_result)
+    end
   end
 
-  describe "CRITICAL: Two pools running simultaneously" do
+  describe "multi-pool configuration and execution" do
     test "starts two pools with different names and executes on both" do
-      # THIS WILL FAIL - Pool only supports single pool (uses first pool only)
-
-      # Configure TWO pools
+      # Configure TWO pools with real Python adapter
       Application.put_env(:snakepit, :pooling_enabled, true)
 
       Application.put_env(:snakepit, :pools, [
@@ -97,9 +152,7 @@ defmodule Snakepit.MultiPoolExecutionTest do
       # Start Snakepit
       {:ok, _apps} = Application.ensure_all_started(:snakepit)
 
-      # NOTE: Pool.await_ready/2 does not support named pools. It only works with the default pool.
-      # Multi-pool support is a future enhancement.
-      # For now, wait for default pool with longer timeout for Python server startup
+      # Wait for pool to be ready
       assert_eventually(
         fn ->
           Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
@@ -108,30 +161,31 @@ defmodule Snakepit.MultiPoolExecutionTest do
         interval: 1_000
       )
 
-      # NOTE: Snakepit.execute/3 does not support routing to named pools.
-      # Current signature: Snakepit.execute(command, args, opts)
-      # Future enhancement would add: Snakepit.execute(pool_name, command, args, opts)
-      {:ok, result_a} = Snakepit.execute("ping", %{message: "to_pool_a"})
+      # Execute on pool_a using pool_name option
+      {:ok, result_a} = Snakepit.execute("ping", %{message: "to_pool_a"}, pool_name: :pool_a)
       assert is_map(result_a)
 
-      # NOTE: This executes on the same (default) pool as above, not on pool_b.
-      # Pool routing is not yet implemented.
-      {:ok, result_b} = Snakepit.execute("ping", %{message: "to_pool_b"})
+      # Execute on pool_b using pool_name option
+      {:ok, result_b} = Snakepit.execute("ping", %{message: "to_pool_b"}, pool_name: :pool_b)
       assert is_map(result_b)
-
-      # NOTE: Unable to verify which pool handled each request without pool routing support
-      # and pool identification in responses. This is a known limitation.
-      assert true, "Test structure works but can't verify multi-pool yet"
     end
 
     test "pools have independent worker sets" do
-      # THIS WILL FAIL - Need per-pool worker tracking
-
       Application.put_env(:snakepit, :pooling_enabled, true)
 
       Application.put_env(:snakepit, :pools, [
-        %{name: :pool_a, worker_profile: :process, pool_size: 3},
-        %{name: :pool_b, worker_profile: :process, pool_size: 5}
+        %{
+          name: :pool_a,
+          worker_profile: :process,
+          pool_size: 2,
+          adapter_module: Snakepit.Adapters.GRPCPython
+        },
+        %{
+          name: :pool_b,
+          worker_profile: :process,
+          pool_size: 3,
+          adapter_module: Snakepit.Adapters.GRPCPython
+        }
       ])
 
       {:ok, _} = Application.ensure_all_started(:snakepit)
@@ -145,30 +199,36 @@ defmodule Snakepit.MultiPoolExecutionTest do
         interval: 1_000
       )
 
-      # NOTE: Pool.list_workers/0 does not support querying workers from named pools.
-      # Current: Snakepit.Pool.list_workers() returns all workers from the default pool.
-      # Future enhancement: Snakepit.Pool.list_workers(pool_name) to query specific pools.
-      workers = Snakepit.Pool.list_workers()
+      # Query workers from each pool
+      workers_a = Snakepit.Pool.list_workers(Snakepit.Pool, :pool_a)
+      workers_b = Snakepit.Pool.list_workers(Snakepit.Pool, :pool_b)
+      all_workers = Snakepit.Pool.list_workers()
 
-      # NOTE: Unable to verify pool separation. The current implementation only manages
-      # a single pool (the first configured pool), not multiple independent pools.
-      assert not Enum.empty?(workers), "Workers started"
-    end
+      # Verify each pool has correct count
+      assert length(workers_a) == 2, "pool_a should have 2 workers"
+      assert length(workers_b) == 3, "pool_b should have 3 workers"
+      assert length(all_workers) == 5, "total should be 5 workers"
 
-    test "pools can have different profiles (process vs thread)" do
-      # THIS WILL FAIL - Multi-pool not supported yet
-      # When it works, this tests process and thread pools coexisting
+      # Verify worker IDs are unique between pools
+      assert Enum.all?(workers_a, &String.contains?(&1, "pool_a")),
+             "pool_a workers should have pool_a in their ID"
+
+      assert Enum.all?(workers_b, &String.contains?(&1, "pool_b")),
+             "pool_b workers should have pool_b in their ID"
     end
   end
 
-  describe "CRITICAL: Pool routing by name" do
-    test "Snakepit.execute routes to named pool" do
-      # THIS WILL FAIL - execute doesn't accept pool_name parameter
-
+  describe "pool routing by name" do
+    test "Snakepit.execute routes to named pool via pool_name option" do
       Application.put_env(:snakepit, :pooling_enabled, true)
 
       Application.put_env(:snakepit, :pools, [
-        %{name: :named_pool, worker_profile: :process, pool_size: 2}
+        %{
+          name: :named_pool,
+          worker_profile: :process,
+          pool_size: 2,
+          adapter_module: Snakepit.Adapters.GRPCPython
+        }
       ])
 
       {:ok, _} = Application.ensure_all_started(:snakepit)
@@ -182,91 +242,91 @@ defmodule Snakepit.MultiPoolExecutionTest do
         interval: 1_000
       )
 
-      # NOTE: Pool routing by name is not implemented.
-      # Current signature: execute(command, args, opts)
-      # Future enhancement: execute(pool_name, command, args, opts)
-      # For now, can only execute on default pool
-      {:ok, result} = Snakepit.execute("ping", %{})
+      # Execute with pool_name option
+      {:ok, result} = Snakepit.execute("ping", %{}, pool_name: :named_pool)
       assert is_map(result)
     end
 
     test "can execute on :pool_a and :pool_b independently" do
-      # THIS IS THE KEY TEST for multi-pool routing
+      Application.put_env(:snakepit, :pooling_enabled, true)
 
-      # Application.put_env(:snakepit, :pools, [
-      #   %{name: :pool_a, pool_size: 2},
-      #   %{name: :pool_b, pool_size: 2}
-      # ])
-      #
-      # {:ok, _} = Application.ensure_all_started(:snakepit)
-      #
-      # # Execute 10 requests on pool_a
-      # results_a = for i <- 1..10 do
-      #   {:ok, r} = Snakepit.execute(:pool_a, "ping", %{id: i})
-      #   r
-      # end
-      #
-      # # Execute 10 requests on pool_b
-      # results_b = for i <- 1..10 do
-      #   {:ok, r} = Snakepit.execute(:pool_b, "ping", %{id: i})
-      #   r
-      # end
-      #
-      # assert length(results_a) == 10
-      # assert length(results_b) == 10
-      #
-      # # Verify they used different worker sets
-      # # (would need worker_id in response to verify)
+      Application.put_env(:snakepit, :pools, [
+        %{
+          name: :pool_a,
+          worker_profile: :process,
+          pool_size: 2,
+          adapter_module: Snakepit.Adapters.GRPCPython
+        },
+        %{
+          name: :pool_b,
+          worker_profile: :process,
+          pool_size: 2,
+          adapter_module: Snakepit.Adapters.GRPCPython
+        }
+      ])
+
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 60_000,
+        interval: 1_000
+      )
+
+      # Execute multiple requests on pool_a (ping doesn't take extra args)
+      results_a =
+        for _i <- 1..5 do
+          {:ok, r} = Snakepit.execute("ping", %{}, pool_name: :pool_a)
+          r
+        end
+
+      # Execute multiple requests on pool_b
+      results_b =
+        for _i <- 1..5 do
+          {:ok, r} = Snakepit.execute("ping", %{}, pool_name: :pool_b)
+          r
+        end
+
+      assert length(results_a) == 5
+      assert length(results_b) == 5
     end
   end
 
-  describe "CRITICAL: Different lifecycle policies per pool" do
-    test "pool_a has short TTL, pool_b has long TTL" do
-      # THIS WILL FAIL - Per-pool lifecycle not validated
+  describe "get_stats per pool" do
+    test "get_stats returns per-pool statistics" do
+      Application.put_env(:snakepit, :pooling_enabled, true)
 
-      # Application.put_env(:snakepit, :pools, [
-      #   %{name: :short, pool_size: 1, worker_ttl: {5, :seconds}},
-      #   %{name: :long, pool_size: 1, worker_ttl: {3600, :seconds}}
-      # ])
-      #
-      # {:ok, _} = Application.ensure_all_started(:snakepit)
-      #
-      # # Get initial workers
-      # [worker_short_initial] = Snakepit.Pool.list_workers(:short)
-      # [worker_long_initial] = Snakepit.Pool.list_workers(:long)
-      #
-      # # Wait for short TTL + check interval
-      # :timer.sleep(66_000)  # 5s + 60s + buffer
-      #
-      # # Verify short pool worker recycled
-      # [worker_short_new] = Snakepit.Pool.list_workers(:short)
-      # assert worker_short_new != worker_short_initial
-      #
-      # # Verify long pool worker NOT recycled
-      # [worker_long_same] = Snakepit.Pool.list_workers(:long)
-      # assert worker_long_same == worker_long_initial
-    end
+      Application.put_env(:snakepit, :pools, [
+        %{
+          name: :stats_pool,
+          worker_profile: :process,
+          pool_size: 2,
+          adapter_module: Snakepit.Adapters.GRPCPython
+        }
+      ])
 
-    test "pool_a recycles after 5 requests, pool_b after 100" do
-      # THIS WILL FAIL - Request-count recycling per pool not validated
+      {:ok, _} = Application.ensure_all_started(:snakepit)
 
-      # Application.put_env(:snakepit, :pools, [
-      #   %{name: :low, pool_size: 1, worker_max_requests: 5},
-      #   %{name: :high, pool_size: 1, worker_max_requests: 100}
-      # ])
-      #
-      # {:ok, _} = Application.ensure_all_started(:snakepit)
-      #
-      # # Execute 10 requests on low pool
-      # for _ <- 1..10, do: Snakepit.execute(:low, "ping", %{})
-      #
-      # # Execute 10 requests on high pool
-      # for _ <- 1..10, do: Snakepit.execute(:high, "ping", %{})
-      #
-      # # low should have recycled (after request 5)
-      # # high should NOT have recycled (10 < 100)
-      #
-      # # Verify via telemetry or worker IDs
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 60_000,
+        interval: 1_000
+      )
+
+      # Get stats for specific pool
+      stats = Snakepit.Pool.get_stats(Snakepit.Pool, :stats_pool)
+      assert is_map(stats)
+      assert Map.has_key?(stats, :workers)
+      assert stats.workers == 2
+
+      # Aggregate stats
+      aggregate = Snakepit.Pool.get_stats()
+      assert is_map(aggregate)
+      assert Map.has_key?(aggregate, :workers)
     end
   end
 end
