@@ -51,6 +51,18 @@ defmodule Snakepit.ProcessKillerTest do
     end
   end
 
+  describe "get_process_group_id/1" do
+    test "returns pgid for existing process" do
+      our_os_pid = System.pid() |> String.to_integer()
+      assert {:ok, pgid} = Snakepit.ProcessKiller.get_process_group_id(our_os_pid)
+      assert is_integer(pgid)
+    end
+
+    test "returns error for non-existent process" do
+      assert {:error, :not_found} = Snakepit.ProcessKiller.get_process_group_id(999_999)
+    end
+  end
+
   describe "kill_process/2" do
     test "kills a sleep process with SIGTERM" do
       # Spawn a sleep process
@@ -135,6 +147,35 @@ defmodule Snakepit.ProcessKillerTest do
     :error, _ -> :ok
   end
 
+  defp read_pids(port, expected_count, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    read_pids_loop(port, "", expected_count, deadline)
+  end
+
+  defp read_pids_loop(port, buffer, expected_count, deadline) do
+    if System.monotonic_time(:millisecond) >= deadline do
+      flunk("Timed out waiting for PID output")
+    else
+      receive do
+        {^port, {:data, data}} ->
+          buffer = buffer <> to_string(data)
+
+          pids =
+            Regex.scan(~r/(\d+)/, buffer)
+            |> Enum.map(fn [_, pid_str] -> String.to_integer(pid_str) end)
+
+          if length(pids) >= expected_count do
+            Enum.take(pids, expected_count)
+          else
+            read_pids_loop(port, buffer, expected_count, deadline)
+          end
+      after
+        50 ->
+          read_pids_loop(port, buffer, expected_count, deadline)
+      end
+    end
+  end
+
   describe "kill_with_escalation/2" do
     test "kills process gracefully with SIGTERM" do
       # Spawn a sleep process
@@ -159,6 +200,36 @@ defmodule Snakepit.ProcessKillerTest do
 
       # Should be dead from SIGKILL - wait to confirm
       assert wait_for_death(pid, 1000), "Process #{pid} should have died from SIGKILL"
+    end
+  end
+
+  describe "kill_process_group_with_escalation/2" do
+    test "kills a process group including child processes" do
+      case Snakepit.ProcessKiller.setsid_executable() do
+        {:ok, setsid} ->
+          port =
+            Port.open({:spawn_executable, setsid}, [
+              :binary,
+              :exit_status,
+              :use_stdio,
+              :stderr_to_stdout,
+              args: ["/bin/sh", "-c", "echo $$; sleep 30 & echo $!; sleep 30"]
+            ])
+
+          on_exit(fn -> safe_close_port(port) end)
+          [pgid, child_pid] = read_pids(port, 2, 1_000)
+
+          assert Snakepit.ProcessKiller.process_alive?(pgid)
+          assert Snakepit.ProcessKiller.process_alive?(child_pid)
+
+          assert :ok = Snakepit.ProcessKiller.kill_process_group_with_escalation(pgid, 1_000)
+
+          assert wait_for_death(pgid, 2_000), "Process group leader #{pgid} should have died"
+          assert wait_for_death(child_pid, 2_000), "Child process #{child_pid} should have died"
+
+        {:error, _} ->
+          assert true
+      end
     end
   end
 

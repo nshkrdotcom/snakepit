@@ -33,6 +33,7 @@ defmodule Snakepit.RunID do
     # Add 2 random characters for collision resistance
     random_part =
       :rand.uniform(1296)
+      |> Kernel.-(1)
       |> Integer.to_string(36)
       |> String.downcase()
       |> String.pad_leading(2, "0")

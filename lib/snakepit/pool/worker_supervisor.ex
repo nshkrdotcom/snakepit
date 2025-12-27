@@ -132,8 +132,13 @@ defmodule Snakepit.Pool.WorkerSupervisor do
     end
   end
 
-  @cleanup_retry_interval Application.compile_env(:snakepit, :cleanup_retry_interval, 50)
-  @cleanup_max_retries Application.compile_env(:snakepit, :cleanup_max_retries, 20)
+  defp cleanup_retry_interval_ms do
+    Application.get_env(:snakepit, :cleanup_retry_interval_ms, 50)
+  end
+
+  defp cleanup_max_retries do
+    Application.get_env(:snakepit, :cleanup_max_retries, 20)
+  end
 
   # Wait for external resources to be released after worker termination.
   #
@@ -152,8 +157,8 @@ defmodule Snakepit.Pool.WorkerSupervisor do
          worker_id,
          current_port,
          requested_port,
-         retries \\ @cleanup_max_retries,
-         backoff \\ @cleanup_retry_interval
+         retries \\ cleanup_max_retries(),
+         backoff \\ cleanup_retry_interval_ms()
        ) do
     if retries > 0 do
       check_and_wait_for_cleanup(worker_id, current_port, requested_port, retries, backoff)
@@ -179,7 +184,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   end
 
   defp maybe_delay_initial_probe(probe_port?, retries, backoff) do
-    if probe_port? and retries == @cleanup_max_retries do
+    if probe_port? and retries == cleanup_max_retries() do
       initial_delay = min(backoff, 50)
 
       receive do
@@ -200,7 +205,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   end
 
   defp log_ephemeral_port_skip(worker_id, retries) do
-    if retries == @cleanup_max_retries do
+    if retries == cleanup_max_retries() do
       SLog.info(
         "Skipping port availability probe for #{worker_id}; worker requested an ephemeral port"
       )
@@ -226,7 +231,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
 
   defp handle_cleanup_timeout(worker_id) do
     SLog.warning(
-      "Resource cleanup timeout for #{worker_id} after #{@cleanup_max_retries} retries, " <>
+      "Resource cleanup timeout for #{worker_id} after #{cleanup_max_retries()} retries, " <>
         "proceeding with restart anyway"
     )
 

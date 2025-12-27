@@ -22,12 +22,26 @@ config :snakepit,
   # Logging level for Snakepit internal logs
   # Options: :debug, :info, :warning, :error, :none
   # Set to :warning or :none for clean output in production
-  log_level: :info,
+  log_level: :warning,
+  # Library mode defaults to quiet logging for embedded usage
+  library_mode: true,
+  # Suppress noisy gRPC logs by default
+  grpc_log_level: :error,
+  # Only emit Python stdout on error/timeout by default
+  log_python_output: false,
   # Track current Mix environment for runtime diagnostics without depending on Mix at runtime
   environment: config_env(),
   # Pooling is opt-in to avoid auto-start surprises in scripts and examples
   pooling_enabled: false,
   enable_otlp?: false,
+  # Deterministic shutdown cleanup
+  cleanup_on_stop: true,
+  cleanup_on_stop_timeout_ms: 3_000,
+  cleanup_poll_interval_ms: 50,
+  process_group_kill: true,
+  # Worker supervisor cleanup backoff
+  cleanup_retry_interval_ms: 50,
+  cleanup_max_retries: 20,
 
   # Pool configuration
   pool_config: %{

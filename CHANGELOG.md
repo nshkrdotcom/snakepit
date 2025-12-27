@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2025-12-26
+
+### Added
+- Deterministic shutdown cleanup via `Snakepit.RuntimeCleanup` and manual cleanup via `Snakepit.cleanup/0`, with cleanup telemetry events.
+- Process group lifecycle support with `process_group_kill`, pgid tracking in `ProcessRegistry`, and new `ProcessKiller` helpers for group kill/pgid lookup.
+- Python gRPC servers can create their own process group when `SNAKEPIT_PROCESS_GROUP` is set.
+- Python package management supports isolated virtualenvs via `:python_packages` `env_dir`, auto-creating venvs and honoring command timeouts.
+- Documentation suites for FFI ergonomics, Python process cleanup, and runtime hygiene (docs/20251226/*).
+- New tests for runtime cleanup, logger defaults, process group kill, process registry cleanup deferrals, and uv venv integration.
+
+### Changed
+- Quiet-by-default library config: `library_mode: true`, `log_level: :warning`, `grpc_log_level: :error`, `log_python_output: false`, plus new cleanup defaults (`cleanup_on_stop`, `cleanup_on_stop_timeout_ms`, `cleanup_poll_interval_ms`, `cleanup_retry_interval_ms`, `cleanup_max_retries`).
+- Application supervision always starts `Snakepit.Pool.ProcessRegistry` and `Snakepit.Pool.ApplicationCleanup` even without pooling; `Application.stop/1` now runs a cleanup pass when enabled.
+- gRPC worker startup/shutdown now tracks pgid/process_group, can kill process groups, buffers startup output, suppresses Python stdout unless enabled, and passes `SNAKEPIT_PROCESS_GROUP` while extending `PYTHONPATH` with SnakeBridge priv Python.
+- `Snakepit.EnvDoctor` now locates `grpc_server.py` from the project or installed app root and expands `PYTHONPATH` to include Snakepit/SnakeBridge priv Python when running checks.
+- Python runtime selection now prefers explicit overrides, then `:python_packages` venv Python, then managed/system fallback; package operations resolve Python from the configured venv.
+- Cleanup retry timing for worker supervisor is now read from runtime config with `_ms` suffix.
+- Version references updated to 0.7.6 in `mix.exs` and README dependency docs. Updated `supertester` to `v0.4.0`.
+
+### Fixed
+- Taint registry ETS initialization now tolerates a pre-existing table.
+- Process registry cleanup no longer drops entries while external OS processes remain alive, and DETS is synced on cleanup/unregister.
+- Startup failure diagnostics now include buffered Python output to aid gRPC server troubleshooting.
+
 ## [0.7.5] - 2025-12-25
 
 ### Added

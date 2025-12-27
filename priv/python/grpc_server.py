@@ -42,6 +42,22 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
+def maybe_create_process_group():
+    enabled = os.environ.get("SNAKEPIT_PROCESS_GROUP", "").lower() in ("1", "true", "yes", "on")
+    if not enabled:
+        return False
+
+    if os.name != "posix" or not hasattr(os, "setsid"):
+        return False
+
+    try:
+        os.setsid()
+        logger.debug("Snakepit process group created")
+        return True
+    except Exception as exc:
+        logger.warning("Failed to create process group: %s", exc)
+        return False
+
 telemetry.setup_tracing()
 _log_filter = telemetry.correlation_filter()
 logger = logging.getLogger(__name__)
@@ -1069,6 +1085,8 @@ def main():
 
     if not args.elixir_address:
         parser.error("--elixir-address is required (e.g., localhost:50051)")
+
+    maybe_create_process_group()
 
     heartbeat_overrides: Dict[str, Any] = {}
 

@@ -47,9 +47,16 @@ defmodule Snakepit.Pool.ProcessRegistry do
   before the worker is considered ready for work.
   """
   def activate_worker(worker_id, elixir_pid, process_pid, fingerprint) do
+    activate_worker(worker_id, elixir_pid, process_pid, fingerprint, [])
+  end
+
+  def activate_worker(worker_id, elixir_pid, process_pid, fingerprint, opts) when is_list(opts) do
+    pgid = Keyword.get(opts, :pgid, process_pid)
+    process_group? = Keyword.get(opts, :process_group?, false)
+
     GenServer.call(
       __MODULE__,
-      {:activate_worker, worker_id, elixir_pid, process_pid, fingerprint},
+      {:activate_worker, worker_id, elixir_pid, process_pid, fingerprint, pgid, process_group?},
       5000
     )
   end
@@ -102,6 +109,13 @@ defmodule Snakepit.Pool.ProcessRegistry do
   """
   def list_all_workers do
     :ets.tab2list(@table_name)
+  end
+
+  @doc """
+  Gets all registered worker entries for the current BEAM run.
+  """
+  def current_run_entries do
+    GenServer.call(__MODULE__, :current_run_entries)
   end
 
   @doc """
@@ -283,7 +297,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
       registered_at: System.system_time(:second),
       beam_run_id: state.beam_run_id,
       beam_os_pid: state.beam_os_pid,
-      pgid: process_pid
+      pgid: process_pid,
+      process_group?: false
     }
 
     # Atomic write to both ETS and DETS
@@ -303,14 +318,27 @@ defmodule Snakepit.Pool.ProcessRegistry do
   @impl true
   def handle_cast({:unregister, worker_id}, state) do
     case :ets.lookup(state.table, worker_id) do
-      [{^worker_id, %{process_pid: process_pid}}] ->
-        :ets.delete(state.table, worker_id)
-        :dets.delete(state.dets_table, worker_id)
-        SLog.info("🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}")
+      [{^worker_id, %{process_pid: process_pid} = info}] ->
+        if process_alive?(process_pid) do
+          updated = mark_terminating(info)
+          :ets.insert(state.table, {worker_id, updated})
+          :dets.insert(state.dets_table, {worker_id, updated})
+          :dets.sync(state.dets_table)
+
+          SLog.debug(
+            "Deferring unregister for #{worker_id}; external process #{process_pid} still alive"
+          )
+        else
+          :ets.delete(state.table, worker_id)
+          :dets.delete(state.dets_table, worker_id)
+          :dets.sync(state.dets_table)
+          SLog.info("🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}")
+        end
 
       [] ->
         # Also check DETS in case ETS was cleared
         :dets.delete(state.dets_table, worker_id)
+        :dets.sync(state.dets_table)
         # Defensive check: Only log at debug level for unknown workers
         # This is expected during certain race conditions and shouldn't be a warning
         SLog.debug(
@@ -323,7 +351,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @impl true
   def handle_call(
-        {:activate_worker, worker_id, elixir_pid, process_pid, fingerprint},
+        {:activate_worker, worker_id, elixir_pid, process_pid, fingerprint, pgid, process_group?},
         _from,
         state
       ) do
@@ -335,7 +363,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
       registered_at: System.system_time(:second),
       beam_run_id: state.beam_run_id,
       beam_os_pid: state.beam_os_pid,
-      pgid: process_pid
+      pgid: pgid,
+      process_group?: process_group?
     }
 
     # Update both ETS and DETS atomically
@@ -415,13 +444,22 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @impl true
+  def handle_call(:current_run_entries, _from, state) do
+    entries =
+      :ets.tab2list(state.table)
+      |> Enum.filter(fn {_id, info} -> Map.get(info, :beam_run_id) == state.beam_run_id end)
+
+    {:reply, entries, state}
+  end
+
+  @impl true
   def handle_call(:get_beam_run_id, _from, state) do
     {:reply, state.beam_run_id, state}
   end
 
   @impl true
   def handle_call(:cleanup_dead_workers, _from, state) do
-    dead_count = do_cleanup_dead_workers(state.table)
+    dead_count = do_cleanup_dead_workers(state)
     {:reply, dead_count, state}
   end
 
@@ -466,7 +504,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @impl true
   def handle_info(:cleanup_dead_workers, state) do
-    dead_count = do_cleanup_dead_workers(state.table)
+    dead_count = do_cleanup_dead_workers(state)
 
     if dead_count > 0 do
       SLog.info("Cleaned up #{dead_count} dead worker entries")
@@ -878,18 +916,42 @@ defmodule Snakepit.Pool.ProcessRegistry do
   defp process_alive?(pid), do: Snakepit.ProcessKiller.process_alive?(pid)
 
   # Helper function for cleanup that operates on the table
-  defp do_cleanup_dead_workers(table) do
+  defp do_cleanup_dead_workers(state) do
     dead_workers =
-      :ets.tab2list(table)
+      :ets.tab2list(state.table)
       |> Enum.filter(fn {_id, %{elixir_pid: pid}} -> not Process.alive?(pid) end)
 
-    Enum.each(dead_workers, fn {worker_id, %{process_pid: process_pid}} ->
-      :ets.delete(table, worker_id)
-      # Also delete from DETS - need to pass state or dets_table
-      # This will be handled by the unregister_worker call from the worker's terminate
-      SLog.info("Cleaned up dead worker #{worker_id} with external process PID #{process_pid}")
-    end)
+    {count, dirty} =
+      Enum.reduce(dead_workers, {0, false}, fn {worker_id, %{process_pid: process_pid} = info},
+                                               {acc, dirty?} ->
+        if process_alive?(process_pid) do
+          updated = mark_terminating(info)
+          :ets.insert(state.table, {worker_id, updated})
+          :dets.insert(state.dets_table, {worker_id, updated})
+          :dets.sync(state.dets_table)
+          {acc, dirty?}
+        else
+          :ets.delete(state.table, worker_id)
+          :dets.delete(state.dets_table, worker_id)
 
-    length(dead_workers)
+          SLog.info(
+            "Cleaned up dead worker #{worker_id} with external process PID #{process_pid}"
+          )
+
+          {acc + 1, true}
+        end
+      end)
+
+    if dirty do
+      :dets.sync(state.dets_table)
+    end
+
+    count
+  end
+
+  defp mark_terminating(info) do
+    info
+    |> Map.put(:terminating?, true)
+    |> Map.put(:terminated_at, System.system_time(:second))
   end
 end

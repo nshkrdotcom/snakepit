@@ -21,6 +21,8 @@ defmodule Snakepit.Application do
 
   @impl true
   def start(_type, _args) do
+    configure_logging()
+
     # Configure threading limits for Python scientific libraries and gRPC
     # This prevents fork bombs when spawning many workers concurrently
     # Each Python worker tries to spawn threads from multiple sources:
@@ -79,7 +81,12 @@ defmodule Snakepit.Application do
 
     base_children = [
       Snakepit.Bridge.SessionStore,
-      Snakepit.Bridge.ToolRegistry
+      Snakepit.Bridge.ToolRegistry,
+      # Process registry for PID tracking (always available for cleanup)
+      Snakepit.Pool.ProcessRegistry,
+      # Application cleanup for hard process termination guarantees
+      # Runs after pool children terminate to catch any stragglers
+      Snakepit.Pool.ApplicationCleanup
     ]
 
     pool_children =
@@ -119,9 +126,6 @@ defmodule Snakepit.Application do
           # Registry for worker starter supervisors
           Snakepit.Pool.Worker.StarterRegistry,
 
-          # Process registry for PID tracking
-          Snakepit.Pool.ProcessRegistry,
-
           # Thread profile capacity tracking
           Snakepit.WorkerProfile.Thread.CapacityStore,
 
@@ -132,11 +136,7 @@ defmodule Snakepit.Application do
           Snakepit.Worker.LifecycleManager,
 
           # Main pool manager
-          {Snakepit.Pool, [size: pool_size]},
-
-          # Application cleanup for hard process termination guarantees
-          # MUST BE LAST - terminates FIRST to ensure workers have shut down
-          Snakepit.Pool.ApplicationCleanup
+          {Snakepit.Pool, [size: pool_size]}
         ]
       else
         SLog.info("🔧 Starting Snakepit with pooling disabled")
@@ -154,7 +154,30 @@ defmodule Snakepit.Application do
   @impl true
   def stop(_state) do
     SLog.debug("Snakepit.Application.stop/1 called at: #{System.monotonic_time(:millisecond)}")
+    maybe_cleanup_on_stop()
     :ok
+  end
+
+  defp maybe_cleanup_on_stop do
+    if Application.get_env(:snakepit, :cleanup_on_stop, true) do
+      if Process.whereis(Snakepit.Pool.ProcessRegistry) do
+        timeout_ms = Application.get_env(:snakepit, :cleanup_on_stop_timeout_ms, 3_000)
+        poll_interval_ms = Application.get_env(:snakepit, :cleanup_poll_interval_ms, 50)
+
+        try do
+          Snakepit.RuntimeCleanup.cleanup_current_run(
+            timeout_ms: timeout_ms,
+            poll_interval_ms: poll_interval_ms
+          )
+        rescue
+          error ->
+            SLog.warning("Shutdown cleanup failed: #{inspect(error)}")
+        catch
+          :exit, reason ->
+            SLog.warning("Shutdown cleanup exited: #{inspect(reason)}")
+        end
+      end
+    end
   end
 
   defp ensure_python_ready do
@@ -163,5 +186,26 @@ defmodule Snakepit.Application do
   rescue
     error ->
       reraise error, __STACKTRACE__
+  end
+
+  defp configure_logging do
+    grpc_level =
+      Application.get_env(
+        :snakepit,
+        :grpc_log_level,
+        default_grpc_log_level()
+      )
+
+    if grpc_level do
+      Logger.put_application_level(:grpc, grpc_level)
+    end
+  end
+
+  defp default_grpc_log_level do
+    if Application.get_env(:snakepit, :library_mode, true) do
+      :error
+    else
+      nil
+    end
   end
 end

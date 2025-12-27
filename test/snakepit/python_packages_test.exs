@@ -50,7 +50,8 @@ defmodule Snakepit.PythonPackagesTest do
 
     Application.put_env(:snakepit, :python_packages,
       installer: :pip,
-      runner: FakeRunner
+      runner: FakeRunner,
+      env_dir: false
     )
 
     {:ok, python_path: python_path}
@@ -146,7 +147,12 @@ defmodule Snakepit.PythonPackagesTest do
     File.chmod!(uv_path, 0o755)
 
     System.put_env("PATH", tmp_dir)
-    Application.put_env(:snakepit, :python_packages, installer: :auto, runner: FakeRunner)
+
+    Application.put_env(:snakepit, :python_packages,
+      installer: :auto,
+      runner: FakeRunner,
+      env_dir: false
+    )
 
     assert :uv == PythonPackages.installer()
   end
@@ -154,7 +160,11 @@ defmodule Snakepit.PythonPackagesTest do
   test "installer/0 falls back to pip when uv is unavailable" do
     System.put_env("PATH", Path.join(System.tmp_dir!(), "snakepit_no_uv"))
 
-    Application.put_env(:snakepit, :python_packages, installer: :auto, runner: FakeRunner)
+    Application.put_env(:snakepit, :python_packages,
+      installer: :auto,
+      runner: FakeRunner,
+      env_dir: false
+    )
 
     assert :pip == PythonPackages.installer()
   end
@@ -182,7 +192,12 @@ defmodule Snakepit.PythonPackagesTest do
 
   test "check_installed/2 uses uv when configured", %{python_path: python_path} do
     Application.put_env(:snakepit, :python, %{managed: false, strategy: :system, uv_path: "uv"})
-    Application.put_env(:snakepit, :python_packages, installer: :uv, runner: FakeRunner)
+
+    Application.put_env(:snakepit, :python_packages,
+      installer: :uv,
+      runner: FakeRunner,
+      env_dir: false
+    )
 
     Process.put(:python_packages_handler, fn
       "uv", ["pip", "show", "numpy", "--python", ^python_path], _opts -> {"Name: numpy\n", 0}

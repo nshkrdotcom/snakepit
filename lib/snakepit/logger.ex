@@ -4,8 +4,8 @@ defmodule Snakepit.Logger do
 
   Users can control Snakepit's log output with:
 
-      config :snakepit, log_level: :warning  # Only show warnings and errors
-      config :snakepit, log_level: :info     # Show info, warnings, and errors (default)
+      config :snakepit, log_level: :warning  # Only show warnings and errors (default)
+      config :snakepit, log_level: :info     # Show info, warnings, and errors
       config :snakepit, log_level: :debug    # Show everything
       config :snakepit, log_level: :none     # Suppress all Snakepit logs
   """
@@ -52,7 +52,11 @@ defmodule Snakepit.Logger do
   Check if logging at the given level is enabled.
   """
   def should_log?(level) do
-    configured_level = Application.get_env(:snakepit, :log_level, :info)
+    configured_level =
+      case Application.fetch_env(:snakepit, :log_level) do
+        {:ok, level} -> level
+        :error -> default_log_level()
+      end
 
     case configured_level do
       :none -> false
@@ -62,6 +66,14 @@ defmodule Snakepit.Logger do
       :debug -> true
       # Default to :info
       _ -> level in [:error, :warning, :info]
+    end
+  end
+
+  defp default_log_level do
+    if Application.get_env(:snakepit, :library_mode, true) do
+      :warning
+    else
+      :info
     end
   end
 end

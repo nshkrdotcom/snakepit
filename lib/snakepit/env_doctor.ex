@@ -173,22 +173,24 @@ defmodule Snakepit.EnvDoctor do
   defp run_check(:grpc_server, state) do
     case python_path_for_check(state) do
       {:ok, _} ->
-        script = Path.join(state.project_root, "priv/python/grpc_server.py")
+        case grpc_server_root(state) do
+          nil ->
+            error(
+              :grpc_server,
+              "priv/python/grpc_server.py missing. Run mix snakepit.setup (or make bootstrap) to regenerate assets."
+            )
 
-        if File.exists?(script) do
-          args = [script, "--health-check"] ++ default_adapter_args()
+          root ->
+            script = Path.join(root, "priv/python/grpc_server.py")
+            args = [script, "--health-check"] ++ default_adapter_args()
 
-          run_python(
-            state,
-            args,
-            :grpc_server,
-            "gRPC server health check failed. Regenerate stubs or reinstall deps."
-          )
-        else
-          error(
-            :grpc_server,
-            "priv/python/grpc_server.py missing. Run mix snakepit.setup (or make bootstrap) to regenerate assets."
-          )
+            run_python(
+              state,
+              args,
+              :grpc_server,
+              "gRPC server health check failed. Regenerate stubs or reinstall deps.",
+              root
+            )
         end
 
       {:error, message} ->
@@ -234,32 +236,68 @@ defmodule Snakepit.EnvDoctor do
     end
   end
 
-  defp run_python(
-         %{python_path: path, runner: runner, project_root: root},
-         args,
-         name,
-         failure_message
-       ) do
+  defp run_python(state, args, name, failure_message, root_override \\ nil) do
+    %{python_path: path, runner: runner, project_root: root} = state
+    root = root_override || root
+
     case runner.cmd(path, args, cd: root, env: python_env(root)) do
       :ok -> ok(name, "#{humanize(name)} check passed")
       {:error, reason} -> error(name, "#{failure_message} (#{format_reason(reason)})")
     end
   end
 
+  defp grpc_server_root(state) do
+    candidates =
+      [
+        state.project_root,
+        snakepit_app_root()
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    Enum.find(candidates, fn root ->
+      File.exists?(Path.join(root, "priv/python/grpc_server.py"))
+    end)
+  end
+
+  defp snakepit_app_root do
+    case :code.priv_dir(:snakepit) do
+      {:error, _} -> nil
+      priv_dir -> priv_dir |> to_string() |> Path.dirname()
+    end
+  end
+
   defp python_env(root) do
-    python_path = Path.join(root, "priv/python")
-    existing = System.get_env("PYTHONPATH")
     path_sep = path_separator()
 
     path =
-      case existing do
-        nil -> python_path
-        "" -> python_path
-        other -> python_path <> path_sep <> other
-      end
+      [
+        Path.join(root, "priv/python"),
+        snakepit_priv_python(),
+        snakebridge_priv_python(),
+        System.get_env("PYTHONPATH")
+      ]
+      |> Enum.reject(&blank?/1)
+      |> Enum.uniq()
+      |> Enum.join(path_sep)
 
     [{"PYTHONPATH", path}]
   end
+
+  defp snakepit_priv_python do
+    case :code.priv_dir(:snakepit) do
+      {:error, _} -> nil
+      priv_dir -> Path.join([to_string(priv_dir), "python"])
+    end
+  end
+
+  defp snakebridge_priv_python do
+    case :code.priv_dir(:snakebridge) do
+      {:error, _} -> nil
+      priv_dir -> Path.join([to_string(priv_dir), "python"])
+    end
+  end
+
+  defp blank?(value), do: value in [nil, ""]
 
   defp path_separator do
     case :os.type() do
@@ -327,14 +365,15 @@ defmodule Snakepit.EnvDoctor do
   end
 
   defp check_adapter_imports(state, python_path, adapters) do
-    script = Path.join(state.project_root, "priv/python/grpc_server.py")
-    env = python_env(state.project_root)
+    root = grpc_server_root(state) || state.project_root
+    script = Path.join(root, "priv/python/grpc_server.py")
+    env = python_env(root)
 
     {ok_adapters, failed_adapters} =
       Enum.reduce(adapters, {[], []}, fn adapter, {oks, fails} ->
         args = [script, "--health-check", "--adapter", adapter]
 
-        case state.runner.cmd(python_path, args, cd: state.project_root, env: env) do
+        case state.runner.cmd(python_path, args, cd: root, env: env) do
           :ok -> {[adapter | oks], fails}
           {:error, reason} -> {oks, [{adapter, reason} | fails]}
         end

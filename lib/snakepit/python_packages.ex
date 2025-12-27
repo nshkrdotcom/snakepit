@@ -81,7 +81,7 @@ defmodule Snakepit.PythonPackages do
     if requirements == [] do
       {:ok, %{}}
     else
-      python = resolve_python!()
+      python = package_python!(opts)
 
       case freeze(installer(), python, opts) do
         {:ok, output} -> {:ok, build_metadata(requirements, output)}
@@ -118,7 +118,7 @@ defmodule Snakepit.PythonPackages do
     if requirements == [] do
       :ok
     else
-      python = resolve_python!()
+      python = package_python!(opts)
 
       case installer() do
         :uv -> install_with_uv(python, requirements, opts)
@@ -138,7 +138,20 @@ defmodule Snakepit.PythonPackages do
 
     @impl true
     def cmd(command, args, opts) do
-      System.cmd(command, args, opts)
+      {timeout, opts} = Keyword.pop(opts, :timeout)
+
+      run = fn -> System.cmd(command, args, opts) end
+
+      if is_integer(timeout) do
+        task = Task.async(run)
+
+        case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+          {:ok, result} -> result
+          nil -> {"Command timed out after #{timeout}ms", 124}
+        end
+      else
+        run.()
+      end
     rescue
       error in ErlangError ->
         {"#{Exception.message(error)}", 127}
@@ -158,7 +171,8 @@ defmodule Snakepit.PythonPackages do
       installer: Map.get(raw, :installer, :auto),
       timeout: Map.get(raw, :timeout, @default_timeout),
       env: @default_env |> Map.merge(runtime_env) |> Map.merge(env_override),
-      runner: Map.get(raw, :runner, Runner.System)
+      runner: Map.get(raw, :runner, Runner.System),
+      env_dir: Map.get(raw, :env_dir)
     }
   end
 
@@ -238,7 +252,7 @@ defmodule Snakepit.PythonPackages do
   defp do_check_installed([], _opts), do: {:ok, :all_installed}
 
   defp do_check_installed(requirements, opts) do
-    python = resolve_python!()
+    python = package_python!(opts)
 
     missing =
       requirements
@@ -284,7 +298,7 @@ defmodule Snakepit.PythonPackages do
     name
   end
 
-  defp resolve_python! do
+  defp base_python! do
     case PythonRuntime.resolve_executable() do
       {:ok, python, _meta} ->
         python
@@ -295,6 +309,19 @@ defmodule Snakepit.PythonPackages do
           packages: [],
           message: "Python runtime unavailable: #{inspect(reason)}",
           suggestion: "Run mix snakepit.setup or set SNAKEPIT_PYTHON."
+    end
+  end
+
+  defp package_python!(opts) do
+    base = base_python!()
+
+    case env_dir(config()) do
+      nil ->
+        base
+
+      env_dir ->
+        ensure_venv!(base, env_dir, opts)
+        venv_python!(env_dir)
     end
   end
 
@@ -437,6 +464,62 @@ defmodule Snakepit.PythonPackages do
       env: Map.to_list(config.env),
       stderr_to_stdout: true,
       timeout: timeout
+    ]
+  end
+
+  defp env_dir(config) do
+    case Map.get(config, :env_dir) do
+      false -> nil
+      nil -> default_env_dir()
+      value -> Path.expand(value, File.cwd!())
+    end
+  end
+
+  defp default_env_dir do
+    runtime_dir = PythonRuntime.config().runtime_dir || "priv/snakepit/python"
+    Path.expand(Path.join(runtime_dir, "venv"), File.cwd!())
+  end
+
+  defp ensure_venv!(base_python, env_dir, opts) do
+    if venv_python_paths(env_dir) |> Enum.any?(&File.exists?/1) do
+      :ok
+    else
+      File.mkdir_p!(env_dir)
+      {output, status} = run_cmd(base_python, ["-m", "venv", env_dir], opts)
+
+      if status == 0 do
+        :ok
+      else
+        raise PackageError,
+          type: :install_failed,
+          packages: [],
+          message: "Failed to create virtual environment in #{env_dir}",
+          output: output,
+          suggestion: "Ensure python includes venv and the directory is writable."
+      end
+    end
+  end
+
+  defp venv_python!(env_dir) do
+    case Enum.find(venv_python_paths(env_dir), &File.exists?/1) do
+      nil ->
+        raise PackageError,
+          type: :install_failed,
+          packages: [],
+          message: "Virtual environment missing Python executable in #{env_dir}",
+          suggestion: "Remove the directory and retry setup."
+
+      python ->
+        python
+    end
+  end
+
+  defp venv_python_paths(env_dir) do
+    [
+      Path.join([env_dir, "bin", "python3"]),
+      Path.join([env_dir, "bin", "python"]),
+      Path.join([env_dir, "Scripts", "python.exe"]),
+      Path.join([env_dir, "Scripts", "python"])
     ]
   end
 

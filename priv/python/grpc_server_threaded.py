@@ -29,6 +29,7 @@ import sys
 import time
 import threading
 import traceback
+import os
 from concurrent import futures
 from typing import Dict, Optional, Sequence, Tuple
 from collections import defaultdict
@@ -57,6 +58,23 @@ logger.addFilter(_log_filter)
 logging.getLogger().addFilter(_log_filter)
 
 logger.info("Loaded grpc_server_threaded.py from %s", __file__)
+
+
+def maybe_create_process_group():
+    enabled = os.environ.get("SNAKEPIT_PROCESS_GROUP", "").lower() in ("1", "true", "yes", "on")
+    if not enabled:
+        return False
+
+    if os.name != "posix" or not hasattr(os, "setsid"):
+        return False
+
+    try:
+        os.setsid()
+        logger.debug("Snakepit process group created")
+        return True
+    except Exception as exc:
+        logger.warning("Failed to create process group: %s", exc)
+        return False
 
 
 def _ensure_event_loop() -> asyncio.AbstractEventLoop:
@@ -768,6 +786,8 @@ def main():
     parser.add_argument('--snakepit-run-id', type=str, default='', help='Snakepit run ID')
 
     args = parser.parse_args()
+
+    maybe_create_process_group()
 
     # Signal handlers
     shutdown_event = None

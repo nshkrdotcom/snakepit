@@ -1,0 +1,95 @@
+
+Expose a stable, public API for embedding libraries to call at exit:
+
+- `Snakepit.cleanup/0` (new public function)
+  - Calls `ProcessRegistry.manual_orphan_cleanup/0`
+  - Optionally `ProcessKiller.kill_by_run_id/1`
+
+This allows SnakeBridge or other consumers to ensure a clean shutdown explicitly
+when they control the app lifecycle.
+
+## Design Details
+
+### Shutdown Flow
+
+```
+Application.stop/1
+  -> ProcessRegistry.manual_orphan_cleanup/0
+  -> ProcessKiller.kill_by_run_id(current_run_id)
+  -> Wait for PIDs to disappear or timeout
+```
+
+Wait implementation:
+
+- Poll `ProcessKiller.process_alive?/1` with a short backoff (ex: 50ms).
+- Exit early when all PIDs are gone.
+- If timeout expires, emit a warning (still safe).
+
+### Process Group Support
+
+To kill child processes reliably:
+
+- Spawn Python via a shell wrapper that calls `setsid` (Linux).
+- Capture parent PID and process group ID if possible.
+- Use `kill -TERM -pgid` and `kill -KILL -pgid` via `ProcessKiller`.
+
+Safety:
+
+- Only kill process groups created by Snakepit.
+- Validate `grpc_server.py` command line includes the current run_id marker.
+
+### Configuration
+
+New keys (defaults shown):
+
+```
+config :snakepit,
+  cleanup_on_stop: true,
+  cleanup_on_stop_timeout_ms: 3000,
+  cleanup_poll_interval_ms: 50,
+  log_python_output: false,
+  library_mode: true
+```
+
+Existing keys used:
+
+- `:cleanup_retry_interval`
+- `:cleanup_max_retries`
+- `:rogue_cleanup` options
+
+### Observability
+
+Emit telemetry:
+
+- `[:snakepit, :cleanup, :start]`
+- `[:snakepit, :cleanup, :success]`
+- `[:snakepit, :cleanup, :timeout]`
+
+Log at warning only if cleanup times out or kills any processes.
+
+## Testing Strategy
+
+1. Integration test: start a worker, run a call, stop app quickly, then assert
+   no orphaned PIDs remain (using a test ProcessKiller stub).
+2. Process group kill test: spawn a Python process that forks a child, ensure
+   group kill clears both.
+3. Manual cleanup test: call `Snakepit.cleanup/0` and verify it removes stale
+   registry entries and kills expected PIDs.
+
+## Risks
+
+- PID reuse: already mitigated by verifying command line includes run_id.
+- Process group kill could be too aggressive if not scoped correctly.
+- Blocking shutdown for too long could slow fast CLI workflows.
+
+## Rollout Plan
+
+1. Add new cleanup API and config defaults.
+2. Enable synchronous cleanup in stop/1 behind config flag.
+3. Add process group support; keep feature flag until verified in CI.
+
+## Open Questions
+
+- Best default timeout for shutdown cleanup in CLI use?
+- Cross-platform support for process group kill (Windows)?
+- Should Snakepit expose a Mix task for manual cleanup?

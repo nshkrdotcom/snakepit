@@ -2,6 +2,7 @@ defmodule Snakepit.Pool.ProcessRegistryCleanupTest do
   use ExUnit.Case, async: false
 
   alias Snakepit.Pool.ProcessRegistry
+  alias Snakepit.ProcessKiller
 
   setup do
     {:ok, _} = Application.ensure_all_started(:snakepit)
@@ -44,5 +45,85 @@ defmodule Snakepit.Pool.ProcessRegistryCleanupTest do
 
     assert :dets.lookup(dets, stale_worker) == []
     assert :dets.lookup(dets, current_worker) == [{current_worker, current_entry}]
+  end
+
+  test "cleanup_dead_workers keeps entries while external process is alive" do
+    port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["30"]])
+    {:os_pid, process_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn -> safe_close_port(port) end)
+
+    worker_id = "cleanup_dead_alive_#{System.unique_integer([:positive])}"
+
+    elixir_pid =
+      spawn(fn ->
+        receive do
+        after
+          10 -> :ok
+        end
+      end)
+
+    Process.exit(elixir_pid, :kill)
+
+    assert :ok = ProcessRegistry.activate_worker(worker_id, elixir_pid, process_pid, "test")
+
+    ProcessRegistry.cleanup_dead_workers()
+
+    TestHelpers.assert_eventually(fn ->
+      case ProcessRegistry.get_worker_info(worker_id) do
+        {:ok, info} ->
+          info.process_pid == process_pid and Map.get(info, :terminating?) == true
+
+        _ ->
+          false
+      end
+    end)
+
+    assert :ok = ProcessKiller.kill_with_escalation(process_pid, 1_000)
+    TestHelpers.assert_eventually(fn -> not ProcessKiller.process_alive?(process_pid) end)
+    safe_close_port(port)
+
+    ProcessRegistry.cleanup_dead_workers()
+
+    TestHelpers.assert_eventually(fn ->
+      match?({:error, :not_found}, ProcessRegistry.get_worker_info(worker_id))
+    end)
+  end
+
+  test "unregister_worker defers removal while external process is alive" do
+    port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["30"]])
+    {:os_pid, process_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn -> safe_close_port(port) end)
+
+    worker_id = "unregister_defers_#{System.unique_integer([:positive])}"
+
+    assert :ok = ProcessRegistry.activate_worker(worker_id, self(), process_pid, "test")
+
+    ProcessRegistry.unregister_worker(worker_id)
+
+    TestHelpers.assert_eventually(fn ->
+      case ProcessRegistry.get_worker_info(worker_id) do
+        {:ok, info} -> info.process_pid == process_pid and Map.get(info, :terminating?) == true
+        _ -> false
+      end
+    end)
+
+    assert :ok = ProcessKiller.kill_with_escalation(process_pid, 1_000)
+    TestHelpers.assert_eventually(fn -> not ProcessKiller.process_alive?(process_pid) end)
+    safe_close_port(port)
+
+    ProcessRegistry.unregister_worker(worker_id)
+
+    TestHelpers.assert_eventually(fn ->
+      match?({:error, :not_found}, ProcessRegistry.get_worker_info(worker_id))
+    end)
+  end
+
+  defp safe_close_port(port) when is_port(port) do
+    Port.close(port)
+  catch
+    :exit, _ -> :ok
+    :error, _ -> :ok
   end
 end

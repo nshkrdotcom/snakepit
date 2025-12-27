@@ -128,6 +128,20 @@ defmodule Snakepit do
   end
 
   @doc """
+  Manually trigger cleanup of external worker processes for the current run.
+
+  Useful for library embedding or scripts that control the lifecycle directly.
+  """
+  @spec cleanup() :: :ok | {:timeout, list()}
+  def cleanup do
+    if Process.whereis(Snakepit.Pool.ProcessRegistry) do
+      Snakepit.RuntimeCleanup.cleanup_current_run()
+    else
+      :ok
+    end
+  end
+
+  @doc """
   Executes a command in a session with a callback function.
   """
   @spec execute_in_session_stream(session_id(), command(), args(), callback_fn(), keyword()) ::

@@ -40,15 +40,26 @@ defmodule Snakepit.PythonRuntime do
   def resolve_executable do
     config = config()
 
-    case managed_executable(config) do
+    case override_python() do
       {:ok, path} ->
-        {:ok, path, %{source: :managed}}
+        {:ok, path, %{source: :override}}
 
-      {:error, :not_managed} ->
-        resolve_fallback(config)
+      :none ->
+        case package_env_python(config) do
+          {:ok, path} ->
+            {:ok, path, %{source: :package_env}}
 
-      {:error, reason} ->
-        {:error, reason}
+          :none ->
+            resolve_managed_or_fallback(config)
+        end
+    end
+  end
+
+  defp resolve_managed_or_fallback(config) do
+    case managed_executable(config) do
+      {:ok, path} -> {:ok, path, %{source: :managed}}
+      {:error, :not_managed} -> resolve_fallback(config)
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -201,17 +212,60 @@ defmodule Snakepit.PythonRuntime do
   end
 
   defp resolve_fallback(_config) do
-    override =
-      Application.get_env(:snakepit, :python_executable) ||
-        System.get_env("SNAKEPIT_PYTHON")
-
     cond do
-      override -> {:ok, override, %{source: :override}}
       venv = find_venv_python() -> {:ok, venv, %{source: :venv}}
       system = system_python() -> {:ok, system, %{source: :system}}
       true -> {:error, :not_found}
     end
   end
+
+  defp override_python do
+    case Application.get_env(:snakepit, :python_executable) || System.get_env("SNAKEPIT_PYTHON") do
+      nil -> :none
+      path -> {:ok, path}
+    end
+  end
+
+  defp package_env_python(config) do
+    case python_packages_env_dir(config) do
+      nil ->
+        :none
+
+      env_dir ->
+        case Enum.find(venv_python_paths(env_dir), &File.exists?/1) do
+          nil -> :none
+          path -> {:ok, path}
+        end
+    end
+  end
+
+  defp python_packages_env_dir(config) do
+    case Map.get(python_packages_config(), :env_dir) do
+      false -> nil
+      nil -> Path.join(runtime_dir(config), "venv")
+      value -> Path.expand(value, project_root())
+    end
+  end
+
+  defp venv_python_paths(env_dir) do
+    [
+      Path.join([env_dir, "bin", "python3"]),
+      Path.join([env_dir, "bin", "python"]),
+      Path.join([env_dir, "Scripts", "python.exe"]),
+      Path.join([env_dir, "Scripts", "python"])
+    ]
+  end
+
+  defp python_packages_config do
+    :snakepit
+    |> Application.get_env(:python_packages, [])
+    |> normalize_config_input()
+  end
+
+  defp normalize_config_input(nil), do: %{}
+  defp normalize_config_input(%{} = map), do: map
+  defp normalize_config_input(list) when is_list(list), do: Map.new(list)
+  defp normalize_config_input(_), do: %{}
 
   defp find_venv_python do
     candidates = [
@@ -296,9 +350,4 @@ defmodule Snakepit.PythonRuntime do
         "unknown"
     end
   end
-
-  defp normalize_config_input(nil), do: %{}
-  defp normalize_config_input(%{} = map), do: map
-  defp normalize_config_input(list) when is_list(list), do: Map.new(list)
-  defp normalize_config_input(_), do: %{}
 end

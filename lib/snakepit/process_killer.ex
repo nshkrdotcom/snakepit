@@ -15,6 +15,39 @@ defmodule Snakepit.ProcessKiller do
   @ps_command_candidates ["/bin/ps", "/usr/bin/ps"]
 
   @doc """
+  Returns true if the platform supports process group kill semantics.
+  """
+  def process_group_supported? do
+    case :os.type() do
+      {:unix, _} ->
+        true
+
+      _ ->
+        false
+    end
+  end
+
+  @doc """
+  Returns the path to the setsid executable, or {:error, :not_found}.
+  """
+  def setsid_executable do
+    case System.find_executable("setsid") do
+      nil -> {:error, :not_found}
+      path -> {:ok, path}
+    end
+  end
+
+  @doc """
+  Returns the setsid executable path or raises if not available.
+  """
+  def setsid_executable! do
+    case setsid_executable() do
+      {:ok, path} -> path
+      {:error, _} -> raise "setsid executable not found"
+    end
+  end
+
+  @doc """
   Kills a process by PID using proper Erlang signals.
 
   ## Parameters
@@ -38,6 +71,38 @@ defmodule Snakepit.ProcessKiller do
     with {:ok, kill_path} <- require_executable("kill", @kill_command_candidates),
          {:ok, output, code} <-
            run_command(kill_path, ["-#{signal_num}", Integer.to_string(os_pid)]) do
+      trimmed = String.trim(output || "")
+
+      cond do
+        code == 0 ->
+          :ok
+
+        String.contains?(trimmed, "No such process") ->
+          :ok
+
+        true ->
+          {:error, if(trimmed == "", do: {:exit_status, code}, else: trimmed)}
+      end
+    else
+      {:error, reason} ->
+        SLog.warning("Failed to execute kill command: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Kills a process group by PGID using proper Erlang signals.
+
+  ## Parameters
+  - `pgid`: Process group ID (integer)
+  - `signal`: :sigterm | :sigkill | :sighup
+  """
+  def kill_process_group(pgid, signal \\ :sigterm) when is_integer(pgid) do
+    signal_num = signal_to_number(signal)
+
+    with {:ok, kill_path} <- require_executable("kill", @kill_command_candidates),
+         {:ok, output, code} <-
+           run_command(kill_path, ["-#{signal_num}", "--", "-#{pgid}"]) do
       trimmed = String.trim(output || "")
 
       cond do
@@ -108,6 +173,69 @@ defmodule Snakepit.ProcessKiller do
     else
       # macOS/BSD: Use ps command
       get_process_command_ps(os_pid)
+    end
+  end
+
+  @doc """
+  Gets the process group ID (PGID) for a process.
+  """
+  def get_process_group_id(os_pid) when is_integer(os_pid) do
+    case :os.type() do
+      {:unix, :linux} ->
+        get_process_group_id_proc(os_pid)
+
+      {:unix, _} ->
+        get_process_group_id_ps(os_pid)
+
+      _ ->
+        {:error, :not_supported}
+    end
+  end
+
+  defp get_process_group_id_proc(os_pid) do
+    stat_path = "/proc/#{os_pid}/stat"
+
+    case File.read(stat_path) do
+      {:ok, content} -> parse_stat_pgid(content)
+      {:error, _} -> {:error, :not_found}
+    end
+  end
+
+  defp parse_stat_pgid(content) do
+    case String.split(content, ") ", parts: 2) do
+      [_prefix, rest] -> extract_pgid_from_stat(rest)
+      _ -> {:error, :parse_error}
+    end
+  end
+
+  defp extract_pgid_from_stat(rest) do
+    case String.split(rest, " ", trim: true) do
+      [_state, _ppid, pgrp | _] -> parse_pgid(pgrp)
+      _ -> {:error, :parse_error}
+    end
+  end
+
+  defp parse_pgid(pgrp) do
+    case Integer.parse(pgrp) do
+      {pgid, ""} -> {:ok, pgid}
+      _ -> {:error, :parse_error}
+    end
+  end
+
+  defp get_process_group_id_ps(os_pid) do
+    with {:ok, ps_path} <- require_executable("ps", @ps_command_candidates),
+         {:ok, output, 0} <-
+           run_command(ps_path, ["-p", Integer.to_string(os_pid), "-o", "pgid="]) do
+      case Integer.parse(String.trim(output || "")) do
+        {pgid, ""} -> {:ok, pgid}
+        _ -> {:error, :not_found}
+      end
+    else
+      {:error, {:executable_not_found, _cmd}} ->
+        {:error, :not_found}
+
+      _ ->
+        {:error, :not_found}
     end
   end
 
@@ -297,6 +425,25 @@ defmodule Snakepit.ProcessKiller do
           # Escalate to SIGKILL
           SLog.warning("⏰ Process #{os_pid} didn't die, escalating to SIGKILL")
           kill_process(os_pid, :sigkill)
+        end
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Kills a process group with escalation: SIGTERM -> wait -> SIGKILL.
+  """
+  def kill_process_group_with_escalation(pgid, timeout_ms \\ 2000) when is_integer(pgid) do
+    case kill_process_group(pgid, :sigterm) do
+      :ok ->
+        if wait_for_death(pgid, timeout_ms) do
+          SLog.debug("✅ Process group #{pgid} terminated gracefully")
+          :ok
+        else
+          SLog.warning("⏰ Process group #{pgid} didn't die, escalating to SIGKILL")
+          kill_process_group(pgid, :sigkill)
         end
 
       error ->

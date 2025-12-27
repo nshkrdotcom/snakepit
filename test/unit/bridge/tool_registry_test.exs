@@ -1,7 +1,5 @@
 defmodule ToolRegistryTest do
   use ExUnit.Case, async: true
-  import ExUnit.CaptureLog
-
   alias Snakepit.Bridge.ToolRegistry
 
   @table_name :snakepit_tool_registry
@@ -71,31 +69,15 @@ defmodule ToolRegistryTest do
     end
   end
 
-  test "cleanup_session logs the number of removed tools" do
+  test "cleanup_session removes tools for the session" do
     session_id = "sess_cleanup_#{System.unique_integer([:positive])}"
-
-    previous_level = Application.get_env(:snakepit, :log_level)
-    Application.put_env(:snakepit, :log_level, :debug)
-    previous_logger_level = Logger.level()
-    Logger.configure(level: :debug)
-
-    on_exit(fn ->
-      case previous_level do
-        nil -> Application.delete_env(:snakepit, :log_level)
-        value -> Application.put_env(:snakepit, :log_level, value)
-      end
-
-      Logger.configure(level: previous_logger_level)
-    end)
 
     assert :ok = ToolRegistry.register_python_tool(session_id, "one", "worker_a", %{})
     assert :ok = ToolRegistry.register_python_tool(session_id, "two", "worker_b", %{})
 
-    log =
-      capture_log([level: :debug], fn ->
-        assert :ok = ToolRegistry.cleanup_session(session_id)
-      end)
+    assert length(ToolRegistry.list_tools(session_id)) == 2
 
-    assert log =~ "Cleaned up 2 tools for session: #{session_id}"
+    assert :ok = ToolRegistry.cleanup_session(session_id)
+    assert ToolRegistry.list_tools(session_id) == []
   end
 end
