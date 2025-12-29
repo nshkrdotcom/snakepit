@@ -24,6 +24,26 @@ defmodule Snakepit.Logger do
   Enable specific categories for targeted debugging:
 
       config :snakepit, log_categories: [:lifecycle, :grpc]
+
+  ## Process-Level Isolation (for Testing)
+
+  Log levels can be set per-process to avoid race conditions in async tests:
+
+      # Set log level for current process only
+      Snakepit.Logger.set_process_level(:debug)
+
+      # Execute with temporary log level
+      Snakepit.Logger.with_level(:warning, fn ->
+        # ... code that should log at warning level
+      end)
+
+      # Clear process-level override
+      Snakepit.Logger.clear_process_level()
+
+  The resolution order is:
+  1. Process-level override (via `set_process_level/1`)
+  2. Elixir Logger process level (via `Logger.put_process_level/2`)
+  3. Application config (via `config :snakepit, log_level: ...`)
   """
 
   require Logger
@@ -42,6 +62,7 @@ defmodule Snakepit.Logger do
 
   @default_level :error
   @default_category :general
+  @process_level_key :snakepit_log_level_override
   @category_whitelist [
     :lifecycle,
     :pool,
@@ -122,6 +143,82 @@ defmodule Snakepit.Logger do
     should_log_level?(level) and category_allowed?(level, category)
   end
 
+  @doc """
+  Set the log level for the current process only.
+
+  This is useful for test isolation - each test process can have its own
+  log level without affecting other concurrent tests.
+
+  ## Examples
+
+      Snakepit.Logger.set_process_level(:debug)
+      # All logging in this process now uses :debug level
+
+      Snakepit.Logger.set_process_level(:none)
+      # All logging in this process is now suppressed
+
+  """
+  @spec set_process_level(level()) :: :ok
+  def set_process_level(level) when level in [:debug, :info, :warning, :error, :none] do
+    Process.put(@process_level_key, level)
+    :ok
+  end
+
+  @doc """
+  Get the effective log level for the current process.
+
+  Returns the log level in priority order:
+  1. Process-level override (set via `set_process_level/1`)
+  2. Elixir Logger process level
+  3. Application config
+  """
+  @spec get_process_level() :: level()
+  def get_process_level do
+    resolve_effective_level()
+  end
+
+  @doc """
+  Clear the process-level log level override.
+
+  After calling this, the process will use the global Application config.
+  """
+  @spec clear_process_level() :: :ok
+  def clear_process_level do
+    Process.delete(@process_level_key)
+    :ok
+  end
+
+  @doc """
+  Execute a function with a temporary log level for the current process.
+
+  The previous log level is restored after the function completes,
+  even if it raises an exception.
+
+  ## Examples
+
+      Snakepit.Logger.with_level(:debug, fn ->
+        # Debug logs are enabled here
+        Snakepit.Logger.debug(:pool, "detailed info")
+      end)
+      # Previous log level is restored
+
+  """
+  @spec with_level(level(), (-> result)) :: result when result: term()
+  def with_level(level, fun) when is_function(fun, 0) do
+    previous = Process.get(@process_level_key)
+
+    try do
+      set_process_level(level)
+      fun.()
+    after
+      if previous do
+        Process.put(@process_level_key, previous)
+      else
+        Process.delete(@process_level_key)
+      end
+    end
+  end
+
   defp log(level, category, message, metadata) do
     if should_log?(level, category) do
       Logger.log(level, message, with_category(metadata, category))
@@ -129,15 +226,57 @@ defmodule Snakepit.Logger do
   end
 
   defp should_log_level?(level) do
-    configured_level = Application.get_env(:snakepit, :log_level, @default_level)
+    effective_level = resolve_effective_level()
 
-    case configured_level do
+    case effective_level do
       :none -> false
       :error -> level == :error
       :warning -> level in [:error, :warning]
       :info -> level in [:error, :warning, :info]
       :debug -> true
       _ -> level == :error
+    end
+  end
+
+  # Resolve the effective log level using priority order:
+  # 1. Process-level override (highest priority)
+  # 2. Elixir Logger process level
+  # 3. Application config (lowest priority)
+  defp resolve_effective_level do
+    case Process.get(@process_level_key) do
+      nil ->
+        case Logger.get_process_level(self()) do
+          nil ->
+            Application.get_env(:snakepit, :log_level, @default_level)
+
+          # Map Elixir Logger levels to our levels
+          logger_level when logger_level in [:emergency, :alert, :critical, :error] ->
+            :error
+
+          :warning ->
+            :warning
+
+          :notice ->
+            :warning
+
+          :info ->
+            :info
+
+          :debug ->
+            :debug
+
+          :all ->
+            :debug
+
+          :none ->
+            :none
+
+          _ ->
+            Application.get_env(:snakepit, :log_level, @default_level)
+        end
+
+      level ->
+        level
     end
   end
 

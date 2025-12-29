@@ -3,6 +3,7 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
 
   @moduletag :capture_log
 
+  alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Pool.Worker.StarterRegistry
   alias Snakepit.Pool.WorkerSupervisor
@@ -68,12 +69,8 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
 
       assert current_port not in [nil, 0]
 
-      original_level = Application.get_env(:snakepit, :log_level, :info)
-      Application.put_env(:snakepit, :log_level, :debug)
-
-      on_exit(fn ->
-        Application.put_env(:snakepit, :log_level, original_level)
-      end)
+      # Use process-level log level for isolation
+      SLog.set_process_level(:debug)
 
       ref = Process.monitor(worker_pid)
 
@@ -124,12 +121,8 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
       assert requested_port not in [nil, 0]
       assert current_port == requested_port
 
-      original_level = Application.get_env(:snakepit, :log_level, :info)
-      Application.put_env(:snakepit, :log_level, :debug)
-
-      on_exit(fn ->
-        Application.put_env(:snakepit, :log_level, original_level)
-      end)
+      # Use process-level log level for isolation
+      SLog.set_process_level(:debug)
 
       ref = Process.monitor(worker_pid)
 

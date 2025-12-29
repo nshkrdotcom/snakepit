@@ -1,13 +1,16 @@
 defmodule Snakepit.ZeroCopyTest do
   use ExUnit.Case, async: true
 
-  import ExUnit.CaptureLog
+  import Snakepit.Logger.TestHelper
 
   alias Snakepit.ZeroCopy
   alias Snakepit.ZeroCopyRef
 
   setup do
     original = Application.get_env(:snakepit, :zero_copy)
+
+    # Set up process-level log isolation
+    setup_log_isolation()
 
     on_exit(fn ->
       Application.put_env(:snakepit, :zero_copy, original)
@@ -28,19 +31,10 @@ defmodule Snakepit.ZeroCopyTest do
 
   test "falls back with warning when zero-copy is disabled" do
     Application.put_env(:snakepit, :zero_copy, %{enabled: false, allow_fallback: true})
-    original_log_level = Application.get_env(:snakepit, :log_level)
-    Application.put_env(:snakepit, :log_level, :warning)
 
-    on_exit(fn ->
-      if is_nil(original_log_level) do
-        Application.delete_env(:snakepit, :log_level)
-      else
-        Application.put_env(:snakepit, :log_level, original_log_level)
-      end
-    end)
-
+    # Use process-level log level for isolation
     log =
-      capture_log(fn ->
+      capture_at_level(:warning, fn ->
         assert {:ok, %ZeroCopyRef{copy: true}} = ZeroCopy.to_dlpack(%{value: 123})
       end)
 

@@ -6,6 +6,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
   use ExUnit.Case, async: false
   @moduletag :slow
   import Snakepit.TestHelpers
+  import Snakepit.Logger.TestHelper
 
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.Worker.LifecycleConfig
@@ -357,17 +358,6 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
     test "logs when memory probe fails and skips recycling" do
       manager = Process.whereis(LifecycleManager)
       worker_id = "mem_probe_fail_#{System.unique_integer([:positive])}"
-      original_log_level = Application.get_env(:snakepit, :log_level)
-
-      Application.put_env(:snakepit, :log_level, :warning)
-
-      on_exit(fn ->
-        if is_nil(original_log_level) do
-          Application.delete_env(:snakepit, :log_level)
-        else
-          Application.put_env(:snakepit, :log_level, original_log_level)
-        end
-      end)
 
       {:ok, worker_pid} =
         TestProfile.start_worker(%{
@@ -389,8 +379,9 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
       LifecycleManager.track_worker(:test_pool, worker_id, worker_pid, config)
       TestLifecycleWorker.fail_memory_probe(worker_pid)
 
+      # Use process-level log level for isolation
       log =
-        ExUnit.CaptureLog.capture_log(fn ->
+        capture_at_level(:warning, fn ->
           send(manager, :lifecycle_check)
 
           receive do

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2025-12-29
+
+### Added
+- **Process-Level Log Isolation** - New `Snakepit.Logger` functions for per-process log level control
+  - `set_process_level/1` - Set log level for current process only
+  - `get_process_level/0` - Get effective log level for current process
+  - `clear_process_level/0` - Clear process-level override
+  - `with_level/2` - Execute function with temporary log level
+- **Test Helper Module** - `Snakepit.Logger.TestHelper` for test isolation
+  - `setup_log_isolation/0` - Set up per-test log level isolation
+  - `capture_at_level/2` - Capture logs at specific level without affecting other tests
+  - `capture_at_level_with_result/2` - Capture logs and return function result
+  - `suppress_logs/1` - Suppress all logs for duration of function
+
+### Fixed
+- **Flaky Test Race Condition** - Tests that modify log levels no longer interfere with each other when running concurrently
+  - Root cause: Multiple async tests modifying global `Application.get_env(:snakepit, :log_level)` caused race conditions
+  - Solution: Logger now checks process-local override first, then Elixir Logger process level, then global config
+
+### Changed
+- Log level resolution now uses priority order:
+  1. Process-level override (via `set_process_level/1`) - highest priority
+  2. Elixir Logger process level (via `Logger.put_process_level/2`)
+  3. Application config (via `config :snakepit, log_level: ...`) - lowest priority
+
 ## [0.8.1] - 2025-12-27
 
 ### Changed

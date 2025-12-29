@@ -2,6 +2,7 @@ defmodule Snakepit.Pool.RegistryLookupTest do
   use ExUnit.Case, async: true
 
   import Snakepit.TestHelpers, only: [assert_eventually: 2]
+  import Snakepit.Logger.TestHelper
 
   alias Snakepit.Pool
   alias Snakepit.Pool.Registry, as: PoolRegistry
@@ -11,6 +12,9 @@ defmodule Snakepit.Pool.RegistryLookupTest do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
     end
+
+    # Set up process-level log isolation
+    setup_log_isolation()
 
     :ok
   end
@@ -42,19 +46,10 @@ defmodule Snakepit.Pool.RegistryLookupTest do
 
   test "falls back to default and logs when metadata missing" do
     worker_id = "unparseable-worker-id"
-    original_log_level = Application.get_env(:snakepit, :log_level)
-    Application.put_env(:snakepit, :log_level, :warning)
 
-    on_exit(fn ->
-      if is_nil(original_log_level) do
-        Application.delete_env(:snakepit, :log_level)
-      else
-        Application.put_env(:snakepit, :log_level, original_log_level)
-      end
-    end)
-
+    # Use process-level log level for isolation
     log =
-      ExUnit.CaptureLog.capture_log(fn ->
+      capture_at_level(:warning, fn ->
         assert :default == Pool.extract_pool_name_from_worker_id(worker_id)
       end)
 
