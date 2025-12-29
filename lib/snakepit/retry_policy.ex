@@ -28,8 +28,7 @@ defmodule Snakepit.RetryPolicy do
           max_backoff_ms: non_neg_integer(),
           jitter: boolean(),
           jitter_factor: float(),
-          retriable_errors: [atom()] | :all,
-          circuit_breaker: GenServer.server() | nil
+          retriable_errors: [atom()] | :all
         }
 
   defstruct max_attempts: 3,
@@ -39,8 +38,7 @@ defmodule Snakepit.RetryPolicy do
             max_backoff_ms: 30_000,
             jitter: false,
             jitter_factor: 0.25,
-            retriable_errors: [:timeout, :unavailable, :connection_refused, :worker_crash],
-            circuit_breaker: nil
+            retriable_errors: [:timeout, :unavailable, :connection_refused, :worker_crash]
 
   @doc """
   Creates a new retry policy.
@@ -102,31 +100,6 @@ defmodule Snakepit.RetryPolicy do
     else
       delay
     end
-  end
-
-  @doc """
-  Calculates exponential backoff for an attempt.
-  """
-  @spec exponential_backoff(t(), pos_integer()) :: non_neg_integer()
-  def exponential_backoff(%__MODULE__{} = policy, attempt) do
-    delay =
-      (policy.base_backoff_ms * :math.pow(policy.backoff_multiplier, attempt - 1))
-      |> trunc()
-      |> min(policy.max_backoff_ms)
-
-    if policy.jitter do
-      apply_jitter(delay, policy.jitter_factor)
-    else
-      delay
-    end
-  end
-
-  @doc """
-  Associates a circuit breaker with this policy.
-  """
-  @spec with_circuit_breaker(t(), GenServer.server()) :: t()
-  def with_circuit_breaker(%__MODULE__{} = policy, circuit_breaker) do
-    %{policy | circuit_breaker: circuit_breaker}
   end
 
   # Private functions

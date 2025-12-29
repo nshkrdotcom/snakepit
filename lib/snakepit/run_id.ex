@@ -18,10 +18,6 @@ defmodule Snakepit.RunID do
       iex> run_id = Snakepit.RunID.generate()
       iex> String.length(run_id)
       7
-
-      iex> run_id = Snakepit.RunID.generate()
-      iex> Snakepit.RunID.valid?(run_id)
-      true
   """
   def generate do
     # Use last 5 digits of microsecond timestamp (base36)
@@ -40,26 +36,6 @@ defmodule Snakepit.RunID do
 
     time_part <> random_part
   end
-
-  @doc """
-  Validates a run ID format.
-
-  ## Examples
-
-      iex> Snakepit.RunID.valid?("k3x9a2p")
-      true
-
-      iex> Snakepit.RunID.valid?("short")
-      false
-
-      iex> Snakepit.RunID.valid?("HAS-UPX")
-      false
-  """
-  def valid?(run_id) when is_binary(run_id) do
-    String.match?(run_id, ~r/^[0-9a-z]{7}$/)
-  end
-
-  def valid?(_), do: false
 
   @doc """
   Extracts run ID from a process command line.

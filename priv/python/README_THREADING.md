@@ -18,7 +18,7 @@ Guide to writing thread-safe adapters for Python 3.13+ free-threading mode.
 
 ## Overview
 
-Snakepit v0.7.4 includes **multi-threaded Python workers** that can handle multiple concurrent requests within a single Python process. This is designed for Python 3.13+ free-threading mode (PEP 703) which removes the Global Interpreter Lock (GIL).
+Snakepit v0.8.3 includes **multi-threaded Python workers** that can handle multiple concurrent requests within a single Python process. This is designed for Python 3.13+ free-threading mode (PEP 703) which removes the Global Interpreter Lock (GIL).
 
 ### Architecture Comparison
 
@@ -548,7 +548,7 @@ python grpc_server_threaded.py \
 
 - [PEP 703: Making the GIL Optional](https://peps.python.org/pep-0703/)
 - [Python 3.13 Free-Threading Docs](https://docs.python.org/3.13/howto/free-threading-python.html)
-- Snakepit v0.7.4 Technical Plan (see project documentation)
+- Snakepit v0.8.3 Technical Plan (see project documentation)
 - [Thread Safety Compatibility Matrix](../../lib/snakepit/compatibility.ex)
 
 ---

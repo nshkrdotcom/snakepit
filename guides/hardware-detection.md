@@ -1,123 +1,140 @@
-# Hardware Detection
+# Hardware Detection for ML Workloads
 
-Snakepit provides automatic hardware detection for ML workloads,
-supporting CPU, NVIDIA CUDA, Apple MPS, and AMD ROCm accelerators.
+Snakepit provides a unified hardware abstraction layer for machine learning workloads. The hardware detection system automatically identifies available accelerators at startup and provides a consistent API for device selection.
 
-## Quick Start
+## Overview
+
+| Accelerator | Description | Detection Method |
+|-------------|-------------|------------------|
+| **CPU** | Always available fallback | Erlang system info |
+| **CUDA** | NVIDIA GPUs | `nvidia-smi` queries |
+| **MPS** | Apple Metal Performance Shaders | macOS sysctl |
+| **ROCm** | AMD GPUs | `rocm-smi` queries |
+
+Priority order: CUDA > MPS > ROCm > CPU.
+
+## Hardware.detect/0
+
+Returns comprehensive hardware information as a map. Results are cached.
 
 ```elixir
-# Detect all hardware
 info = Snakepit.Hardware.detect()
-# => %{accelerator: :cuda, cpu: %{...}, cuda: %{...}, ...}
+# => %{
+#   accelerator: :cuda,
+#   platform: "linux-x86_64",
+#   cpu: %{cores: 8, threads: 16, model: "Intel Core i7-9700K", features: [:avx, :avx2], memory_total_mb: 32768},
+#   cuda: %{version: "12.1", driver_version: "535.104.05", cudnn_version: "8.9.0",
+#           devices: [%{id: 0, name: "RTX 3080", memory_total_mb: 10240, compute_capability: "8.6"}]},
+#   mps: nil,
+#   rocm: nil
+# }
+```
 
-# Check capabilities
+## Hardware.capabilities/0
+
+Returns boolean capability flags for quick feature checks.
+
+```elixir
 caps = Snakepit.Hardware.capabilities()
-# => %{cuda: true, mps: false, avx2: true, ...}
+# => %{cuda: true, mps: false, rocm: false, avx: true, avx2: true, avx512: false,
+#      cuda_version: "12.1", cudnn_version: "8.9", cudnn: true}
 
-# Select device
-{:ok, device} = Snakepit.Hardware.select(:auto)
-# => {:ok, {:cuda, 0}}
-```
-
-## Hardware Info Structure
-
-The `detect/0` function returns a comprehensive map:
-
-```elixir
-%{
-  accelerator: :cuda,           # Primary accelerator
-  platform: "linux-x86_64",     # Platform string
-  cpu: %{
-    cores: 8,
-    threads: 16,
-    model: "Intel Core i7-...",
-    features: [:avx, :avx2, :sse4_2],
-    memory_total_mb: 32768
-  },
-  cuda: %{
-    version: "12.1",
-    driver_version: "535.104.05",
-    devices: [
-      %{
-        id: 0,
-        name: "NVIDIA GeForce RTX 3080",
-        memory_total_mb: 10240,
-        memory_free_mb: 9500,
-        compute_capability: "8.6"
-      }
-    ],
-    cudnn_version: nil
-  },
-  mps: nil,
-  rocm: nil
-}
-```
-
-## Device Selection
-
-### Automatic Selection
-
-```elixir
-# Select best available device
-{:ok, device} = Snakepit.Hardware.select(:auto)
-```
-
-### Specific Device
-
-```elixir
-# Request CUDA (fails if unavailable)
-case Snakepit.Hardware.select(:cuda) do
-  {:ok, {:cuda, 0}} -> IO.puts("Using CUDA device 0")
-  {:error, :device_not_available} -> IO.puts("CUDA not available")
+if caps.cuda and caps.cudnn do
+  IO.puts("Full CUDA acceleration available")
 end
-
-# Request specific CUDA device
-{:ok, {:cuda, 1}} = Snakepit.Hardware.select({:cuda, 1})
 ```
 
-### Fallback Strategy
+## Hardware.select/1
+
+Selects a device based on preference. Returns `{:ok, device}` or `{:error, :device_not_available}`.
 
 ```elixir
-# Prefer CUDA, fall back to MPS, then CPU
+{:ok, device} = Snakepit.Hardware.select(:auto)   # Best available
+{:ok, {:cuda, 0}} = Snakepit.Hardware.select(:cuda)
+{:ok, :mps} = Snakepit.Hardware.select(:mps)
+{:ok, :cpu} = Snakepit.Hardware.select(:cpu)
+{:ok, {:cuda, 1}} = Snakepit.Hardware.select({:cuda, 1})  # Specific GPU
+```
+
+| Option | Description |
+|--------|-------------|
+| `:auto` | Automatically select best available |
+| `:cpu` | Select CPU (always succeeds) |
+| `:cuda` | Select CUDA device 0 |
+| `:mps` | Select Apple MPS |
+| `:rocm` | Select ROCm device 0 |
+| `{:cuda, id}` | Select specific CUDA device |
+| `{:rocm, id}` | Select specific ROCm device |
+
+## Hardware.select_with_fallback/1
+
+Tries devices in order until one is available. Useful for graceful degradation.
+
+```elixir
 {:ok, device} = Snakepit.Hardware.select_with_fallback([:cuda, :mps, :cpu])
+# On CUDA: {:ok, {:cuda, 0}}
+# On Mac: {:ok, :mps}
+# Otherwise: {:ok, :cpu}
 ```
 
-## Capability Flags
+## Hardware.identity/0
 
-```elixir
-caps = Snakepit.Hardware.capabilities()
-
-if caps.cuda do
-  IO.puts("CUDA version: #{caps.cuda_version}")
-end
-
-if caps.avx2 do
-  IO.puts("AVX2 available for optimized CPU operations")
-end
-```
-
-## Lock File Identity
-
-For reproducible environments, generate a hardware identity map:
+Returns a hardware identity map for lock files and reproducible environments.
 
 ```elixir
 identity = Snakepit.Hardware.identity()
-# => %{
-#   "platform" => "linux-x86_64",
-#   "accelerator" => "cuda",
-#   "cpu_features" => ["avx", "avx2"],
-#   "gpu_count" => 1
-# }
+# => %{"platform" => "linux-x86_64", "accelerator" => "cuda",
+#      "cpu_features" => ["avx", "avx2"], "gpu_count" => 2}
 
-# Save to lock file
 File.write!("hardware.lock", Jason.encode!(identity))
 ```
 
-## Caching
+## Accelerator Details
 
-Hardware detection results are cached for performance:
+### CPU Features
+- **AVX/AVX2**: Vector operations for numerical computing
+- **AVX-512**: Advanced vector extensions for HPC
+- **SSE4.1/SSE4.2**: Streaming SIMD extensions
+- **FMA**: Fused multiply-add operations
+
+### CUDA (NVIDIA)
+Detection provides: driver/runtime versions, cuDNN version, per-device name, memory, and compute capability.
+
+### MPS (Apple Silicon)
+Detection provides: availability, device name, unified memory total.
+
+### ROCm (AMD)
+Detection provides: ROCm version, per-device name and memory.
+
+## Complete ML Workload Example
 
 ```elixir
-# Clear cache to force re-detection
-Snakepit.Hardware.clear_cache()
+defmodule MyApp.MLWorker do
+  alias Snakepit.Hardware
+
+  def select_device do
+    caps = Hardware.capabilities()
+    cond do
+      caps.cuda and caps.cudnn -> Hardware.select(:cuda)
+      caps.mps -> Hardware.select(:mps)
+      true -> {:ok, :cpu}
+    end
+  end
+
+  def run_inference(model, input) do
+    {:ok, device} = select_device()
+    Snakepit.execute("inference", %{model: model, input: input, device: format_device(device)})
+  end
+
+  defp format_device(:cpu), do: "cpu"
+  defp format_device(:mps), do: "mps"
+  defp format_device({:cuda, id}), do: "cuda:#{id}"
+  defp format_device({:rocm, id}), do: "rocm:#{id}"
+end
+```
+
+## Cache Management
+
+```elixir
+Snakepit.Hardware.clear_cache()  # Force re-detection
 ```

@@ -64,14 +64,6 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @doc """
-  Registers a worker with its external process information.
-  @deprecated Use reserve_worker/1 followed by activate_worker/4 instead
-  """
-  def register_worker(worker_id, elixir_pid, process_pid, fingerprint) do
-    GenServer.cast(__MODULE__, {:register, worker_id, elixir_pid, process_pid, fingerprint})
-  end
-
-  @doc """
   Unregisters a worker from tracking.
   Returns :ok regardless of whether the worker was registered.
   """
@@ -293,34 +285,6 @@ defmodule Snakepit.Pool.ProcessRegistry do
        beam_run_id: beam_run_id,
        beam_os_pid: beam_os_pid
      }}
-  end
-
-  @impl true
-  def handle_cast({:register, worker_id, elixir_pid, process_pid, fingerprint}, state) do
-    worker_info = %{
-      elixir_pid: elixir_pid,
-      process_pid: process_pid,
-      fingerprint: fingerprint,
-      registered_at: System.system_time(:second),
-      beam_run_id: state.beam_run_id,
-      beam_os_pid: state.beam_os_pid,
-      pgid: process_pid,
-      process_group?: false
-    }
-
-    # Atomic write to both ETS and DETS
-    :ets.insert(state.table, {worker_id, worker_info})
-    :dets.insert(state.dets_table, {worker_id, worker_info})
-    # CRITICAL: Force immediate sync to prevent orphans on crash
-    :dets.sync(state.dets_table)
-
-    SLog.info(
-      @log_category,
-      "✅ Registered worker #{worker_id} with external process PID #{process_pid} " <>
-        "for BEAM run #{state.beam_run_id} in ProcessRegistry"
-    )
-
-    {:noreply, state}
   end
 
   @impl true

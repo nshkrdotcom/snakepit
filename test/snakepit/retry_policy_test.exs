@@ -95,25 +95,4 @@ defmodule Snakepit.RetryPolicyTest do
       assert RetryPolicy.backoff_for_attempt(policy, 3) == 500
     end
   end
-
-  describe "exponential backoff" do
-    test "calculates exponential backoff" do
-      policy = RetryPolicy.new(base_backoff_ms: 100, backoff_multiplier: 2.0)
-
-      assert RetryPolicy.exponential_backoff(policy, 1) == 100
-      assert RetryPolicy.exponential_backoff(policy, 2) == 200
-      assert RetryPolicy.exponential_backoff(policy, 3) == 400
-    end
-  end
-
-  describe "with_circuit_breaker/2" do
-    test "adds circuit breaker reference" do
-      policy = RetryPolicy.new([])
-
-      cb_ref = make_ref()
-      new_policy = RetryPolicy.with_circuit_breaker(policy, cb_ref)
-
-      assert new_policy.circuit_breaker == cb_ref
-    end
-  end
 end

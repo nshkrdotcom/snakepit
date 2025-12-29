@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2025-12-29
+
+### Fixed
+- **Hardware Detector Cache** - Replaced ETS cache creation with `:persistent_term` to eliminate race conditions and table ownership hazards under concurrent access.
+
+### Removed
+- **Deprecated/Unused APIs** - Removed `RetryPolicy.exponential_backoff/2`, `RetryPolicy.with_circuit_breaker/2`, `HeartbeatMonitor.get_status/1`, `RunID.valid?/1`, and deprecated `ProcessRegistry.register_worker/4`.
+
 ## [0.8.2] - 2025-12-29
 
 ### Added
@@ -1195,6 +1203,9 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
+[0.8.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.3
+[0.8.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.2
+[0.8.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.1
 [0.8.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.0
 [0.7.7]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.7
 [0.7.6]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.6

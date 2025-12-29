@@ -48,6 +48,20 @@ defmodule Snakepit.GRPC.HeartbeatEndToEndTest do
 
     worker_id = "hb_e2e_#{System.unique_integer([:positive])}"
 
+    handler_id = "heartbeat_pong_#{System.unique_integer([:positive])}"
+    test_pid = self()
+
+    :telemetry.attach(
+      handler_id,
+      [:snakepit, :heartbeat, :pong_received],
+      fn _event, _measurements, metadata, _config ->
+        send(test_pid, {:heartbeat_pong_received, metadata.worker_id})
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
     heartbeat_config = %{
       enabled: true,
       ping_interval_ms: 500,
@@ -85,17 +99,11 @@ defmodule Snakepit.GRPC.HeartbeatEndToEndTest do
     assert_receive {:heartbeat_monitor_started, ^worker_id, monitor_pid}, 30_000
     assert is_pid(monitor_pid)
 
-    assert_eventually(
-      fn ->
-        status = Snakepit.HeartbeatMonitor.get_status(monitor_pid)
+    assert_receive {:heartbeat_pong_received, ^worker_id}, 10_000
 
-        status.stats.pings_sent >= 1 and
-          status.stats.pongs_received >= 1 and
-          status.missed_heartbeats == 0
-      end,
-      timeout: 5_000,
-      interval: 200
-    )
+    # If heartbeats are working, the monitor and worker should stay alive
+    assert Process.alive?(monitor_pid), "Monitor should stay alive with successful heartbeats"
+    assert Process.alive?(worker_pid), "Worker should stay alive with successful heartbeats"
 
     :ok = GenServer.stop(worker_pid)
 

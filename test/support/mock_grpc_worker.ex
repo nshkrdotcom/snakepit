@@ -56,7 +56,9 @@ defmodule Snakepit.Test.MockGRPCWorker do
       {:ok, connection} ->
         # Register with ProcessRegistry for consistency with GRPCWorker
         # Use nil for process_pid since mock doesn't spawn external process
-        ProcessRegistry.register_worker(
+        ProcessRegistry.reserve_worker(worker_id)
+
+        ProcessRegistry.activate_worker(
           worker_id,
           self(),
           nil,

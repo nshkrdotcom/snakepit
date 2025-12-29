@@ -1551,32 +1551,6 @@ defmodule Snakepit.GRPCWorker do
 
   # Private functions
 
-  ##
-  # defp wait_for_server_ready(port, expected_port, timeout) do
-  #   receive do
-  #     {^port, {:data, data}} ->
-  #       output = to_string(data)
-
-  #       cond do
-  #         String.contains?(output, "gRPC Bridge started") ->
-  #           SLog.info(@log_category, "gRPC worker started successfully on port #{expected_port}")
-  #           SLog.info(@log_category, "gRPC server output: #{String.trim(output)}")
-  #           {:ok, port}
-
-  #         true ->
-  #           # Keep waiting for the ready message
-  #           wait_for_server_ready(port, expected_port, timeout)
-  #       end
-
-  #     {:DOWN, _ref, :port, ^port, reason} ->
-  #       {:error, "gRPC server crashed during startup: #{inspect(reason)}"}
-  #   after
-  #     timeout ->
-  #       Port.close(port)
-  #       {:error, "gRPC server failed to start within #{timeout}ms"}
-  #   end
-  # end
-
   # Drain remaining output from port buffer to capture error messages
   defp drain_port_buffer(port, timeout) do
     drain_port_buffer(port, timeout, [])

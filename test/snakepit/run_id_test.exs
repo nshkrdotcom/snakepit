@@ -21,26 +21,6 @@ defmodule Snakepit.RunIDTest do
     end
   end
 
-  describe "valid?/1" do
-    test "accepts valid run_ids" do
-      assert Snakepit.RunID.valid?("k3x9a2p")
-      assert Snakepit.RunID.valid?("0000000")
-      assert Snakepit.RunID.valid?("zzzzzzz")
-      assert Snakepit.RunID.valid?("abc123d")
-    end
-
-    test "rejects invalid run_ids" do
-      refute Snakepit.RunID.valid?("toolong8")
-      refute Snakepit.RunID.valid?("short")
-      refute Snakepit.RunID.valid?("UPPER")
-      refute Snakepit.RunID.valid?("has-dash")
-      refute Snakepit.RunID.valid?("has_underscore")
-      refute Snakepit.RunID.valid?("")
-      refute Snakepit.RunID.valid?(nil)
-      refute Snakepit.RunID.valid?(123)
-    end
-  end
-
   describe "extract_from_command/1" do
     test "finds run_id from command line with --snakepit-run-id" do
       cmd = "python3 grpc_server.py --snakepit-run-id k3x9a2p --port 50051"

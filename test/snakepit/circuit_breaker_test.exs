@@ -23,7 +23,7 @@ defmodule Snakepit.CircuitBreakerTest do
     end
   end
 
-  describe "state transitions" do
+  describe "state transitions via call/2" do
     setup do
       {:ok, pid} =
         CircuitBreaker.start_link(
@@ -40,35 +40,35 @@ defmodule Snakepit.CircuitBreakerTest do
       {:ok, cb: pid}
     end
 
-    test "starts in closed state", %{cb: cb} do
-      assert CircuitBreaker.state(cb) == :closed
+    test "allows calls when closed", %{cb: cb} do
+      result = CircuitBreaker.call(cb, fn -> {:ok, :success} end)
+      assert result == {:ok, :success}
     end
 
-    test "stays closed on success", %{cb: cb} do
-      CircuitBreaker.record_success(cb)
-      assert CircuitBreaker.state(cb) == :closed
-    end
-
-    test "opens after threshold failures", %{cb: cb} do
+    test "opens after threshold failures and rejects calls", %{cb: cb} do
       CircuitBreaker.record_failure(cb)
       CircuitBreaker.record_failure(cb)
       CircuitBreaker.record_failure(cb)
 
-      assert CircuitBreaker.state(cb) == :open
+      result = CircuitBreaker.call(cb, fn -> {:ok, :success} end)
+      assert result == {:error, :circuit_open}
     end
 
-    test "transitions to half-open after timeout", %{cb: cb} do
+    test "transitions to half-open after timeout and allows call", %{cb: cb} do
       # Open the circuit
       CircuitBreaker.record_failure(cb)
       CircuitBreaker.record_failure(cb)
       CircuitBreaker.record_failure(cb)
 
-      assert CircuitBreaker.state(cb) == :open
+      # Verify it's open
+      assert CircuitBreaker.call(cb, fn -> {:ok, :test} end) == {:error, :circuit_open}
 
       # Wait for reset timeout
       Process.sleep(150)
 
-      assert CircuitBreaker.state(cb) == :half_open
+      # Should be half-open now - allows one call
+      result = CircuitBreaker.call(cb, fn -> {:ok, :half_open_test} end)
+      assert result == {:ok, :half_open_test}
     end
 
     test "closes on success in half-open state", %{cb: cb} do
@@ -78,10 +78,12 @@ defmodule Snakepit.CircuitBreakerTest do
       CircuitBreaker.record_failure(cb)
       Process.sleep(150)
 
-      assert CircuitBreaker.state(cb) == :half_open
+      # Call succeeds in half-open state, circuit should close
+      CircuitBreaker.call(cb, fn -> {:ok, :success} end)
 
-      CircuitBreaker.record_success(cb)
-      assert CircuitBreaker.state(cb) == :closed
+      # Now should be closed - multiple calls should work
+      assert CircuitBreaker.call(cb, fn -> {:ok, :test1} end) == {:ok, :test1}
+      assert CircuitBreaker.call(cb, fn -> {:ok, :test2} end) == {:ok, :test2}
     end
 
     test "re-opens on failure in half-open state", %{cb: cb} do
@@ -91,18 +93,60 @@ defmodule Snakepit.CircuitBreakerTest do
       CircuitBreaker.record_failure(cb)
       Process.sleep(150)
 
-      assert CircuitBreaker.state(cb) == :half_open
+      # Fail in half-open state
+      CircuitBreaker.call(cb, fn -> {:error, :fail} end)
 
-      CircuitBreaker.record_failure(cb)
-      assert CircuitBreaker.state(cb) == :open
+      # Should be open again
+      result = CircuitBreaker.call(cb, fn -> {:ok, :should_not_run} end)
+      assert result == {:error, :circuit_open}
     end
   end
 
-  describe "allow_call?/1" do
+  describe "state/1 and allow_call?/1" do
     setup do
       {:ok, pid} =
         CircuitBreaker.start_link(
-          name: :"cb_allow_#{System.unique_integer([:positive])}",
+          name: :"cb_state_#{System.unique_integer([:positive])}",
+          failure_threshold: 2,
+          reset_timeout_ms: 100,
+          half_open_max_calls: 1
+        )
+
+      on_exit(fn ->
+        if Process.alive?(pid), do: GenServer.stop(pid)
+      end)
+
+      {:ok, cb: pid}
+    end
+
+    test "starts closed and allows calls", %{cb: cb} do
+      assert CircuitBreaker.state(cb) == :closed
+      assert CircuitBreaker.allow_call?(cb)
+    end
+
+    test "reports open and rejects calls after threshold failures", %{cb: cb} do
+      CircuitBreaker.record_failure(cb)
+      CircuitBreaker.record_failure(cb)
+
+      assert CircuitBreaker.state(cb) == :open
+      refute CircuitBreaker.allow_call?(cb)
+    end
+
+    test "transitions to half-open after timeout", %{cb: cb} do
+      CircuitBreaker.record_failure(cb)
+      CircuitBreaker.record_failure(cb)
+      Process.sleep(150)
+
+      assert CircuitBreaker.state(cb) == :half_open
+      assert CircuitBreaker.allow_call?(cb)
+    end
+  end
+
+  describe "stats/1 and reset/1" do
+    setup do
+      {:ok, pid} =
+        CircuitBreaker.start_link(
+          name: :"cb_stats_#{System.unique_integer([:positive])}",
           failure_threshold: 2,
           reset_timeout_ms: 100
         )
@@ -114,25 +158,24 @@ defmodule Snakepit.CircuitBreakerTest do
       {:ok, cb: pid}
     end
 
-    test "allows calls when closed", %{cb: cb} do
-      assert CircuitBreaker.allow_call?(cb) == true
+    test "reports counters in stats", %{cb: cb} do
+      CircuitBreaker.record_success(cb)
+      CircuitBreaker.record_failure(cb)
+
+      stats = CircuitBreaker.stats(cb)
+      assert stats.success_count >= 1
+      assert stats.failure_count >= 1
+      assert stats.failure_threshold == 2
     end
 
-    test "rejects calls when open", %{cb: cb} do
+    test "resets open circuit to closed state", %{cb: cb} do
       CircuitBreaker.record_failure(cb)
       CircuitBreaker.record_failure(cb)
 
       assert CircuitBreaker.state(cb) == :open
-      assert CircuitBreaker.allow_call?(cb) == false
-    end
 
-    test "allows limited calls in half-open", %{cb: cb} do
-      CircuitBreaker.record_failure(cb)
-      CircuitBreaker.record_failure(cb)
-      Process.sleep(150)
-
-      assert CircuitBreaker.state(cb) == :half_open
-      assert CircuitBreaker.allow_call?(cb) == true
+      CircuitBreaker.reset(cb)
+      assert CircuitBreaker.state(cb) == :closed
     end
   end
 
@@ -165,62 +208,10 @@ defmodule Snakepit.CircuitBreakerTest do
       assert result == {:error, :circuit_open}
     end
 
-    test "records success on ok result", %{cb: cb} do
-      CircuitBreaker.call(cb, fn -> {:ok, :success} end)
-
-      stats = CircuitBreaker.stats(cb)
-      assert stats.success_count > 0
-    end
-
-    test "records failure on error result", %{cb: cb} do
-      CircuitBreaker.call(cb, fn -> {:error, :failed} end)
-
-      stats = CircuitBreaker.stats(cb)
-      assert stats.failure_count > 0
-    end
-
-    test "records failure on exception", %{cb: cb} do
-      catch_error(CircuitBreaker.call(cb, fn -> raise "test error" end))
-
-      stats = CircuitBreaker.stats(cb)
-      assert stats.failure_count > 0
-    end
-  end
-
-  describe "stats/1" do
-    test "returns stats map" do
-      {:ok, cb} =
-        CircuitBreaker.start_link(name: :"cb_stats_#{System.unique_integer([:positive])}")
-
-      stats = CircuitBreaker.stats(cb)
-
-      assert is_map(stats)
-      assert Map.has_key?(stats, :state)
-      assert Map.has_key?(stats, :failure_count)
-      assert Map.has_key?(stats, :success_count)
-
-      GenServer.stop(cb)
-    end
-  end
-
-  describe "reset/1" do
-    test "resets to closed state" do
-      {:ok, cb} =
-        CircuitBreaker.start_link(
-          name: :"cb_reset_#{System.unique_integer([:positive])}",
-          failure_threshold: 2
-        )
-
-      # Open the circuit
-      CircuitBreaker.record_failure(cb)
-      CircuitBreaker.record_failure(cb)
-      assert CircuitBreaker.state(cb) == :open
-
-      # Reset
-      CircuitBreaker.reset(cb)
-      assert CircuitBreaker.state(cb) == :closed
-
-      GenServer.stop(cb)
+    test "propagates exceptions", %{cb: cb} do
+      assert_raise RuntimeError, "test error", fn ->
+        CircuitBreaker.call(cb, fn -> raise "test error" end)
+      end
     end
   end
 end

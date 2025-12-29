@@ -53,14 +53,6 @@ defmodule Snakepit.HeartbeatMonitor do
     GenServer.cast(monitor_pid, {:pong, timestamp})
   end
 
-  @doc """
-  Retrieve current monitor status.
-  """
-  @spec get_status(pid()) :: map()
-  def get_status(monitor_pid) do
-    GenServer.call(monitor_pid, :get_status)
-  end
-
   @impl true
   def init(opts) do
     worker_pid = Keyword.fetch!(opts, :worker_pid)
@@ -90,20 +82,6 @@ defmodule Snakepit.HeartbeatMonitor do
     new_state = schedule_initial_ping(state)
     emit_event(:monitor_started, new_state, %{})
     {:ok, new_state}
-  end
-
-  @impl true
-  def handle_call(:get_status, _from, state) do
-    status = %{
-      worker_id: state.worker_id,
-      worker_pid: state.worker_pid,
-      missed_heartbeats: state.missed_heartbeats,
-      last_ping_timestamp: state.last_ping_timestamp,
-      stats: state.stats,
-      dependent: state.dependent
-    }
-
-    {:reply, status, state}
   end
 
   @impl true

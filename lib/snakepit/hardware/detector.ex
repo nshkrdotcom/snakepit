@@ -8,7 +8,9 @@ defmodule Snakepit.Hardware.Detector do
 
   alias Snakepit.Hardware.{CPUDetector, CUDADetector, MPSDetector, ROCmDetector}
 
-  @table :snakepit_hardware_cache
+  @hardware_info_key {__MODULE__, :hardware_info}
+  @capabilities_key {__MODULE__, :capabilities}
+  @cache_miss :snakepit_cache_miss
 
   @type accelerator :: :cpu | :cuda | :mps | :rocm
 
@@ -41,15 +43,7 @@ defmodule Snakepit.Hardware.Detector do
   """
   @spec detect() :: hardware_info()
   def detect do
-    case get_cached(:hardware_info) do
-      {:ok, info} ->
-        info
-
-      :miss ->
-        info = do_detect()
-        cache(:hardware_info, info)
-        info
-    end
+    fetch_cached(@hardware_info_key, &do_detect/0)
   end
 
   @doc """
@@ -59,16 +53,10 @@ defmodule Snakepit.Hardware.Detector do
   """
   @spec capabilities() :: capabilities()
   def capabilities do
-    case get_cached(:capabilities) do
-      {:ok, caps} ->
-        caps
-
-      :miss ->
-        info = detect()
-        caps = build_capabilities(info)
-        cache(:capabilities, caps)
-        caps
-    end
+    fetch_cached(@capabilities_key, fn ->
+      detect()
+      |> build_capabilities()
+    end)
   end
 
   @doc """
@@ -78,9 +66,8 @@ defmodule Snakepit.Hardware.Detector do
   """
   @spec clear_cache() :: :ok
   def clear_cache do
-    ensure_table()
-    :ets.delete(@table, :hardware_info)
-    :ets.delete(@table, :capabilities)
+    :persistent_term.erase(@hardware_info_key)
+    :persistent_term.erase(@capabilities_key)
     :ok
   end
 
@@ -176,30 +163,16 @@ defmodule Snakepit.Hardware.Detector do
     }
   end
 
-  @spec get_cached(atom()) :: {:ok, term()} | :miss
-  defp get_cached(key) do
-    ensure_table()
+  @spec fetch_cached(term(), (-> term())) :: term()
+  defp fetch_cached(key, fun) do
+    case :persistent_term.get(key, @cache_miss) do
+      @cache_miss ->
+        value = fun.()
+        :persistent_term.put(key, value)
+        value
 
-    case :ets.lookup(@table, key) do
-      [{^key, value}] -> {:ok, value}
-      [] -> :miss
-    end
-  end
-
-  @spec cache(atom(), term()) :: true
-  defp cache(key, value) do
-    ensure_table()
-    :ets.insert(@table, {key, value})
-  end
-
-  @spec ensure_table() :: atom()
-  defp ensure_table do
-    case :ets.whereis(@table) do
-      :undefined ->
-        :ets.new(@table, [:named_table, :set, :public, {:read_concurrency, true}])
-
-      _ ->
-        @table
+      value ->
+        value
     end
   end
 end
