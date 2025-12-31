@@ -113,6 +113,8 @@ EXAMPLE_SCRIPTS=(
   "examples/crash_recovery.exs"
   "examples/ml_errors.exs"
   "examples/ml_telemetry.exs"
+  # v0.8.5 Streaming
+  "examples/execute_streaming_tool_demo.exs"
 )
 
 EXAMPLE_DURATION_MS="${SNAKEPIT_EXAMPLE_DURATION_MS:-3000}"

@@ -235,10 +235,20 @@ defmodule Snakepit.GRPC.BridgeServerTest do
   end
 
   describe "execute_streaming_tool/2" do
-    test "raises UNIMPLEMENTED with remediation guidance", %{session_id: session_id} do
+    test "raises UNIMPLEMENTED for local tools", %{session_id: session_id} do
+      ensure_tool_registry_started()
+      {:ok, _session} = SessionStore.create_session(session_id)
+
+      :ok =
+        ToolRegistry.register_elixir_tool(
+          session_id,
+          "local_tool",
+          fn _params -> {:ok, :ok} end
+        )
+
       request = %ExecuteToolRequest{
         session_id: session_id,
-        tool_name: "unconfigured_stream_tool",
+        tool_name: "local_tool",
         parameters: %{},
         metadata: %{}
       }
@@ -249,8 +259,98 @@ defmodule Snakepit.GRPC.BridgeServerTest do
         end
 
       assert error.status == Status.unimplemented()
-      assert String.contains?(error.message, "Enable streaming support")
-      assert String.contains?(error.message, "execute_tool")
+      assert String.contains?(error.message, "Streaming execution is not enabled")
+    end
+
+    test "raises NOT_FOUND for non-existent session" do
+      request = %ExecuteToolRequest{
+        session_id: "non_existent_session",
+        tool_name: "any_tool",
+        parameters: %{},
+        metadata: %{}
+      }
+
+      error =
+        assert_raise GRPC.RPCError, fn ->
+          BridgeServer.execute_streaming_tool(request, nil)
+        end
+
+      assert error.status == Status.not_found()
+    end
+
+    test "raises UNIMPLEMENTED for remote tool without streaming support", %{
+      session_id: session_id
+    } do
+      ensure_tool_registry_started()
+      ensure_started(Snakepit.Pool.Registry)
+      {:ok, _session} = SessionStore.create_session(session_id)
+
+      worker_id = "no_stream_worker_#{System.unique_integer([:positive])}"
+      {:ok, _worker_pid} = start_supervised({ChannelWorker, {self(), worker_id}})
+
+      :ok =
+        ToolRegistry.register_python_tool(
+          session_id,
+          "no_stream_tool",
+          worker_id,
+          %{"supports_streaming" => "false"}
+        )
+
+      request = %ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: "no_stream_tool",
+        parameters: %{},
+        metadata: %{}
+      }
+
+      error =
+        assert_raise GRPC.RPCError, fn ->
+          BridgeServer.execute_streaming_tool(request, nil)
+        end
+
+      assert error.status == Status.unimplemented()
+    end
+
+    test "forwards streaming request to worker for streaming-enabled tool", %{
+      session_id: session_id
+    } do
+      ensure_tool_registry_started()
+      ensure_started(Snakepit.Pool.Registry)
+      {:ok, _session} = SessionStore.create_session(session_id)
+
+      worker_id = "stream_worker_#{System.unique_integer([:positive])}"
+      {:ok, _worker_pid} = start_supervised({ChannelWorker, {self(), worker_id}})
+
+      :ok =
+        ToolRegistry.register_python_tool(
+          session_id,
+          "stream_tool",
+          worker_id,
+          %{"supports_streaming" => "true"}
+        )
+
+      request = %ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: "stream_tool",
+        parameters: %{},
+        metadata: %{}
+      }
+
+      # Execute streaming - the mock client will be called
+      # The mock returns non-ToolChunk items which causes stream iteration to fail,
+      # but we just want to verify the client was called with correct parameters
+      try do
+        BridgeServer.execute_streaming_tool(request, nil)
+      rescue
+        GRPC.RPCError -> :ok
+      end
+
+      # Verify the mock client was called with correct parameters
+      assert_receive {:grpc_client_execute_streaming_tool, ^session_id, "stream_tool", %{}, opts},
+                     1_000
+
+      # Verify correlation_id was set
+      assert is_binary(opts[:correlation_id])
     end
   end
 
@@ -382,6 +482,33 @@ defmodule Snakepit.GRPC.BridgeServerTest do
 
       {:error, {:already_started, _pid}} ->
         :ok
+    end
+  end
+
+  describe "execute_tool with string timeout_ms" do
+    test "handles string timeout_ms in metadata", %{session_id: session_id} do
+      ensure_tool_registry_started()
+      ensure_started(Snakepit.Pool.Registry)
+      {:ok, _session} = SessionStore.create_session(session_id)
+
+      worker_id = "timeout_test_#{System.unique_integer([:positive])}"
+      {:ok, _worker_pid} = start_supervised({ChannelWorker, {self(), worker_id}})
+
+      :ok = ToolRegistry.register_python_tool(session_id, "timeout_tool", worker_id, %{})
+
+      request = %ExecuteToolRequest{
+        session_id: session_id,
+        tool_name: "timeout_tool",
+        parameters: %{},
+        metadata: %{"timeout_ms" => "5000"}
+      }
+
+      response = BridgeServer.execute_tool(request, nil)
+      assert %ExecuteToolResponse{success: true} = response
+
+      assert_receive {:grpc_client_execute_tool, ^session_id, "timeout_tool", %{}, opts}, 1_000
+      # Verify timeout was parsed correctly from string
+      assert opts[:timeout] == 5000
     end
   end
 end

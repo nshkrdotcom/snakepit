@@ -226,3 +226,37 @@ end
 3. **Timeouts**: Default is 5 minutes; adjust with `:timeout` option
 4. **Memory**: Streaming reduces peak memory by processing incrementally
 5. **gRPC required**: Streaming only works with gRPC adapters
+
+## Server-Side Streaming Implementation (v0.8.5+)
+
+Starting in v0.8.5, Snakepit's BridgeServer fully implements `ExecuteStreamingTool`,
+enabling end-to-end gRPC streaming from external clients through to Python workers.
+
+### Requirements for Streaming Tools
+
+1. Tool must be a **remote** (Python) tool
+2. Tool must have `supports_streaming: true` in metadata
+3. Python adapter must implement the streaming tool as a generator
+
+### Enabling a Tool for Streaming
+
+In your Python adapter:
+
+```python
+@tool(description="Stream results", supports_streaming=True)
+def my_streaming_tool(self, param: str):
+    for i in range(10):
+        yield {"step": i, "result": f"Processing {param}"}
+```
+
+The tool will be registered with streaming support automatically.
+
+### Stream Chunk Metadata
+
+Final chunks include automatic metadata decoration:
+- `execution_time_ms`: Total execution time in milliseconds
+- `tool_type`: The type of tool (always "remote" for streaming)
+- `worker_id`: The ID of the worker that executed the tool
+
+If the worker doesn't send a final chunk, Snakepit injects a synthetic final chunk
+with `synthetic_final: "true"` in metadata.

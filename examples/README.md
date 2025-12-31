@@ -118,6 +118,17 @@ mix run --no-start examples/grpc_streaming_demo.exs
 mix run --no-start examples/stream_progress_demo.exs
 ```
 
+#### `execute_streaming_tool_demo.exs`
+**Pool-based streaming tool execution**
+- Uses `Snakepit.execute_stream/3` (Pool → Worker path)
+- Streaming-enabled Python tools
+- Real-time chunk processing with callbacks
+- See guides/streaming.md for BridgeServer streaming (v0.8.5+)
+
+```bash
+mix run --no-start examples/execute_streaming_tool_demo.exs
+```
+
 ### 🔄 Bidirectional Tools
 
 #### `bidirectional_tools_demo.exs`

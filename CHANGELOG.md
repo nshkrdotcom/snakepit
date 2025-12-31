@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.4] - 2025-12-30
 
+### Added
+- **ExecuteStreamingTool Implementation** - Full gRPC streaming support in BridgeServer
+  - End-to-end streaming from clients through to Python workers
+  - Automatic final chunk injection if worker doesn't send one
+  - Execution time metadata on final chunks
+  - Proper error handling for streaming failures
+
+### Fixed
+- **Timeout Parsing Bug** - Fixed precedence issue in `tool_call_options/1` that caused string timeout values to bypass parsing
+- **Binary Parameter Encoding** - Fixed remote tool execution to properly handle binary parameters without attempting JSON encoding of tuples
+
 ## [0.8.3] - 2025-12-29
 
 ### Fixed
@@ -1205,6 +1216,8 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
+[0.8.5]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.5
+[0.8.4]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.4
 [0.8.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.3
 [0.8.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.2
 [0.8.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.1
