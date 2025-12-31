@@ -31,7 +31,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.8.3"}
+    {:snakepit, "~> 0.8.4"}
   ]
 end
 ```
