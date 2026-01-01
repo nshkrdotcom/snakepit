@@ -198,11 +198,68 @@ defmodule Snakepit.Application do
   end
 
   defp ensure_python_ready do
+    # Ensure snakepit's Python requirements are installed (auto-upgrade if needed)
+    ensure_snakepit_requirements()
+
+    # Then run the doctor checks
     doctor = Application.get_env(:snakepit, :env_doctor_module, Snakepit.EnvDoctor)
     doctor.ensure_python!()
   rescue
     error ->
       reraise error, __STACKTRACE__
+  end
+
+  @requirements_checked_key {__MODULE__, :requirements_checked}
+
+  defp ensure_snakepit_requirements do
+    # Only check once per BEAM session to avoid noise during tests
+    if :persistent_term.get(@requirements_checked_key, false) do
+      :ok
+    else
+      do_ensure_snakepit_requirements()
+    end
+  end
+
+  defp do_ensure_snakepit_requirements do
+    # Only auto-install if explicitly enabled or in dev/test environment
+    runtime_env = Application.get_env(:snakepit, :environment, :prod)
+
+    auto_install? =
+      runtime_env in [:dev, :test] or
+        Application.get_env(:snakepit, :auto_install_python_deps, false)
+
+    if auto_install? do
+      case snakepit_requirements_path() do
+        nil ->
+          :ok
+
+        path ->
+          # Use Mix.shell for dev/test feedback (Mix is always available when auto_install? is true)
+          if Code.ensure_loaded?(Mix) do
+            Mix.shell().info("🐍 Checking Python package requirements...")
+          end
+
+          Snakepit.PythonPackages.ensure!({:file, path}, quiet: true)
+          :persistent_term.put(@requirements_checked_key, true)
+      end
+    end
+  rescue
+    error ->
+      # Log warning but don't fail startup - let EnvDoctor provide detailed errors
+      require Logger
+      Logger.warning("Failed to auto-install Python requirements: #{Exception.message(error)}")
+      :ok
+  end
+
+  defp snakepit_requirements_path do
+    case :code.priv_dir(:snakepit) do
+      {:error, _} ->
+        nil
+
+      priv_dir ->
+        path = Path.join([to_string(priv_dir), "python", "requirements.txt"])
+        if File.exists?(path), do: path, else: nil
+    end
   end
 
   defp configure_logging do

@@ -147,7 +147,8 @@ defmodule Snakepit.Bootstrap do
   defp install_requirements(root, requirements, runner) do
     Mix.shell().info("📦 Installing Python requirements")
     pip = Path.join([root, ".venv", "bin", "pip"])
-    runner.cmd(pip, ["install", "-r", requirements], cd: root)
+    # Use -q to suppress "Requirement already satisfied" noise
+    runner.cmd(pip, ["install", "-q", "-r", requirements], cd: root)
   end
 
   defp run_script(%{project_root: root, runner: runner}, parts, step) do

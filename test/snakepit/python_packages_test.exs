@@ -45,166 +45,253 @@ defmodule Snakepit.PythonPackagesTest do
     File.write!(python_path, "#!/usr/bin/env bash\nexit 0\n")
     File.chmod!(python_path, 0o755)
 
-    Application.put_env(:snakepit, :python_executable, python_path)
-    Application.put_env(:snakepit, :python, %{managed: false, strategy: :system})
-
-    Application.put_env(:snakepit, :python_packages,
-      installer: :pip,
-      runner: FakeRunner,
-      env_dir: false
-    )
-
-    {:ok, python_path: python_path}
-  end
-
-  defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
-  defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
-
-  test "check_installed/2 returns :all_installed when packages are present",
-       %{python_path: python_path} do
-    Process.put(:python_packages_handler, fn
-      ^python_path, ["-m", "pip", "show", "numpy"], _opts -> {"Name: numpy\n", 0}
-      ^python_path, ["-m", "pip", "show", "pandas"], _opts -> {"Name: pandas\n", 0}
-    end)
-
-    assert {:ok, :all_installed} =
-             PythonPackages.check_installed(["numpy~=1.26", "pandas>=2.0"])
-
-    assert_receive {:cmd, ^python_path, ["-m", "pip", "show", "numpy"], _opts}
-    assert_receive {:cmd, ^python_path, ["-m", "pip", "show", "pandas"], _opts}
-  end
-
-  test "check_installed/2 returns missing requirements when packages are absent",
-       %{python_path: python_path} do
-    Process.put(:python_packages_handler, fn
-      ^python_path, ["-m", "pip", "show", "numpy"], _opts -> {"Name: numpy\n", 0}
-      ^python_path, ["-m", "pip", "show", "pandas"], _opts -> {"", 1}
-    end)
-
-    assert {:ok, {:missing, ["pandas>=2.0"]}} =
-             PythonPackages.check_installed(["numpy~=1.26", "pandas>=2.0"])
-
-    assert_receive {:cmd, ^python_path, ["-m", "pip", "show", "numpy"], _opts}
-    assert_receive {:cmd, ^python_path, ["-m", "pip", "show", "pandas"], _opts}
-  end
-
-  test "ensure!/2 installs missing packages via pip", %{python_path: python_path} do
-    Process.put(:python_packages_handler, fn
-      ^python_path, ["-m", "pip", "show", "numpy"], _opts ->
-        {"", 1}
-
-      ^python_path, ["-m", "pip", "install", "--upgrade", "--quiet", "numpy~=1.26"], _opts ->
-        {"ok", 0}
-    end)
-
-    assert :ok =
-             PythonPackages.ensure!({:list, ["numpy~=1.26"]},
-               upgrade: true,
-               quiet: true,
-               timeout: 1_234
-             )
-
-    assert_receive {:cmd, ^python_path, ["-m", "pip", "show", "numpy"], _opts}
-
-    assert_receive {:cmd, ^python_path,
-                    ["-m", "pip", "install", "--upgrade", "--quiet", "numpy~=1.26"], opts}
-
-    assert opts[:timeout] == 1_234
-  end
-
-  test "ensure!/2 raises PackageError on install failure", %{python_path: python_path} do
-    Process.put(:python_packages_handler, fn
-      ^python_path, ["-m", "pip", "show", "badpkg"], _opts -> {"", 1}
-      ^python_path, ["-m", "pip", "install", "badpkg"], _opts -> {"error", 2}
-    end)
-
-    error =
-      assert_raise PackageError, fn ->
-        PythonPackages.ensure!({:list, ["badpkg"]})
-      end
-
-    assert error.type == :install_failed
-  end
-
-  test "lock_metadata/2 returns versions for requested packages", %{python_path: python_path} do
-    Process.put(:python_packages_handler, fn
-      ^python_path, ["-m", "pip", "freeze"], _opts ->
-        {"numpy==1.26.4\nscipy==1.11.4\n", 0}
-    end)
-
-    assert {:ok,
-            %{
-              "numpy" => %{version: "1.26.4", hash: nil},
-              "scipy" => %{version: "1.11.4", hash: nil}
-            }} = PythonPackages.lock_metadata(["numpy~=1.26", "scipy>=1.11"])
-  end
-
-  test "installer/0 prefers uv when available" do
+    # Create fake uv executable
     tmp_dir = Path.join(System.tmp_dir!(), "snakepit_uv_#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp_dir)
     uv_path = Path.join(tmp_dir, "uv")
     File.write!(uv_path, "#!/usr/bin/env bash\nexit 0\n")
     File.chmod!(uv_path, 0o755)
 
-    System.put_env("PATH", tmp_dir)
+    Application.put_env(:snakepit, :python_executable, python_path)
+
+    Application.put_env(:snakepit, :python, %{managed: false, strategy: :system, uv_path: uv_path})
 
     Application.put_env(:snakepit, :python_packages,
-      installer: :auto,
       runner: FakeRunner,
       env_dir: false
     )
 
-    assert :uv == PythonPackages.installer()
+    {:ok, python_path: python_path, uv_path: uv_path}
   end
 
-  test "installer/0 falls back to pip when uv is unavailable" do
-    System.put_env("PATH", Path.join(System.tmp_dir!(), "snakepit_no_uv"))
+  defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
 
-    Application.put_env(:snakepit, :python_packages,
-      installer: :auto,
-      runner: FakeRunner,
-      env_dir: false
-    )
+  describe "check_installed/2" do
+    test "returns :all_installed when packages satisfy version requirements",
+         %{python_path: python_path, uv_path: uv_path} do
+      Process.put(:python_packages_handler, fn
+        ^uv_path,
+        ["pip", "install", "--dry-run", "--python", ^python_path, "numpy~=1.26"],
+        _opts ->
+          # No "Would install" means package is satisfied
+          {"Audited 1 package in 5ms", 0}
 
-    assert :pip == PythonPackages.installer()
+        ^uv_path,
+        ["pip", "install", "--dry-run", "--python", ^python_path, "pandas>=2.0"],
+        _opts ->
+          {"Audited 1 package in 5ms", 0}
+      end)
+
+      assert {:ok, :all_installed} =
+               PythonPackages.check_installed(["numpy~=1.26", "pandas>=2.0"])
+
+      assert_receive {:cmd, ^uv_path,
+                      ["pip", "install", "--dry-run", "--python", ^python_path, "numpy~=1.26"],
+                      _opts}
+
+      assert_receive {:cmd, ^uv_path,
+                      ["pip", "install", "--dry-run", "--python", ^python_path, "pandas>=2.0"],
+                      _opts}
+    end
+
+    test "returns missing requirements when packages need installation or upgrade",
+         %{python_path: python_path, uv_path: uv_path} do
+      Process.put(:python_packages_handler, fn
+        ^uv_path,
+        ["pip", "install", "--dry-run", "--python", ^python_path, "numpy~=1.26"],
+        _opts ->
+          {"Audited 1 package in 5ms", 0}
+
+        ^uv_path,
+        ["pip", "install", "--dry-run", "--python", ^python_path, "pandas>=2.0"],
+        _opts ->
+          # "Would install" means package needs to be installed
+          {"Would install pandas==2.1.0", 0}
+      end)
+
+      assert {:ok, {:missing, ["pandas>=2.0"]}} =
+               PythonPackages.check_installed(["numpy~=1.26", "pandas>=2.0"])
+    end
+
+    test "detects version mismatches that need upgrade",
+         %{python_path: python_path, uv_path: uv_path} do
+      Process.put(:python_packages_handler, fn
+        ^uv_path,
+        ["pip", "install", "--dry-run", "--python", ^python_path, "grpcio>=1.76.0"],
+        _opts ->
+          # "Would upgrade" means installed version doesn't satisfy requirement
+          {"Would upgrade grpcio from 1.67.1 to 1.76.0", 0}
+      end)
+
+      assert {:ok, {:missing, ["grpcio>=1.76.0"]}} =
+               PythonPackages.check_installed(["grpcio>=1.76.0"])
+    end
+
+    test "handles complex version specifiers",
+         %{python_path: python_path, uv_path: uv_path} do
+      Process.put(:python_packages_handler, fn
+        ^uv_path, ["pip", "install", "--dry-run", "--python", ^python_path, requirement], _opts ->
+          case requirement do
+            "numpy>=1.26,<2.0" -> {"Audited 1 package in 5ms", 0}
+            "scipy~=1.11" -> {"Audited 1 package in 5ms", 0}
+            "torch[cuda]>=2.0" -> {"Audited 1 package in 5ms", 0}
+            _ -> {"Would install #{requirement}", 0}
+          end
+      end)
+
+      assert {:ok, :all_installed} =
+               PythonPackages.check_installed([
+                 "numpy>=1.26,<2.0",
+                 "scipy~=1.11",
+                 "torch[cuda]>=2.0"
+               ])
+    end
   end
 
-  test "ensure!/2 parses requirements files and ignores comments", %{python_path: python_path} do
-    requirements_path =
-      Path.join(
-        System.tmp_dir!(),
-        "snakepit_requirements_#{System.unique_integer([:positive])}.txt"
-      )
+  describe "ensure!/2" do
+    test "installs missing packages via uv", %{python_path: python_path, uv_path: uv_path} do
+      Process.put(:python_packages_handler, fn
+        ^uv_path,
+        ["pip", "install", "--dry-run", "--python", ^python_path, "numpy~=1.26"],
+        _opts ->
+          {"Would install numpy==1.26.4", 0}
 
-    File.write!(requirements_path, "# comment\nnumpy~=1.26\n\nscipy>=1.11\n")
+        ^uv_path,
+        ["pip", "install", "--python", ^python_path, "--upgrade", "--quiet", "numpy~=1.26"],
+        _opts ->
+          {"ok", 0}
+      end)
 
-    Process.put(:python_packages_handler, fn
-      ^python_path, ["-m", "pip", "show", "numpy"], _opts -> {"Name: numpy\n", 0}
-      ^python_path, ["-m", "pip", "show", "scipy"], _opts -> {"Name: scipy\n", 0}
-    end)
+      assert :ok =
+               PythonPackages.ensure!({:list, ["numpy~=1.26"]},
+                 upgrade: true,
+                 quiet: true,
+                 timeout: 1_234
+               )
 
-    assert :ok = PythonPackages.ensure!({:file, requirements_path})
+      assert_receive {:cmd, ^uv_path,
+                      ["pip", "install", "--dry-run", "--python", ^python_path, "numpy~=1.26"],
+                      _opts}
 
-    assert_receive {:cmd, ^python_path, ["-m", "pip", "show", "numpy"], _opts}
-    assert_receive {:cmd, ^python_path, ["-m", "pip", "show", "scipy"], _opts}
-    refute_receive {:cmd, ^python_path, ["-m", "pip", "install" | _], _opts}
+      assert_receive {:cmd, ^uv_path,
+                      [
+                        "pip",
+                        "install",
+                        "--python",
+                        ^python_path,
+                        "--upgrade",
+                        "--quiet",
+                        "numpy~=1.26"
+                      ], opts}
+
+      assert opts[:timeout] == 1_234
+    end
+
+    test "skips installation when all packages satisfy requirements",
+         %{python_path: python_path, uv_path: uv_path} do
+      Process.put(:python_packages_handler, fn
+        ^uv_path, ["pip", "install", "--dry-run", "--python", ^python_path, _req], _opts ->
+          {"Audited 1 package in 5ms", 0}
+      end)
+
+      assert :ok = PythonPackages.ensure!({:list, ["numpy~=1.26"]})
+
+      # Should only call dry-run, not actual install
+      assert_receive {:cmd, ^uv_path, ["pip", "install", "--dry-run" | _], _opts}
+      refute_receive {:cmd, ^uv_path, ["pip", "install", "--python" | _], _opts}
+    end
+
+    test "raises PackageError on install failure", %{python_path: python_path, uv_path: uv_path} do
+      Process.put(:python_packages_handler, fn
+        ^uv_path, ["pip", "install", "--dry-run", "--python", ^python_path, "badpkg"], _opts ->
+          {"Would install badpkg", 0}
+
+        ^uv_path, ["pip", "install", "--python", ^python_path, "badpkg"], _opts ->
+          {"error: No solution found", 2}
+      end)
+
+      error =
+        assert_raise PackageError, fn ->
+          PythonPackages.ensure!({:list, ["badpkg"]})
+        end
+
+      assert error.type == :install_failed
+    end
+
+    test "parses requirements files and ignores comments", %{
+      python_path: python_path,
+      uv_path: uv_path
+    } do
+      requirements_path =
+        Path.join(
+          System.tmp_dir!(),
+          "snakepit_requirements_#{System.unique_integer([:positive])}.txt"
+        )
+
+      File.write!(requirements_path, "# comment\nnumpy~=1.26\n\nscipy>=1.11\n")
+
+      Process.put(:python_packages_handler, fn
+        ^uv_path, ["pip", "install", "--dry-run", "--python", ^python_path, _req], _opts ->
+          {"Audited 1 package in 5ms", 0}
+      end)
+
+      assert :ok = PythonPackages.ensure!({:file, requirements_path})
+
+      assert_receive {:cmd, ^uv_path,
+                      ["pip", "install", "--dry-run", "--python", ^python_path, "numpy~=1.26"],
+                      _opts}
+
+      assert_receive {:cmd, ^uv_path,
+                      ["pip", "install", "--dry-run", "--python", ^python_path, "scipy>=1.11"],
+                      _opts}
+
+      # No actual install since packages are satisfied
+      refute_receive {:cmd, ^uv_path, ["pip", "install", "--python" | _], _opts}
+    end
   end
 
-  test "check_installed/2 uses uv when configured", %{python_path: python_path} do
-    Application.put_env(:snakepit, :python, %{managed: false, strategy: :system, uv_path: "uv"})
+  describe "lock_metadata/2" do
+    test "returns versions for requested packages", %{python_path: python_path, uv_path: uv_path} do
+      Process.put(:python_packages_handler, fn
+        ^uv_path, ["pip", "freeze", "--python", ^python_path], _opts ->
+          {"numpy==1.26.4\nscipy==1.11.4\n", 0}
+      end)
 
-    Application.put_env(:snakepit, :python_packages,
-      installer: :uv,
-      runner: FakeRunner,
-      env_dir: false
-    )
+      assert {:ok,
+              %{
+                "numpy" => %{version: "1.26.4", hash: nil},
+                "scipy" => %{version: "1.11.4", hash: nil}
+              }} = PythonPackages.lock_metadata(["numpy~=1.26", "scipy>=1.11"])
+    end
+  end
 
-    Process.put(:python_packages_handler, fn
-      "uv", ["pip", "show", "numpy", "--python", ^python_path], _opts -> {"Name: numpy\n", 0}
-    end)
+  describe "uv requirement" do
+    test "raises PackageError when uv is not available" do
+      Application.put_env(:snakepit, :python, %{managed: false, strategy: :system, uv_path: nil})
+      System.put_env("PATH", Path.join(System.tmp_dir!(), "snakepit_no_uv"))
 
-    assert {:ok, :all_installed} = PythonPackages.check_installed(["numpy~=1.26"])
+      error =
+        assert_raise PackageError, fn ->
+          PythonPackages.check_installed(["numpy"])
+        end
 
-    assert_receive {:cmd, "uv", ["pip", "show", "numpy", "--python", ^python_path], _opts}
+      assert error.type == :uv_not_found
+      assert error.message =~ "uv is required"
+    end
+  end
+
+  describe "editable requirements" do
+    test "treats editable installs as always needing reinstall",
+         %{python_path: python_path, uv_path: uv_path} do
+      # Editable requirements should not even call dry-run, they always need install
+      Process.put(:python_packages_handler, fn
+        ^uv_path, ["pip", "install", "--python", ^python_path, "-e", "./mypackage"], _opts ->
+          {"ok", 0}
+      end)
+
+      assert {:ok, {:missing, ["-e ./mypackage"]}} =
+               PythonPackages.check_installed(["-e ./mypackage"])
+    end
   end
 end

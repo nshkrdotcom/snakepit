@@ -103,11 +103,6 @@ config :snakepit,
     }
   },
 
-  # Worker configuration
-  worker_init_timeout: 20_000,
-  worker_health_check_interval: 30_000,
-  worker_shutdown_grace_period: 2_000,
-
   # gRPC configuration
   # Port for the central Elixir gRPC server (source of truth for state)
   grpc_port: 50051,
@@ -137,8 +132,9 @@ config :snakepit,
     grpc_poll_threads: 1
   }
 
+# Python package management configuration (requires uv)
+# Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh
 config :snakepit, :python_packages,
-  installer: :auto,
   timeout: 300_000,
   env: %{
     "PYTHONNOUSERSITE" => "1",

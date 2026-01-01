@@ -36,7 +36,7 @@ defmodule Snakepit.BootstrapTest do
     assert BootstrapRunner.calls() == [
              {:mix, "deps.get", []},
              {:cmd, python_cmd(), ["-m", "venv", ".venv"], [cd: tmp]},
-             {:cmd, pip_cmd(tmp), ["install", "-r", requirements(tmp)], [cd: tmp]},
+             {:cmd, pip_cmd(tmp), ["install", "-q", "-r", requirements(tmp)], [cd: tmp]},
              {:cmd, script(tmp, "scripts/setup_test_pythons.sh"), [], [cd: tmp]},
              {:cmd, script(tmp, "priv/python/generate_grpc.sh"), [], [cd: tmp]}
            ]
@@ -49,7 +49,7 @@ defmodule Snakepit.BootstrapTest do
 
     assert BootstrapRunner.calls() == [
              {:mix, "deps.get", []},
-             {:cmd, pip_cmd(tmp), ["install", "-r", requirements(tmp)], [cd: tmp]},
+             {:cmd, pip_cmd(tmp), ["install", "-q", "-r", requirements(tmp)], [cd: tmp]},
              {:cmd, script(tmp, "scripts/setup_test_pythons.sh"), [], [cd: tmp]},
              {:cmd, script(tmp, "priv/python/generate_grpc.sh"), [], [cd: tmp]}
            ]

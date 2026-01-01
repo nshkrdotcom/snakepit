@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-01-01
+
+### Breaking Changes
+
+- **uv is now required** - pip support has been removed. Snakepit now requires [uv](https://docs.astral.sh/uv/) for Python package management.
+  - Install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+  - Or via Homebrew: `brew install uv`
+  - The `:installer` config option has been removed (was `:auto`, `:uv`, or `:pip`)
+  - uv provides 10-100x faster package operations and more reliable version resolution
+
+### Fixed
+
+- **Version checking now validates constraints** - `PythonPackages.check_installed/2` now properly verifies that installed package versions satisfy the version constraints in requirements (e.g., `grpcio>=1.76.0`).
+  - Previously, only package existence was checked, not version satisfaction
+  - This caused runtime errors when outdated packages were installed (e.g., grpcio 1.67.1 when >=1.76.0 was required)
+  - Now uses `uv pip install --dry-run` for accurate PEP-440 version checking
+  - Packages that need upgrading are correctly identified as "missing" and reinstalled
+
+- **Bootstrap now uses quiet pip install** - Reduced noise from "Requirement already satisfied" messages during `mix test --include python_integration`
+
+- **Added startup feedback** - Shows "🐍 Checking Python package requirements..." during app startup in dev/test when checking packages (once per BEAM session)
+
+### Changed
+
+- Removed unused configuration keys from `config/config.exs`, `config/test.exs`, and `config/grpc_test.exs` to trim dead config surface (legacy worker timeouts and unused grpc_test flags)
+- Virtual environments are now created using `uv venv` for consistency with package management
+- Simplified `PythonPackages` module by removing all pip-specific code paths
+
 ## [0.8.8] - 2025-12-31
 
 ### Added
@@ -399,7 +427,6 @@ config :snakepit, log_level: :info
 - `Snakepit.PythonPackages.ensure!/2` for provisioning required packages.
 - `Snakepit.PythonPackages.check_installed/2` for verifying package presence.
 - `Snakepit.PythonPackages.lock_metadata/2` for lockfile package metadata.
-- `Snakepit.PythonPackages.installer/0` for reporting the active installer.
 - `Snakepit.PythonPackages.install!/2` for direct requirement installs.
 
 ## [0.7.4] - 2025-12-25

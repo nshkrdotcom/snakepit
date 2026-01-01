@@ -31,7 +31,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.8.8"}
+    {:snakepit, "~> 0.8.9"}
   ]
 end
 ```
@@ -42,6 +42,23 @@ Then run:
 mix deps.get
 mix snakepit.setup    # Install Python dependencies and generate gRPC stubs
 mix snakepit.doctor   # Verify environment is correctly configured
+```
+
+### Using with SnakeBridge (Recommended)
+
+For higher-level Python integration with compile-time type generation, use [SnakeBridge](https://hex.pm/packages/snakebridge) instead of snakepit directly. SnakeBridge handles Python environment setup automatically at compile time.
+
+```elixir
+def deps do
+  [{:snakebridge, "~> 0.7.9"}]
+end
+
+def project do
+  [
+    ...
+    compilers: [:snakebridge] ++ Mix.compilers()
+  ]
+end
 ```
 
 ## Quick Start
@@ -632,7 +649,21 @@ mix run examples/hardware_detection.exs
 - Elixir 1.18+
 - Erlang/OTP 27+
 - Python 3.9+ (3.13+ for thread profile)
+- [uv](https://docs.astral.sh/uv/) - Fast Python package manager (required)
 - gRPC Python packages (`grpcio`, `grpcio-tools`)
+
+### Installing uv
+
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Or via Homebrew
+brew install uv
+```
 
 ## License
 

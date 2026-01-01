@@ -45,7 +45,7 @@ defmodule MixSnakepitSetupTaskTest do
     assert BootstrapRunner.calls() == [
              {:mix, "deps.get", []},
              {:cmd, python_cmd(), ["-m", "venv", ".venv"], [cd: tmp]},
-             {:cmd, Path.join(tmp, ".venv/bin/pip"), ["install", "-r", requirements(tmp)],
+             {:cmd, Path.join(tmp, ".venv/bin/pip"), ["install", "-q", "-r", requirements(tmp)],
               [cd: tmp]},
              {:cmd, Path.join(tmp, "scripts/setup_test_pythons.sh"), [], [cd: tmp]},
              {:cmd, Path.join(tmp, "priv/python/generate_grpc.sh"), [], [cd: tmp]}

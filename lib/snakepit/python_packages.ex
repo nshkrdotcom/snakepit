@@ -2,7 +2,9 @@ defmodule Snakepit.PythonPackages do
   @moduledoc """
   Package installation and inspection for Snakepit-managed Python runtimes.
 
-  Uses uv when available or configured, with pip as the fallback.
+  Requires [uv](https://docs.astral.sh/uv/) for package management. Install with:
+
+      curl -LsSf https://astral.sh/uv/install.sh | sh
 
   ## Examples
 
@@ -36,7 +38,10 @@ defmodule Snakepit.PythonPackages do
   @default_timeout 300_000
 
   @doc """
-  Ensure all packages in the requirements spec are installed.
+  Ensure all packages in the requirements spec are installed and satisfy version constraints.
+
+  Uses `uv pip install --dry-run` to check if packages need to be installed or upgraded,
+  then installs any missing or outdated packages.
 
   Options:
     * `:upgrade` - upgrade matching packages
@@ -54,10 +59,11 @@ defmodule Snakepit.PythonPackages do
   end
 
   @doc """
-  Check which packages are installed.
+  Check which packages are installed and satisfy their version constraints.
 
-  Returns `{:ok, :all_installed}` when every requirement is present, or
-  `{:ok, {:missing, requirements}}` when any are missing.
+  Uses `uv pip install --dry-run` for accurate PEP-440 version checking.
+  Returns `{:ok, :all_installed}` when every requirement is satisfied, or
+  `{:ok, {:missing, requirements}}` when any are missing or have version mismatches.
   """
   @spec check_installed([requirement()], keyword()) ::
           {:ok, :all_installed} | {:ok, {:missing, [requirement()]}}
@@ -83,7 +89,7 @@ defmodule Snakepit.PythonPackages do
     else
       python = package_python!(opts)
 
-      case freeze(installer(), python, opts) do
+      case freeze(python, opts) do
         {:ok, output} -> {:ok, build_metadata(requirements, output)}
         {:error, %PackageError{} = error} -> {:error, error}
       end
@@ -91,22 +97,7 @@ defmodule Snakepit.PythonPackages do
   end
 
   @doc """
-  Return the active installer (`:uv` or `:pip`).
-  """
-  @spec installer() :: :uv | :pip
-  def installer do
-    config = config()
-
-    case config.installer do
-      :auto -> detect_installer()
-      :uv -> :uv
-      :pip -> :pip
-      _ -> detect_installer()
-    end
-  end
-
-  @doc """
-  Install the given package requirements.
+  Install the given package requirements using uv.
 
   Prefer `ensure!/2` unless you already know which requirements are missing.
   """
@@ -120,9 +111,22 @@ defmodule Snakepit.PythonPackages do
     else
       python = package_python!(opts)
 
-      case installer() do
-        :uv -> install_with_uv(python, requirements, opts)
-        :pip -> install_with_pip(python, requirements, opts)
+      args =
+        ["pip", "install", "--python", python] ++
+          build_install_args(opts) ++
+          requirements
+
+      {output, status} = run_cmd(uv_path!(), args, opts)
+
+      if status == 0 do
+        :ok
+      else
+        raise PackageError,
+          type: :install_failed,
+          packages: requirements,
+          message: "uv install failed with exit code #{status}",
+          output: output,
+          suggestion: "Check package names and network connectivity."
       end
     end
   end
@@ -168,7 +172,6 @@ defmodule Snakepit.PythonPackages do
     env_override = normalize_env_input(Map.get(raw, :env, %{}))
 
     %{
-      installer: Map.get(raw, :installer, :auto),
       timeout: Map.get(raw, :timeout, @default_timeout),
       env: @default_env |> Map.merge(runtime_env) |> Map.merge(env_override),
       runner: Map.get(raw, :runner, Runner.System),
@@ -257,9 +260,7 @@ defmodule Snakepit.PythonPackages do
     missing =
       requirements
       |> Enum.reduce([], fn requirement, acc ->
-        name = requirement_name!(requirement)
-
-        if package_installed?(installer(), python, name, opts) do
+        if requirement_satisfied?(python, requirement, opts) do
           acc
         else
           [requirement | acc]
@@ -273,6 +274,8 @@ defmodule Snakepit.PythonPackages do
     end
   end
 
+  # Extracts the package name from a requirement string.
+  # Used for building metadata maps.
   defp requirement_name!(requirement) do
     name =
       requirement
@@ -325,63 +328,36 @@ defmodule Snakepit.PythonPackages do
     end
   end
 
-  defp package_installed?(:uv, python, package, opts) do
-    {_, status} =
-      run_cmd(
-        uv_path!(),
-        ["pip", "show", package, "--python", python],
-        opts
-      )
-
-    status == 0
-  end
-
-  defp package_installed?(:pip, python, package, opts) do
-    {_, status} = run_cmd(python, ["-m", "pip", "show", package], opts)
-    status == 0
-  end
-
-  defp install_with_uv(python, requirements, opts) do
-    args =
-      ["pip", "install", "--python", python] ++
-        build_install_args(opts) ++
-        requirements
-
-    {output, status} = run_cmd(uv_path!(), args, opts)
-
-    if status == 0 do
-      :ok
+  # Checks if a requirement (with version spec) is satisfied by installed packages.
+  # Uses `uv pip install --dry-run` which is fast and provides accurate PEP-440
+  # version checking without actually installing anything.
+  defp requirement_satisfied?(python, requirement, opts) do
+    # Editable installs should always be reinstalled
+    if editable_requirement?(requirement) do
+      false
     else
-      raise PackageError,
-        type: :install_failed,
-        packages: requirements,
-        message: "UV install failed with exit code #{status}",
-        output: output,
-        suggestion: "Check package names and network connectivity."
+      args = ["pip", "install", "--dry-run", "--python", python, requirement]
+      {output, status} = run_cmd(uv_path!(), args, opts)
+
+      # uv returns 0 on success. Check output to see if it would install anything.
+      # "Would install" or "Would upgrade" or "Would downgrade" = not satisfied
+      # "Audited" with no changes = satisfied
+      status == 0 and not would_install?(output)
     end
   end
 
-  defp install_with_pip(python, requirements, opts) do
-    args =
-      ["-m", "pip", "install"] ++
-        build_install_args(opts) ++
-        requirements
-
-    {output, status} = run_cmd(python, args, opts)
-
-    if status == 0 do
-      :ok
-    else
-      raise PackageError,
-        type: :install_failed,
-        packages: requirements,
-        message: "Pip install failed with exit code #{status}",
-        output: output,
-        suggestion: "Check package names and network connectivity."
-    end
+  defp editable_requirement?(requirement) do
+    trimmed = String.trim(requirement)
+    String.starts_with?(trimmed, "-e ") or String.starts_with?(trimmed, "--editable")
   end
 
-  defp freeze(:uv, python, opts) do
+  defp would_install?(output) do
+    String.contains?(output, "Would install") or
+      String.contains?(output, "Would upgrade") or
+      String.contains?(output, "Would downgrade")
+  end
+
+  defp freeze(python, opts) do
     {output, status} =
       run_cmd(
         uv_path!(),
@@ -396,24 +372,7 @@ defmodule Snakepit.PythonPackages do
        %PackageError{
          type: :install_failed,
          packages: [],
-         message: "UV freeze failed with exit code #{status}",
-         output: output,
-         suggestion: "Verify the Python environment is accessible."
-       }}
-    end
-  end
-
-  defp freeze(:pip, python, opts) do
-    {output, status} = run_cmd(python, ["-m", "pip", "freeze"], opts)
-
-    if status == 0 do
-      {:ok, output}
-    else
-      {:error,
-       %PackageError{
-         type: :install_failed,
-         packages: [],
-         message: "Pip freeze failed with exit code #{status}",
+         message: "uv freeze failed with exit code #{status}",
          output: output,
          suggestion: "Verify the Python environment is accessible."
        }}
@@ -485,7 +444,8 @@ defmodule Snakepit.PythonPackages do
       :ok
     else
       File.mkdir_p!(env_dir)
-      {output, status} = run_cmd(base_python, ["-m", "venv", env_dir], opts)
+      # Use uv to create the venv for consistency
+      {output, status} = run_cmd(uv_path!(), ["venv", "--python", base_python, env_dir], opts)
 
       if status == 0 do
         :ok
@@ -495,7 +455,7 @@ defmodule Snakepit.PythonPackages do
           packages: [],
           message: "Failed to create virtual environment in #{env_dir}",
           output: output,
-          suggestion: "Ensure python includes venv and the directory is writable."
+          suggestion: "Ensure uv is installed and the directory is writable."
       end
     end
   end
@@ -523,14 +483,6 @@ defmodule Snakepit.PythonPackages do
     ]
   end
 
-  defp detect_installer do
-    if uv_path() do
-      :uv
-    else
-      :pip
-    end
-  end
-
   defp uv_path do
     PythonRuntime.config().uv_path || System.find_executable("uv")
   end
@@ -539,10 +491,12 @@ defmodule Snakepit.PythonPackages do
     case uv_path() do
       nil ->
         raise PackageError,
-          type: :install_failed,
+          type: :uv_not_found,
           packages: [],
-          message: "uv not found",
-          suggestion: "Install uv or set :python, uv_path: \"/path/to/uv\"."
+          message: "uv is required but not found",
+          suggestion:
+            "Install uv: curl -LsSf https://astral.sh/uv/install.sh | sh\n" <>
+              "Or set config :snakepit, :python, uv_path: \"/path/to/uv\""
 
       path ->
         path
