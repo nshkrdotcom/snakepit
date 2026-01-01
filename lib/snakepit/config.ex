@@ -77,6 +77,7 @@ defmodule Snakepit.Config do
   """
 
   require Logger
+  alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
 
   @typedoc """
@@ -107,23 +108,20 @@ defmodule Snakepit.Config do
   @type normalized_pool_config :: map()
   @type validation_result :: {:ok, [pool_config()]} | {:error, term()}
 
-  @default_pool_size System.schedulers_online() * 2
-  @default_profile :process
-  @default_batch_size 8
-  @default_batch_delay 750
-  @default_threads_per_worker 10
-  @default_capacity_strategy :pool
-
-  @default_heartbeat_config %{
+  # Base heartbeat config - actual runtime defaults are in Snakepit.Defaults
+  @base_heartbeat_config_template %{
     enabled: true,
-    ping_interval_ms: 2_000,
-    timeout_ms: 10_000,
-    max_missed_heartbeats: 3,
-    initial_delay_ms: 0,
     dependent: true
   }
 
-  @heartbeat_known_keys Map.keys(@default_heartbeat_config)
+  @heartbeat_known_keys [
+    :enabled,
+    :ping_interval_ms,
+    :timeout_ms,
+    :max_missed_heartbeats,
+    :initial_delay_ms,
+    :dependent
+  ]
   @heartbeat_string_keys Enum.map(@heartbeat_known_keys, &Atom.to_string/1)
 
   @doc """
@@ -192,16 +190,16 @@ defmodule Snakepit.Config do
   """
   @spec normalize_pool_config(map()) :: pool_config()
   def normalize_pool_config(config) do
-    profile = Map.get(config, :worker_profile, @default_profile)
+    profile = Map.get(config, :worker_profile, Defaults.default_worker_profile())
 
     capacity_strategy =
       Map.get(config, :capacity_strategy) ||
-        Application.get_env(:snakepit, :capacity_strategy, @default_capacity_strategy)
+        Application.get_env(:snakepit, :capacity_strategy, Defaults.default_capacity_strategy())
 
     base_config =
       config
-      |> Map.put_new(:worker_profile, @default_profile)
-      |> Map.put_new(:pool_size, @default_pool_size)
+      |> Map.put_new(:worker_profile, Defaults.default_worker_profile())
+      |> Map.put_new(:pool_size, Defaults.default_pool_size())
       |> Map.put_new(:adapter_args, [])
       |> Map.put_new(:adapter_env, [])
       |> Map.put_new(:worker_ttl, :infinity)
@@ -220,12 +218,12 @@ defmodule Snakepit.Config do
     case profile do
       :process ->
         base_config
-        |> Map.put_new(:startup_batch_size, @default_batch_size)
-        |> Map.put_new(:startup_batch_delay_ms, @default_batch_delay)
+        |> Map.put_new(:startup_batch_size, Defaults.config_default_batch_size())
+        |> Map.put_new(:startup_batch_delay_ms, Defaults.config_default_batch_delay())
 
       :thread ->
         base_config
-        |> Map.put_new(:threads_per_worker, @default_threads_per_worker)
+        |> Map.put_new(:threads_per_worker, Defaults.config_default_threads_per_worker())
         |> Map.put_new(:thread_safety_checks, false)
 
       _ ->
@@ -317,21 +315,22 @@ defmodule Snakepit.Config do
     base_pool = %{
       name: :default,
       worker_profile: :process,
-      pool_size: Application.get_env(:snakepit, :pool_size, @default_pool_size),
+      pool_size: Application.get_env(:snakepit, :pool_size, Defaults.default_pool_size()),
       adapter_module: Application.get_env(:snakepit, :adapter_module),
       adapter_args: [],
       adapter_env: [],
       capacity_strategy:
-        Application.get_env(:snakepit, :capacity_strategy, @default_capacity_strategy)
+        Application.get_env(:snakepit, :capacity_strategy, Defaults.default_capacity_strategy())
     }
 
     # Add pool_config if present
     legacy_pool =
       if pool_config = Application.get_env(:snakepit, :pool_config) do
         Map.merge(base_pool, %{
-          startup_batch_size: Map.get(pool_config, :startup_batch_size, @default_batch_size),
+          startup_batch_size:
+            Map.get(pool_config, :startup_batch_size, Defaults.config_default_batch_size()),
           startup_batch_delay_ms:
-            Map.get(pool_config, :startup_batch_delay_ms, @default_batch_delay),
+            Map.get(pool_config, :startup_batch_delay_ms, Defaults.config_default_batch_delay()),
           max_workers: Map.get(pool_config, :max_workers, 1000)
         })
       else
@@ -395,7 +394,7 @@ defmodule Snakepit.Config do
   end
 
   defp validate_profile(config) do
-    case Map.get(config, :worker_profile, :process) do
+    case Map.get(config, :worker_profile, Defaults.default_worker_profile()) do
       profile when profile in [:process, :thread] ->
         :ok
 
@@ -418,7 +417,7 @@ defmodule Snakepit.Config do
   end
 
   defp validate_pool_size(config) do
-    case Map.get(config, :pool_size, @default_pool_size) do
+    case Map.get(config, :pool_size, Defaults.default_pool_size()) do
       size when is_integer(size) and size > 0 ->
         :ok
 
@@ -470,7 +469,18 @@ defmodule Snakepit.Config do
 
   defp normalize_heartbeat_overrides(_), do: %{}
 
-  defp merge_with_heartbeat_defaults(overrides, base \\ @default_heartbeat_config) do
+  defp default_heartbeat_config do
+    Map.merge(@base_heartbeat_config_template, %{
+      ping_interval_ms: Defaults.heartbeat_ping_interval_ms(),
+      timeout_ms: Defaults.heartbeat_timeout_ms(),
+      max_missed_heartbeats: Defaults.heartbeat_max_missed(),
+      initial_delay_ms: Defaults.heartbeat_initial_delay_ms()
+    })
+  end
+
+  defp merge_with_heartbeat_defaults(overrides, base \\ nil) do
+    base = base || default_heartbeat_config()
+
     defaults =
       Enum.reduce(base, %{}, fn {key, value}, acc ->
         Map.put(acc, key, value)

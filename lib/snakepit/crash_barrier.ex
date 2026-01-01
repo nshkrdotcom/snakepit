@@ -5,20 +5,23 @@ defmodule Snakepit.CrashBarrier do
   Classifies worker crashes, taints unstable workers, and determines retry eligibility.
   """
 
+  alias Snakepit.Defaults
   alias Snakepit.Error
   alias Snakepit.Worker.TaintRegistry
 
-  @default_config %{
-    enabled: false,
-    retry: :idempotent,
-    max_restarts: 1,
-    taint_duration_ms: 60_000,
-    backoff_ms: [50, 100, 200],
-    mark_on: [:segfault, :oom, :gpu],
-    taint_on_exit_codes: [],
-    taint_on_error_types: [],
-    taint_device_on_cuda_fatal: true
-  }
+  defp default_config do
+    %{
+      enabled: false,
+      retry: :idempotent,
+      max_restarts: Defaults.crash_barrier_max_restarts(),
+      taint_duration_ms: Defaults.crash_barrier_taint_duration_ms(),
+      backoff_ms: Defaults.crash_barrier_backoff_ms(),
+      mark_on: [:segfault, :oom, :gpu],
+      taint_on_exit_codes: [],
+      taint_on_error_types: [],
+      taint_device_on_cuda_fatal: true
+    }
+  end
 
   @segfault_codes [139]
   @abort_codes [134]
@@ -35,7 +38,7 @@ defmodule Snakepit.CrashBarrier do
       |> Map.get(:crash_barrier, %{})
       |> Map.new()
 
-    @default_config
+    default_config()
     |> Map.merge(global)
     |> Map.merge(pool_override)
     |> normalize_config()

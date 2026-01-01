@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.8] - 2025-12-31
+
+### Added
+- **Centralized configurable defaults** - New `Snakepit.Defaults` module provides runtime-configurable defaults for all hardcoded values
+  - All 68 previously hardcoded timeout, sizing, and threshold values are now configurable via `Application.get_env/3`
+  - Values are read at runtime, allowing configuration changes in `config/runtime.exs` without recompilation
+  - Defaults remain unchanged from previous versions for backward compatibility
+  - See `Snakepit.Defaults` module documentation for complete list of configurable keys
+
+- **Timeout profile architecture** - New single-budget, derived deadlines, profile-based timeout system
+  - Six predefined profiles: `:balanced`, `:production`, `:production_strict`, `:development`, `:ml_inference`, `:batch`
+  - New user-facing API: `default_timeout/0`, `stream_timeout/0`, `queue_timeout/0`
+  - Margin configuration: `worker_call_margin_ms/0` (default 1000), `pool_reply_margin_ms/0` (default 200)
+  - RPC timeout derivation: `rpc_timeout/1` computes inner timeout from total budget
+  - Legacy getters (`pool_request_timeout`, `grpc_command_timeout`, etc.) now derive from profile when not explicitly configured
+  - Configure via: `config :snakepit, timeout_profile: :production`
+
+- **Pool deadline-aware execution** - Pool.execute/3 now stores deadline_ms for queue-aware timeout handling
+  - New helper: `Pool.get_default_timeout_for_call/3` for call-type-aware timeout lookup
+  - New helper: `Pool.derive_rpc_timeout_from_opts/2` for deadline-aware RPC timeout derivation
+  - New helper: `Pool.effective_queue_timeout_ms/2` for budget-aware queue timeout
+  - GenServer.call timeout caught and returned as structured `{:error, %Snakepit.Error{}}`
+
+### Changed
+- **Pool module** - Timeout and sizing defaults now read from `Snakepit.Defaults`:
+  - `pool_request_timeout`, `pool_streaming_timeout`, `pool_startup_timeout`, `pool_queue_timeout`
+  - `checkout_timeout`, `default_command_timeout`, `pool_await_ready_timeout`
+  - `pool_max_queue_size`, `pool_max_workers`, `pool_max_cancelled_entries`
+  - `pool_startup_batch_size`, `pool_startup_batch_delay_ms`
+
+- **GRPCWorker** - Execute and streaming timeouts now configurable:
+  - `grpc_worker_execute_timeout`, `grpc_worker_stream_timeout`
+  - `grpc_server_ready_timeout`, `worker_ready_timeout`
+  - `grpc_worker_health_check_interval`
+  - Heartbeat configuration: `heartbeat_ping_interval_ms`, `heartbeat_timeout_ms`, `heartbeat_max_missed`, `heartbeat_initial_delay_ms`
+
+- **Fault tolerance modules** - Circuit breaker, retry policy, crash barrier, and health monitor defaults now configurable:
+  - `circuit_breaker_failure_threshold`, `circuit_breaker_reset_timeout_ms`, `circuit_breaker_half_open_max_calls`
+  - `retry_max_attempts`, `retry_backoff_sequence`, `retry_max_backoff_ms`, `retry_jitter_factor`
+  - `crash_barrier_taint_duration_ms`, `crash_barrier_max_restarts`, `crash_barrier_backoff_ms`
+  - `health_monitor_check_interval`, `health_monitor_crash_window_ms`, `health_monitor_max_crashes`
+
+- **Session store** - Session management defaults now configurable:
+  - `session_cleanup_interval`, `session_default_ttl`, `session_max_sessions`, `session_warning_threshold`
+
+- **Process registry** - Cleanup intervals now configurable:
+  - `process_registry_cleanup_interval`, `process_registry_unregister_cleanup_delay`, `process_registry_unregister_cleanup_attempts`
+
+- **Application and gRPC** - Server configuration now configurable:
+  - `grpc_port`, `grpc_num_acceptors`, `grpc_max_connections`, `grpc_socket_backlog`
+  - `cleanup_on_stop_timeout_ms`, `cleanup_poll_interval_ms`
+
+- **Config module** - Pool and worker profile defaults now configurable:
+  - `default_pool_size`, `default_worker_profile`, `default_capacity_strategy`
+  - `config_default_batch_size`, `config_default_batch_delay`, `config_default_threads_per_worker`
+
+### Timeout Architecture Proposal
+
+The following documents the design rationale for the timeout architecture implemented in this release.
+
+#### Problem Statement
+
+Snakepit's timeout configuration was fragmented with 7+ independent timeout keys that didn't coordinate:
+- `pool_request_timeout` vs `grpc_command_timeout` - Which is outer? Which is inner?
+- Queue wait time consumed part of the budget, but inner timeouts didn't account for it
+- GenServer.call timeouts firing before inner timeouts produced unhandled exits instead of structured errors
+
+#### Solution: Single-Budget, Derived Deadlines
+
+**Core principle**: One top-level timeout budget, all inner timeouts derived from remaining time.
+
+**Profile-based defaults** provide sensible starting points for different deployment scenarios:
+
+| Profile | default_timeout | stream_timeout | queue_timeout |
+|---------|-----------------|----------------|---------------|
+| :balanced | 300_000 (5m) | 900_000 (15m) | 10_000 (10s) |
+| :production | 300_000 (5m) | 900_000 (15m) | 10_000 (10s) |
+| :production_strict | 60_000 (60s) | 300_000 (5m) | 5_000 (5s) |
+| :development | 900_000 (15m) | 3_600_000 (60m) | 60_000 (60s) |
+| :ml_inference | 900_000 (15m) | 3_600_000 (60m) | 60_000 (60s) |
+| :batch | 3_600_000 (60m) | :infinity | 300_000 (5m) |
+
+**Margin formula** ensures inner timeouts fire before outer:
+```
+rpc_timeout = total_timeout - worker_call_margin_ms (1000) - pool_reply_margin_ms (200)
+```
+
+**Deadline propagation** tracks remaining budget:
+1. Pool.execute stores `deadline_ms = now + timeout` in opts
+2. Queue handler uses `effective_queue_timeout_ms/2` to respect deadline
+3. Worker execution uses `derive_rpc_timeout_from_opts/2` to compute remaining budget
+4. All GenServer.call timeouts are caught and returned as structured errors
+
+#### Backward Compatibility
+
+- All legacy config keys (`pool_request_timeout`, `grpc_command_timeout`, etc.) still work
+- When explicitly set, they take precedence over profile-derived values
+- When not set, they derive from the active profile
+- Default profile is `:balanced` which provides similar values to previous defaults
+
 ## [0.8.7] - 2025-12-31
 
 ### Fixed

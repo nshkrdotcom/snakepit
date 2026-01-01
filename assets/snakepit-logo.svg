@@ -1,95 +1,387 @@
-<svg width="256px" height="256px" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- Python-inspired color gradients -->
+    <!-- Python Blue Gradient -->
     <linearGradient id="pythonBlue" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#306998; stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#4b8bbe; stop-opacity:1" />
+      <stop offset="0%" stop-color="#306998"/>
+      <stop offset="50%" stop-color="#4b8bbe"/>
+      <stop offset="100%" stop-color="#5a9fd4"/>
     </linearGradient>
+    
+    <!-- Python Yellow Gradient -->
     <linearGradient id="pythonYellow" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#ffd43b; stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#ffe873; stop-opacity:1" />
+      <stop offset="0%" stop-color="#ffd43b"/>
+      <stop offset="50%" stop-color="#ffe873"/>
+      <stop offset="100%" stop-color="#fff3a3"/>
     </linearGradient>
-    <linearGradient id="shadowGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#1e1e1e; stop-opacity:0.3" />
-      <stop offset="100%" style="stop-color:#1e1e1e; stop-opacity:0" />
+    
+    <!-- Dark Pit Gradient (radial for depth) -->
+    <radialGradient id="pitDepth" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#0a0f1a"/>
+      <stop offset="40%" stop-color="#0d121f"/>
+      <stop offset="70%" stop-color="#141b2d"/>
+      <stop offset="100%" stop-color="#1c2331"/>
+    </radialGradient>
+    
+    <!-- Hexagon Border Gradient -->
+    <linearGradient id="hexBorder" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4b8bbe"/>
+      <stop offset="50%" stop-color="#ffd43b"/>
+      <stop offset="100%" stop-color="#4b8bbe"/>
     </linearGradient>
-
-    <!-- Filter for a subtle glow on the eyes -->
-    <filter id="eyeGlow">
-      <feGaussianBlur stdDeviation="0.5" result="coloredBlur"/>
+    
+    <!-- Snake Scale Pattern -->
+    <pattern id="snakeScales" patternUnits="userSpaceOnUse" width="6" height="5">
+      <ellipse cx="3" cy="2.5" rx="2.8" ry="2.2" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="0.4"/>
+    </pattern>
+    
+    <!-- Eye Glow Filter -->
+    <filter id="eyeGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.5" result="glow"/>
       <feMerge>
-        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="glow"/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
+    
+    <!-- Snake Body Glow -->
+    <filter id="snakeGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <!-- Inner Shadow for Pit -->
+    <filter id="pitShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="4" result="shadow"/>
+      <feOffset dx="0" dy="2"/>
+      <feComposite in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.6 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <!-- Ambient Light -->
+    <filter id="ambientLight">
+      <feSpecularLighting surfaceScale="3" specularConstant="0.8" specularExponent="25" lighting-color="#ffffff" result="specOut">
+        <fePointLight x="100" y="50" z="80"/>
+      </feSpecularLighting>
+      <feComposite in="SourceGraphic" in2="specOut" operator="arithmetic" k1="0" k2="1" k3="0.3" k4="0"/>
+    </filter>
+    
+    <!-- Hexagon Clip Path -->
+    <clipPath id="hexClip">
+      <polygon points="100,8 181.6,55 181.6,145 100,192 18.4,145 18.4,55"/>
+    </clipPath>
+    
+    <!-- Snake Body Texture -->
+    <linearGradient id="blueSnakeBody" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#5a9fd4"/>
+      <stop offset="30%" stop-color="#4b8bbe"/>
+      <stop offset="70%" stop-color="#306998"/>
+      <stop offset="100%" stop-color="#254f73"/>
+    </linearGradient>
+    
+    <linearGradient id="yellowSnakeBody" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fff3a3"/>
+      <stop offset="30%" stop-color="#ffe873"/>
+      <stop offset="70%" stop-color="#ffd43b"/>
+      <stop offset="100%" stop-color="#e6b800"/>
+    </linearGradient>
+    
+    <!-- Subtle noise texture -->
+    <filter id="noiseTexture">
+      <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="4" result="noise"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feBlend in="SourceGraphic" in2="noise" mode="multiply" result="blended"/>
+      <feComposite in="blended" in2="SourceAlpha" operator="in"/>
+    </filter>
   </defs>
-
-  <!-- Hexagonal Pit Background -->
-  <polygon
-      points="50,5 95,27.5 95,72.5 50,95 5,72.5 5,27.5"
-      fill="#1c2331"
-  />
+  
+  <!-- Outer Hexagon Border/Glow -->
   <polygon 
-      points="50,5 95,27.5 95,72.5 50,95 5,72.5 5,27.5" 
-      fill="url(#shadowGradient)"
+    points="100,5 184.6,53.5 184.6,146.5 100,195 15.4,146.5 15.4,53.5"
+    fill="none"
+    stroke="url(#hexBorder)"
+    stroke-width="2"
+    opacity="0.6"
   />
-
-  <!-- Intertwined Snakes -->
-  <g transform="translate(0.0, 0.0)">
-    <!-- Snake 1 (Blue) -->
-    <g>
-      <path 
-          d="M 50,80 C 20,85 15,50 35,40 C 55,30 60,50 50,60 C 40,70 30,75 50,80 Z"
-          fill="none"
-          stroke="url(#pythonBlue)"
-          stroke-width="10"
-          stroke-linecap="round"
-      />
-      <path 
-          d="M 35,40 L 28,35 L 38,35 C 45,35 45,40 35,40 Z"
-          fill="url(#pythonBlue)"
-      />
-      <circle cx="33" cy="37" r="1.2" fill="#ffdd57" filter="url(#eyeGlow)"/>
-    </g>
-
-    <!-- Snake 2 (Yellow) -->
-    <g>
-      <path 
-          d="M 50,20 C 80,15 85,50 65,60 C 45,70 40,50 50,40 C 60,30 70,25 50,20 Z"
-          fill="none"
-          stroke="url(#pythonYellow)"
-          stroke-width="10"
-          stroke-linecap="round"
-      />
-      <path 
-          d="M 65,60 L 72,65 L 62,65 C 55,65 55,60 65,60 Z"
-          fill="url(#pythonYellow)"
-      />
-      <circle cx="67" cy="63" r="1.2" fill="#3472a8" filter="url(#eyeGlow)"/>
-    </g>
-
-    <!-- Snake 3 (Blue - background) -->
-    <g>
-        <path
-          d="M 25,70 C 35,90 65,90 75,70 C 85,50 65,50 55,60 C 45,70 35,70 25,70 Z"
-          fill="none"
-          stroke="url(#pythonBlue)"
-          stroke-width="8"
-          stroke-linecap="round"
-          opacity="0.8"
-        />
-    </g>
-
-    <!-- Snake 4 (Yellow - background) -->
-    <g>
-        <path
-          d="M 75,30 C 65,10 35,10 25,30 C 15,50 35,50 45,40 C 55,30 65,30 75,30 Z"
-          fill="none"
-          stroke="url(#pythonYellow)"
-          stroke-width="8"
-          stroke-linecap="round"
-          opacity="0.8"
-        />
-    </g>
+  
+  <!-- Main Hexagon (The Pit) -->
+  <polygon 
+    points="100,8 181.6,55 181.6,145 100,192 18.4,145 18.4,55"
+    fill="url(#pitDepth)"
+    stroke="url(#hexBorder)"
+    stroke-width="3"
+    filter="url(#pitShadow)"
+  />
+  
+  <!-- Pit Floor Pattern (subtle) -->
+  <g clip-path="url(#hexClip)" opacity="0.3">
+    <circle cx="100" cy="130" r="50" fill="none" stroke="#1a2540" stroke-width="1"/>
+    <circle cx="100" cy="130" r="35" fill="none" stroke="#1a2540" stroke-width="1"/>
+    <circle cx="100" cy="130" r="20" fill="none" stroke="#1a2540" stroke-width="1"/>
   </g>
+  
+  <!-- Snake Pit Contents -->
+  <g clip-path="url(#hexClip)">
+    
+    <!-- ===== DEEPEST LAYER - Faded coils at bottom ===== -->
+    
+    <!-- Blue snake coil in deep background -->
+    <g filter="url(#snakeGlow)" opacity="0.35">
+      <path 
+        d="M 60,148 C 75,155 95,145 110,150 C 125,155 135,148 145,142"
+        fill="none"
+        stroke="url(#blueSnakeBody)"
+        stroke-width="11"
+        stroke-linecap="round"
+      />
+    </g>
+    
+    <!-- Yellow snake loop deep -->
+    <g filter="url(#snakeGlow)" opacity="0.4">
+      <path 
+        d="M 140,132 C 130,140 112,130 95,136 C 78,142 68,136 60,128"
+        fill="none"
+        stroke="url(#yellowSnakeBody)"
+        stroke-width="9"
+        stroke-linecap="round"
+      />
+    </g>
+    
+    <!-- ===== MID LAYER - More visible snakes ===== -->
+    
+    <!-- Blue snake winding from bottom-left -->
+    <g filter="url(#snakeGlow)" opacity="0.6">
+      <path 
+        d="M 52,130 C 58,118 72,122 78,110 C 84,98 70,92 62,102 C 54,112 50,120 55,128"
+        fill="none"
+        stroke="url(#blueSnakeBody)"
+        stroke-width="13"
+        stroke-linecap="round"
+      />
+    </g>
+    
+    <!-- Yellow snake coiling right side -->
+    <g filter="url(#snakeGlow)" opacity="0.65">
+      <path 
+        d="M 148,125 C 142,112 128,118 124,105 C 120,92 138,88 144,100 C 150,112 152,120 146,128"
+        fill="none"
+        stroke="url(#yellowSnakeBody)"
+        stroke-width="12"
+        stroke-linecap="round"
+      />
+    </g>
+    
+    <!-- ===== MAIN SNAKES - Full detail ===== -->
+    
+    <!-- Main Blue Snake - curving from left, head pointing upper-right -->
+    <g>
+      <path 
+        d="M 45,95 
+           C 52,82 72,88 82,75 
+           C 92,62 85,52 95,45
+           C 105,38 118,48 125,58"
+        fill="none"
+        stroke="url(#blueSnakeBody)"
+        stroke-width="15"
+        stroke-linecap="round"
+        filter="url(#snakeGlow)"
+      />
+      
+      <!-- Blue Snake Head - detailed anatomical design -->
+      <g transform="translate(122, 52) rotate(25)">
+        <!-- Head base shape (slightly triangular) -->
+        <path d="M -2,0 Q 2,-7 10,-6 Q 18,-4 18,0 Q 18,4 10,6 Q 2,7 -2,0 Z" fill="url(#pythonBlue)"/>
+        <path d="M -1,0 Q 2,-6 10,-5 Q 16,-3 16,0 Q 16,3 10,5 Q 2,6 -1,0 Z" fill="url(#blueSnakeBody)"/>
+        <!-- Brow ridge -->
+        <path d="M 4,-4 Q 8,-5.5 12,-4" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="0.8"/>
+        <!-- Scale pattern on crown -->
+        <ellipse cx="10" cy="-3" rx="3" ry="1.5" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="0.4"/>
+        <ellipse cx="6" cy="-4" rx="2" ry="1" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="0.3"/>
+        <!-- Eye socket -->
+        <ellipse cx="5" cy="-1.5" rx="2.8" ry="2.5" fill="#0a0e15"/>
+        <!-- Eye -->
+        <ellipse cx="5" cy="-1.5" rx="2.2" ry="2" fill="#1a1a1a"/>
+        <!-- Slit pupil -->
+        <ellipse cx="5" cy="-1.5" rx="0.6" ry="1.8" fill="#ffd43b" filter="url(#eyeGlow)"/>
+        <!-- Eye highlights -->
+        <circle cx="4.2" cy="-2.2" r="0.4" fill="#ffffff" opacity="0.9"/>
+        <circle cx="5.5" cy="-0.8" r="0.2" fill="#ffffff" opacity="0.5"/>
+        <!-- Heat pit -->
+        <ellipse cx="0" cy="-1" rx="0.6" ry="0.4" fill="#1a2540"/>
+        <!-- Nostrils -->
+        <circle cx="-1" cy="-0.8" r="0.35" fill="#0a0f1a"/>
+        <circle cx="-1" cy="0.8" r="0.35" fill="#0a0f1a"/>
+        <!-- Jaw line -->
+        <path d="M 2,3 Q 8,4 14,2" fill="none" stroke="rgba(0,0,0,0.2)" stroke-width="0.5"/>
+        <!-- Forked tongue -->
+        <path d="M -3,0 L -7,0 L -9,-1.5 M -7,0 L -9,1.5" stroke="#dd3344" stroke-width="0.5" stroke-linecap="round" fill="none"/>
+      </g>
+    </g>
+    
+    <!-- Main Yellow Snake - curving from bottom-right, head pointing left -->
+    <g>
+      <path 
+        d="M 158,120 
+           C 145,112 135,125 115,118
+           C 95,111 100,95 85,88
+           C 70,81 55,90 48,78"
+        fill="none"
+        stroke="url(#yellowSnakeBody)"
+        stroke-width="15"
+        stroke-linecap="round"
+        filter="url(#snakeGlow)"
+      />
+      
+      <!-- Yellow Snake Head - detailed anatomical design -->
+      <g transform="translate(52, 80) rotate(-135)">
+        <!-- Head base shape (slightly triangular) -->
+        <path d="M -2,0 Q 2,-7 10,-6 Q 18,-4 18,0 Q 18,4 10,6 Q 2,7 -2,0 Z" fill="url(#pythonYellow)"/>
+        <path d="M -1,0 Q 2,-6 10,-5 Q 16,-3 16,0 Q 16,3 10,5 Q 2,6 -1,0 Z" fill="url(#yellowSnakeBody)"/>
+        <!-- Brow ridge -->
+        <path d="M 4,-4 Q 8,-5.5 12,-4" fill="none" stroke="rgba(0,0,0,0.1)" stroke-width="0.8"/>
+        <!-- Scale pattern on crown -->
+        <ellipse cx="10" cy="-3" rx="3" ry="1.5" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="0.4"/>
+        <ellipse cx="6" cy="-4" rx="2" ry="1" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="0.3"/>
+        <!-- Eye socket -->
+        <ellipse cx="5" cy="-1.5" rx="2.8" ry="2.5" fill="#0a0e15"/>
+        <!-- Eye -->
+        <ellipse cx="5" cy="-1.5" rx="2.2" ry="2" fill="#1a1a1a"/>
+        <!-- Slit pupil -->
+        <ellipse cx="5" cy="-1.5" rx="0.6" ry="1.8" fill="#306998" filter="url(#eyeGlow)"/>
+        <!-- Eye highlights -->
+        <circle cx="4.2" cy="-2.2" r="0.4" fill="#ffffff" opacity="0.9"/>
+        <circle cx="5.5" cy="-0.8" r="0.2" fill="#ffffff" opacity="0.5"/>
+        <!-- Heat pit -->
+        <ellipse cx="0" cy="-1" rx="0.6" ry="0.4" fill="#8b7500"/>
+        <!-- Nostrils -->
+        <circle cx="-1" cy="-0.8" r="0.35" fill="#8b6914"/>
+        <circle cx="-1" cy="0.8" r="0.35" fill="#8b6914"/>
+        <!-- Jaw line -->
+        <path d="M 2,3 Q 8,4 14,2" fill="none" stroke="rgba(0,0,0,0.15)" stroke-width="0.5"/>
+        <!-- Forked tongue -->
+        <path d="M -3,0 L -7,0 L -9,-1.5 M -7,0 L -9,1.5" stroke="#dd3344" stroke-width="0.5" stroke-linecap="round" fill="none"/>
+      </g>
+    </g>
+    
+    <!-- Third Snake (Blue) - slithering across middle -->
+    <g>
+      <path 
+        d="M 35,108 
+           C 50,100 65,112 85,102
+           C 105,92 115,105 130,95
+           C 145,85 155,95 162,88"
+        fill="none"
+        stroke="url(#blueSnakeBody)"
+        stroke-width="12"
+        stroke-linecap="round"
+        filter="url(#snakeGlow)"
+      />
+      
+      <!-- Third snake head - detailed smaller version -->
+      <g transform="translate(159, 86) rotate(20)">
+        <!-- Head base -->
+        <path d="M -1,0 Q 1,-5 6,-4.5 Q 11,-3 11,0 Q 11,3 6,4.5 Q 1,5 -1,0 Z" fill="url(#pythonBlue)"/>
+        <path d="M 0,0 Q 1.5,-4 6,-3.5 Q 10,-2.5 10,0 Q 10,2.5 6,3.5 Q 1.5,4 0,0 Z" fill="url(#blueSnakeBody)"/>
+        <!-- Brow ridge -->
+        <path d="M 2,-2.5 Q 5,-3.5 8,-2.5" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="0.5"/>
+        <!-- Eye socket -->
+        <ellipse cx="3" cy="-1" rx="1.8" ry="1.6" fill="#0a0e15"/>
+        <!-- Eye -->
+        <ellipse cx="3" cy="-1" rx="1.4" ry="1.3" fill="#1a1a1a"/>
+        <!-- Slit pupil -->
+        <ellipse cx="3" cy="-1" rx="0.4" ry="1.1" fill="#ffd43b" filter="url(#eyeGlow)"/>
+        <!-- Highlight -->
+        <circle cx="2.5" cy="-1.5" r="0.25" fill="#ffffff" opacity="0.85"/>
+        <!-- Nostril -->
+        <circle cx="-0.5" cy="0" r="0.25" fill="#1a2540"/>
+        <!-- Forked tongue -->
+        <path d="M -2,0 L -4.5,0 L -6,-1 M -4.5,0 L -6,1" stroke="#dd3344" stroke-width="0.4" stroke-linecap="round" fill="none"/>
+      </g>
+    </g>
+    
+    <!-- Fourth Snake (Yellow) - smaller, peeking from upper left -->
+    <g opacity="0.85">
+      <path 
+        d="M 38,72 C 48,65 62,72 72,62 C 82,52 75,42 85,38"
+        fill="none"
+        stroke="url(#yellowSnakeBody)"
+        stroke-width="10"
+        stroke-linecap="round"
+        filter="url(#snakeGlow)"
+      />
+      
+      <!-- Fourth snake head - detailed smaller version -->
+      <g transform="translate(83, 36) rotate(30)">
+        <!-- Head base -->
+        <path d="M -1,0 Q 1,-4.5 5,-4 Q 9,-2.5 9,0 Q 9,2.5 5,4 Q 1,4.5 -1,0 Z" fill="url(#pythonYellow)"/>
+        <path d="M 0,0 Q 1,-3.5 5,-3 Q 8,-2 8,0 Q 8,2 5,3 Q 1,3.5 0,0 Z" fill="url(#yellowSnakeBody)"/>
+        <!-- Brow ridge -->
+        <path d="M 1.5,-2 Q 4,-3 6.5,-2" fill="none" stroke="rgba(0,0,0,0.08)" stroke-width="0.4"/>
+        <!-- Eye socket -->
+        <ellipse cx="2.5" cy="-0.8" rx="1.5" ry="1.4" fill="#0a0e15"/>
+        <!-- Eye -->
+        <ellipse cx="2.5" cy="-0.8" rx="1.2" ry="1.1" fill="#1a1a1a"/>
+        <!-- Slit pupil -->
+        <ellipse cx="2.5" cy="-0.8" rx="0.35" ry="0.9" fill="#306998" filter="url(#eyeGlow)"/>
+        <!-- Highlight -->
+        <circle cx="2.1" cy="-1.2" r="0.2" fill="#ffffff" opacity="0.85"/>
+        <!-- Nostril -->
+        <circle cx="-0.3" cy="0" r="0.2" fill="#8b6914"/>
+        <!-- Forked tongue -->
+        <path d="M -1.5,0 L -3.5,0 L -4.8,-0.8 M -3.5,0 L -4.8,0.8" stroke="#dd3344" stroke-width="0.35" stroke-linecap="round" fill="none"/>
+      </g>
+    </g>
+    
+    <!-- Fifth Snake (Blue) - tiny one lurking bottom right -->
+    <g opacity="0.7">
+      <path 
+        d="M 152,130 C 145,136 135,130 128,138 C 122,146 130,152 125,158"
+        fill="none"
+        stroke="url(#blueSnakeBody)"
+        stroke-width="8"
+        stroke-linecap="round"
+        filter="url(#snakeGlow)"
+      />
+    </g>
+    
+    <!-- Loose coil segment (Yellow) in bottom left -->
+    <g opacity="0.55">
+      <path 
+        d="M 62,148 C 72,142 80,150 88,144 C 96,138 92,132 98,128"
+        fill="none"
+        stroke="url(#yellowSnakeBody)"
+        stroke-width="10"
+        stroke-linecap="round"
+        filter="url(#snakeGlow)"
+      />
+    </g>
+    
+    <!-- Background tail fragment -->
+    <g opacity="0.45">
+      <path 
+        d="M 115,155 C 108,148 100,155 90,150"
+        fill="none"
+        stroke="url(#blueSnakeBody)"
+        stroke-width="7"
+        stroke-linecap="round"
+      />
+    </g>
+    
+  </g>
+  
+  <!-- Subtle highlight on hexagon edge -->
+  <polygon 
+    points="100,8 181.6,55 181.6,145 100,192 18.4,145 18.4,55"
+    fill="none"
+    stroke="url(#hexBorder)"
+    stroke-width="1.5"
+    opacity="0.4"
+  />
 </svg>

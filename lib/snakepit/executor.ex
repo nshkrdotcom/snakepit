@@ -26,7 +26,7 @@ defmodule Snakepit.Executor do
       )
   """
 
-  alias Snakepit.{CircuitBreaker, RetryPolicy}
+  alias Snakepit.{CircuitBreaker, Defaults, RetryPolicy}
 
   @doc """
   Executes a function directly.
@@ -133,7 +133,7 @@ defmodule Snakepit.Executor do
   """
   @spec execute_batch([(-> any())], keyword()) :: [any()]
   def execute_batch(functions, opts \\ []) when is_list(functions) do
-    timeout_ms = Keyword.get(opts, :timeout_ms, 30_000)
+    timeout_ms = Keyword.get(opts, :timeout_ms, Defaults.executor_batch_timeout())
     max_concurrency = Keyword.get(opts, :max_concurrency, length(functions))
 
     functions

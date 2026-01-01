@@ -12,12 +12,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
   """
 
   use GenServer
+  alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
 
   @table_name :snakepit_pool_process_registry
-  @cleanup_interval 30_000
-  @unregister_cleanup_delay 500
-  @unregister_cleanup_attempts 10
   @log_category :pool
 
   defstruct [
@@ -296,7 +294,12 @@ defmodule Snakepit.Pool.ProcessRegistry do
           :ets.insert(state.table, {worker_id, updated})
           :dets.insert(state.dets_table, {worker_id, updated})
           :dets.sync(state.dets_table)
-          schedule_unregister_cleanup(worker_id, process_pid, @unregister_cleanup_attempts)
+
+          schedule_unregister_cleanup(
+            worker_id,
+            process_pid,
+            Defaults.process_registry_unregister_cleanup_attempts()
+          )
 
           SLog.debug(
             @log_category,
@@ -563,8 +566,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
   # Private Functions
 
   defp schedule_cleanup do
-    # Clean up dead workers every 30 seconds
-    Process.send_after(self(), :cleanup_dead_workers, @cleanup_interval)
+    Process.send_after(
+      self(),
+      :cleanup_dead_workers,
+      Defaults.process_registry_cleanup_interval()
+    )
   end
 
   defp schedule_unregister_cleanup(worker_id, process_pid, attempts_left)
@@ -572,7 +578,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     Process.send_after(
       self(),
       {:unregister_retry, worker_id, process_pid, attempts_left},
-      @unregister_cleanup_delay
+      Defaults.process_registry_unregister_cleanup_delay()
     )
   end
 

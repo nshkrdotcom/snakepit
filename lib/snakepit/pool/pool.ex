@@ -14,6 +14,7 @@ defmodule Snakepit.Pool do
   alias Snakepit.Bridge.SessionStore
   alias Snakepit.Config
   alias Snakepit.CrashBarrier
+  alias Snakepit.Defaults
   alias Snakepit.Error
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Logger.Redaction
@@ -22,12 +23,6 @@ defmodule Snakepit.Pool do
   alias Snakepit.Worker.LifecycleManager
   alias Snakepit.WorkerProfile.Thread.CapacityStore
 
-  @default_size System.schedulers_online() * 2
-  @default_startup_timeout 10_000
-  @default_queue_timeout 5_000
-  @default_max_queue_size 1000
-  @cancelled_retention_multiplier 4
-  @max_cancelled_entries 1024
   @log_category :pool
 
   # Per-pool state structure
@@ -83,9 +78,122 @@ defmodule Snakepit.Pool do
   """
   def execute(command, args, opts \\ []) do
     pool = opts[:pool] || __MODULE__
-    timeout = opts[:timeout] || 60_000
+    timeout = opts[:timeout] || Defaults.pool_request_timeout()
 
-    GenServer.call(pool, {:execute, command, args, opts}, timeout)
+    # Store deadline_ms for queue-aware remaining-time calculations
+    deadline_ms = System.monotonic_time(:millisecond) + timeout
+    opts_with_deadline = Keyword.put(opts, :deadline_ms, deadline_ms)
+
+    try do
+      GenServer.call(pool, {:execute, command, args, opts_with_deadline}, timeout)
+    catch
+      :exit, {:timeout, _} ->
+        {:error,
+         Error.timeout_error("Pool execute timed out", %{
+           timeout_ms: timeout,
+           command: command
+         })}
+    end
+  end
+
+  # ============================================================================
+  # Timeout Helpers (Public API for deadline-aware timeout derivation)
+  # ============================================================================
+
+  @doc """
+  Returns the default timeout for a given call type.
+
+  ## Call types
+  - `:execute` - Regular execute operations
+  - `:execute_stream` - Streaming operations
+  - `:queue` - Queue wait operations
+
+  ## Examples
+
+      iex> Snakepit.Pool.get_default_timeout_for_call(:execute, %{}, [])
+      300_000  # from default_timeout()
+
+      iex> Snakepit.Pool.get_default_timeout_for_call(:execute, %{}, [timeout: 45_000])
+      45_000
+  """
+  @spec get_default_timeout_for_call(atom(), map(), Keyword.t()) :: timeout()
+  def get_default_timeout_for_call(call_type, _args, opts) do
+    case Keyword.get(opts, :timeout) do
+      nil -> get_timeout_for_call_type(call_type)
+      explicit_timeout -> explicit_timeout
+    end
+  end
+
+  defp get_timeout_for_call_type(:execute), do: Defaults.default_timeout()
+  defp get_timeout_for_call_type(:execute_stream), do: Defaults.stream_timeout()
+  defp get_timeout_for_call_type(:queue), do: Defaults.queue_timeout()
+  defp get_timeout_for_call_type(_), do: Defaults.default_timeout()
+
+  @doc """
+  Derives the RPC timeout from opts, considering deadline if present.
+
+  When a request has been queued, time has already elapsed. This function
+  calculates the remaining time budget for the actual RPC call.
+
+  ## Examples
+
+      # Fresh request with 60s budget
+      iex> Snakepit.Pool.derive_rpc_timeout_from_opts([], 60_000)
+      58_800  # 60_000 - 1000 - 200 margins
+
+      # Request that waited 500ms in queue
+      iex> now = System.monotonic_time(:millisecond)
+      iex> opts = [deadline_ms: now + 59_500]
+      iex> Snakepit.Pool.derive_rpc_timeout_from_opts(opts, 60_000)
+      # ~= 58_300 (remaining - margins)
+  """
+  @spec derive_rpc_timeout_from_opts(Keyword.t(), timeout()) :: timeout()
+  def derive_rpc_timeout_from_opts(_opts, :infinity), do: :infinity
+
+  def derive_rpc_timeout_from_opts(opts, default_timeout) when is_integer(default_timeout) do
+    case Keyword.get(opts, :deadline_ms) do
+      nil ->
+        # No deadline set, use full budget
+        Defaults.rpc_timeout(default_timeout)
+
+      deadline_ms ->
+        # Calculate remaining time
+        now = System.monotonic_time(:millisecond)
+        remaining = deadline_ms - now
+        # Apply margins and floor
+        Defaults.rpc_timeout(max(remaining, 1))
+    end
+  end
+
+  @doc """
+  Computes effective queue timeout considering deadline.
+
+  If a deadline is set and less time remains than the configured queue timeout,
+  returns the remaining time instead.
+
+  ## Examples
+
+      # No deadline - use configured queue timeout
+      iex> Snakepit.Pool.effective_queue_timeout_ms([], 10_000)
+      10_000
+
+      # Deadline with 5s remaining - use remaining time
+      iex> now = System.monotonic_time(:millisecond)
+      iex> opts = [deadline_ms: now + 5_000]
+      iex> Snakepit.Pool.effective_queue_timeout_ms(opts, 10_000)
+      # ~= 5_000 (remaining time)
+  """
+  @spec effective_queue_timeout_ms(Keyword.t(), timeout()) :: non_neg_integer()
+  def effective_queue_timeout_ms(opts, configured_queue_timeout) do
+    case Keyword.get(opts, :deadline_ms) do
+      nil ->
+        configured_queue_timeout
+
+      deadline_ms ->
+        now = System.monotonic_time(:millisecond)
+        remaining = deadline_ms - now
+        max(remaining, 0)
+    end
   end
 
   @doc """
@@ -93,7 +201,7 @@ defmodule Snakepit.Pool do
   """
   def execute_stream(command, args, callback_fn, opts \\ []) do
     pool = opts[:pool] || __MODULE__
-    timeout = opts[:timeout] || 300_000
+    timeout = opts[:timeout] || Defaults.pool_streaming_timeout()
     pool_identifier = opts[:pool_name] || pool
     SLog.debug(@log_category, "[Pool] execute_stream #{command} with #{Redaction.describe(args)}")
 
@@ -130,7 +238,7 @@ defmodule Snakepit.Pool do
   end
 
   defp checkout_worker_for_stream(pool, opts) do
-    timeout = opts[:checkout_timeout] || 5_000
+    timeout = opts[:checkout_timeout] || Defaults.checkout_timeout()
     GenServer.call(pool, {:checkout_worker, opts[:session_id]}, timeout)
   end
 
@@ -221,8 +329,12 @@ defmodule Snakepit.Pool do
   Returns `:ok` when all workers are ready, or `{:error, %Snakepit.Error{}}` if
   the pool doesn't initialize within the given timeout.
   """
-  @spec await_ready(atom() | pid(), timeout()) :: :ok | {:error, Error.t()}
-  def await_ready(pool \\ __MODULE__, timeout \\ 15_000) do
+  @spec await_ready(atom() | pid(), timeout() | nil) :: :ok | {:error, Error.t()}
+  def await_ready(pool \\ __MODULE__, timeout \\ nil)
+
+  def await_ready(pool, nil), do: await_ready(pool, Defaults.pool_await_ready_timeout())
+
+  def await_ready(pool, timeout) do
     GenServer.call(pool, :await_ready, timeout)
   catch
     :exit, {:timeout, _} ->
@@ -295,14 +407,9 @@ defmodule Snakepit.Pool do
     # In legacy mode, use opts[:size] (from application.ex) or fall back to pool_config/default
     size = resolve_pool_size(opts, pool_config, multi_pool_mode?)
 
-    startup_timeout =
-      Application.get_env(:snakepit, :pool_startup_timeout, @default_startup_timeout)
-
-    queue_timeout =
-      Application.get_env(:snakepit, :pool_queue_timeout, @default_queue_timeout)
-
-    max_queue_size =
-      Application.get_env(:snakepit, :pool_max_queue_size, @default_max_queue_size)
+    startup_timeout = Defaults.pool_startup_timeout()
+    queue_timeout = Defaults.pool_queue_timeout()
+    max_queue_size = Defaults.pool_max_queue_size()
 
     worker_module = opts[:worker_module] || Snakepit.GRPCWorker
 
@@ -340,12 +447,12 @@ defmodule Snakepit.Pool do
 
   defp resolve_pool_size(_opts, pool_config, true = _multi_pool_mode?) do
     # Multi-pool mode: use per-pool config only
-    Map.get(pool_config, :pool_size, @default_size)
+    Map.get(pool_config, :pool_size, Defaults.default_pool_size())
   end
 
   defp resolve_pool_size(opts, pool_config, false = _multi_pool_mode?) do
     # Legacy mode: opts[:size] takes precedence
-    opts[:size] || Map.get(pool_config, :pool_size, @default_size)
+    opts[:size] || Map.get(pool_config, :pool_size, Defaults.default_pool_size())
   end
 
   @impl true
@@ -1437,12 +1544,12 @@ defmodule Snakepit.Pool do
 
   defp cancellation_retention_ms(queue_timeout)
        when is_integer(queue_timeout) and queue_timeout > 0 do
-    retention = queue_timeout * @cancelled_retention_multiplier
+    retention = queue_timeout * Defaults.pool_cancelled_retention_multiplier()
     max(retention, queue_timeout)
   end
 
   defp cancellation_retention_ms(_queue_timeout) do
-    @default_queue_timeout * @cancelled_retention_multiplier
+    Defaults.pool_queue_timeout() * Defaults.pool_cancelled_retention_multiplier()
   end
 
   defp prune_cancelled_requests(cancelled_requests, _now_ms, _retention_ms)
@@ -1477,10 +1584,12 @@ defmodule Snakepit.Pool do
   end
 
   defp trim_cancelled_requests(cancelled_requests) do
-    if map_size(cancelled_requests) <= @max_cancelled_entries do
+    max_entries = Defaults.pool_max_cancelled_entries()
+
+    if map_size(cancelled_requests) <= max_entries do
       cancelled_requests
     else
-      entries_to_keep = @max_cancelled_entries
+      entries_to_keep = max_entries
       drop_count = map_size(cancelled_requests) - entries_to_keep
 
       cancelled_requests
@@ -1538,7 +1647,8 @@ defmodule Snakepit.Pool do
     legacy_pool_config = Application.get_env(:snakepit, :pool_config, %{})
 
     max_workers =
-      Map.get(pool_config, :max_workers) || Map.get(legacy_pool_config, :max_workers, 150)
+      Map.get(pool_config, :max_workers) ||
+        Map.get(legacy_pool_config, :max_workers, Defaults.pool_max_workers())
 
     actual_count = min(count, max_workers)
 
@@ -1574,11 +1684,15 @@ defmodule Snakepit.Pool do
 
     batch_size =
       Map.get(pool_config, :startup_batch_size) ||
-        Map.get(legacy_pool_config, :startup_batch_size, 10)
+        Map.get(legacy_pool_config, :startup_batch_size, Defaults.pool_startup_batch_size())
 
     batch_delay =
       Map.get(pool_config, :startup_batch_delay_ms) ||
-        Map.get(legacy_pool_config, :startup_batch_delay_ms, 500)
+        Map.get(
+          legacy_pool_config,
+          :startup_batch_delay_ms,
+          Defaults.pool_startup_batch_delay_ms()
+        )
 
     %{size: batch_size, delay: batch_delay}
   end
@@ -2210,7 +2324,11 @@ defmodule Snakepit.Pool do
         Map.get(args, :session_id) ||
         Map.get(args, "session_id")
 
-    GenServer.call(pool_pid, {:checkout_worker, pool_name, session_id}, 5_000)
+    GenServer.call(
+      pool_pid,
+      {:checkout_worker, pool_name, session_id},
+      Defaults.crash_barrier_checkout_timeout()
+    )
   end
 
   defp maybe_wait_backoff(delay_ms) when is_integer(delay_ms) and delay_ms > 0 do
@@ -2240,7 +2358,7 @@ defmodule Snakepit.Pool do
       nil ->
         case get_adapter_timeout(command, args) do
           # Global default
-          nil -> 30_000
+          nil -> Defaults.default_command_timeout()
           adapter_timeout -> adapter_timeout
         end
 

@@ -13,6 +13,7 @@ defmodule Snakepit.Application do
 
   use Application
   require Logger
+  alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
   alias Snakepit.PythonThreadLimits
   alias Snakepit.Telemetry.OpenTelemetry
@@ -83,7 +84,7 @@ defmodule Snakepit.Application do
     )
 
     # Get gRPC config for the Elixir server
-    grpc_port = Application.get_env(:snakepit, :grpc_port, 50_051)
+    grpc_port = Defaults.grpc_port()
 
     # Always start SessionStore as it's needed for tests and bridge functionality
     telemetry_children = Snakepit.TelemetryMetrics.reporter_children()
@@ -118,9 +119,9 @@ defmodule Snakepit.Application do
            port: grpc_port,
            start_server: true,
            adapter_opts: [
-             num_acceptors: 20,
-             max_connections: 1000,
-             socket_opts: [backlog: 512]
+             num_acceptors: Defaults.grpc_num_acceptors(),
+             max_connections: Defaults.grpc_max_connections(),
+             socket_opts: [backlog: Defaults.grpc_socket_backlog()]
            ]},
 
           # Task supervisor for async pool operations
@@ -177,8 +178,8 @@ defmodule Snakepit.Application do
   defp maybe_cleanup_on_stop do
     if Application.get_env(:snakepit, :cleanup_on_stop, true) do
       if Process.whereis(Snakepit.Pool.ProcessRegistry) do
-        timeout_ms = Application.get_env(:snakepit, :cleanup_on_stop_timeout_ms, 3_000)
-        poll_interval_ms = Application.get_env(:snakepit, :cleanup_poll_interval_ms, 50)
+        timeout_ms = Defaults.cleanup_on_stop_timeout_ms()
+        poll_interval_ms = Defaults.cleanup_poll_interval_ms()
 
         try do
           Snakepit.RuntimeCleanup.cleanup_current_run(

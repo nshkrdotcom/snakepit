@@ -25,6 +25,7 @@ defmodule Snakepit.HealthMonitor do
 
   use GenServer
 
+  alias Snakepit.Defaults
   require Logger
 
   @type worker_stats :: %{
@@ -103,10 +104,12 @@ defmodule Snakepit.HealthMonitor do
     state = %{
       pool: pool,
       workers: %{},
-      crash_window_ms: Keyword.get(opts, :crash_window_ms, 60_000),
-      max_crashes: Keyword.get(opts, :max_crashes, 10),
+      crash_window_ms:
+        Keyword.get(opts, :crash_window_ms, Defaults.health_monitor_crash_window_ms()),
+      max_crashes: Keyword.get(opts, :max_crashes, Defaults.health_monitor_max_crashes()),
       total_crashes: 0,
-      check_interval_ms: Keyword.get(opts, :check_interval_ms, 30_000),
+      check_interval_ms:
+        Keyword.get(opts, :check_interval_ms, Defaults.health_monitor_check_interval()),
       check_timer: nil
     }
 

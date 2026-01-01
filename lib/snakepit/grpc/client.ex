@@ -5,6 +5,7 @@ defmodule Snakepit.GRPC.Client do
   """
 
   require Logger
+  alias Snakepit.Defaults
   alias Snakepit.GRPC.ClientImpl
   # Uncomment when logging is added to this module:
   # alias Snakepit.Logger, as: SLog
@@ -91,7 +92,8 @@ defmodule Snakepit.GRPC.Client do
   end
 
   # Existing methods for backward compatibility
-  def execute(channel, command, args, timeout \\ 30_000) do
+  def execute(channel, command, args, timeout \\ nil) do
+    timeout = timeout || Defaults.grpc_client_execute_timeout()
     # Legacy support - redirect to execute_tool
     execute_tool(channel, "default_session", command, args, timeout: timeout)
   end

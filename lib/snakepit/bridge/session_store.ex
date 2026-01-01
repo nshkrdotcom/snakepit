@@ -8,20 +8,12 @@ defmodule Snakepit.Bridge.SessionStore do
   """
 
   use GenServer
+  alias Snakepit.Bridge.Session
+  alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
 
-  alias Snakepit.Bridge.Session
-
   @log_category :bridge
-
   @default_table_name :snakepit_sessions
-  # 1 minute
-  @cleanup_interval 60_000
-  # 1 hour
-  @default_ttl 3600
-  @default_max_sessions 10_000
-  # Warn when session count exceeds this percentage of max
-  @session_warning_threshold 0.8
 
   ## Client API
 
@@ -242,11 +234,13 @@ defmodule Snakepit.Bridge.SessionStore do
         {:decentralized_counters, true}
       ])
 
-    cleanup_interval = Keyword.get(opts, :cleanup_interval, @cleanup_interval)
-    default_ttl = Keyword.get(opts, :default_ttl, @default_ttl)
+    cleanup_interval = Keyword.get(opts, :cleanup_interval, Defaults.session_cleanup_interval())
+    default_ttl = Keyword.get(opts, :default_ttl, Defaults.session_default_ttl())
 
     quota_config = Application.get_env(:snakepit, :session_store, %{})
-    max_sessions = resolve_quota(opts, quota_config, :max_sessions, @default_max_sessions)
+
+    max_sessions =
+      resolve_quota(opts, quota_config, :max_sessions, Defaults.session_max_sessions())
 
     # Strict mode for dev/test - warns loudly on session accumulation
     strict_mode = Keyword.get(opts, :strict_mode, Map.get(quota_config, :strict_mode, false))
@@ -568,7 +562,7 @@ defmodule Snakepit.Bridge.SessionStore do
           )
         end
 
-      current_sessions >= trunc(max_sessions * @session_warning_threshold) ->
+      current_sessions >= trunc(max_sessions * Defaults.session_warning_threshold()) ->
         emit_accumulation_warning(state, current_sessions, :threshold_warning)
 
         if state.strict_mode do

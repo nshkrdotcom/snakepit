@@ -31,6 +31,8 @@ defmodule Snakepit.RetryPolicy do
           retriable_errors: [atom()] | :all
         }
 
+  # Note: These struct defaults are compile-time constants.
+  # Runtime configurable defaults are handled in new/1 via Snakepit.Defaults
   defstruct max_attempts: 3,
             backoff_ms: [100, 200, 400, 800, 1600],
             base_backoff_ms: 100,
@@ -39,6 +41,8 @@ defmodule Snakepit.RetryPolicy do
             jitter: false,
             jitter_factor: 0.25,
             retriable_errors: [:timeout, :unavailable, :connection_refused, :worker_crash]
+
+  alias Snakepit.Defaults
 
   @doc """
   Creates a new retry policy.
@@ -56,7 +60,18 @@ defmodule Snakepit.RetryPolicy do
   """
   @spec new(keyword()) :: t()
   def new(opts) do
-    struct(__MODULE__, opts)
+    # Use runtime-configurable defaults, then apply any user-provided options
+    defaults = [
+      max_attempts: Defaults.retry_max_attempts(),
+      backoff_ms: Defaults.retry_backoff_sequence(),
+      base_backoff_ms: Defaults.retry_base_backoff_ms(),
+      backoff_multiplier: Defaults.retry_backoff_multiplier(),
+      max_backoff_ms: Defaults.retry_max_backoff_ms(),
+      jitter_factor: Defaults.retry_jitter_factor()
+    ]
+
+    merged = Keyword.merge(defaults, opts)
+    struct(__MODULE__, merged)
   end
 
   @doc """

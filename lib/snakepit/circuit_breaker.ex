@@ -24,6 +24,7 @@ defmodule Snakepit.CircuitBreaker do
 
   use GenServer
 
+  alias Snakepit.Defaults
   require Logger
 
   @type state :: :closed | :open | :half_open
@@ -155,9 +156,12 @@ defmodule Snakepit.CircuitBreaker do
       state: :closed,
       failure_count: 0,
       success_count: 0,
-      failure_threshold: Keyword.get(opts, :failure_threshold, 5),
-      reset_timeout_ms: Keyword.get(opts, :reset_timeout_ms, 30_000),
-      half_open_max_calls: Keyword.get(opts, :half_open_max_calls, 1),
+      failure_threshold:
+        Keyword.get(opts, :failure_threshold, Defaults.circuit_breaker_failure_threshold()),
+      reset_timeout_ms:
+        Keyword.get(opts, :reset_timeout_ms, Defaults.circuit_breaker_reset_timeout_ms()),
+      half_open_max_calls:
+        Keyword.get(opts, :half_open_max_calls, Defaults.circuit_breaker_half_open_max_calls()),
       half_open_calls: 0,
       last_failure_time: nil,
       name: Keyword.get(opts, :name)

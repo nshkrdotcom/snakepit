@@ -53,13 +53,10 @@ defmodule Snakepit.Worker.LifecycleManager do
   """
 
   use GenServer
+  alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Worker.LifecycleConfig
 
-  # Check every 60 seconds
-  @check_interval 60_000
-  # Health check every 5 minutes
-  @health_check_interval 300_000
   @log_category :worker
 
   defstruct [
@@ -369,11 +366,11 @@ defmodule Snakepit.Worker.LifecycleManager do
   # Private Functions
 
   defp schedule_lifecycle_check do
-    Process.send_after(self(), :lifecycle_check, @check_interval)
+    Process.send_after(self(), :lifecycle_check, Defaults.lifecycle_check_interval())
   end
 
   defp schedule_health_check do
-    Process.send_after(self(), :health_check, @health_check_interval)
+    Process.send_after(self(), :health_check, Defaults.lifecycle_health_check_interval())
   end
 
   defp recycle_decision(worker_state, now) do

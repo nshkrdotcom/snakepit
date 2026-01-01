@@ -32,6 +32,7 @@ defmodule Snakepit.GRPCWorker do
   use GenServer
   require Logger
   alias Snakepit.Adapters.GRPCPython
+  alias Snakepit.Defaults
   alias Snakepit.Error
   alias Snakepit.GRPC.Client
   alias Snakepit.Logger, as: SLog
@@ -75,18 +76,34 @@ defmodule Snakepit.GRPCWorker do
           shutting_down: boolean()
         }
 
-  @base_heartbeat_defaults %{
+  # Base heartbeat defaults - actual values are retrieved via Defaults module
+  # to allow runtime configuration. These are the compile-time fallbacks.
+  @base_heartbeat_defaults_template %{
     enabled: true,
-    ping_interval_ms: 2_000,
-    timeout_ms: 10_000,
-    max_missed_heartbeats: 3,
     ping_fun: nil,
     test_pid: nil,
-    initial_delay_ms: 0,
     dependent: true
   }
 
-  @heartbeat_known_keys Map.keys(@base_heartbeat_defaults)
+  defp base_heartbeat_defaults do
+    Map.merge(@base_heartbeat_defaults_template, %{
+      ping_interval_ms: Defaults.heartbeat_ping_interval_ms(),
+      timeout_ms: Defaults.heartbeat_timeout_ms(),
+      max_missed_heartbeats: Defaults.heartbeat_max_missed(),
+      initial_delay_ms: Defaults.heartbeat_initial_delay_ms()
+    })
+  end
+
+  @heartbeat_known_keys [
+    :enabled,
+    :ping_interval_ms,
+    :timeout_ms,
+    :max_missed_heartbeats,
+    :ping_fun,
+    :test_pid,
+    :initial_delay_ms,
+    :dependent
+  ]
   @heartbeat_known_key_strings Enum.map(@heartbeat_known_keys, &Atom.to_string/1)
   @log_category :grpc
 
@@ -119,7 +136,11 @@ defmodule Snakepit.GRPCWorker do
   Execute a command and return the result.
   """
   # Header for default values
-  def execute(worker, command, args, timeout \\ 30_000)
+  def execute(worker, command, args, timeout \\ nil)
+
+  def execute(worker, command, args, nil) do
+    execute(worker, command, args, Defaults.grpc_worker_execute_timeout())
+  end
 
   def execute(worker_id, command, args, timeout) when is_binary(worker_id) do
     case PoolRegistry.get_worker_pid(worker_id) do
@@ -139,7 +160,11 @@ defmodule Snakepit.GRPCWorker do
   @doc """
   Execute a streaming command with callback.
   """
-  def execute_stream(worker, command, args, callback_fn, timeout \\ 300_000)
+  def execute_stream(worker, command, args, callback_fn, timeout \\ nil)
+
+  def execute_stream(worker, command, args, callback_fn, nil) do
+    execute_stream(worker, command, args, callback_fn, Defaults.grpc_worker_stream_timeout())
+  end
 
   def execute_stream(worker_id, command, args, callback_fn, timeout) when is_binary(worker_id) do
     case PoolRegistry.get_worker_pid(worker_id) do
@@ -167,7 +192,13 @@ defmodule Snakepit.GRPCWorker do
   @doc """
   Execute a command in a specific session.
   """
-  def execute_in_session(worker, session_id, command, args, timeout \\ 30_000) do
+  def execute_in_session(worker, session_id, command, args, timeout \\ nil)
+
+  def execute_in_session(worker, session_id, command, args, nil) do
+    execute_in_session(worker, session_id, command, args, Defaults.grpc_worker_execute_timeout())
+  end
+
+  def execute_in_session(worker, session_id, command, args, timeout) do
     GenServer.call(
       worker,
       {:execute_session, session_id, command, args, timeout},
@@ -671,7 +702,12 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_continue(:connect_and_wait, state) do
-    with {:ok, actual_port} <- wait_for_server_ready(state.server_port, state.ready_file, 30_000),
+    with {:ok, actual_port} <-
+           wait_for_server_ready(
+             state.server_port,
+             state.ready_file,
+             Defaults.grpc_server_ready_timeout()
+           ),
          {:ok, connection} <-
            wrap_grpc_connection_result(state.adapter.init_grpc_connection(actual_port)),
          pool_pid <- resolve_pool_pid(state.pool_name),
@@ -1239,7 +1275,7 @@ defmodule Snakepit.GRPCWorker do
        {:pool_handshake_failed, Error.pool_error("Pool not found", %{worker_id: worker_id})}}
 
   defp notify_pool_ready(pool_pid, worker_id) when is_pid(pool_pid) do
-    GenServer.call(pool_pid, {:worker_ready, worker_id}, 30_000)
+    GenServer.call(pool_pid, {:worker_ready, worker_id}, Defaults.worker_ready_timeout())
   catch
     :exit, {:noproc, _} ->
       {:error,
@@ -1494,7 +1530,7 @@ defmodule Snakepit.GRPCWorker do
 
   defp default_heartbeat_config do
     Map.merge(
-      @base_heartbeat_defaults,
+      base_heartbeat_defaults(),
       Snakepit.Config.heartbeat_defaults(),
       fn _key, _base, override -> override end
     )
@@ -1880,8 +1916,7 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp schedule_health_check do
-    # Health check every 30 seconds
-    Process.send_after(self(), :health_check, 30_000)
+    Process.send_after(self(), :health_check, Defaults.grpc_worker_health_check_interval())
   end
 
   defp make_health_check(state) do

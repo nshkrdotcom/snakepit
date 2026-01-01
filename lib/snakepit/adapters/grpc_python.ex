@@ -42,6 +42,7 @@ defmodule Snakepit.Adapters.GRPCPython do
   @behaviour Snakepit.Adapter
 
   alias Snakepit.Bridge.ToolChunk
+  alias Snakepit.Defaults
   alias Snakepit.GRPC.Client
   alias Snakepit.Logger, as: SLog
   alias Snakepit.PythonRuntime
@@ -202,7 +203,13 @@ defmodule Snakepit.Adapters.GRPCPython do
   @doc """
   Execute a command via gRPC.
   """
-  def grpc_execute(connection, session_id, command, args, timeout \\ 30_000) do
+  def grpc_execute(connection, session_id, command, args, timeout \\ nil)
+
+  def grpc_execute(connection, session_id, command, args, nil) do
+    grpc_execute(connection, session_id, command, args, Defaults.grpc_command_timeout())
+  end
+
+  def grpc_execute(connection, session_id, command, args, timeout) do
     if grpc_available?() do
       Client.execute_tool(
         connection.channel,
@@ -219,7 +226,21 @@ defmodule Snakepit.Adapters.GRPCPython do
   @doc """
   Execute a streaming command via gRPC with callback.
   """
-  def grpc_execute_stream(connection, session_id, command, args, callback_fn, timeout \\ 300_000)
+  def grpc_execute_stream(connection, session_id, command, args, callback_fn, timeout \\ nil)
+
+  def grpc_execute_stream(connection, session_id, command, args, callback_fn, nil)
+      when is_function(callback_fn, 1) do
+    grpc_execute_stream(
+      connection,
+      session_id,
+      command,
+      args,
+      callback_fn,
+      Defaults.grpc_worker_stream_timeout()
+    )
+  end
+
+  def grpc_execute_stream(connection, session_id, command, args, callback_fn, timeout)
       when is_function(callback_fn, 1) do
     if grpc_available?() do
       connection.channel
@@ -243,11 +264,11 @@ defmodule Snakepit.Adapters.GRPCPython do
 
   @impl true
   # 5 minutes for ML inference
-  def command_timeout("batch_inference", _args), do: 300_000
+  def command_timeout("batch_inference", _args), do: Defaults.grpc_batch_inference_timeout()
   # 10 minutes for large datasets
-  def command_timeout("process_large_dataset", _args), do: 600_000
-  # Default 30 seconds
-  def command_timeout(_command, _args), do: 30_000
+  def command_timeout("process_large_dataset", _args), do: Defaults.grpc_large_dataset_timeout()
+  # Default
+  def command_timeout(_command, _args), do: Defaults.grpc_command_timeout()
 
   defp consume_stream({:ok, stream}, callback_fn) do
     Enum.reduce_while(stream, :ok, fn message, _acc ->

@@ -31,7 +31,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.8.7"}
+    {:snakepit, "~> 0.8.8"}
   ]
 end
 ```
@@ -108,6 +108,72 @@ config :snakepit, log_level: :none           # Complete silence
 # Filter to specific categories
 config :snakepit, log_level: :debug, log_categories: [:grpc, :pool]
 ```
+
+### Runtime Configurable Defaults (v0.8.8+)
+
+All hardcoded timeout and sizing values are now configurable via `Application.get_env/3`.
+Values are read at runtime, allowing configuration changes without recompilation.
+
+```elixir
+# config/runtime.exs - Example customization
+config :snakepit,
+  # Timeouts (all in milliseconds)
+  default_command_timeout: 30_000,       # Default timeout for commands
+  pool_request_timeout: 60_000,          # Pool execute timeout
+  pool_streaming_timeout: 300_000,       # Pool streaming timeout
+  pool_startup_timeout: 10_000,          # Worker startup timeout
+  pool_queue_timeout: 5_000,             # Queue timeout
+  checkout_timeout: 5_000,               # Worker checkout timeout
+  grpc_worker_execute_timeout: 30_000,   # GRPCWorker execute timeout
+  grpc_worker_stream_timeout: 300_000,   # GRPCWorker streaming timeout
+  graceful_shutdown_timeout_ms: 6_000,   # Python process shutdown timeout
+
+  # Pool sizing
+  pool_max_queue_size: 1000,             # Max pending requests in queue
+  pool_max_workers: 150,                 # Maximum workers per pool
+  pool_startup_batch_size: 10,           # Workers started per batch
+  pool_startup_batch_delay_ms: 500,      # Delay between startup batches
+
+  # Retry policy
+  retry_max_attempts: 3,
+  retry_backoff_sequence: [100, 200, 400, 800, 1600],
+  retry_max_backoff_ms: 30_000,
+  retry_jitter_factor: 0.25,
+
+  # Circuit breaker
+  circuit_breaker_failure_threshold: 5,
+  circuit_breaker_reset_timeout_ms: 30_000,
+  circuit_breaker_half_open_max_calls: 1,
+
+  # Crash barrier
+  crash_barrier_taint_duration_ms: 60_000,
+  crash_barrier_max_restarts: 1,
+  crash_barrier_backoff_ms: [50, 100, 200],
+
+  # Health monitor
+  health_monitor_check_interval: 30_000,
+  health_monitor_crash_window_ms: 60_000,
+  health_monitor_max_crashes: 10,
+
+  # Heartbeat
+  heartbeat_ping_interval_ms: 2_000,
+  heartbeat_timeout_ms: 10_000,
+  heartbeat_max_missed: 3,
+
+  # Session store
+  session_cleanup_interval: 60_000,
+  session_default_ttl: 3600,
+  session_max_sessions: 10_000,
+  session_warning_threshold: 0.8,
+
+  # gRPC server
+  grpc_port: 50_051,
+  grpc_num_acceptors: 20,
+  grpc_max_connections: 1000,
+  grpc_socket_backlog: 512
+```
+
+See `Snakepit.Defaults` module documentation for the complete list of configurable values.
 
 ## Core API
 
