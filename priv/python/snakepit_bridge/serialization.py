@@ -41,12 +41,12 @@ class TypeSerializer:
             return TypeSerializer._encode_with_binary(normalized, var_type)
         else:
             # Standard JSON serialization
-            json_str = TypeSerializer._serialize_value(normalized, var_type)
+            json_bytes = TypeSerializer._serialize_value(normalized, var_type)
             
             # Create Any message
             any_msg = any_pb2.Any()
             any_msg.type_url = f"type.googleapis.com/snakepit.{var_type}"
-            any_msg.value = json_str.encode('utf-8')
+            any_msg.value = json_bytes
             
             return any_msg, None
     
@@ -83,8 +83,8 @@ class TypeSerializer:
             var_type = type_part.split('.')[-1]  # e.g., "float"
 
             # Decode JSON
-            json_str = any_msg.value.decode('utf-8')
-            value = TypeSerializer._deserialize_json(json_str)
+            json_payload = any_msg.value
+            value = TypeSerializer._deserialize_json(json_payload)
 
             # Convert to appropriate Python type
             decoded = TypeSerializer._deserialize_value(value, var_type)
@@ -150,9 +150,9 @@ class TypeSerializer:
         return value
     
     @staticmethod
-    def _serialize_value(value: Any, var_type: str) -> str:
+    def _serialize_value(value: Any, var_type: str) -> bytes:
         """
-        Serialize normalized value to JSON string.
+        Serialize normalized value to JSON bytes.
 
         Uses orjson for 6x performance boost if available,
         falls back to stdlib json otherwise.
@@ -173,26 +173,25 @@ class TypeSerializer:
 
         # Use orjson if available, otherwise stdlib json
         if _use_orjson:
-            # orjson returns bytes, must decode to str
-            return orjson.dumps(value_to_serialize).decode('utf-8')
+            return orjson.dumps(value_to_serialize)
         else:
             import json
-            return json.dumps(value_to_serialize)
+            return json.dumps(value_to_serialize).encode('utf-8')
     
     @staticmethod
-    def _deserialize_json(json_str: str) -> Any:
+    def _deserialize_json(json_payload: Union[str, bytes, bytearray]) -> Any:
         """
-        Deserialize JSON string to Python value.
+        Deserialize JSON payload to Python value.
 
         Uses orjson for 6x performance boost if available,
         falls back to stdlib json otherwise.
         """
         if _use_orjson:
             # orjson.loads accepts str or bytes
-            return orjson.loads(json_str)
+            return orjson.loads(json_payload)
         else:
             import json
-            return json.loads(json_str)
+            return json.loads(json_payload)
 
     @staticmethod
     def _deserialize_value(value: Any, var_type: str) -> Any:
@@ -303,7 +302,7 @@ class TypeSerializer:
             # Create Any message with metadata
             any_msg = any_pb2.Any()
             any_msg.type_url = f"type.googleapis.com/snakepit.{var_type}.binary"
-            any_msg.value = TypeSerializer._serialize_value(metadata, 'string').encode('utf-8')
+            any_msg.value = TypeSerializer._serialize_value(metadata, 'string')
             
             # Serialize data as binary
             binary_data = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
@@ -322,7 +321,7 @@ class TypeSerializer:
             # Create Any message with metadata
             any_msg = any_pb2.Any()
             any_msg.type_url = f"type.googleapis.com/snakepit.{var_type}.binary"
-            any_msg.value = TypeSerializer._serialize_value(metadata, 'string').encode('utf-8')
+            any_msg.value = TypeSerializer._serialize_value(metadata, 'string')
             
             # Serialize data as binary
             binary_data = pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
@@ -340,7 +339,7 @@ class TypeSerializer:
         var_type = type_parts[-2]  # Get type before .binary
         
         # Decode metadata
-        metadata = TypeSerializer._deserialize_json(any_msg.value.decode('utf-8'))
+        metadata = TypeSerializer._deserialize_json(any_msg.value)
         
         # Deserialize binary data
         data = pickle.loads(binary_data)

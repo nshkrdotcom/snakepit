@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2025-12-31
+
+### Fixed
+- **Python Any encoding performance** - Avoided extra UTF-8 decode/encode round-trips in `TypeSerializer`
+  - JSON payloads now stay as bytes for `google.protobuf.Any.value`
+  - Stabilizes orjson benchmark expectations on large payloads
+- **Test isolation** - Prevented telemetry/logging state bleed across tests
+  - OOM telemetry assertions now scoped by operation ID
+  - Logging tests reset global logging disable state
+- **Python integration test bootstrap** - Ensure `--include python_integration` reliably provisions deps
+  - CLI tag detection now triggers bootstrap and real env doctor checks
+  - Test helper validates `.venv` exists after bootstrap and skips redundant deps fetches
+- **HealthMonitor cleanup** - Ignore benign shutdown races in test teardown
+- **Ready file race condition on CI** - Fixed flaky gRPC server startup on slow/loaded systems
+  - `read_ready_file/1` now returns `:not_ready` instead of error when file is empty
+  - Polling loop continues retrying instead of failing immediately
+  - Resolves `{:invalid_ready_file, ""}` errors on GitHub Actions runners
+  - Python already uses atomic rename (`os.replace`), but edge cases on slow filesystems could still produce empty reads
+
 ## [0.8.6] - 2025-12-31
 
 ### Added

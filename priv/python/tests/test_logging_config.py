@@ -2,8 +2,8 @@ import os
 import logging
 
 
-def test_default_level_is_error():
-    os.environ.pop("SNAKEPIT_LOG_LEVEL", None)
+def test_default_level_is_error(monkeypatch):
+    monkeypatch.delenv("SNAKEPIT_LOG_LEVEL", raising=False)
 
     from snakepit_bridge import logging_config
 
@@ -13,9 +13,11 @@ def test_default_level_is_error():
     assert logger.isEnabledFor(logging.ERROR)
     assert not logger.isEnabledFor(logging.DEBUG)
 
+    logging.disable(logging.NOTSET)
 
-def test_respects_env_var():
-    os.environ["SNAKEPIT_LOG_LEVEL"] = "debug"
+
+def test_respects_env_var(monkeypatch):
+    monkeypatch.setenv("SNAKEPIT_LOG_LEVEL", "debug")
 
     from snakepit_bridge import logging_config
 
@@ -24,9 +26,11 @@ def test_respects_env_var():
     logger = logging_config.get_logger("test")
     assert logger.isEnabledFor(logging.DEBUG)
 
+    logging.disable(logging.NOTSET)
 
-def test_none_disables_logging():
-    os.environ["SNAKEPIT_LOG_LEVEL"] = "none"
+
+def test_none_disables_logging(monkeypatch):
+    monkeypatch.setenv("SNAKEPIT_LOG_LEVEL", "none")
 
     from snakepit_bridge import logging_config
 
@@ -34,3 +38,5 @@ def test_none_disables_logging():
 
     logger = logging_config.get_logger("test")
     assert not logger.isEnabledFor(logging.ERROR)
+
+    logging.disable(logging.NOTSET)

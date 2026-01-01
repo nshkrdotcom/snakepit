@@ -369,3 +369,125 @@ def test_streaming_completes_under_backpressure(stub_factory):
     assert HighVolumeStreamingAdapter.cleanup_called is True
     # All chunks should have been produced
     assert HighVolumeStreamingAdapter.chunks_produced == 250
+
+
+# --- Boolean type inference tests ---
+
+
+class BooleanAdapter:
+    """Adapter that returns boolean values to test type inference."""
+    last_result = None
+
+    def set_session_context(self, context: SessionContext) -> None:
+        self._context = context
+
+    def execute_tool(self, tool_name: str, arguments: dict, context):
+        """Return boolean values based on tool name."""
+        if tool_name == "return_true":
+            BooleanAdapter.last_result = True
+            return True
+        elif tool_name == "return_false":
+            BooleanAdapter.last_result = False
+            return False
+        elif tool_name == "return_int":
+            BooleanAdapter.last_result = 42
+            return 42
+        elif tool_name == "return_float":
+            BooleanAdapter.last_result = 3.14
+            return 3.14
+        return None
+
+
+def test_boolean_true_type_inference(stub_factory):
+    """
+    Verify that boolean True is correctly inferred as 'boolean' type, not 'float'.
+
+    This tests a critical bug where isinstance(True, (int, float)) returns True
+    (since bool is a subclass of int in Python), causing booleans to be
+    misclassified as floats and serialized as 1.0/0.0 instead of true/false.
+    """
+    _created, grpc_module = stub_factory
+
+    async def run_call():
+        servicer = grpc_module.BridgeServiceServicer(
+            BooleanAdapter,
+            "localhost:50051",
+            heartbeat_options={"enabled": False},
+        )
+        request = pb2.ExecuteToolRequest(
+            session_id="session-bool-1",
+            tool_name="return_true",
+        )
+        context = FakeContext()
+        response = await servicer.ExecuteTool(request, context)
+        return response
+
+    response = asyncio.run(run_call())
+
+    # Verify the response was successful
+    assert response.success is True
+
+    # Critical assertion: the type_url must indicate boolean, not float
+    # If this fails with "float" in the type_url, the boolean type inference is broken
+    assert "boolean" in response.result.type_url, (
+        f"Expected 'boolean' in type_url, got: {response.result.type_url}. "
+        "Boolean was misclassified as float due to isinstance(True, (int, float)) being True."
+    )
+
+    # Verify the value is the JSON boolean true, not the number 1 or 1.0
+    result_json = response.result.value.decode("utf-8")
+    assert result_json == "true", (
+        f"Expected JSON 'true', got: {result_json}. "
+        "Boolean was serialized as a number instead of a boolean."
+    )
+
+
+def test_boolean_false_type_inference(stub_factory):
+    """Verify that boolean False is correctly inferred as 'boolean' type."""
+    _created, grpc_module = stub_factory
+
+    async def run_call():
+        servicer = grpc_module.BridgeServiceServicer(
+            BooleanAdapter,
+            "localhost:50051",
+            heartbeat_options={"enabled": False},
+        )
+        request = pb2.ExecuteToolRequest(
+            session_id="session-bool-2",
+            tool_name="return_false",
+        )
+        context = FakeContext()
+        response = await servicer.ExecuteTool(request, context)
+        return response
+
+    response = asyncio.run(run_call())
+
+    assert response.success is True
+    assert "boolean" in response.result.type_url
+    result_json = response.result.value.decode("utf-8")
+    assert result_json == "false", f"Expected 'false', got: {result_json}"
+
+
+def test_integer_still_inferred_as_float(stub_factory):
+    """Verify that integers are still correctly inferred as 'float' type."""
+    _created, grpc_module = stub_factory
+
+    async def run_call():
+        servicer = grpc_module.BridgeServiceServicer(
+            BooleanAdapter,
+            "localhost:50051",
+            heartbeat_options={"enabled": False},
+        )
+        request = pb2.ExecuteToolRequest(
+            session_id="session-int-1",
+            tool_name="return_int",
+        )
+        context = FakeContext()
+        response = await servicer.ExecuteTool(request, context)
+        return response
+
+    response = asyncio.run(run_call())
+
+    assert response.success is True
+    # Integers should still be classified as float (for numeric compatibility)
+    assert "float" in response.result.type_url

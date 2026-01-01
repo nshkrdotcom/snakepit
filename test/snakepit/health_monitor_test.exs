@@ -13,7 +13,7 @@ defmodule Snakepit.HealthMonitorTest do
         )
 
       assert Process.alive?(pid)
-      GenServer.stop(pid)
+      stop_if_alive(pid)
     end
   end
 
@@ -28,9 +28,7 @@ defmodule Snakepit.HealthMonitorTest do
           max_crashes: 3
         )
 
-      on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid)
-      end)
+      on_exit(fn -> stop_if_alive(pid) end)
 
       {:ok, hm: pid}
     end
@@ -63,9 +61,7 @@ defmodule Snakepit.HealthMonitorTest do
           max_crashes: 2
         )
 
-      on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid)
-      end)
+      on_exit(fn -> stop_if_alive(pid) end)
 
       {:ok, hm: pid}
     end
@@ -92,9 +88,7 @@ defmodule Snakepit.HealthMonitorTest do
           check_interval_ms: 1000
         )
 
-      on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid)
-      end)
+      on_exit(fn -> stop_if_alive(pid) end)
 
       {:ok, hm: pid}
     end
@@ -132,7 +126,17 @@ defmodule Snakepit.HealthMonitorTest do
       assert Map.has_key?(stats, :workers_with_crashes)
       assert Map.has_key?(stats, :is_healthy)
 
-      GenServer.stop(hm)
+      stop_if_alive(hm)
+    end
+  end
+
+  defp stop_if_alive(pid) do
+    if Process.alive?(pid) do
+      try do
+        GenServer.stop(pid)
+      catch
+        :exit, _reason -> :ok
+      end
     end
   end
 end

@@ -21,6 +21,7 @@ defmodule Snakepit.Bootstrap do
   Options:
     * `:project_root` - overrides the working directory (defaults to `File.cwd!/0`)
     * `:runner` - injects a custom runner, useful for tests
+    * `:skip_mix_deps` - skips `mix deps.get` (useful for test bootstrapping)
   """
   @spec run(Keyword.t()) :: :ok | {:error, term()}
   def run(opts \\ []) do
@@ -45,8 +46,9 @@ defmodule Snakepit.Bootstrap do
 
   defp do_run(opts) do
     state = build_state(opts)
+    skip_mix_deps = Keyword.get(opts, :skip_mix_deps, false)
 
-    with :ok <- fetch_mix_deps(state),
+    with :ok <- maybe_fetch_mix_deps(state, skip_mix_deps),
          :ok <- ensure_managed_python(state),
          :ok <- ensure_primary_python(state),
          :ok <- run_script(state, @setup_script, :setup_pythons),
@@ -86,6 +88,9 @@ defmodule Snakepit.Bootstrap do
       {:error, reason} -> {:error, {:mix_failure, "deps.get", reason}}
     end
   end
+
+  defp maybe_fetch_mix_deps(_state, true), do: :ok
+  defp maybe_fetch_mix_deps(state, false), do: fetch_mix_deps(state)
 
   defp ensure_primary_python(%{project_root: root, runner: runner}) do
     requirements = Path.join([root | @requirements_path])

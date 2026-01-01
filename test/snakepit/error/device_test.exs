@@ -76,17 +76,20 @@ defmodule Snakepit.Error.DeviceTest do
     test "emits telemetry event on OOM" do
       parent = self()
       ref = make_ref()
+      operation = "oom-test-#{inspect(ref)}"
 
       :telemetry.attach(
         "oom-test-#{inspect(ref)}",
         [:snakepit, :error, :oom],
         fn _event, measurements, metadata, _config ->
-          send(parent, {:telemetry, measurements, metadata})
+          if metadata.operation == operation do
+            send(parent, {:telemetry, measurements, metadata})
+          end
         end,
         nil
       )
 
-      _error = Device.out_of_memory({:cuda, 0}, 1024, 512)
+      _error = Device.out_of_memory({:cuda, 0}, 1024, 512, operation)
 
       assert_receive {:telemetry, measurements, metadata}
       assert measurements.requested_bytes == 1024

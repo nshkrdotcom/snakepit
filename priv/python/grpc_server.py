@@ -520,14 +520,16 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                 response = pb2.ExecuteToolResponse(success=True)
 
                 # Infer the type of the result (simple type inference for now)
-                if isinstance(result_data, dict):
+                # IMPORTANT: Check bool BEFORE int/float because bool is a subclass of int.
+                # isinstance(True, (int, float)) returns True, so we must check bool first.
+                if isinstance(result_data, bool):
+                    result_type = "boolean"
+                elif isinstance(result_data, dict):
                     result_type = "map"
                 elif isinstance(result_data, str):
                     result_type = "string"
                 elif isinstance(result_data, (int, float)):
                     result_type = "float"
-                elif isinstance(result_data, bool):
-                    result_type = "boolean"
                 elif isinstance(result_data, list):
                     result_type = "list"
                 else:

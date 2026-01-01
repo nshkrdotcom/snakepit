@@ -1832,8 +1832,13 @@ defmodule Snakepit.GRPCWorker do
     case File.read(path) do
       {:ok, contents} ->
         case Integer.parse(String.trim(contents)) do
-          {port, _} -> {:ok, port}
-          :error -> {:error, {:invalid_ready_file, contents}}
+          {port, _} ->
+            {:ok, port}
+
+          :error ->
+            # Empty or invalid content - file may still be mid-write (atomic rename race)
+            # Treat as not ready and keep polling
+            :not_ready
         end
 
       {:error, :enoent} ->

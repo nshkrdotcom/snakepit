@@ -87,6 +87,7 @@ include_tags_from_args =
   end)
 
 serial_run? = Enum.any?(include_tags_from_args, &(&1 in ["python_integration", "performance"]))
+python_integration_from_args = Enum.member?(include_tags_from_args, "python_integration")
 
 exunit_opts = [exclude: [:performance, :python_integration, :slow]]
 exunit_opts = if serial_run?, do: Keyword.put(exunit_opts, :max_cases, 1), else: exunit_opts
@@ -95,19 +96,19 @@ exunit_opts = if serial_run?, do: Keyword.put(exunit_opts, :max_cases, 1), else:
 ExUnit.start(exunit_opts)
 
 include_tags = ExUnit.configuration()[:include] || []
-python_integration? = Keyword.has_key?(include_tags, :python_integration)
+
+python_integration? =
+  python_integration_from_args or Keyword.has_key?(include_tags, :python_integration)
 
 if python_integration? do
   # Ensure Python deps are available before starting Snakepit for integration tests.
-  :ok = Snakepit.Bootstrap.run()
+  :ok = Snakepit.Bootstrap.run(skip_mix_deps: true)
   Application.put_env(:snakepit, :env_doctor_module, Snakepit.EnvDoctor)
 
   venv_python = Path.join(File.cwd!(), ".venv/bin/python3")
 
-  if is_nil(System.get_env("SNAKEPIT_PYTHON")) and
-       is_nil(Application.get_env(:snakepit, :python_executable)) and
-       File.exists?(venv_python) do
-    Application.put_env(:snakepit, :python_executable, venv_python)
+  if not File.exists?(venv_python) do
+    raise ".venv missing after bootstrap; expected #{venv_python}"
   end
 else
   # Ensure env doctor is stubbed for unit tests (real doctor exercised via dedicated tests).
