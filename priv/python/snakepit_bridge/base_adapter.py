@@ -92,10 +92,46 @@ def tool(description: str = "",
 
 class BaseAdapter:
     """Base class for all Snakepit Python adapters."""
-    
+
     def __init__(self):
         self._tools_cache = None
-        
+        self._session_context = None
+
+    @property
+    def session_id(self) -> Optional[str]:
+        """
+        Get the session ID from the current context.
+
+        This is the authoritative session_id for this request.
+        Use this for any session-scoped operations.
+
+        Returns:
+            Session ID string or None if no context is set
+        """
+        ctx = getattr(self, 'session_context', None) or self._session_context
+        if ctx:
+            return ctx.session_id
+        return None
+
+    def set_session_context(self, session_context) -> None:
+        """
+        Set the session context for this adapter instance.
+
+        This is called by the gRPC server before tool execution.
+        The session_id from this context is the authoritative session
+        identifier for routing and ref storage.
+
+        Subclasses may override this, but should call super().set_session_context()
+        or set self.session_context = session_context.
+
+        Args:
+            session_context: SessionContext instance with session_id and stub
+        """
+        self._session_context = session_context
+        # Also set as attribute for backward compatibility with adapters that
+        # use self.session_context = context in their __init__ or elsewhere
+        self.session_context = session_context
+
     def get_tools(self) -> List[ToolRegistration]:
         """
         Discover and return tool specifications for all tools in this adapter.

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.6] - 2025-12-31
+
+### Added
+- **Session cleanup telemetry** - Emit telemetry events for session lifecycle monitoring
+  - `[:snakepit, :bridge, :session, :pruned]` - Emitted when sessions expire via TTL
+  - `[:snakepit, :bridge, :session, :accumulation_warning]` - Emitted when session count exceeds thresholds
+
+- **Strict mode for session store** - New `strict_mode: true` option for dev/test environments
+  - Logs loud warnings when session count exceeds 80% of `max_sessions`
+  - Helps detect session leaks during development
+
+- **BaseAdapter session context** - Added `session_id` property and `set_session_context()` to `BaseAdapter`
+  - Ensures consistent session_id handling across all adapters
+  - Backward compatible with existing adapter implementations
+
+- **Session Scoping Guide** - New documentation at `guides/session-scoping-rules.md`
+  - Explains session lifecycle, reference scoping, and recommended patterns
+  - Documents telemetry events and strict mode configuration
+
 ## [0.8.5] - 2025-12-31
 
 ### Fixed

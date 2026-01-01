@@ -20,6 +20,8 @@ defmodule Snakepit.Bridge.SessionStore do
   # 1 hour
   @default_ttl 3600
   @default_max_sessions 10_000
+  # Warn when session count exceeds this percentage of max
+  @session_warning_threshold 0.8
 
   ## Client API
 
@@ -246,6 +248,9 @@ defmodule Snakepit.Bridge.SessionStore do
     quota_config = Application.get_env(:snakepit, :session_store, %{})
     max_sessions = resolve_quota(opts, quota_config, :max_sessions, @default_max_sessions)
 
+    # Strict mode for dev/test - warns loudly on session accumulation
+    strict_mode = Keyword.get(opts, :strict_mode, Map.get(quota_config, :strict_mode, false))
+
     Process.send_after(self(), :cleanup_expired_sessions, cleanup_interval)
 
     state = %{
@@ -254,6 +259,7 @@ defmodule Snakepit.Bridge.SessionStore do
       cleanup_interval: cleanup_interval,
       default_ttl: default_ttl,
       max_sessions: max_sessions,
+      strict_mode: strict_mode,
       stats: %{
         sessions_created: 0,
         sessions_deleted: 0,
@@ -417,7 +423,16 @@ defmodule Snakepit.Bridge.SessionStore do
 
   @impl true
   def handle_info(:cleanup_expired_sessions, state) do
-    {_expired_count, new_stats} = do_cleanup_expired_sessions(state.table, state.stats)
+    {expired_count, new_stats} = do_cleanup_expired_sessions(state.table, state.stats)
+
+    # Emit telemetry for session pruning
+    if expired_count > 0 do
+      emit_cleanup_telemetry(state, expired_count, :ttl)
+    end
+
+    # Check session accumulation thresholds and warn if needed
+    maybe_warn_session_accumulation(state)
+
     Process.send_after(self(), :cleanup_expired_sessions, state.cleanup_interval)
     {:noreply, %{state | stats: new_stats}}
   end
@@ -509,5 +524,89 @@ defmodule Snakepit.Bridge.SessionStore do
 
         {:reply, {:ok, existing_session}, state}
     end
+  end
+
+  # Telemetry emission for session pruning events
+  defp emit_cleanup_telemetry(state, count, reason) do
+    current_sessions = :ets.info(state.table, :size)
+
+    :telemetry.execute(
+      [:snakepit, :bridge, :session, :pruned],
+      %{
+        count: count,
+        remaining_sessions: current_sessions,
+        system_time: System.system_time()
+      },
+      %{
+        reason: reason,
+        table_name: state.table_name,
+        max_sessions: state.max_sessions
+      }
+    )
+  end
+
+  # Warn on session accumulation in strict mode or when approaching limits
+  defp maybe_warn_session_accumulation(state) do
+    current_sessions = :ets.info(state.table, :size)
+    max_sessions = state.max_sessions
+
+    cond do
+      max_sessions == :infinity ->
+        :ok
+
+      current_sessions >= max_sessions ->
+        emit_accumulation_warning(state, current_sessions, :quota_exceeded)
+
+        if state.strict_mode do
+          SLog.warning(
+            @log_category,
+            """
+            [STRICT MODE] Session quota exceeded!
+            Current: #{current_sessions}, Max: #{max_sessions}
+            Sessions are being rejected. Check for session leaks.
+            """
+          )
+        end
+
+      current_sessions >= trunc(max_sessions * @session_warning_threshold) ->
+        emit_accumulation_warning(state, current_sessions, :threshold_warning)
+
+        if state.strict_mode do
+          utilization = Float.round(current_sessions / max_sessions * 100, 1)
+
+          SLog.warning(
+            @log_category,
+            """
+            [STRICT MODE] High session count warning!
+            Current: #{current_sessions}, Max: #{max_sessions} (#{utilization}% utilization)
+            Consider checking for session leaks or increasing max_sessions.
+            """
+          )
+        end
+
+      true ->
+        :ok
+    end
+  end
+
+  defp emit_accumulation_warning(state, current_sessions, reason) do
+    :telemetry.execute(
+      [:snakepit, :bridge, :session, :accumulation_warning],
+      %{
+        current_sessions: current_sessions,
+        max_sessions: state.max_sessions,
+        utilization:
+          if(state.max_sessions != :infinity,
+            do: current_sessions / state.max_sessions,
+            else: 0.0
+          ),
+        system_time: System.system_time()
+      },
+      %{
+        reason: reason,
+        table_name: state.table_name,
+        strict_mode: state.strict_mode
+      }
+    )
   end
 end

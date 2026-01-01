@@ -1,7 +1,7 @@
 defmodule Snakepit.MixProject do
   use Mix.Project
 
-  @version "0.8.5"
+  @version "0.8.6"
   @source_url "https://github.com/nshkrdotcom/snakepit"
 
   def project do
@@ -128,6 +128,7 @@ defmodule Snakepit.MixProject do
         {"guides/getting-started.md", title: "Getting Started"},
         {"guides/configuration.md", title: "Configuration"},
         {"guides/worker-profiles.md", title: "Worker Profiles"},
+        {"guides/session-scoping-rules.md", title: "Session Scoping"},
         {"guides/hardware-detection.md", title: "Hardware Detection"},
         {"guides/fault-tolerance.md", title: "Fault Tolerance"},
         {"guides/streaming.md", title: "Streaming"},
@@ -149,7 +150,8 @@ defmodule Snakepit.MixProject do
         ],
         Configuration: [
           "guides/configuration.md",
-          "guides/worker-profiles.md"
+          "guides/worker-profiles.md",
+          "guides/session-scoping-rules.md"
         ],
         Features: [
           "guides/hardware-detection.md",
