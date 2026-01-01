@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `snakepit_bridge.proto` file defines the unified gRPC protocol for the DSPex bridge, supporting both tool execution and variable management with streaming capabilities.
+The `snakepit_bridge.proto` file defines the gRPC protocol for the Snakepit bridge, supporting session management, tool execution (including streaming), tool registration/discovery, and telemetry streaming.
 
 ## Protocol Version
 
@@ -11,107 +11,104 @@ The `snakepit_bridge.proto` file defines the unified gRPC protocol for the DSPex
 
 ## Service Definition
 
-The `SnakepitBridge` service provides the following RPC methods:
+The `BridgeService` service provides the following RPC methods:
 
 ### Health & Session Management
 
 - `Ping` - Health check endpoint
 - `InitializeSession` - Initialize a new session with configuration
 - `CleanupSession` - Clean up session resources
-
-### Variable Operations
-
-- `GetVariable` - Get a single variable value
-- `SetVariable` - Update a variable value
-- `GetVariables` - Batch get multiple variables
-- `SetVariables` - Batch set multiple variables
-- `RegisterVariable` - Register a new variable in the session
+- `GetSession` - Get session details
+- `Heartbeat` - Session keepalive
 
 ### Tool Execution
 
-- `ExecuteTool` - Execute a tool synchronously
-- `ExecuteStreamingTool` - Execute a tool with streaming results
+- `ExecuteTool` - Execute a tool synchronously (unary RPC)
+- `ExecuteStreamingTool` - Execute a tool with streaming results (server streaming RPC)
 
-### Streaming & Reactive
+### Tool Registration & Discovery
 
-- `WatchVariables` - Stream variable updates in real-time
+- `RegisterTools` - Register Python tools with the bridge
+- `GetExposedElixirTools` - Discover tools exposed by Elixir
+- `ExecuteElixirTool` - Call an Elixir-side tool from Python
 
-### Advanced Features (Stage 4)
+### Telemetry
 
-- `AddDependency` - Add dependency between variables
-- `StartOptimization` - Start variable optimization
-- `StopOptimization` - Stop ongoing optimization
-- `GetVariableHistory` - Get variable change history
-- `RollbackVariable` - Rollback variable to previous version
+- `StreamTelemetry` - Bidirectional telemetry stream for metrics and tracing
 
 ## Binary Serialization
 
-The protocol includes automatic binary serialization for efficient handling of large data:
-
-### Overview
-- **Automatic**: Triggered when data exceeds 10KB threshold
-- **Transparent**: No API changes required
-- **Optimized**: 5-10x faster for large tensors and embeddings
-- **Types**: Currently supports `tensor` and `embedding` types
+The protocol supports binary payloads for efficient handling of large data:
 
 ### Binary Fields
-- `Variable.binary_value` (field 12): Stores large variable data
-- `SetVariableRequest.binary_value` (field 6): Binary data for updates
-- `RegisterVariableRequest.initial_binary_value` (field 7): Initial binary value
-- `BatchSetVariablesRequest.binary_updates` (field 5): Map of binary updates
-- `ExecuteToolRequest.binary_parameters` (field 6): Binary tool parameters
 
-### Format
-- **Metadata**: Stored in the standard `value` field as JSON
-  - Contains: shape, dtype, binary_format, type
-- **Binary Data**: Stored in the `binary_value` field
-  - Elixir side: Erlang Term Format (ETF)
-  - Python side: Python pickle format
+- `ExecuteToolRequest.binary_parameters` (field 6): Binary parameters for large inputs (images, audio, etc.)
+- `ExecuteToolResponse.binary_result` (field 6): Binary result payload
+- `ExecuteElixirToolResponse.binary_result` (field 6): Binary result for Elixir tool calls
 
-### Example
-```protobuf
-// For a large tensor
-Variable {
-  name: "large_tensor"
-  type: "tensor"
-  value: Any {
-    type_url: "type.googleapis.com/snakepit.tensor.binary"
-    value: "{\"shape\": [1000, 1000], \"dtype\": \"float32\", \"binary_format\": \"pickle\"}"
-  }
-  binary_value: <8MB of binary data>
-}
+### Format Convention
+
+- `binary_*` fields are **opaque bytes**; producer and consumer must agree on format
+- Use the `metadata` field to communicate content-type, encoding, or other format details
+- Keys in `binary_parameters` should match parameter names
+
+### Pickle Opt-In (Python)
+
+By default, `binary_parameters` are passed as raw bytes to Python tools. To enable Python pickle deserialization for a specific parameter, set the metadata key:
+
 ```
+metadata["binary_format:<param_name>"] = "pickle"
+```
+
+Example:
+```python
+# Elixir/client side - mark 'model_weights' for pickle deserialization
+request = ExecuteToolRequest(
+    tool_name="load_model",
+    binary_parameters={"model_weights": pickled_bytes},
+    metadata={"binary_format:model_weights": "pickle"}
+)
+
+# Python adapter receives: arguments["model_weights"] as deserialized object
+```
+
+Without this metadata key, `arguments["model_weights"]` would be raw `bytes`.
 
 ## Type System
 
-The protocol supports the following variable types:
+### `Any` Encoding Convention
 
-1. **Basic Types**
-   - `float` - Floating point numbers
-   - `integer` - Integer values
-   - `string` - Text strings
-   - `boolean` - True/false values
+The protocol uses `google.protobuf.Any` in two ways:
 
-2. **Advanced Types**
-   - `choice` - Enumeration with allowed values
-   - `module` - DSPy module selection
-   - `embedding` - Vector representations
-   - `tensor` - Multi-dimensional arrays
+1. **True protobuf packing** - Wrap values in protobuf wrapper types (DoubleValue, StringValue, etc.) and use `Any.Pack()`
+2. **JSON bytes convention** - JSON-encode complex data and store raw bytes in `Any.value` with a custom type URL
 
-## Serialization
+For maximum compatibility, prefer the JSON bytes convention for complex types:
 
-### Using protobuf Any
+```python
+import json
+from google.protobuf import any_pb2
 
-The protocol uses `google.protobuf.Any` for variable values and tool parameters. This allows type-safe serialization of various data types:
+# JSON bytes convention (recommended for complex types)
+any_msg = any_pb2.Any()
+any_msg.type_url = "type.snakepit.bridge/json"
+any_msg.value = json.dumps({"key": "value"}).encode("utf-8")
+```
 
-- **Simple types** (int, float, string, bool) - Use corresponding protobuf wrapper types
-- **Complex types** (lists, dicts, tensors) - JSON-encode and wrap in StringValue
-- **Custom types** - Define custom protobuf messages as needed
+Reserved payload fields (used by the protocol):
+- `protocol_version` - Wire protocol version
+- `call_type` - RPC call type indicator
+- `session_id` - Session identifier
+
+Tool parameters and results use `google.protobuf.Any` for flexible typing:
+
+1. **Simple types** (int, float, string, bool) - Use corresponding protobuf wrapper types
+2. **Complex types** (lists, dicts) - JSON-encode and wrap in StringValue
+3. **Binary data** - Use the dedicated `binary_parameters`/`binary_result` fields
 
 ### Example Serialization
 
 ```python
-# Python example
 from google.protobuf import any_pb2
 from google.protobuf.wrappers_pb2 import StringValue, DoubleValue
 
@@ -145,13 +142,13 @@ This generates Elixir modules in `lib/snakepit/grpc/generated/`
 cd priv/python
 python -m grpc_tools.protoc \
   -I../proto \
-  --python_out=snakepit_bridge/grpc \
-  --pyi_out=snakepit_bridge/grpc \
-  --grpc_python_out=snakepit_bridge/grpc \
+  --python_out=. \
+  --pyi_out=. \
+  --grpc_python_out=. \
   ../proto/snakepit_bridge.proto
 ```
 
-This generates Python modules in `snakepit_bridge/grpc/`
+This generates Python modules in `priv/python/`
 
 ## Message Details
 
@@ -159,18 +156,22 @@ This generates Python modules in `snakepit_bridge/grpc/`
 
 - **InitializeSessionRequest**: Contains session ID, metadata, and configuration
 - **SessionConfig**: Configures caching, TTL, and telemetry
-- **InitializeSessionResponse**: Returns available tools and initial variables
-
-### Variable Messages
-
-- **Variable**: Complete variable representation with ID, name, type, value, constraints, metadata, source, version, and optimization status
-- **VariableUpdate**: Streamed update containing variable changes with metadata and timestamp
+- **InitializeSessionResponse**: Returns success status and available tools
 
 ### Tool Messages
 
-- **ToolSpec**: Tool definition with parameters, metadata, and streaming support
-- **ExecuteToolRequest**: Tool execution request with parameters and metadata
-- **ToolChunk**: Streaming chunk for progressive tool results
+- **ToolSpec**: Tool definition with name, description, parameters, metadata, and streaming support flag
+- **ParameterSpec**: Parameter definition with name, type, description, required flag, default value, and validation
+- **ExecuteToolRequest**: Tool execution request with session ID, tool name, parameters, metadata, and optional binary data
+- **ExecuteToolResponse**: Result with success flag, result payload, error message, metadata, execution time, and optional binary result
+- **ToolChunk**: Streaming chunk with chunk ID, data bytes, is_final flag, and metadata
+
+### Telemetry Messages
+
+- **TelemetryEvent**: Event with name parts, measurements, metadata, timestamp, and correlation ID
+- **TelemetryControl**: Control message for toggle, sampling, or filtering
+- **TelemetrySamplingUpdate**: Sampling rate and event patterns
+- **TelemetryEventFilter**: Allow/deny lists for event filtering
 
 ## Error Handling
 
@@ -178,31 +179,19 @@ All response messages include:
 - `success` - Boolean indicating operation success
 - `error_message` - Human-readable error description when success=false
 
-## Versioning
-
-Variables support optimistic locking through version numbers:
-- Each variable has a `version` field incremented on updates
-- `SetVariableRequest` includes `expected_version` for conflict detection
-
-## Streaming
-
-The protocol supports server-side streaming for:
-- Tool execution results (`ExecuteStreamingTool`)
-- Variable updates (`WatchVariables`)
-
-Clients should handle stream termination and reconnection as needed.
-
 ## Security Considerations
 
-1. **Session Isolation**: All operations require a valid session_id
-2. **Type Validation**: All values are validated against their declared types
-3. **Access Control**: Future support via `access_control_json` field
-4. **Rate Limiting**: Should be implemented at the gRPC interceptor level
+1. **Local deployment model**: The bridge is designed for trusted/local environments
+2. **Session isolation**: All operations require a valid session_id
+3. **No TLS by default**: Uses insecure channels (appropriate for same-host communication)
 
-## Migration Notes
+For remote/untrusted deployments, additional security measures (TLS, auth) would be needed.
 
-This protocol unifies the previously separate tool and variable bridges:
-- Tool execution remains largely unchanged
-- Variable operations are new additions
-- All operations now go through the same gRPC channel
-- Sessions provide isolation and state management
+## Roadmap
+
+The following features are planned but not yet implemented:
+
+- Variable management (get/set/watch variables)
+- Dependency tracking between variables
+- Optimization APIs (start/stop optimization, history, rollback)
+- TLS and authentication support

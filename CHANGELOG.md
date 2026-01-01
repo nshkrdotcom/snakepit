@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2025-12-31
+
+### Fixed
+- **GRPCWorker graceful shutdown** - Eliminated spurious crash logs during application shutdown
+  - Added `shutting_down` flag to distinguish expected exits from unexpected crashes
+  - Handle supervisor EXIT signals (`:shutdown`, `{:shutdown, _}`) explicitly
+  - Detect shutdown via mailbox peek and pool liveness checks to handle message race conditions
+  - Shutdown exit codes (0, 137/SIGKILL, 143/SIGTERM) logged at debug level during shutdown
+  - Non-zero exits only logged as errors when not in shutdown context
+
+- **Configurable shutdown timeouts** - Graceful shutdown timeout now configurable via `:graceful_shutdown_timeout_ms`
+  - Default increased from 2s to 6s to accommodate Python's async shutdown envelope
+  - `child_spec` and `Worker.Starter` derive supervisor shutdown timeout from this config
+  - New `Snakepit.GRPCWorker.supervisor_shutdown_timeout/0` for custom supervision trees
+
+- **Python server shutdown** - Improved graceful termination sequence
+  - Server stop grace period increased to 2 seconds
+  - `wait_for_termination` now awaited with 3s timeout before force-cancel
+  - Sequential shutdown: close servicer → stop server → await termination task
+
+- **Python dependency version mismatch** - Updated `requirements.txt` to match generated protobuf/grpc stubs
+  - `grpcio`: `>=1.60.0` → `>=1.76.0`
+  - `protobuf`: `>=4.25.0` → `>=6.31.1`
+  - Previously, users installing minimum versions would get runtime import errors
+
+- **Proto README documentation drift** - Rewrote `priv/proto/README.md` to match actual implementation
+  - Fixed service name: `SnakepitBridge` → `BridgeService`
+  - Removed non-existent methods (GetVariable, SetVariable, WatchVariables, optimization APIs)
+  - Documented only implemented RPC methods
+  - Added `Any` encoding convention documentation
+  - Clarified binary payload format (opaque bytes, not pickle/ETF specific)
+  - Moved aspirational features to "Roadmap" section
+
+- **Streaming backpressure** - Added bounded queue (maxsize=100) to `ExecuteStreamingTool`
+  - Prevents unbounded memory growth when producer outpaces consumer
+  - `drain_sync` now blocks on enqueue with proper exception handling
+
+- **Streaming cancellation handling** - Producer now stops when client disconnects
+  - Added cancellation event propagation to drain loops
+  - Added disconnect watcher task that polls `context.is_active()`
+  - Producer task explicitly cancelled on cleanup
+  - Iterator/generator properly closed via `aclose()`/`close()`
+
+- **Adapter lifecycle cleanup** - Added `cleanup()` calls to adapter lifecycle
+  - `ExecuteTool`: Calls `adapter.cleanup()` in finally block (always runs)
+  - `ExecuteStreamingTool`: Calls `adapter.cleanup()` in finally block
+  - Uses `inspect.isawaitable()` pattern for robust sync/async handling
+  - Added `_maybe_cleanup()` and `_close_iterator()` helper functions
+
+- **Threaded server parity** - Applied all streaming/cleanup fixes to `grpc_server_threaded.py`
+  - Bounded queue, cancellation handling, iterator closing, adapter cleanup
+
+- **CancelledError handling** - Producer now properly re-raises `CancelledError`
+  - Prevents task from blocking on `queue.put()` when consumer is gone
+  - On cancellation, task terminates immediately without sentinel (consumer is already gone)
+
+- **Sentinel delivery under backpressure** - Fixed potential hang when queue is full
+  - Sentinel is now `await queue.put(sentinel)` (guaranteed delivery) on normal completion
+  - Previous `put_nowait` could silently drop sentinel, causing consumer to hang forever
+
+- **Sentinel delivery on disconnect** - Fixed hang when `watch_disconnect()` sets cancelled flag
+  - `watch_disconnect()` now injects sentinel directly into queue when disconnect detected
+  - Drops buffered chunks if needed to make room for sentinel (consumer is gone anyway)
+  - Prevents hang when producer exits normally (not via CancelledError) with cancelled flag set
+
+- **Binary parameters handling** - Fixed unconditional `pickle.loads` security issue
+  - `binary_parameters` now treated as opaque bytes by default (per proto docs)
+  - Pickle only used if `metadata["binary_format:<param>"] == "pickle"`
+  - Enables safe handling of images, audio, and other binary data
+
+- **Loadtest demo formatting** - Fixed `format_number/1` crash on nil values and spacing in output
+
+### Added
+- **CI version guard** - New `scripts/check_stub_versions.py` validates that `requirements.txt` versions match generated protobuf/grpc stubs
+  - Integrated into GitHub Actions CI workflow
+  - Checks protobuf, grpcio, and grpcio-tools versions
+  - Prevents "works for us, breaks for users" dependency issues
+
+- **Streaming cancellation tests** - New tests for streaming cleanup behavior
+  - `test_streaming_cleanup_called_on_normal_completion`
+  - `test_streaming_producer_stops_on_client_disconnect`
+  - `test_async_streaming_cleanup_called`
+  - `test_streaming_completes_under_backpressure` - verifies sentinel delivery with >maxsize chunks
+
+### Changed
+- **Adapter lifecycle documentation** - Clarified per-request adapter lifecycle in `base_adapter.py`
+  - Documented that adapters are instantiated per-request
+  - Added example showing module-level caching pattern for expensive resources
+  - Explained `initialize()`/`cleanup()` semantics
+
+- **Streaming demo modernization** - Updated `execute_streaming_tool_demo.exs` to use standard bootstrap pattern
+
 ## [0.8.4] - 2025-12-30
 
 ### Added
@@ -1216,6 +1308,7 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
+[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.5...HEAD
 [0.8.5]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.5
 [0.8.4]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.4
 [0.8.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.3

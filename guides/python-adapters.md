@@ -75,26 +75,43 @@ Snakepit infers parameter types from Python type annotations:
 | `np.ndarray` | `tensor` | Shape preserved |
 | `bytes` | `binary` | Raw binary data |
 
-### Initialize and Cleanup Lifecycle
+### Per-Request Lifecycle
 
-Adapters can define lifecycle methods for resource management:
+Adapters follow a **per-request lifecycle**:
+
+1. A new adapter instance is created for each incoming RPC request
+2. `initialize()` is called (if defined) at the start of each request
+3. The tool is executed via `execute_tool()` or a decorated method
+4. `cleanup()` is called (if defined) at the end of each request, even on error
+
+Both `initialize()` and `cleanup()` can be sync or async.
 
 ```python
+# Module-level cache for expensive resources
+_model_cache = {}
+
 class MLAdapter(BaseAdapter):
 
     def __init__(self):
         super().__init__()
         self.model = None
 
-    async def initialize(self):
-        """Called before first tool execution."""
-        self.model = await load_model("my-model")
+    def initialize(self):
+        """Called at the start of each request."""
+        # Cache expensive resources at module level
+        if "model" not in _model_cache:
+            _model_cache["model"] = load_model("my-model")
+        self.model = _model_cache["model"]
 
     def cleanup(self):
-        """Called during session cleanup."""
-        if self.model:
-            self.model.unload()
+        """Called at the end of each request (even on error)."""
+        # Release request-specific resources here
+        pass
 ```
+
+**Important**: Since adapters are instantiated per-request, do NOT rely on instance state
+persisting across requests. Use module-level caches (as shown above) or external stores
+for state that must survive across requests.
 
 ## Session Context
 
@@ -310,6 +327,9 @@ import numpy as np
 from snakepit_bridge.base_adapter import BaseAdapter, tool
 from snakepit_bridge import telemetry
 
+# Module-level cache for expensive resources
+_model = None
+
 class ExampleAdapter(BaseAdapter):
     def __init__(self):
         super().__init__()
@@ -319,12 +339,16 @@ class ExampleAdapter(BaseAdapter):
     def set_session_context(self, ctx):
         self.session_context = ctx
 
-    async def initialize(self):
-        self.model = await self.load_model()
+    def initialize(self):
+        """Per-request initialization - load from cache."""
+        global _model
+        if _model is None:
+            _model = self.load_model()
+        self.model = _model
 
     def cleanup(self):
-        if self.model:
-            self.model.unload()
+        """Per-request cleanup - release request-specific resources."""
+        pass  # Model stays cached at module level
 
     @tool(description="Echo input")
     def echo(self, message: str) -> str:

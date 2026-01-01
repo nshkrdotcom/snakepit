@@ -44,6 +44,9 @@ jobs:
     - name: Log uv version
       run: uv --version
 
+    - name: Check stub version compatibility
+      run: python scripts/check_stub_versions.py
+
     - name: Restore dependencies cache
       uses: actions/cache@v4
       with:

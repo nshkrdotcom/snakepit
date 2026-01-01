@@ -19,6 +19,21 @@
 # Run:
 #   mix run examples/execute_streaming_tool_demo.exs
 
+Code.require_file("mix_bootstrap.exs", __DIR__)
+
+Snakepit.Examples.Bootstrap.ensure_mix!([
+  {:snakepit, path: "."}
+])
+
+# Enable pooling for this demo
+Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+Application.put_env(:snakepit, :pooling_enabled, true)
+Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
+Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_host, "localhost")
+Application.put_env(:snakepit, :log_level, :error)
+Snakepit.Examples.Bootstrap.ensure_grpc_port!()
+
 defmodule StreamingToolDemo do
   @moduledoc """
   Demonstrates streaming tool execution via `Snakepit.execute_stream/3`.
@@ -44,25 +59,10 @@ defmodule StreamingToolDemo do
   def run do
     IO.puts("=== Streaming Tool Demo ===\n")
     IO.puts("This demo uses Snakepit.execute_stream/3 (Pool → Worker streaming)\n")
-
-    # Ensure pool is ready - use the Pool module with default pool name
-    case Snakepit.Pool.await_ready(Snakepit.Pool, 10_000) do
-      :ok ->
-        IO.puts("Pool ready. Running demos...\n")
-        demo_progress_streaming()
-        demo_data_streaming()
-        IO.puts("\n=== Demo Complete ===")
-
-      {:error, reason} ->
-        IO.puts("Failed to start pool: #{inspect(reason)}")
-        IO.puts("\nNote: This demo requires a running Snakepit pool with streaming tools.")
-        IO.puts("Make sure your Python adapter has streaming tools registered.")
-        IO.puts("\nExample adapter setup:")
-        IO.puts("  @tool(description=\"Stream progress\", supports_streaming=True)")
-        IO.puts("  def stream_progress(self, steps: int = 10):")
-        IO.puts("      for i in range(steps):")
-        IO.puts("          yield {\"step\": i + 1, \"total\": steps}")
-    end
+    IO.puts("Pool ready. Running demos...\n")
+    demo_progress_streaming()
+    demo_data_streaming()
+    IO.puts("\n=== Demo Complete ===")
   end
 
   defp demo_progress_streaming do
@@ -116,5 +116,7 @@ defmodule StreamingToolDemo do
   end
 end
 
-# Run the demo
-StreamingToolDemo.run()
+# Run the demo using the bootstrap wrapper which handles pool startup/teardown
+Snakepit.Examples.Bootstrap.run_example(fn ->
+  StreamingToolDemo.run()
+end)

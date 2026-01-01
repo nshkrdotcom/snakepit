@@ -168,9 +168,10 @@ defmodule Snakepit.Pool.Worker.Starter do
         start: {worker_module, :start_link, [worker_opts]},
         # Within this supervisor, the worker restarts on crashes but not during shutdown
         restart: :transient,
-        # CRITICAL: Give worker time to gracefully shutdown (send SIGTERM, wait for Python)
-        # Default is 5000ms, but we explicitly set it to ensure it's not :brutal_kill
-        shutdown: 5000,
+        # CRITICAL: Give worker time to gracefully shutdown (send SIGTERM, wait for Python).
+        # Derived from :graceful_shutdown_timeout_ms + margin to stay in sync with GRPCWorker.
+        # Default: 6000ms (graceful) + 2000ms (margin) = 8000ms
+        shutdown: supervisor_shutdown_timeout(),
         type: :worker
       }
     ]
@@ -210,4 +211,21 @@ defmodule Snakepit.Pool.Worker.Starter do
   end
 
   defp normalize_identifier(_), do: nil
+
+  # Derive supervisor shutdown timeout from the same config as GRPCWorker.
+  # This ensures consistency: if a user sets :graceful_shutdown_timeout_ms,
+  # both the worker's terminate/2 and the supervisor's shutdown are aligned.
+  @default_graceful_shutdown_timeout 6000
+  @shutdown_margin 2000
+
+  defp supervisor_shutdown_timeout do
+    graceful =
+      Application.get_env(
+        :snakepit,
+        :graceful_shutdown_timeout_ms,
+        @default_graceful_shutdown_timeout
+      )
+
+    graceful + @shutdown_margin
+  end
 end

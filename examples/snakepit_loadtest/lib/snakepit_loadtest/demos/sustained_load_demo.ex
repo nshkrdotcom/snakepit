@@ -189,8 +189,8 @@ defmodule SnakepitLoadtest.Demos.SustainedLoadDemo do
         IO.puts("\nInterval #{interval.interval} (#{format_duration(interval.timestamp)}):")
         IO.puts("  Throughput: #{format_number(throughput)} req/s")
         IO.puts("  Success rate: #{percentage(successful, total)}%")
-        IO.puts("  Median latency: #{format_number(stats.median)}ms")
-        IO.puts("  P95 latency: #{format_number(stats.p95)}ms")
+        IO.puts("  Median latency: #{format_number(stats.median)} ms")
+        IO.puts("  P95 latency: #{format_number(stats.p95)} ms")
       end
     end)
   end
@@ -225,7 +225,7 @@ defmodule SnakepitLoadtest.Demos.SustainedLoadDemo do
         end
 
       IO.puts(
-        "Median latency range: #{format_number(latency_stats.min)}ms - #{format_number(latency_stats.max)}ms"
+        "Median latency range: #{format_number(latency_stats.min)} ms - #{format_number(latency_stats.max)} ms"
       )
 
       IO.puts("Coefficient of variation: #{format_number(cv)}%")
@@ -254,8 +254,8 @@ defmodule SnakepitLoadtest.Demos.SustainedLoadDemo do
         degradation = (last_median - first_median) / first_median * 100
 
         IO.puts("\nPerformance trend:")
-        IO.puts("  First third median: #{format_number(first_median)}ms")
-        IO.puts("  Last third median: #{format_number(last_median)}ms")
+        IO.puts("  First third median: #{format_number(first_median)} ms")
+        IO.puts("  Last third median: #{format_number(last_median)} ms")
 
         sign = if degradation >= 0, do: "+", else: ""
         IO.puts("  Change: #{sign}#{format_number(degradation)}%")
@@ -325,6 +325,7 @@ defmodule SnakepitLoadtest.Demos.SustainedLoadDemo do
   defp percentage(part, whole) when whole > 0, do: round(part / whole * 100)
   defp percentage(_, _), do: 0
 
+  defp format_number(nil), do: "n/a"
   defp format_number(n) when is_float(n), do: :erlang.float_to_binary(n, decimals: 2)
   defp format_number(n), do: to_string(n)
 

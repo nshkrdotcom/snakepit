@@ -126,6 +126,40 @@ def _build_error_payload(exc: Exception, request, arguments: Optional[Dict[str, 
     }
 
 
+async def _maybe_cleanup(adapter) -> None:
+    """
+    Call adapter.cleanup() if it exists, handling both sync and async implementations.
+
+    Uses isawaitable() instead of iscoroutinefunction() to correctly handle
+    wrapped/partial/decorated async functions.
+    """
+    if not hasattr(adapter, 'cleanup'):
+        return
+    try:
+        result = adapter.cleanup()
+        if inspect.isawaitable(result):
+            await result
+    except Exception as cleanup_error:
+        logger.warning("Adapter cleanup failed: %s", cleanup_error)
+
+
+async def _close_iterator(iterator) -> None:
+    """
+    Properly close an iterator/generator to release resources.
+
+    Handles both sync and async generators.
+    """
+    if iterator is None:
+        return
+    try:
+        if hasattr(iterator, 'aclose'):
+            await iterator.aclose()
+        elif hasattr(iterator, 'close'):
+            iterator.close()
+    except Exception as close_error:
+        logger.debug("Iterator close failed (usually benign): %s", close_error)
+
+
 def _resolve_heartbeat_options(cli_options: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
     """Merge CLI-provided heartbeat overrides with Elixir-sourced env config."""
 
@@ -409,6 +443,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         logger.info(f"ExecuteTool: {request.tool_name} for session {request.session_id}")
         start_time = time.time()
         metadata = context.invocation_metadata()
+        adapter = None
 
         with telemetry.otel_span(
             "BridgeService/ExecuteTool",
@@ -435,49 +470,52 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                     request_metadata=dict(request.metadata),
                 )
                 await self._ensure_heartbeat_client(request.session_id)
-                
+
                 # Create adapter instance for this request
                 adapter = self.adapter_class()
                 adapter.set_session_context(session_context)
-                
+
                 # Register adapter tools with the session (for new BaseAdapter)
                 if hasattr(adapter, 'register_with_session'):
                     await self._ensure_tools_registered(request.session_id, adapter)
-                
-                # Initialize adapter if needed
+
+                # Initialize adapter if needed (uses isawaitable for robustness)
                 if hasattr(adapter, 'initialize'):
-                    await adapter.initialize()
-                
+                    result = adapter.initialize()
+                    if inspect.isawaitable(result):
+                        await result
+
                 # Decode parameters from protobuf Any using TypeSerializer
                 arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
-                # Also handle binary parameters if present
+                # Handle binary parameters - raw bytes by default, pickle only if metadata specifies
                 for key, binary_val in request.binary_parameters.items():
-                    arguments[key] = pickle.loads(binary_val)
-                
+                    format_key = f"binary_format:{key}"
+                    if request.metadata.get(format_key) == "pickle":
+                        arguments[key] = pickle.loads(binary_val)
+                    else:
+                        # Treat as opaque bytes (images, audio, etc.)
+                        arguments[key] = binary_val
+
                 # Execute the tool
                 if not hasattr(adapter, 'execute_tool'):
                     raise grpc.RpcError(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support 'execute_tool'")
-                
-                # CORRECT: Await the async method
-                import inspect
-                if inspect.iscoroutinefunction(adapter.execute_tool):
-                    result_data = await adapter.execute_tool(
-                        tool_name=request.tool_name,
-                        arguments=arguments,
-                        context=session_context
-                    )
+
+                # Execute - handle both sync and async
+                result = adapter.execute_tool(
+                    tool_name=request.tool_name,
+                    arguments=arguments,
+                    context=session_context
+                )
+                if inspect.isawaitable(result):
+                    result_data = await result
                 else:
-                    result_data = adapter.execute_tool(
-                        tool_name=request.tool_name,
-                        arguments=arguments,
-                        context=session_context
-                    )
-                
+                    result_data = result
+
                 # Check if a generator was mistakenly returned (should have been called via streaming endpoint)
                 if inspect.isgenerator(result_data) or inspect.isasyncgen(result_data):
                     logger.warning(f"Tool '{request.tool_name}' returned a generator but was called via non-streaming ExecuteTool. Returning empty result.")
                     result_data = {"error": "Streaming tool called on non-streaming endpoint."}
-                
+
                 # Use TypeSerializer to encode the result
                 response = pb2.ExecuteToolResponse(success=True)
 
@@ -497,16 +535,15 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
                 # Use the centralized serializer to encode the result correctly
                 any_msg, binary_data = TypeSerializer.encode_any(result_data, result_type)
-                
+
                 # The result from encode_any is already a protobuf Any message, so we just assign it
                 response.result.CopyFrom(any_msg)
                 if binary_data:
                     response.binary_result = binary_data
-                    
+
                 response.execution_time_ms = int((time.time() - start_time) * 1000)
-                
                 return response
-                    
+
             except Exception as e:
                 logger.error(f"ExecuteTool failed: {e}", exc_info=True)
                 response = pb2.ExecuteToolResponse()
@@ -514,6 +551,11 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                 payload = _build_error_payload(e, request, locals().get("arguments"))
                 response.error_message = json.dumps(payload)
                 return response
+
+            finally:
+                # Always cleanup adapter
+                if adapter is not None:
+                    await _maybe_cleanup(adapter)
     
     async def ExecuteStreamingTool(self, request, context):
         """Execute a streaming tool, bridging async/sync generators safely."""
@@ -522,6 +564,8 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         )
 
         metadata = context.invocation_metadata()
+        adapter = None
+        stream_iterator = None
 
         with telemetry.otel_span(
             "BridgeService/ExecuteStreamingTool",
@@ -542,58 +586,61 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                         logger.debug(f"InitializeSession for {request.session_id}: {e}")
 
                 # Create ephemeral context for this request
-                logger.info(f"Creating SessionContext for {request.session_id}")
+                logger.debug(f"Creating SessionContext for {request.session_id}")
                 session_context = SessionContext(
                     self.sync_elixir_stub,
                     request.session_id,
                     request_metadata=dict(request.metadata),
                 )
                 await self._ensure_heartbeat_client(request.session_id)
-                
+
                 # Create adapter instance for this request
-                logger.info(f"Creating adapter instance: {self.adapter_class}")
+                logger.debug(f"Creating adapter instance: {self.adapter_class}")
                 adapter = self.adapter_class()
                 adapter.set_session_context(session_context)
-                
+
                 # Register adapter tools with the session (for new BaseAdapter)
                 if hasattr(adapter, 'register_with_session'):
                     await self._ensure_tools_registered(request.session_id, adapter)
-                
-                # CRITICAL FIX: Initialize adapter (async-safe now that method is async)
+
+                # Initialize adapter (uses isawaitable for robustness)
                 if hasattr(adapter, 'initialize'):
-                    if inspect.iscoroutinefunction(adapter.initialize):
-                        await adapter.initialize()
-                    else:
-                        adapter.initialize()
+                    result = adapter.initialize()
+                    if inspect.isawaitable(result):
+                        await result
 
                 # Decode parameters from protobuf Any using TypeSerializer
                 arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
-                # Also handle binary parameters if present
+                # Handle binary parameters - raw bytes by default, pickle only if metadata specifies
                 for key, binary_val in request.binary_parameters.items():
-                    arguments[key] = pickle.loads(binary_val)
+                    format_key = f"binary_format:{key}"
+                    if request.metadata.get(format_key) == "pickle":
+                        arguments[key] = pickle.loads(binary_val)
+                    else:
+                        # Treat as opaque bytes (images, audio, etc.)
+                        arguments[key] = binary_val
 
                 # Execute the tool
                 if not hasattr(adapter, 'execute_tool'):
                     await context.abort(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support tool execution")
                     return
 
-                # CRITICAL FIX: Support both sync and async execute_tool
-                if inspect.iscoroutinefunction(adapter.execute_tool):
-                    stream_iterator = await adapter.execute_tool(
-                        tool_name=request.tool_name,
-                        arguments=arguments,
-                        context=session_context
-                    )
+                # Execute - handle both sync and async
+                result = adapter.execute_tool(
+                    tool_name=request.tool_name,
+                    arguments=arguments,
+                    context=session_context
+                )
+                if inspect.isawaitable(result):
+                    stream_iterator = await result
                 else:
-                    stream_iterator = adapter.execute_tool(
-                        tool_name=request.tool_name,
-                        arguments=arguments,
-                        context=session_context
-                    )
+                    stream_iterator = result
 
                 loop = self.loop
-                queue: asyncio.Queue = asyncio.Queue()
+                # Bounded queue prevents unbounded memory growth if consumer is slow
+                queue: asyncio.Queue = asyncio.Queue(maxsize=100)
                 sentinel = object()
+                cancelled = asyncio.Event()
                 chunk_id_counter = 0
                 marked_final = False
 
@@ -646,17 +693,29 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
                 async def drain_async(iterator):
                     async for chunk_data in iterator:
+                        if cancelled.is_set():
+                            # Client disconnected; stop producing
+                            break
                         payload, is_final, metadata = unpack_chunk(chunk_data)
                         await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
 
                 def drain_sync(iterator):
                     for chunk_data in iterator:
+                        if cancelled.is_set():
+                            # Client disconnected; stop producing
+                            break
                         payload, is_final, metadata = unpack_chunk(chunk_data)
                         fut = asyncio.run_coroutine_threadsafe(
                             enqueue_chunk(payload, is_final=is_final, metadata=metadata),
                             loop,
                         )
-                        fut.result()
+                        # Block on enqueue to apply backpressure (bounded queue)
+                        try:
+                            fut.result()
+                        except Exception:
+                            # Queue full or cancelled - stop producing
+                            cancelled.set()
+                            break
 
                 async def produce_chunks():
                     error_raised = False
@@ -668,34 +727,96 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                         else:
                             payload, is_final, metadata = unpack_chunk(stream_iterator)
                             await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
+                    except asyncio.CancelledError:
+                        # Producer was cancelled - this is expected on client disconnect
+                        # Must re-raise to properly terminate the task (no sentinel needed)
+                        logger.debug("Streaming producer cancelled")
+                        raise
                     except Exception as iteration_error:
                         error_raised = True
                         await queue.put(iteration_error)
-                    finally:
-                        if not error_raised and not marked_final:
-                            await enqueue_chunk(None, is_final=True)
+                        # Sentinel must be delivered so consumer can terminate
                         await queue.put(sentinel)
+                    else:
+                        # Normal completion - deliver final chunk and sentinel
+                        if not marked_final and not cancelled.is_set():
+                            await enqueue_chunk(None, is_final=True)
+                        # Sentinel MUST be delivered so consumer terminates (await guarantees this)
+                        if not cancelled.is_set():
+                            await queue.put(sentinel)
 
-                asyncio.create_task(produce_chunks())
+                async def watch_disconnect():
+                    """Watch for client disconnect and signal cancellation."""
+                    while not cancelled.is_set():
+                        # Check if context is still active
+                        if hasattr(context, 'is_active') and not context.is_active():
+                            logger.debug("Client disconnected (context inactive)")
+                            cancelled.set()
 
-                while True:
-                    item = await queue.get()
-                    if item is sentinel:
-                        break
-                    if isinstance(item, Exception):
-                        logger.error(
-                            "Streaming tool %s raised %s",
-                            request.tool_name,
-                            item,
-                            exc_info=True,
-                        )
-                        payload = _build_error_payload(item, request, locals().get("arguments"))
-                        await context.abort(grpc.StatusCode.INTERNAL, json.dumps(payload))
-                        return
-                    yield item
+                            # Ensure consumer unblocks: guarantee sentinel insertion.
+                            # This is critical because producer may exit normally (not via
+                            # CancelledError) and skip sentinel delivery when cancelled is set.
+                            try:
+                                queue.put_nowait(sentinel)
+                            except asyncio.QueueFull:
+                                # Drop buffered chunks until sentinel fits
+                                while True:
+                                    try:
+                                        _ = queue.get_nowait()
+                                    except asyncio.QueueEmpty:
+                                        break
+                                    try:
+                                        queue.put_nowait(sentinel)
+                                        break
+                                    except asyncio.QueueFull:
+                                        continue
+                            break
+                        await asyncio.sleep(0.1)
+
+                producer_task = asyncio.create_task(produce_chunks())
+                watcher_task = asyncio.create_task(watch_disconnect())
+
+                try:
+                    while True:
+                        item = await queue.get()
+                        if item is sentinel:
+                            break
+                        if isinstance(item, Exception):
+                            logger.error(
+                                "Streaming tool %s raised %s",
+                                request.tool_name,
+                                item,
+                                exc_info=True,
+                            )
+                            payload = _build_error_payload(item, request, locals().get("arguments"))
+                            cancelled.set()  # Signal producer to stop
+                            await context.abort(grpc.StatusCode.INTERNAL, json.dumps(payload))
+                            return
+                        yield item
+                finally:
+                    # Ensure producer stops if client disconnects or we exit early
+                    cancelled.set()
+                    watcher_task.cancel()
+                    producer_task.cancel()
+                    # Suppress cancellation exceptions from tasks
+                    try:
+                        await watcher_task
+                    except asyncio.CancelledError:
+                        pass
+                    try:
+                        await producer_task
+                    except asyncio.CancelledError:
+                        pass
+                    # Close the iterator to release resources
+                    await _close_iterator(stream_iterator)
+                    # Cleanup adapter
+                    await _maybe_cleanup(adapter)
 
             except Exception as e:
                 logger.error(f"ExecuteStreamingTool failed: {e}", exc_info=True)
+                # Cleanup on early failure
+                await _close_iterator(stream_iterator)
+                await _maybe_cleanup(adapter)
                 payload = _build_error_payload(e, request, locals().get("arguments"))
                 await context.abort(grpc.StatusCode.INTERNAL, json.dumps(payload))
 
@@ -1010,15 +1131,31 @@ async def serve_with_shutdown(
 
     finally:
         # This block executes regardless of how we exited the try block
-        # Clean up the server_task
-        server_task.cancel()
-
         logger.debug("Closing servicer and stopping server")
 
         try:
+            # 1. Close servicer first - this stops heartbeat clients and
+            #    sends sentinel to telemetry stream to unblock StreamTelemetry RPC
             await servicer.close()
-            # CRITICAL FIX: grpcio 1.75+ changed API - grace period is positional, not keyword
-            await server.stop(0.5)
+
+            # 2. Stop the server with a reasonable grace period (2 seconds)
+            #    This allows in-flight RPCs to complete before force-closing
+            #    CRITICAL FIX: grpcio 1.75+ changed API - grace period is positional
+            await server.stop(2.0)
+
+            # 3. Await server termination task to complete naturally (event-driven).
+            #    Only cancel if it doesn't complete in time (timeout as safety net).
+            #    This lets wait_for_termination() do its draining work properly.
+            try:
+                await asyncio.wait_for(server_task, timeout=3.0)
+                logger.debug("Server termination task completed naturally")
+            except asyncio.TimeoutError:
+                logger.warning("Server termination timed out, cancelling task")
+                server_task.cancel()
+                try:
+                    await server_task
+                except asyncio.CancelledError:
+                    pass
 
             logger.debug("Server stopped gracefully")
         except asyncio.CancelledError:

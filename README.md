@@ -31,7 +31,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.8.4"}
+    {:snakepit, "~> 0.8.5"}
   ]
 end
 ```
@@ -310,22 +310,32 @@ Snakepit.Executor.execute_batch(
 
 ### Creating an Adapter
 
+Adapters follow a **per-request lifecycle**: a new instance is created for each RPC request,
+`initialize()` is called at the start, the tool executes, then `cleanup()` is called (even on error).
+
 ```python
 # my_adapter.py
 from snakepit_bridge import BaseAdapter, tool
+
+# Module-level cache for expensive resources (shared across requests)
+_model_cache = {}
 
 class MyAdapter(BaseAdapter):
     def __init__(self):
         super().__init__()
         self.model = None
 
-    async def initialize(self):
-        """Called once when worker starts."""
-        self.model = load_model()
+    def initialize(self):
+        """Called at the start of each request."""
+        # Load from cache or disk (cache persists across requests)
+        if "model" not in _model_cache:
+            _model_cache["model"] = load_model()
+        self.model = _model_cache["model"]
 
-    async def cleanup(self):
-        """Called when worker shuts down."""
-        self.model = None
+    def cleanup(self):
+        """Called at the end of each request (even on error)."""
+        # Release request-specific resources (not the cached model)
+        pass
 
     @tool(description="Run inference on input data")
     def predict(self, input_data: dict) -> dict:
@@ -342,17 +352,27 @@ class MyAdapter(BaseAdapter):
 ### Thread-Safe Adapters (Python 3.13+)
 
 ```python
+import threading
 from snakepit_bridge import ThreadSafeAdapter, tool, thread_safe_method
+
+# Module-level shared resources (thread-safe access required)
+_shared_model = None
+_model_lock = threading.Lock()
 
 class ThreadedAdapter(ThreadSafeAdapter):
     __thread_safe__ = True
 
     def __init__(self):
         super().__init__()
-        self.shared_model = None  # Read-only after init
+        self.model = None
 
-    async def initialize(self):
-        self.shared_model = load_model()  # Safe: happens before requests
+    def initialize(self):
+        """Load shared model (with thread-safe initialization)."""
+        global _shared_model
+        with _model_lock:
+            if _shared_model is None:
+                _shared_model = load_model()
+        self.model = _shared_model
 
     @tool
     @thread_safe_method
@@ -362,7 +382,7 @@ class ThreadedAdapter(ThreadSafeAdapter):
         if text in cache:
             return cache[text]
 
-        result = self.shared_model.predict(text)
+        result = self.model.predict(text)
         cache[text] = result
         self.set_thread_local("cache", cache)
         return result

@@ -2,6 +2,43 @@
 Base adapter class for Snakepit Python adapters.
 
 Provides tool discovery and registration functionality that all adapters should inherit from.
+
+Adapter Lifecycle
+-----------------
+Adapters follow a **per-request lifecycle**:
+
+1. A new adapter instance is created for each incoming RPC request
+2. `initialize()` is called (if defined) at the start of each request
+3. The tool is executed via `execute_tool()` or a decorated method
+4. `cleanup()` is called (if defined) at the end of each request, even on error
+
+This means:
+- Do NOT rely on adapter instance state persisting across requests
+- Use module-level caches or external stores for shared state (e.g., loaded models)
+- Both `initialize()` and `cleanup()` can be sync or async
+
+Example with model caching::
+
+    # Module-level cache (shared across requests)
+    _model_cache = {}
+
+    class MyAdapter(BaseAdapter):
+        def initialize(self):
+            # Load model from cache or disk
+            if "model" not in _model_cache:
+                _model_cache["model"] = load_expensive_model()
+            self.model = _model_cache["model"]
+
+        def cleanup(self):
+            # Optional: release request-specific resources
+            pass
+
+        @tool(description="Run inference")
+        def predict(self, input_data: str) -> dict:
+            return self.model.predict(input_data)
+
+For thread-safe adapters (used with grpc_server_threaded.py), also set:
+    __thread_safe__ = True
 """
 
 import inspect

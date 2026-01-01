@@ -48,7 +48,10 @@ defmodule Snakepit.GRPCWorker do
       id: Keyword.get(opts, :id, __MODULE__),
       start: {__MODULE__, :start_link, [opts]},
       restart: :transient,
-      type: :worker
+      type: :worker,
+      # Must give worker time for graceful Python shutdown.
+      # Derived from :graceful_shutdown_timeout_ms + margin.
+      shutdown: supervisor_shutdown_timeout()
     }
   end
 
@@ -68,7 +71,8 @@ defmodule Snakepit.GRPCWorker do
           ready_file: String.t(),
           stats: map(),
           session_id: String.t(),
-          worker_config: map()
+          worker_config: map(),
+          shutting_down: boolean()
         }
 
   @base_heartbeat_defaults %{
@@ -597,6 +601,8 @@ defmodule Snakepit.GRPCWorker do
       connection: nil,
       health_check_ref: nil,
       python_output_buffer: "",
+      # Track whether we initiated shutdown (to distinguish expected vs unexpected exits)
+      shutting_down: false,
       stats: %{
         requests: 0,
         errors: 0,
@@ -873,8 +879,37 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_info({:DOWN, _ref, :port, port, reason}, %{server_port: port} = state) do
-    SLog.error(@log_category, "External gRPC process died: #{inspect(reason)}")
-    {:stop, {:external_process_died, reason}, state}
+    # Use same shutdown detection as exit_status handler to avoid race conditions.
+    # :DOWN can arrive before or instead of exit_status on some platforms.
+    effective_shutting_down? =
+      state.shutting_down or
+        shutdown_pending_in_mailbox?() or
+        not pool_alive?(state.pool_name)
+
+    state =
+      if effective_shutting_down? and not state.shutting_down do
+        %{state | shutting_down: true}
+      else
+        state
+      end
+
+    if effective_shutting_down? do
+      SLog.debug(@log_category, """
+      gRPC port DOWN during shutdown
+      Worker: #{state.id}
+      Reason: #{inspect(reason)}
+      """)
+
+      {:stop, :shutdown, state}
+    else
+      SLog.error(@log_category, """
+      External gRPC process died unexpectedly
+      Worker: #{state.id}
+      Reason: #{inspect(reason)}
+      """)
+
+      {:stop, {:external_process_died, reason}, state}
+    end
   end
 
   @impl true
@@ -920,15 +955,91 @@ defmodule Snakepit.GRPCWorker do
         last_output
       end
 
-    SLog.error(@log_category, """
-    🔴 Python gRPC server exited with status #{status}
-    Worker: #{state.id}
-    Port: #{state.port}
-    PID: #{state.process_pid}
-    Last output: #{last_output}
+    # Compute effective shutdown status to handle mailbox race conditions.
+    # The port exit message may arrive before the {:EXIT, _, :shutdown} message is processed.
+    # We check multiple signals to determine if we're in a shutdown scenario:
+    # 1. state.shutting_down was already set
+    # 2. A shutdown EXIT message is pending in the mailbox
+    # 3. The pool is no longer alive (system is shutting down)
+    effective_shutting_down? =
+      state.shutting_down or
+        shutdown_pending_in_mailbox?() or
+        not pool_alive?(state.pool_name)
+
+    # Update state if we detected shutdown via mailbox peek or pool check
+    state =
+      if effective_shutting_down? and not state.shutting_down do
+        %{state | shutting_down: true}
+      else
+        state
+      end
+
+    # Shutdown exit codes: 0 (clean), 143 (SIGTERM: 128+15), 137 (SIGKILL: 128+9)
+    # These are expected during shutdown and should not be treated as errors.
+    case {status, effective_shutting_down?} do
+      {s, true} when s in [0, 137, 143] ->
+        # Expected shutdown - Python exited with a normal shutdown code
+        SLog.debug(@log_category, """
+        Python gRPC server exited during shutdown (status #{s})
+        Worker: #{state.id}
+        Port: #{state.port}
+        PID: #{state.process_pid}
+        """)
+
+        {:stop, :shutdown, state}
+
+      {0, false} ->
+        # Unexpected but clean exit - Python decided to exit on its own
+        # This could be idle timeout, internal shutdown, or other reason
+        SLog.warning(@log_category, """
+        Python gRPC server exited unexpectedly (status 0)
+        Worker: #{state.id}
+        Port: #{state.port}
+        PID: #{state.process_pid}
+        Last output: #{last_output}
+        """)
+
+        # Use an abnormal reason so Worker.Starter (with :transient) will restart.
+        # This maintains pool capacity when Python exits unexpectedly.
+        {:stop, {:grpc_server_exited_unexpectedly, 0}, state}
+
+      {_nonzero, _} ->
+        # Real crash - non-zero exit status (not a shutdown code)
+        SLog.error(@log_category, """
+        🔴 Python gRPC server crashed with status #{status}
+        Worker: #{state.id}
+        Port: #{state.port}
+        PID: #{state.process_pid}
+        Last output: #{last_output}
+        """)
+
+        {:stop, {:grpc_server_exited, status}, state}
+    end
+  end
+
+  # Handle shutdown signals from supervisor.
+  # Matches both :shutdown and {:shutdown, term} which supervisors use.
+  # Does not match :normal since that can come from other linked processes (like Tasks).
+  @impl true
+  def handle_info({:EXIT, _from, reason}, state) when reason == :shutdown do
+    SLog.debug(@log_category, """
+    Received shutdown signal for worker #{state.id}
+    Reason: #{inspect(reason)}
+    Setting shutting_down flag and stopping gracefully
     """)
 
-    {:stop, {:grpc_server_exited, status}, state}
+    {:stop, :shutdown, %{state | shutting_down: true}}
+  end
+
+  @impl true
+  def handle_info({:EXIT, _from, {:shutdown, term} = reason}, state) do
+    SLog.debug(@log_category, """
+    Received shutdown signal for worker #{state.id}
+    Reason: #{inspect(reason)}
+    Setting shutting_down flag and stopping gracefully
+    """)
+
+    {:stop, {:shutdown, term}, %{state | shutting_down: true}}
   end
 
   @impl true
@@ -937,9 +1048,48 @@ defmodule Snakepit.GRPCWorker do
     {:noreply, state}
   end
 
-  # Define graceful shutdown timeout - configurable
-  # 2000ms to accommodate Python server's async shutdown
-  @graceful_shutdown_timeout 2000
+  # Graceful shutdown timeout for Python process termination.
+  # Must be >= Python's shutdown envelope: server.stop(2s) + wait_for_termination(3s) = 5s
+  # We use 6s as default to provide margin. Configurable via :graceful_shutdown_timeout_ms.
+  @default_graceful_shutdown_timeout 6000
+
+  # Margin added to graceful_shutdown_timeout for supervisor shutdown.
+  # This gives the worker time to complete its terminate/2 callback.
+  @shutdown_margin 2000
+
+  defp graceful_shutdown_timeout do
+    Application.get_env(
+      :snakepit,
+      :graceful_shutdown_timeout_ms,
+      @default_graceful_shutdown_timeout
+    )
+  end
+
+  @doc """
+  Returns the recommended supervisor shutdown timeout.
+
+  This is `graceful_shutdown_timeout + margin` to ensure supervisors give workers
+  enough time to complete their terminate/2 callback (which includes graceful
+  Python process termination).
+
+  Use this value for:
+  - `shutdown:` in child_spec
+  - `shutdown:` in Worker.Starter
+  - Any other supervisor that manages GRPCWorker processes
+
+  ## Example
+
+      children = [
+        %{
+          id: MyWorker,
+          start: {Snakepit.GRPCWorker, :start_link, [opts]},
+          shutdown: Snakepit.GRPCWorker.supervisor_shutdown_timeout()
+        }
+      ]
+  """
+  def supervisor_shutdown_timeout do
+    graceful_shutdown_timeout() + @shutdown_margin
+  end
 
   @impl true
   def terminate(reason, state) do
@@ -975,7 +1125,7 @@ defmodule Snakepit.GRPCWorker do
         worker_id: state.id,
         worker_pid: self(),
         reason: reason,
-        planned: reason in [:shutdown, :normal]
+        planned: shutdown_reason?(reason) or reason == :normal
       }
     )
   end
@@ -985,37 +1135,19 @@ defmodule Snakepit.GRPCWorker do
     maybe_notify_test_pid(state.heartbeat_config, {:heartbeat_monitor_stopped, state.id, reason})
   end
 
+  # Group all kill_python_process clauses together
   defp kill_python_process(%{process_pid: nil}, _reason), do: :ok
 
-  defp kill_python_process(state, reason) when reason in [:shutdown, :normal] do
-    SLog.debug(
-      @log_category,
-      "Starting graceful shutdown of external gRPC process PID: #{state.process_pid}..."
-    )
+  defp kill_python_process(state, reason) when reason == :normal do
+    do_graceful_kill(state)
+  end
 
-    result =
-      if use_process_group_kill?(state) do
-        Snakepit.ProcessKiller.kill_process_group_with_escalation(
-          state.pgid,
-          @graceful_shutdown_timeout
-        )
-      else
-        Snakepit.ProcessKiller.kill_with_escalation(
-          state.process_pid,
-          @graceful_shutdown_timeout
-        )
-      end
+  defp kill_python_process(state, :shutdown) do
+    do_graceful_kill(state)
+  end
 
-    case result do
-      :ok ->
-        SLog.debug(@log_category, "✅ gRPC server PID #{state.process_pid} terminated gracefully")
-
-      {:error, kill_reason} ->
-        SLog.warning(
-          @log_category,
-          "Failed to gracefully kill #{state.process_pid}: #{inspect(kill_reason)}"
-        )
-    end
+  defp kill_python_process(state, {:shutdown, _}) do
+    do_graceful_kill(state)
   end
 
   defp kill_python_process(state, reason) do
@@ -1039,6 +1171,37 @@ defmodule Snakepit.GRPCWorker do
         SLog.warning(
           @log_category,
           "Failed to kill #{state.process_pid}: #{inspect(kill_reason)}"
+        )
+    end
+  end
+
+  defp do_graceful_kill(state) do
+    SLog.debug(
+      @log_category,
+      "Starting graceful shutdown of external gRPC process PID: #{state.process_pid}..."
+    )
+
+    result =
+      if use_process_group_kill?(state) do
+        Snakepit.ProcessKiller.kill_process_group_with_escalation(
+          state.pgid,
+          graceful_shutdown_timeout()
+        )
+      else
+        Snakepit.ProcessKiller.kill_with_escalation(
+          state.process_pid,
+          graceful_shutdown_timeout()
+        )
+      end
+
+    case result do
+      :ok ->
+        SLog.debug(@log_category, "✅ gRPC server PID #{state.process_pid} terminated gracefully")
+
+      {:error, kill_reason} ->
+        SLog.warning(
+          @log_category,
+          "Failed to gracefully kill #{state.process_pid}: #{inspect(kill_reason)}"
         )
     end
   end
@@ -1916,4 +2079,39 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp adapter_name(other), do: inspect(other)
+
+  # Shutdown detection helpers
+  # These eliminate race conditions between port exit messages and shutdown signals
+
+  @doc false
+  # Matches both :shutdown and {:shutdown, term} which supervisors use
+  defp shutdown_reason?(:shutdown), do: true
+  defp shutdown_reason?({:shutdown, _}), do: true
+  defp shutdown_reason?(_), do: false
+
+  @doc false
+  # Peek into mailbox to detect if a shutdown signal is pending but not yet processed.
+  # This handles the race where port exit arrives before the EXIT message is processed.
+  # Only called on rare port-exit path, not on hot request paths.
+  defp shutdown_pending_in_mailbox? do
+    case Process.info(self(), :messages) do
+      {:messages, msgs} ->
+        Enum.any?(msgs, fn
+          {:EXIT, _from, reason} -> shutdown_reason?(reason)
+          _ -> false
+        end)
+
+      _ ->
+        false
+    end
+  end
+
+  @doc false
+  # Check if the pool is still alive - if not, we're in system shutdown
+  defp pool_alive?(pool_name) do
+    case resolve_pool_pid(pool_name) do
+      pid when is_pid(pid) -> Process.alive?(pid)
+      _ -> false
+    end
+  end
 end

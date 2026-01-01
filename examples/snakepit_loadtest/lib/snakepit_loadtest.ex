@@ -1,7 +1,7 @@
 defmodule SnakepitLoadtest do
   @moduledoc """
   Load testing suite for Snakepit Python integration.
-  
+
   Provides various load testing scenarios to stress test the Python process pool
   and measure performance characteristics under different load patterns.
   """
@@ -12,7 +12,7 @@ defmodule SnakepitLoadtest do
   def calculate_stats(measurements) when is_list(measurements) and length(measurements) > 0 do
     sorted = Enum.sort(measurements)
     count = length(sorted)
-    
+
     %{
       min: List.first(sorted),
       max: List.last(sorted),
@@ -28,15 +28,16 @@ defmodule SnakepitLoadtest do
   """
   def format_stats(stats, unit \\ "ms") do
     """
-    Min: #{format_number(stats.min)}#{unit}
-    Max: #{format_number(stats.max)}#{unit}
-    Mean: #{format_number(stats.mean)}#{unit}
-    Median: #{format_number(stats.median)}#{unit}
-    P95: #{format_number(stats.p95)}#{unit}
-    P99: #{format_number(stats.p99)}#{unit}
+    Min: #{format_number(stats.min)} #{unit}
+    Max: #{format_number(stats.max)} #{unit}
+    Mean: #{format_number(stats.mean)} #{unit}
+    Median: #{format_number(stats.median)} #{unit}
+    P95: #{format_number(stats.p95)} #{unit}
+    P99: #{format_number(stats.p99)} #{unit}
     """
   end
 
+  defp format_number(nil), do: "n/a"
   defp format_number(n) when is_float(n), do: :erlang.float_to_binary(n, decimals: 2)
   defp format_number(n), do: to_string(n)
 
@@ -63,7 +64,7 @@ defmodule SnakepitLoadtest do
             duration_ms: options[:duration] || 50
           })
         end
-      
+
       :sleep ->
         fn ->
           # Use sleep_task from ShowcaseAdapter
@@ -72,7 +73,7 @@ defmodule SnakepitLoadtest do
             task_number: System.unique_integer([:positive])
           })
         end
-      
+
       :memory ->
         fn ->
           # Use cpu_bound_task with longer duration to simulate memory work
@@ -81,7 +82,7 @@ defmodule SnakepitLoadtest do
             duration_ms: options[:duration] || 100
           })
         end
-      
+
       :io ->
         fn ->
           # Use lightweight_task for IO simulation
@@ -89,23 +90,27 @@ defmodule SnakepitLoadtest do
             iteration: System.unique_integer([:positive])
           })
         end
-      
+
       :mixed ->
         fn ->
           # Use a combination of cpu_bound_task and sleep_task
           task_id = System.unique_integer([:positive])
-          cpu_result = Snakepit.execute("cpu_bound_task", %{
-            task_id: "mixed_cpu_#{task_id}",
-            duration_ms: options[:compute_duration] || 20
-          })
-          
+
+          cpu_result =
+            Snakepit.execute("cpu_bound_task", %{
+              task_id: "mixed_cpu_#{task_id}",
+              duration_ms: options[:compute_duration] || 20
+            })
+
           case cpu_result do
             {:ok, _} ->
               Snakepit.execute("sleep_task", %{
                 duration_ms: options[:sleep] || 10,
                 task_number: task_id
               })
-            error -> error
+
+            error ->
+              error
           end
         end
     end

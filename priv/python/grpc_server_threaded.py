@@ -132,6 +132,40 @@ def _build_error_payload(exc: Exception, request, arguments: Optional[Dict[str, 
     }
 
 
+async def _maybe_cleanup(adapter) -> None:
+    """
+    Call adapter.cleanup() if it exists, handling both sync and async implementations.
+
+    Uses isawaitable() instead of iscoroutinefunction() to correctly handle
+    wrapped/partial/decorated async functions.
+    """
+    if not hasattr(adapter, 'cleanup'):
+        return
+    try:
+        result = adapter.cleanup()
+        if inspect.isawaitable(result):
+            await result
+    except Exception as cleanup_error:
+        logger.warning("Adapter cleanup failed: %s", cleanup_error)
+
+
+async def _close_iterator(iterator) -> None:
+    """
+    Properly close an iterator/generator to release resources.
+
+    Handles both sync and async generators.
+    """
+    if iterator is None:
+        return
+    try:
+        if hasattr(iterator, 'aclose'):
+            await iterator.aclose()
+        elif hasattr(iterator, 'close'):
+            iterator.close()
+    except Exception as close_error:
+        logger.debug("Iterator close failed (usually benign): %s", close_error)
+
+
 class ThreadSafetyMonitor:
     """
     Monitor for tracking thread safety issues during execution.
@@ -375,6 +409,7 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         self.safety_monitor.record_access("ExecuteTool")
         metadata = context.invocation_metadata()
         start_time = time.time()
+        adapter = None
 
         try:
             with telemetry.otel_span(
@@ -416,37 +451,40 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                 if hasattr(adapter, 'register_with_session'):
                     adapter.register_with_session(request.session_id, self.sync_elixir_stub)
 
-                # Initialize adapter
+                # Initialize adapter (uses isawaitable for robustness)
                 if hasattr(adapter, 'initialize'):
-                    if asyncio.iscoroutinefunction(adapter.initialize):
-                        await adapter.initialize()
-                    else:
-                        adapter.initialize()
+                    result = adapter.initialize()
+                    if inspect.isawaitable(result):
+                        await result
 
                 # Decode parameters
                 arguments = {
                     key: TypeSerializer.decode_any(any_msg)
                     for key, any_msg in request.parameters.items()
                 }
+                # Handle binary parameters - raw bytes by default, pickle only if metadata specifies
                 for key, binary_val in request.binary_parameters.items():
-                    arguments[key] = pickle.loads(binary_val)
+                    format_key = f"binary_format:{key}"
+                    if request.metadata.get(format_key) == "pickle":
+                        arguments[key] = pickle.loads(binary_val)
+                    else:
+                        # Treat as opaque bytes (images, audio, etc.)
+                        arguments[key] = binary_val
 
                 # Execute tool
                 if not hasattr(adapter, 'execute_tool'):
                     raise NotImplementedError("Adapter does not support execute_tool")
 
-                if inspect.iscoroutinefunction(adapter.execute_tool):
-                    result_data = await adapter.execute_tool(
-                        tool_name=request.tool_name,
-                        arguments=arguments,
-                        context=session_context
-                    )
+                # Execute - handle both sync and async
+                result = adapter.execute_tool(
+                    tool_name=request.tool_name,
+                    arguments=arguments,
+                    context=session_context
+                )
+                if inspect.isawaitable(result):
+                    result_data = await result
                 else:
-                    result_data = adapter.execute_tool(
-                        tool_name=request.tool_name,
-                        arguments=arguments,
-                        context=session_context
-                    )
+                    result_data = result
 
                 # Encode response
                 response = pb2.ExecuteToolResponse(success=True)
@@ -490,6 +528,9 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
         finally:
             self._record_request_end()
+            # Always cleanup adapter
+            if adapter is not None:
+                await _maybe_cleanup(adapter)
 
     async def ExecuteStreamingTool(self, request, context):
         """Execute streaming tool with thread-safe handling"""
@@ -497,6 +538,8 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         thread_name = threading.current_thread().name
         self.safety_monitor.record_access("ExecuteStreamingTool")
         metadata = context.invocation_metadata()
+        adapter = None
+        stream_iterator = None
 
         try:
             with telemetry.otel_span(
@@ -535,18 +578,24 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                 if hasattr(adapter, 'register_with_session'):
                     adapter.register_with_session(request.session_id, self.sync_elixir_stub)
 
+                # Initialize adapter (uses isawaitable for robustness)
                 if hasattr(adapter, 'initialize'):
-                    if asyncio.iscoroutinefunction(adapter.initialize):
-                        await adapter.initialize()
-                    else:
-                        adapter.initialize()
+                    result = adapter.initialize()
+                    if inspect.isawaitable(result):
+                        await result
 
                 arguments = {
                     key: TypeSerializer.decode_any(any_msg)
                     for key, any_msg in request.parameters.items()
                 }
+                # Handle binary parameters - raw bytes by default, pickle only if metadata specifies
                 for key, binary_val in request.binary_parameters.items():
-                    arguments[key] = pickle.loads(binary_val)
+                    format_key = f"binary_format:{key}"
+                    if request.metadata.get(format_key) == "pickle":
+                        arguments[key] = pickle.loads(binary_val)
+                    else:
+                        # Treat as opaque bytes (images, audio, etc.)
+                        arguments[key] = binary_val
 
                 if not hasattr(adapter, 'execute_tool'):
                     await context.abort(
@@ -555,22 +604,22 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                     )
                     return
 
-                if inspect.iscoroutinefunction(adapter.execute_tool):
-                    stream_iterator = await adapter.execute_tool(
-                        tool_name=request.tool_name,
-                        arguments=arguments,
-                        context=session_context
-                    )
+                # Execute - handle both sync and async
+                result = adapter.execute_tool(
+                    tool_name=request.tool_name,
+                    arguments=arguments,
+                    context=session_context
+                )
+                if inspect.isawaitable(result):
+                    stream_iterator = await result
                 else:
-                    stream_iterator = adapter.execute_tool(
-                        tool_name=request.tool_name,
-                        arguments=arguments,
-                        context=session_context
-                    )
+                    stream_iterator = result
 
                 loop = self.loop
-                queue: asyncio.Queue = asyncio.Queue()
+                # Bounded queue prevents unbounded memory growth if consumer is slow
+                queue: asyncio.Queue = asyncio.Queue(maxsize=100)
                 sentinel = object()
+                cancelled = asyncio.Event()
                 chunk_id_counter = 0
                 marked_final = False
 
@@ -623,17 +672,29 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
                 async def drain_async(iterator):
                     async for chunk_data in iterator:
+                        if cancelled.is_set():
+                            # Client disconnected; stop producing
+                            break
                         payload, is_final, metadata = unpack_chunk(chunk_data)
                         await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
 
                 def drain_sync(iterator):
                     for chunk_data in iterator:
+                        if cancelled.is_set():
+                            # Client disconnected; stop producing
+                            break
                         payload, is_final, metadata = unpack_chunk(chunk_data)
                         fut = asyncio.run_coroutine_threadsafe(
                             enqueue_chunk(payload, is_final=is_final, metadata=metadata),
                             loop,
                         )
-                        fut.result()
+                        # Block on enqueue to apply backpressure (bounded queue)
+                        try:
+                            fut.result()
+                        except Exception:
+                            # Queue full or cancelled - stop producing
+                            cancelled.set()
+                            break
 
                 async def produce_chunks():
                     error_raised = False
@@ -645,37 +706,99 @@ class ThreadedBridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                         else:
                             payload, is_final, metadata = unpack_chunk(stream_iterator)
                             await enqueue_chunk(payload, is_final=is_final, metadata=metadata)
+                    except asyncio.CancelledError:
+                        # Producer was cancelled - this is expected on client disconnect
+                        # Must re-raise to properly terminate the task (no sentinel needed)
+                        logger.debug("Streaming producer cancelled")
+                        raise
                     except Exception as iteration_error:
                         error_raised = True
                         await queue.put(iteration_error)
-                    finally:
-                        if not error_raised and not marked_final:
-                            await enqueue_chunk(None, is_final=True)
+                        # Sentinel must be delivered so consumer can terminate
                         await queue.put(sentinel)
+                    else:
+                        # Normal completion - deliver final chunk and sentinel
+                        if not marked_final and not cancelled.is_set():
+                            await enqueue_chunk(None, is_final=True)
+                        # Sentinel MUST be delivered so consumer terminates (await guarantees this)
+                        if not cancelled.is_set():
+                            await queue.put(sentinel)
 
-                asyncio.create_task(produce_chunks())
+                async def watch_disconnect():
+                    """Watch for client disconnect and signal cancellation."""
+                    while not cancelled.is_set():
+                        # Check if context is still active
+                        if hasattr(context, 'is_active') and not context.is_active():
+                            logger.debug("Client disconnected (context inactive)")
+                            cancelled.set()
 
-                while True:
-                    item = await queue.get()
-                    if item is sentinel:
-                        break
-                    if isinstance(item, Exception):
-                        logger.error(
-                            "[%s] ExecuteStreamingTool #%s raised %s",
-                            thread_name,
-                            request_id,
-                            item,
-                            exc_info=True,
-                        )
-                        await context.abort(
-                            grpc.StatusCode.INTERNAL,
-                            json.dumps(_build_error_payload(item, request, locals().get("arguments"))),
-                        )
-                        return
-                    yield item
+                            # Ensure consumer unblocks: guarantee sentinel insertion.
+                            # This is critical because producer may exit normally (not via
+                            # CancelledError) and skip sentinel delivery when cancelled is set.
+                            try:
+                                queue.put_nowait(sentinel)
+                            except asyncio.QueueFull:
+                                # Drop buffered chunks until sentinel fits
+                                while True:
+                                    try:
+                                        _ = queue.get_nowait()
+                                    except asyncio.QueueEmpty:
+                                        break
+                                    try:
+                                        queue.put_nowait(sentinel)
+                                        break
+                                    except asyncio.QueueFull:
+                                        continue
+                            break
+                        await asyncio.sleep(0.1)
+
+                producer_task = asyncio.create_task(produce_chunks())
+                watcher_task = asyncio.create_task(watch_disconnect())
+
+                try:
+                    while True:
+                        item = await queue.get()
+                        if item is sentinel:
+                            break
+                        if isinstance(item, Exception):
+                            logger.error(
+                                "[%s] ExecuteStreamingTool #%s raised %s",
+                                thread_name,
+                                request_id,
+                                item,
+                                exc_info=True,
+                            )
+                            cancelled.set()  # Signal producer to stop
+                            await context.abort(
+                                grpc.StatusCode.INTERNAL,
+                                json.dumps(_build_error_payload(item, request, locals().get("arguments"))),
+                            )
+                            return
+                        yield item
+                finally:
+                    # Ensure producer stops if client disconnects or we exit early
+                    cancelled.set()
+                    watcher_task.cancel()
+                    producer_task.cancel()
+                    # Suppress cancellation exceptions from tasks
+                    try:
+                        await watcher_task
+                    except asyncio.CancelledError:
+                        pass
+                    try:
+                        await producer_task
+                    except asyncio.CancelledError:
+                        pass
+                    # Close the iterator to release resources
+                    await _close_iterator(stream_iterator)
+                    # Cleanup adapter
+                    await _maybe_cleanup(adapter)
 
         except Exception as e:
             logger.error(f"[{thread_name}] ExecuteStreamingTool #{request_id} failed: {e}", exc_info=True)
+            # Cleanup on early failure
+            await _close_iterator(stream_iterator)
+            await _maybe_cleanup(adapter)
             await context.abort(
                 grpc.StatusCode.INTERNAL,
                 json.dumps(_build_error_payload(e, request, locals().get("arguments"))),
@@ -787,9 +910,25 @@ async def serve_threaded(
         await shutdown_event.wait()
         logger.info("Shutdown signal received")
     finally:
-        server_task.cancel()
+        # 1. Close servicer first
         await servicer.close()
-        await server.stop(0.5)
+
+        # 2. Stop server with grace period
+        await server.stop(2.0)
+
+        # 3. Await server termination task to complete naturally (event-driven).
+        #    Only cancel if it doesn't complete in time (timeout as safety net).
+        try:
+            await asyncio.wait_for(server_task, timeout=3.0)
+            logger.debug("Server termination task completed naturally")
+        except asyncio.TimeoutError:
+            logger.warning("Server termination timed out, cancelling task")
+            server_task.cancel()
+            try:
+                await server_task
+            except asyncio.CancelledError:
+                pass
+
         logger.info("Server stopped gracefully")
 
 

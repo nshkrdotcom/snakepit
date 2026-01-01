@@ -150,8 +150,8 @@ defmodule SnakepitLoadtest.Demos.StressTestDemo do
     if success_count > 0 do
       response_times = Enum.map(successful, fn {:success, _, time} -> time end)
       stats = SnakepitLoadtest.calculate_stats(response_times)
-      IO.puts("  Median response: #{format_number(stats.median)}ms")
-      IO.puts("  P95 response: #{format_number(stats.p95)}ms")
+      IO.puts("  Median response: #{format_number(stats.median)} ms")
+      IO.puts("  P95 response: #{format_number(stats.p95)} ms")
     end
   end
 
@@ -211,6 +211,7 @@ defmodule SnakepitLoadtest.Demos.StressTestDemo do
   defp percentage(part, whole) when whole > 0, do: round(part / whole * 100)
   defp percentage(_, _), do: 0
 
+  defp format_number(nil), do: "n/a"
   defp format_number(n) when is_float(n), do: :erlang.float_to_binary(n, decimals: 1)
   defp format_number(n), do: to_string(n)
 end

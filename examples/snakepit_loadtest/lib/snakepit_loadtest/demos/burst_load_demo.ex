@@ -169,8 +169,8 @@ defmodule SnakepitLoadtest.Demos.BurstLoadDemo do
 
       if length(response_times) > 0 do
         stats = SnakepitLoadtest.calculate_stats(response_times)
-        IO.puts("  Median latency: #{format_number(stats.median)}ms")
-        IO.puts("  P95 latency: #{format_number(stats.p95)}ms")
+        IO.puts("  Median latency: #{format_number(stats.median)} ms")
+        IO.puts("  P95 latency: #{format_number(stats.p95)} ms")
       end
     end
 
@@ -276,6 +276,7 @@ defmodule SnakepitLoadtest.Demos.BurstLoadDemo do
     end
   end
 
+  defp format_number(nil), do: "n/a"
   defp format_number(n) when is_float(n), do: :erlang.float_to_binary(n, decimals: 2)
   defp format_number(n), do: to_string(n)
 end
