@@ -18,8 +18,9 @@ defmodule Snakepit.Pool do
   alias Snakepit.Error
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Logger.Redaction
+  alias Snakepit.Pool.Dispatcher
+  alias Snakepit.Pool.EventHandler
   alias Snakepit.Pool.Initializer
-  alias Snakepit.Pool.Queue
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Pool.State
   alias Snakepit.Worker.LifecycleManager
@@ -485,48 +486,7 @@ defmodule Snakepit.Pool do
 
   # queue_timeout - WITH pool_name
   def handle_info({:queue_timeout, pool_name, from}, state) do
-    case Map.get(state.pools, pool_name) do
-      nil ->
-        {:noreply, state}
-
-      pool_state ->
-        now = System.monotonic_time(:millisecond)
-        retention_ms = Queue.cancellation_retention_ms(pool_state.queue_timeout)
-
-        {pruned_queue, dropped?} =
-          Queue.drop_request_from_queue(pool_state.request_queue, from)
-
-        if dropped? do
-          GenServer.reply(from, {:error, :queue_timeout})
-
-          SLog.debug(
-            @log_category,
-            "Removed timed out request #{inspect(from)} from queue in pool #{pool_name}"
-          )
-
-          new_cancelled =
-            Queue.record_cancelled_request(pool_state.cancelled_requests, from, now, retention_ms)
-
-          updated_stats = Map.update!(pool_state.stats, :queue_timeouts, &(&1 + 1))
-
-          updated_pool_state = %{
-            pool_state
-            | request_queue: pruned_queue,
-              cancelled_requests: new_cancelled,
-              stats: updated_stats
-          }
-
-          updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-          {:noreply, %{state | pools: updated_pools}}
-        else
-          SLog.debug(
-            @log_category,
-            "Queue timeout fired for #{inspect(from)} in pool #{pool_name} after request was already handled"
-          )
-
-          {:noreply, state}
-        end
-    end
+    EventHandler.handle_queue_timeout(state, pool_name, from)
   end
 
   # Legacy queue_timeout WITHOUT pool_name
@@ -536,13 +496,7 @@ defmodule Snakepit.Pool do
 
   # Worker death - find which pool it belongs to
   def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
-    case Snakepit.Pool.Registry.get_worker_id_by_pid(pid) do
-      {:error, :not_found} ->
-        {:noreply, state}
-
-      {:ok, worker_id} ->
-        handle_worker_down(worker_id, pid, reason, state)
-    end
+    EventHandler.handle_down(state, pid, reason)
   end
 
   def handle_info({:reply_to_waiter, from}, state) do
@@ -568,11 +522,11 @@ defmodule Snakepit.Pool do
   def handle_call({:execute, command, args, opts}, from, state) do
     # Backward compatibility: route to default pool
     pool_name = opts[:pool_name] || state.default_pool
-    handle_execute_for_pool(pool_name, command, args, opts, from, state)
+    Dispatcher.execute(state, pool_name, command, args, opts, from, dispatcher_context())
   end
 
   def handle_call({:execute, pool_name, command, args, opts}, from, state) do
-    handle_execute_for_pool(pool_name, command, args, opts, from, state)
+    Dispatcher.execute(state, pool_name, command, args, opts, from, dispatcher_context())
   end
 
   def handle_call({:checkout_worker, session_id}, _from, state) do
@@ -770,193 +724,23 @@ defmodule Snakepit.Pool do
     |> Enum.into(%{})
   end
 
-  defp handle_execute_for_pool(pool_name, command, args, opts, from, state) do
-    with {:ok, pool_state} <- get_pool(state.pools, pool_name),
-         :ok <- check_pool_initialized(pool_state) do
-      handle_execute_in_pool(pool_name, pool_state, command, args, opts, from, state)
-    else
-      {:error, :pool_not_found} ->
-        {:reply, {:error, {:pool_not_found, pool_name}}, state}
-
-      {:error, :pool_not_initialized} ->
-        {:reply, {:error, :pool_not_initialized}, state}
-    end
-  end
-
-  defp get_pool(pools, pool_name) do
-    case Map.get(pools, pool_name) do
-      nil -> {:error, :pool_not_found}
-      pool_state -> {:ok, pool_state}
-    end
-  end
-
-  defp check_pool_initialized(pool_state) do
-    if pool_state.initialized, do: :ok, else: {:error, :pool_not_initialized}
-  end
-
-  defp handle_execute_in_pool(pool_name, pool_state, command, args, opts, from, state) do
-    {request_queue, cancelled_requests} =
-      Queue.compact_pool_queue(
-        pool_state.request_queue,
-        pool_state.cancelled_requests,
-        pool_state.queue_timeout
-      )
-
-    pool_state = %{
-      pool_state
-      | request_queue: request_queue,
-        cancelled_requests: cancelled_requests
-    }
-
-    session_id = opts[:session_id]
-
-    case checkout_worker(pool_state, session_id, state.affinity_cache) do
-      {:ok, worker_id, new_pool_state} ->
-        execute_with_worker(
-          pool_name,
-          worker_id,
-          new_pool_state,
-          command,
-          args,
-          opts,
-          from,
-          state
-        )
-
-      {:error, :no_workers} ->
-        handle_no_workers_available(pool_name, pool_state, command, args, opts, from, state)
-    end
-  end
-
-  defp execute_with_worker(pool_name, worker_id, new_pool_state, command, args, opts, from, state) do
-    spawn_execution_task(
-      pool_name,
-      worker_id,
-      command,
-      args,
-      opts,
-      from,
-      new_pool_state.pool_config
-    )
-
-    updated_pool_state = %{
-      new_pool_state
-      | stats: Map.update!(new_pool_state.stats, :requests, &(&1 + 1))
-    }
-
-    updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-    {:noreply, %{state | pools: updated_pools}}
-  end
-
-  defp spawn_execution_task(pool_name, worker_id, command, args, opts, from, pool_config) do
-    async_with_context(fn ->
-      {client_pid, _tag} = from
-      ref = Process.monitor(client_pid)
-      start_time = System.monotonic_time(:microsecond)
-
-      case monitor_client_status(ref, client_pid) do
-        {:down, reason} ->
-          handle_client_already_down(pool_name, worker_id, command, ref, start_time, reason)
-
-        :alive ->
-          exec_ctx = %{
-            pool_pid: self(),
-            pool_name: pool_name,
-            worker_id: worker_id,
-            command: command,
-            args: args,
-            opts: opts,
-            from: from,
-            ref: ref,
-            client_pid: client_pid,
-            pool_config: pool_config
-          }
-
-          handle_client_alive(exec_ctx, start_time)
-      end
-    end)
-  end
-
-  defp handle_client_already_down(pool_name, worker_id, command, ref, start_time, reason) do
-    Process.demonitor(ref, [:flush])
-    duration_us = System.monotonic_time(:microsecond) - start_time
-
-    :telemetry.execute(
-      [:snakepit, :request, :executed],
-      %{duration_us: duration_us},
-      %{
-        pool: pool_name,
-        worker_id: worker_id,
-        command: command,
-        success: false,
-        aborted: true,
-        reason: :client_down,
-        client_down_reason: reason
-      }
-    )
-
-    SLog.debug(@log_category, "Client was already down; skipping work on worker #{worker_id}")
-    GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
-  end
-
-  defp handle_client_alive(exec_ctx, start_time) do
+  defp dispatcher_context do
     %{
-      pool_pid: pool_pid,
-      pool_name: pool_name,
-      worker_id: worker_id,
-      command: command,
-      args: args,
-      opts: opts,
-      from: from,
-      ref: ref,
-      client_pid: client_pid,
-      pool_config: pool_config
-    } = exec_ctx
-
-    {result, final_worker_id} =
-      execute_with_crash_barrier(
-        pool_pid,
-        pool_name,
-        worker_id,
-        command,
-        args,
-        opts,
-        pool_config
-      )
-
-    telemetry_worker_id = final_worker_id || worker_id
-    duration_us = System.monotonic_time(:microsecond) - start_time
-
-    :telemetry.execute(
-      [:snakepit, :request, :executed],
-      %{duration_us: duration_us},
-      %{
-        pool: pool_name,
-        worker_id: telemetry_worker_id,
-        command: command,
-        success: match?({:ok, _}, result)
-      }
-    )
-
-    handle_client_reply(pool_name, final_worker_id, from, ref, client_pid, result)
+      checkout_worker: &checkout_worker/3,
+      execute_with_crash_barrier: &execute_with_crash_barrier/7,
+      async_with_context: &async_with_context/1,
+      maybe_checkin_worker: &maybe_checkin_worker/2
+    }
   end
 
-  defp handle_client_reply(pool_name, worker_id, from, ref, client_pid, result) do
-    receive do
-      {:DOWN, ^ref, :process, ^client_pid, _reason} ->
-        SLog.warning(
-          @log_category,
-          "Client #{inspect(client_pid)} died before receiving reply. " <>
-            "Checking in worker #{inspect(worker_id)}."
-        )
-
-        maybe_checkin_worker(pool_name, worker_id)
-    after
-      0 ->
-        Process.demonitor(ref, [:flush])
-        GenServer.reply(from, result)
-        maybe_checkin_worker(pool_name, worker_id)
-    end
+  defp event_handler_context do
+    %{
+      async_with_context: &async_with_context/1,
+      execute_with_crash_barrier: &execute_with_crash_barrier/7,
+      maybe_checkin_worker: &maybe_checkin_worker/2,
+      maybe_track_capacity: &maybe_track_capacity/3,
+      select_queue_worker: &select_queue_worker/2
+    }
   end
 
   defp maybe_checkin_worker(_pool_name, nil), do: :ok
@@ -965,337 +749,21 @@ defmodule Snakepit.Pool do
     GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
   end
 
-  defp handle_no_workers_available(pool_name, pool_state, command, args, opts, from, state) do
-    current_queue_size = :queue.len(pool_state.request_queue)
-
-    if current_queue_size >= pool_state.max_queue_size do
-      handle_pool_saturated(pool_name, pool_state, current_queue_size, state)
-    else
-      queue_request(pool_name, pool_state, command, args, opts, from, state)
-    end
-  end
-
-  defp handle_pool_saturated(pool_name, pool_state, current_queue_size, state) do
-    updated_pool_state = %{
-      pool_state
-      | stats: Map.update!(pool_state.stats, :pool_saturated, &(&1 + 1))
-    }
-
-    :telemetry.execute(
-      [:snakepit, :pool, :saturated],
-      %{queue_size: current_queue_size, max_queue_size: pool_state.max_queue_size},
-      %{
-        pool: pool_name,
-        available_workers: MapSet.size(pool_state.available),
-        busy_workers: busy_worker_count(pool_state)
-      }
-    )
-
-    updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-    {:reply, {:error, :pool_saturated}, %{state | pools: updated_pools}}
-  end
-
-  defp queue_request(pool_name, pool_state, command, args, opts, from, state) do
-    timer_ref =
-      Process.send_after(self(), {:queue_timeout, pool_name, from}, pool_state.queue_timeout)
-
-    request = {from, command, args, opts, System.monotonic_time(), timer_ref}
-    new_queue = :queue.in(request, pool_state.request_queue)
-
-    updated_stats =
-      pool_state.stats
-      |> Map.update!(:requests, &(&1 + 1))
-      |> Map.update!(:queued, &(&1 + 1))
-
-    updated_pool_state = %{
-      pool_state
-      | request_queue: new_queue,
-        stats: updated_stats
-    }
-
-    updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-    {:noreply, %{state | pools: updated_pools}}
-  end
-
   # checkin_worker - WITH pool_name parameter
   @impl true
   def handle_cast({:checkin_worker, pool_name, worker_id, :skip_decrement}, state)
       when is_atom(pool_name) do
-    do_handle_checkin(pool_name, worker_id, state, false)
+    EventHandler.handle_checkin(state, pool_name, worker_id, false, event_handler_context())
   end
 
   def handle_cast({:checkin_worker, pool_name, worker_id}, state) when is_atom(pool_name) do
-    do_handle_checkin(pool_name, worker_id, state, true)
+    EventHandler.handle_checkin(state, pool_name, worker_id, true, event_handler_context())
   end
 
   # Legacy checkin_worker WITHOUT pool_name (infer from worker_id)
   def handle_cast({:checkin_worker, worker_id}, state) do
     pool_name = extract_pool_name_from_worker_id(worker_id)
     handle_cast({:checkin_worker, pool_name, worker_id}, state)
-  end
-
-  defp do_handle_checkin(pool_name, worker_id, state, decrement?) do
-    case Map.get(state.pools, pool_name) do
-      nil ->
-        SLog.error(@log_category, "checkin_worker: pool #{pool_name} not found!")
-        {:noreply, state}
-
-      pool_state ->
-        process_checkin(pool_name, worker_id, pool_state, state, decrement?)
-    end
-  end
-
-  defp process_checkin(pool_name, worker_id, pool_state, state, decrement?) do
-    now = System.monotonic_time(:millisecond)
-    retention_ms = Queue.cancellation_retention_ms(pool_state.queue_timeout)
-
-    pruned_cancelled =
-      Queue.prune_cancelled_requests(pool_state.cancelled_requests, now, retention_ms)
-
-    pool_state =
-      if decrement? do
-        updated_pool_state = State.decrement_worker_load(pool_state, worker_id)
-        maybe_track_capacity(updated_pool_state, worker_id, :decrement)
-        updated_pool_state
-      else
-        pool_state
-      end
-
-    process_next_queued_request(pool_name, worker_id, pool_state, pruned_cancelled, state)
-  end
-
-  defp process_next_queued_request(pool_name, worker_id, pool_state, pruned_cancelled, state) do
-    case select_queue_worker(pool_state, worker_id) do
-      {:ok, queue_worker} ->
-        case :queue.out(pool_state.request_queue) do
-          {{:value, request}, new_queue} ->
-            handle_queued_request(
-              pool_name,
-              queue_worker,
-              pool_state,
-              request,
-              new_queue,
-              pruned_cancelled,
-              state
-            )
-
-          {:empty, _} ->
-            updated_pool_state = %{pool_state | cancelled_requests: pruned_cancelled}
-            updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-            {:noreply, %{state | pools: updated_pools}}
-        end
-
-      :no_worker ->
-        updated_pool_state = %{pool_state | cancelled_requests: pruned_cancelled}
-        updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-        {:noreply, %{state | pools: updated_pools}}
-    end
-  end
-
-  defp handle_queued_request(
-         pool_name,
-         worker_id,
-         pool_state,
-         {queued_from, command, args, opts, _queued_at, timer_ref},
-         new_queue,
-         pruned_cancelled,
-         state
-       ) do
-    Queue.cancel_queue_timer(timer_ref)
-
-    ctx = %{
-      pool_name: pool_name,
-      worker_id: worker_id,
-      pool_state: pool_state,
-      queued_from: queued_from,
-      new_queue: new_queue,
-      pruned_cancelled: pruned_cancelled,
-      state: state
-    }
-
-    if Map.has_key?(pruned_cancelled, queued_from) do
-      handle_cancelled_request(ctx)
-    else
-      handle_valid_request(ctx, command, args, opts)
-    end
-  end
-
-  defp handle_cancelled_request(ctx) do
-    %{
-      pool_name: pool_name,
-      worker_id: worker_id,
-      pool_state: pool_state,
-      queued_from: queued_from,
-      new_queue: new_queue,
-      pruned_cancelled: pruned_cancelled,
-      state: state
-    } = ctx
-
-    SLog.debug(@log_category, "Skipping cancelled request from #{inspect(queued_from)}")
-    new_cancelled = Queue.drop_cancelled_request(pruned_cancelled, queued_from)
-
-    updated_pool_state = %{
-      pool_state
-      | request_queue: new_queue,
-        cancelled_requests: new_cancelled
-    }
-
-    GenServer.cast(self(), {:checkin_worker, pool_name, worker_id, :skip_decrement})
-    updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-    {:noreply, %{state | pools: updated_pools}}
-  end
-
-  defp handle_valid_request(ctx, command, args, opts) do
-    %{queued_from: queued_from} = ctx
-    {client_pid, _tag} = queued_from
-
-    if Process.alive?(client_pid) do
-      execute_queued_request(ctx, client_pid, command, args, opts)
-    else
-      handle_dead_client(ctx, client_pid)
-    end
-  end
-
-  defp execute_queued_request(ctx, client_pid, command, args, opts) do
-    %{
-      pool_name: pool_name,
-      worker_id: worker_id,
-      queued_from: queued_from,
-      pool_state: pool_state,
-      new_queue: new_queue,
-      pruned_cancelled: pruned_cancelled,
-      state: state
-    } = ctx
-
-    pool_state = State.increment_worker_load(pool_state, worker_id)
-    maybe_track_capacity(pool_state, worker_id, :increment)
-    pool_pid = self()
-
-    async_with_context(fn ->
-      ref = Process.monitor(client_pid)
-
-      {result, final_worker_id} =
-        execute_with_crash_barrier(
-          pool_pid,
-          pool_name,
-          worker_id,
-          command,
-          args,
-          opts,
-          pool_state.pool_config
-        )
-
-      checkin_worker_id = final_worker_id
-
-      receive do
-        {:DOWN, ^ref, :process, ^client_pid, _reason} ->
-          SLog.warning(
-            @log_category,
-            "Queued client #{inspect(client_pid)} died during execution."
-          )
-
-          maybe_checkin_worker(pool_name, checkin_worker_id)
-      after
-        0 ->
-          Process.demonitor(ref, [:flush])
-          GenServer.reply(queued_from, result)
-          maybe_checkin_worker(pool_name, checkin_worker_id)
-      end
-    end)
-
-    updated_pool_state = %{
-      pool_state
-      | request_queue: new_queue,
-        cancelled_requests: pruned_cancelled
-    }
-
-    updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-    {:noreply, %{state | pools: updated_pools}}
-  end
-
-  defp handle_dead_client(ctx, client_pid) do
-    %{
-      pool_name: pool_name,
-      worker_id: worker_id,
-      pool_state: pool_state,
-      new_queue: new_queue,
-      pruned_cancelled: pruned_cancelled,
-      state: state
-    } = ctx
-
-    SLog.debug(@log_category, "Discarding request from dead client #{inspect(client_pid)}")
-    GenServer.cast(self(), {:checkin_worker, pool_name, worker_id, :skip_decrement})
-
-    updated_pool_state = %{
-      pool_state
-      | request_queue: new_queue,
-        cancelled_requests: pruned_cancelled
-    }
-
-    updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-    {:noreply, %{state | pools: updated_pools}}
-  end
-
-  defp handle_worker_down(worker_id, pid, reason, state) do
-    SLog.error(
-      @log_category,
-      "Worker #{worker_id} (pid: #{inspect(pid)}) died: #{inspect(reason)}"
-    )
-
-    :ets.match_delete(state.affinity_cache, {:_, worker_id, :_})
-
-    pool_name = extract_pool_name_from_worker_id(worker_id)
-
-    case Map.get(state.pools, pool_name) do
-      nil ->
-        SLog.warning(
-          @log_category,
-          "Dead worker #{worker_id} belongs to unknown pool #{pool_name}"
-        )
-
-        {:noreply, state}
-
-      pool_state ->
-        maybe_taint_on_crash(pool_name, worker_id, reason, pool_state)
-
-        updated_state =
-          state
-          |> remove_worker_from_pool(pool_name, pool_state, worker_id)
-          |> tap(fn _ ->
-            SLog.debug(@log_category, "Removed dead worker #{worker_id} from pool #{pool_name}")
-          end)
-
-        {:noreply, updated_state}
-    end
-  end
-
-  defp maybe_taint_on_crash(pool_name, worker_id, reason, pool_state) do
-    crash_config = CrashBarrier.config(pool_state.pool_config)
-
-    with true <- CrashBarrier.enabled?(crash_config),
-         {:ok, info} <- CrashBarrier.crash_info({:error, {:worker_exit, reason}}, crash_config) do
-      maybe_taint_worker(pool_name, worker_id, info, crash_config)
-    else
-      _ -> :ok
-    end
-  end
-
-  defp remove_worker_from_pool(state, pool_name, pool_state, worker_id) do
-    new_workers = List.delete(pool_state.workers, worker_id)
-    new_available = MapSet.delete(pool_state.available, worker_id)
-    new_loads = Map.delete(pool_state.worker_loads, worker_id)
-    new_capacities = Map.delete(pool_state.worker_capacities, worker_id)
-
-    updated_pool_state = %{
-      pool_state
-      | workers: new_workers,
-        available: new_available,
-        worker_loads: new_loads,
-        worker_capacities: new_capacities
-    }
-
-    updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-    %{state | pools: updated_pools}
   end
 
   @impl true
@@ -1723,25 +1191,6 @@ defmodule Snakepit.Pool do
         else
           nil
         end
-    end
-  end
-
-  defp monitor_client_status(ref, client_pid) do
-    if Process.alive?(client_pid) do
-      await_client_down(ref, client_pid)
-    else
-      case await_client_down(ref, client_pid) do
-        :alive -> {:down, :unknown}
-        other -> other
-      end
-    end
-  end
-
-  defp await_client_down(ref, client_pid) do
-    receive do
-      {:DOWN, ^ref, :process, ^client_pid, reason} -> {:down, reason}
-    after
-      0 -> :alive
     end
   end
 

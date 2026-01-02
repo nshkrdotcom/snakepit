@@ -7,20 +7,38 @@ defmodule Snakepit.GRPCWorkerHeartbeatDependencyTest do
 
   alias Snakepit.GRPCWorker
 
-  setup do
-    previous_flag = Process.flag(:trap_exit, true)
-    on_exit(fn -> Process.flag(:trap_exit, previous_flag) end)
-    :ok
+  defmodule TestPool do
+    @moduledoc false
+    use GenServer
+
+    def start_link(_opts) do
+      GenServer.start_link(__MODULE__, :ok, [])
+    end
+
+    @impl true
+    def init(:ok), do: {:ok, %{}}
+
+    @impl true
+    def handle_call({:worker_ready, _worker_id}, _from, state) do
+      {:reply, :ok, state}
+    end
   end
 
-  test "dependent heartbeat kills the worker on repeated ping failures" do
+  setup do
+    pool_pid = start_supervised!(TestPool)
+    previous_flag = Process.flag(:trap_exit, true)
+    on_exit(fn -> Process.flag(:trap_exit, previous_flag) end)
+    %{pool_pid: pool_pid}
+  end
+
+  test "dependent heartbeat kills the worker on repeated ping failures", %{pool_pid: pool_pid} do
     worker_id = "grpc_dep_#{System.unique_integer([:positive])}"
 
     case start_worker_catching_exit(fn ->
            GRPCWorker.start_link(
              id: worker_id,
              adapter: Snakepit.TestAdapters.MockGRPCAdapter,
-             pool_name: Snakepit.Pool,
+             pool_name: pool_pid,
              worker_config: %{
                heartbeat: %{
                  enabled: true,
@@ -47,14 +65,16 @@ defmodule Snakepit.GRPCWorkerHeartbeatDependencyTest do
     end
   end
 
-  test "independent heartbeat keeps the worker alive on ping failures until stopped" do
+  test "independent heartbeat keeps the worker alive on ping failures until stopped", %{
+    pool_pid: pool_pid
+  } do
     worker_id = "grpc_ind_#{System.unique_integer([:positive])}"
 
     {:ok, worker_pid} =
       GRPCWorker.start_link(
         id: worker_id,
         adapter: Snakepit.TestAdapters.MockGRPCAdapter,
-        pool_name: Snakepit.Pool,
+        pool_name: pool_pid,
         worker_config: %{
           heartbeat: %{
             enabled: true,

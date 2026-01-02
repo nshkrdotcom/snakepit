@@ -200,8 +200,9 @@ defmodule Snakepit do
 
     * `:timeout` - Maximum time to wait for pool initialization (default: 15000ms)
     * `:shutdown_timeout` - Time to wait for supervisor shutdown confirmation (default: 15000ms)
-    * `:cleanup_timeout` - Time to wait for worker process cleanup before forcing cleanup (default: 5000ms)
-      (cleanup is bounded; if it exceeds `cleanup_timeout + 1000` ms the script continues)
+    * `:cleanup_timeout` - Time to wait for worker process cleanup before forcing cleanup (default: 5000ms).
+      When greater than zero, cleanup runs even if Snakepit was already started; set to 0 to skip cleanup.
+      Cleanup is bounded; if it exceeds `cleanup_timeout + 1000` ms the script continues.
     * `:restart` - Restart Snakepit if already started to apply script config (`:auto` | true | false)
     * `:await_pool` - Wait for pool readiness (default: `pooling_enabled` setting)
     * `:exit_mode` - Exit behavior (`:none` | `:halt` | `:stop` | `:auto`, default: `:none`).

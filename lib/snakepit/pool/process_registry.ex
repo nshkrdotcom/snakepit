@@ -17,6 +17,9 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @table_name :snakepit_pool_process_registry
   @log_category :pool
+  # Extra startup cleanup passes to handle stop/start overlap in a single BEAM.
+  @post_start_cleanup_attempts 3
+  @post_start_cleanup_delay_ms 500
 
   defstruct [
     :table,
@@ -215,10 +218,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
     # Open DETS for persistence with repair option
     # Generate an unguessable table identifier so callers cannot mutate DETS directly.
-    dets_table_name =
-      :crypto.strong_rand_bytes(8)
-      |> Base.encode32(case: :lower)
-      |> then(&:"snakepit_process_registry_dets_#{&1}")
+    dets_table_name = build_dets_table_name()
 
     dets_result =
       :dets.open_file(dets_table_name, [
@@ -253,6 +253,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
           table
       end
 
+    dets_table = ensure_dets_consistency(dets_table, dets_file)
+
     # Create ETS table for worker tracking - protected so only GenServer can write
     table =
       :ets.new(@table_name, [
@@ -275,6 +277,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
     # Schedule periodic cleanup
     schedule_cleanup()
+    schedule_post_start_cleanup(@post_start_cleanup_attempts)
 
     {:ok,
      %__MODULE__{
@@ -517,6 +520,17 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @impl true
+  def handle_info({:post_start_orphan_cleanup, attempts_left}, state) do
+    cleanup_orphaned_processes(state.dets_table, state.beam_run_id, state.beam_os_pid)
+
+    if attempts_left > 1 do
+      schedule_post_start_cleanup(attempts_left - 1)
+    end
+
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info(msg, state) do
     SLog.debug(@log_category, "ProcessRegistry received unexpected message: #{inspect(msg)}")
     {:noreply, state}
@@ -570,6 +584,14 @@ defmodule Snakepit.Pool.ProcessRegistry do
       self(),
       :cleanup_dead_workers,
       Defaults.process_registry_cleanup_interval()
+    )
+  end
+
+  defp schedule_post_start_cleanup(attempts_left) when attempts_left > 0 do
+    Process.send_after(
+      self(),
+      {:post_start_orphan_cleanup, attempts_left},
+      @post_start_cleanup_delay_ms
     )
   end
 
@@ -991,6 +1013,102 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   # Delegate to ProcessKiller for process checking
   defp process_alive?(pid), do: Snakepit.ProcessKiller.process_alive?(pid)
+
+  defp ensure_dets_consistency(dets_table, dets_file) do
+    size = :dets.info(dets_table, :size)
+
+    entries =
+      if size > 0 do
+        :dets.match_object(dets_table, :_)
+      else
+        []
+      end
+
+    case entries do
+      [] ->
+        dets_table
+
+      [{sample_key, _} | _] ->
+        if :dets.lookup(dets_table, sample_key) == [] do
+          SLog.warning(
+            @log_category,
+            "Detected DETS index corruption; rebuilding process registry table"
+          )
+
+          rebuild_dets_table(dets_table, dets_file, entries)
+        else
+          dets_table
+        end
+    end
+  end
+
+  defp rebuild_dets_table(dets_table, dets_file, entries) do
+    safe_close_dets(dets_table)
+    backup_corrupt_dets(dets_file)
+
+    dets_table_name = build_dets_table_name()
+
+    {:ok, new_table} =
+      :dets.open_file(dets_table_name, [
+        {:file, to_charlist(dets_file)},
+        {:type, :set},
+        {:auto_save, 1000},
+        {:repair, true}
+      ])
+
+    entries
+    |> dedupe_dets_entries()
+    |> Enum.each(fn {worker_id, info} ->
+      :dets.insert(new_table, {worker_id, info})
+    end)
+
+    :dets.sync(new_table)
+    new_table
+  end
+
+  defp dedupe_dets_entries(entries) do
+    entries
+    |> Enum.reduce(%{}, fn {worker_id, info}, acc ->
+      Map.update(acc, worker_id, info, fn existing ->
+        if entry_timestamp(info) >= entry_timestamp(existing), do: info, else: existing
+      end)
+    end)
+    |> Enum.map(fn {worker_id, info} -> {worker_id, info} end)
+  end
+
+  defp entry_timestamp(info) when is_map(info) do
+    max(Map.get(info, :registered_at, 0), Map.get(info, :reserved_at, 0))
+  end
+
+  defp entry_timestamp(_info), do: 0
+
+  defp safe_close_dets(nil), do: :ok
+
+  defp safe_close_dets(table) do
+    :dets.close(table)
+  rescue
+    _ -> :ok
+  end
+
+  defp backup_corrupt_dets(dets_file) do
+    timestamp = System.system_time(:second)
+    backup_path = "#{dets_file}.corrupt.#{timestamp}"
+
+    case File.rename(dets_file, backup_path) do
+      :ok ->
+        :ok
+
+      {:error, _} ->
+        File.rm(dets_file)
+        :ok
+    end
+  end
+
+  defp build_dets_table_name do
+    :crypto.strong_rand_bytes(8)
+    |> Base.encode32(case: :lower)
+    |> then(&:"snakepit_process_registry_dets_#{&1}")
+  end
 
   # Helper function for cleanup that operates on the table
   defp do_cleanup_dead_workers(state) do

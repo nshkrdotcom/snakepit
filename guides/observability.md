@@ -73,6 +73,7 @@ Key features:
 ```
 
 Metadata includes: `run_id`, `exit_mode`, `stop_mode`, `owned?`, `status`, `cleanup_result`.
+`cleanup_result` may be `:skipped` when cleanup is disabled (`cleanup_timeout: 0`).
 See `docs/20251229/documentation-overhaul/01-core-api.md#telemetry-contract-090` for details.
 
 ## Attaching Handlers

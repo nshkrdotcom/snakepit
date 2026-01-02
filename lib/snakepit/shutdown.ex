@@ -58,15 +58,18 @@ defmodule Snakepit.Shutdown do
     }
 
     stop_snakepit? = ScriptStop.stop_snakepit?(stop_mode, owned?)
+    exit_will_stop? = exit_mode in [:halt, :stop]
+    cleanup_will_run? = is_integer(cleanup_timeout) and cleanup_timeout > 0
+    mark_shutdown? = stop_snakepit? or cleanup_will_run? or exit_will_stop?
 
-    if stop_snakepit? do
+    if mark_shutdown? do
       mark_in_progress()
     end
 
     try do
       emit_telemetry(telemetry_fun, @telemetry_start, metadata_base, :pending)
 
-      targets = safe_capture_targets(capture_targets_fun)
+      targets = if cleanup_will_run?, do: safe_capture_targets(capture_targets_fun), else: []
 
       if stop_snakepit? do
         stop_fun.(shutdown_timeout, label)
@@ -82,7 +85,7 @@ defmodule Snakepit.Shutdown do
       exit_fun.(exit_mode, status)
       :ok
     after
-      if stop_snakepit? do
+      if mark_shutdown? do
         clear_in_progress()
       end
     end

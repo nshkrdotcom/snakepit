@@ -5,6 +5,25 @@ defmodule Snakepit.GRPCWorkerTelemetryTest do
   alias Snakepit.Pool.WorkerSupervisor
   alias Snakepit.TestAdapters.MockGRPCAdapter
 
+  setup do
+    prev_env = capture_env()
+
+    Application.stop(:snakepit)
+    Application.load(:snakepit)
+    configure_pooling()
+
+    {:ok, _} = Application.ensure_all_started(:snakepit)
+    assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 5_000)
+
+    on_exit(fn ->
+      Application.stop(:snakepit)
+      restore_env(prev_env)
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+    end)
+
+    :ok
+  end
+
   describe "telemetry instrumentation" do
     test "emits telemetry events with correlation id on execute" do
       handler_id = "test-grpc-worker-telemetry"
@@ -101,5 +120,37 @@ defmodule Snakepit.GRPCWorkerTelemetryTest do
       remaining ->
         flunk("Timed out waiting for telemetry event #{inspect(event)} for worker #{worker_id}")
     end
+  end
+
+  defp configure_pooling do
+    Application.put_env(:snakepit, :pooling_enabled, true)
+    Application.put_env(:snakepit, :pool_config, %{pool_size: 1})
+
+    Application.put_env(:snakepit, :pools, [
+      %{
+        name: :default,
+        worker_profile: :process,
+        pool_size: 1,
+        adapter_module: MockGRPCAdapter
+      }
+    ])
+
+    Application.put_env(:snakepit, :adapter_module, MockGRPCAdapter)
+  end
+
+  defp capture_env do
+    %{
+      pooling_enabled: Application.get_env(:snakepit, :pooling_enabled),
+      pools: Application.get_env(:snakepit, :pools),
+      pool_config: Application.get_env(:snakepit, :pool_config),
+      adapter_module: Application.get_env(:snakepit, :adapter_module)
+    }
+  end
+
+  defp restore_env(env) do
+    Enum.each(env, fn
+      {key, nil} -> Application.delete_env(:snakepit, key)
+      {key, value} -> Application.put_env(:snakepit, key, value)
+    end)
   end
 end

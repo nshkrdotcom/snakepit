@@ -2,8 +2,9 @@ import Config
 
 # Test configuration
 config :snakepit,
-  # Enable pooling for tests
-  pooling_enabled: true,
+  # Disable pooling by default so unit tests do not spawn Python workers.
+  # Integration tests explicitly enable pooling in their setup blocks.
+  pooling_enabled: false,
   env_doctor_module: Snakepit.Test.FakeDoctor,
 
   # Use smaller pool size for tests

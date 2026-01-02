@@ -286,6 +286,10 @@ Defaults are `exit_mode: :none` and `stop_mode: :if_started`. For embedded usage
 You can also set `SNAKEPIT_SCRIPT_EXIT` to `none|halt|stop|auto` when options are not
 explicitly provided. `SNAKEPIT_SCRIPT_HALT` is deprecated in favor of `SNAKEPIT_SCRIPT_EXIT`.
 
+Cleanup runs whenever `cleanup_timeout` is greater than zero (default), even if Snakepit
+is already started. For embedded usage where you do not own the pool, set
+`cleanup_timeout: 0` to skip cleanup.
+
 See `docs/20251229/documentation-overhaul/01-core-api.md#script-lifecycle-090` for the
 authoritative exit precedence and shutdown tables.
 

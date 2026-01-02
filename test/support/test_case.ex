@@ -41,13 +41,21 @@ defmodule Snakepit.TestCase do
   """
 
   defmacro __using__(opts \\ []) do
+    async? = Keyword.get(opts, :async, true)
+    isolation = Keyword.get(opts, :isolation, :basic)
+
     quote do
+      use ExUnit.Case, async: unquote(async?)
+
       # NOTE: Using :basic isolation mode. Current tests use manual worker creation which
       # conflicts with Supertester's :full_isolation cleanup. This is a known limitation
       # and works as expected for the test suite.
-      use Supertester.ExUnitFoundation,
-        isolation: :basic,
-        async: unquote(Keyword.get(opts, :async, true))
+      setup context do
+        {:ok, base_context} =
+          Supertester.UnifiedTestFoundation.setup_isolation(unquote(isolation), context)
+
+        {:ok, base_context}
+      end
 
       import Supertester.OTPHelpers
       import Supertester.GenServerHelpers

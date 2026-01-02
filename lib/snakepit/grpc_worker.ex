@@ -33,17 +33,17 @@ defmodule Snakepit.GRPCWorker do
   require Logger
   alias Snakepit.Defaults
   alias Snakepit.Error
+  alias Snakepit.GRPCWorker.Bootstrap
+  alias Snakepit.GRPCWorker.Instrumentation
   alias Snakepit.GRPC.Client
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Logger.Redaction
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.Pool.Registry, as: PoolRegistry
-  alias Snakepit.Telemetry.Correlation
   alias Snakepit.Telemetry.GrpcStream
   alias Snakepit.Worker.Configuration
   alias Snakepit.Worker.LifecycleManager
   alias Snakepit.Worker.ProcessManager
-  require OpenTelemetry.Tracer, as: Tracer
 
   def child_spec(opts) when is_list(opts) do
     %{
@@ -76,36 +76,6 @@ defmodule Snakepit.GRPCWorker do
           worker_config: map(),
           shutting_down: boolean()
         }
-
-  # Base heartbeat defaults - actual values are retrieved via Defaults module
-  # to allow runtime configuration. These are the compile-time fallbacks.
-  @base_heartbeat_defaults_template %{
-    enabled: true,
-    ping_fun: nil,
-    test_pid: nil,
-    dependent: true
-  }
-
-  defp base_heartbeat_defaults do
-    Map.merge(@base_heartbeat_defaults_template, %{
-      ping_interval_ms: Defaults.heartbeat_ping_interval_ms(),
-      timeout_ms: Defaults.heartbeat_timeout_ms(),
-      max_missed_heartbeats: Defaults.heartbeat_max_missed(),
-      initial_delay_ms: Defaults.heartbeat_initial_delay_ms()
-    })
-  end
-
-  @heartbeat_known_keys [
-    :enabled,
-    :ping_interval_ms,
-    :timeout_ms,
-    :max_missed_heartbeats,
-    :ping_fun,
-    :test_pid,
-    :initial_delay_ms,
-    :dependent
-  ]
-  @heartbeat_known_key_strings Enum.map(@heartbeat_known_keys, &Atom.to_string/1)
   @log_category :grpc
 
   # Client API
@@ -251,32 +221,6 @@ defmodule Snakepit.GRPCWorker do
   defp maybe_put_pool_identifier_opt(opts, identifier),
     do: Keyword.put(opts, :pool_identifier, identifier)
 
-  defp ensure_registry_metadata(metadata, pool_name, pool_identifier) do
-    metadata
-    |> Map.put(:worker_module, __MODULE__)
-    |> Map.put(:pool_name, pool_name)
-    |> maybe_put_pool_identifier(pool_identifier)
-  end
-
-  defp maybe_attach_registry_metadata(worker_id, metadata) when is_binary(worker_id) do
-    case PoolRegistry.put_metadata(worker_id, metadata) do
-      :ok ->
-        :ok
-
-      {:error, :not_registered} ->
-        SLog.debug(
-          @log_category,
-          "Pool.Registry missing entry for #{worker_id} while attaching metadata"
-        )
-
-        :ok
-    end
-  rescue
-    _ -> :ok
-  end
-
-  defp maybe_attach_registry_metadata(_worker_id, _metadata), do: :ok
-
   defp current_process_memory_bytes do
     case Process.info(self(), :memory) do
       {:memory, bytes} when is_integer(bytes) and bytes >= 0 -> bytes
@@ -288,200 +232,7 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def init(opts) do
-    # CRITICAL: Trap exits so terminate/2 is called on shutdown
-    # Without this, the GenServer is brutally killed and Python processes are orphaned!
-    Process.flag(:trap_exit, true)
-
-    adapter = Keyword.fetch!(opts, :adapter)
-    worker_id = Keyword.fetch!(opts, :id)
-    pool_name = Keyword.get(opts, :pool_name, Snakepit.Pool)
-    pool_identifier = Keyword.get(opts, :pool_identifier)
-
-    Logger.metadata(worker_id: worker_id, pool_name: pool_name, adapter: adapter)
-
-    metadata =
-      opts
-      |> Keyword.get(:registry_metadata, %{})
-      |> ensure_registry_metadata(pool_name, pool_identifier)
-
-    maybe_attach_registry_metadata(worker_id, metadata)
-
-    case ProcessRegistry.reserve_worker(worker_id) do
-      :ok ->
-        init_worker(opts, adapter, worker_id, pool_name, pool_identifier)
-
-      {:error, reason} ->
-        SLog.error(
-          @log_category,
-          "Failed to reserve worker slot for #{worker_id}: #{inspect(reason)}"
-        )
-
-        {:stop, {:reservation_failed, reason}}
-    end
-  end
-
-  defp init_worker(opts, adapter, worker_id, pool_name, pool_identifier) do
-    SLog.debug(@log_category, "Reserved worker slot for #{worker_id}")
-
-    session_id = generate_session_id()
-    Logger.metadata(session_id: session_id)
-    elixir_address = build_elixir_address()
-    port = adapter.get_port()
-
-    worker_config =
-      opts
-      |> Keyword.get(:worker_config, %{})
-      |> Configuration.normalize_worker_config(__MODULE__, pool_name, adapter, pool_identifier)
-
-    heartbeat_config =
-      worker_config
-      |> get_worker_config_section(:heartbeat)
-      |> normalize_heartbeat_config()
-
-    spawn_config =
-      Configuration.build_spawn_config(
-        adapter,
-        worker_config,
-        heartbeat_config,
-        port,
-        elixir_address,
-        worker_id
-      )
-
-    server_port = ProcessManager.spawn_grpc_server(spawn_config)
-    process_pid = extract_and_log_pid(server_port, port)
-    {pgid, process_group?} = resolve_process_group(process_pid, spawn_config)
-
-    register_worker_pid(worker_id, process_pid, pgid, process_group?)
-
-    state_params = %{
-      worker_id: worker_id,
-      pool_name: pool_name,
-      adapter: adapter,
-      port: port,
-      server_port: server_port,
-      process_pid: process_pid,
-      pgid: pgid,
-      process_group?: process_group?,
-      session_id: session_id,
-      worker_config: worker_config,
-      heartbeat_config: heartbeat_config,
-      ready_file: spawn_config.ready_file
-    }
-
-    state = build_initial_state(state_params)
-
-    {:ok, state, {:continue, :connect_and_wait}}
-  end
-
-  defp generate_session_id do
-    "session_#{:erlang.unique_integer([:positive, :monotonic])}_#{:erlang.system_time(:microsecond)}"
-  end
-
-  defp build_elixir_address do
-    elixir_grpc_host = Application.get_env(:snakepit, :grpc_host, "localhost")
-    elixir_grpc_port = Application.get_env(:snakepit, :grpc_port, 50_051)
-    "#{elixir_grpc_host}:#{elixir_grpc_port}"
-  end
-
-  defp resolve_process_group(process_pid, %{process_group?: true})
-       when is_integer(process_pid) do
-    with {:ok, pgid} <- Snakepit.ProcessKiller.get_process_group_id(process_pid),
-         true <- pgid == process_pid do
-      {pgid, true}
-    else
-      _ -> {nil, false}
-    end
-  end
-
-  defp resolve_process_group(_process_pid, _spawn_config), do: {nil, false}
-
-  defp extract_and_log_pid(server_port, port) do
-    case Port.info(server_port, :os_pid) do
-      {:os_pid, pid} ->
-        SLog.info(@log_category, "Started gRPC server process, will listen on TCP port #{port}")
-        pid
-
-      error ->
-        SLog.error(@log_category, "Failed to get gRPC server process PID: #{inspect(error)}")
-        nil
-    end
-  end
-
-  defp register_worker_pid(_worker_id, nil, _pgid, _process_group?), do: :ok
-
-  defp register_worker_pid(worker_id, process_pid, pgid, process_group?) do
-    case ProcessRegistry.activate_worker(worker_id, self(), process_pid, "grpc_worker",
-           pgid: pgid,
-           process_group?: process_group?
-         ) do
-      :ok ->
-        SLog.debug(
-          @log_category,
-          "Registered Python PID #{process_pid} for worker #{worker_id} in ProcessRegistry"
-        )
-
-      {:error, reason} ->
-        SLog.error(
-          @log_category,
-          "Failed to register Python PID #{process_pid} for worker #{worker_id}: #{inspect(reason)}"
-        )
-    end
-  end
-
-  defp build_initial_state(%{
-         worker_id: worker_id,
-         pool_name: pool_name,
-         adapter: adapter,
-         port: port,
-         server_port: server_port,
-         process_pid: process_pid,
-         pgid: pgid,
-         process_group?: process_group?,
-         session_id: session_id,
-         worker_config: worker_config,
-         heartbeat_config: heartbeat_config,
-         ready_file: ready_file
-       }) do
-    %{
-      id: worker_id,
-      pool_name: pool_name,
-      adapter: adapter,
-      port: port,
-      server_port: server_port,
-      process_pid: process_pid,
-      pgid: pgid,
-      process_group?: process_group?,
-      session_id: session_id,
-      requested_port: port,
-      worker_config: worker_config,
-      heartbeat_config: heartbeat_config,
-      ready_file: ready_file,
-      heartbeat_monitor: nil,
-      connection: nil,
-      health_check_ref: nil,
-      python_output_buffer: "",
-      # Track whether we initiated shutdown (to distinguish expected vs unexpected exits)
-      shutting_down: false,
-      stats: %{
-        requests: 0,
-        errors: 0,
-        start_time: System.monotonic_time()
-      }
-    }
-  end
-
-  defp resolve_pool_pid(pool_name) when is_atom(pool_name), do: Process.whereis(pool_name)
-  defp resolve_pool_pid(pool_name), do: pool_name
-
-  defp verify_pool_alive(nil, worker_id), do: {:error, {:pool_dead, worker_id}}
-
-  defp verify_pool_alive(pool_pid, worker_id) do
-    if Process.alive?(pool_pid) do
-      :ok
-    else
-      {:error, {:pool_dead, worker_id}}
-    end
+    Bootstrap.init(opts)
   end
 
   defp complete_worker_initialization(state, connection, actual_port) do
@@ -496,7 +247,7 @@ defmodule Snakepit.GRPCWorker do
 
     maybe_initialize_session(connection, state.session_id)
     register_telemetry_stream(connection, state)
-    emit_worker_spawned_telemetry(state, actual_port)
+    Instrumentation.emit_worker_spawned_telemetry(state, actual_port)
 
     new_state =
       state
@@ -508,86 +259,16 @@ defmodule Snakepit.GRPCWorker do
     {:noreply, new_state}
   end
 
-  defp emit_worker_spawned_telemetry(state, actual_port) do
-    start_time = Map.get(state.stats, :start_time, System.monotonic_time())
-
-    :telemetry.execute(
-      [:snakepit, :pool, :worker, :spawned],
-      %{
-        duration: System.monotonic_time() - start_time,
-        system_time: System.system_time()
-      },
-      %{
-        node: node(),
-        pool_name: state.pool_name,
-        worker_id: state.id,
-        worker_pid: self(),
-        python_port: actual_port,
-        python_pid: state.process_pid,
-        mode: :process
-      }
-    )
-  end
-
   @impl true
   def handle_continue(:connect_and_wait, state) do
-    with {:ok, actual_port} <-
-           ProcessManager.wait_for_server_ready(
-             state.server_port,
-             state.ready_file,
-             Defaults.grpc_server_ready_timeout()
-           ),
-         {:ok, connection} <-
-           wrap_grpc_connection_result(state.adapter.init_grpc_connection(actual_port)),
-         pool_pid <- resolve_pool_pid(state.pool_name),
-         :ok <- verify_pool_alive(pool_pid, state.id),
-         :ok <- notify_pool_ready(pool_pid, state.id) do
-      complete_worker_initialization(state, connection, actual_port)
-    else
-      {:error, :shutdown} ->
-        SLog.debug(@log_category, "gRPC server exited during startup (shutdown)")
-        {:stop, :shutdown, state}
-
-      {:error, {:exit_status, status}} when status in [137] ->
-        SLog.error(@log_category, "gRPC server exited during startup with status #{status}")
-        {:stop, {:grpc_server_failed, {:exit_status, status}}, state}
-
-      {:error, {:pool_dead, _}} ->
-        SLog.debug(
-          @log_category,
-          "Worker #{state.id} finished starting but Pool is shut down. Stopping gracefully."
-        )
-
-        {:stop, :normal, state}
-
-      {:error, {:pool_handshake_failed, reason}} ->
-        SLog.debug(
-          @log_category,
-          "Pool handshake failed for worker #{state.id}: #{inspect(reason)}"
-        )
-
-        {:stop, :shutdown, state}
-
-      {:error, {:grpc_connection_failed, reason}} ->
-        SLog.error(@log_category, "Failed to connect to gRPC server: #{reason}")
-        {:stop, {:grpc_connection_failed, reason}, state}
-
-      {:error, reason} ->
-        SLog.error(@log_category, "Failed to start gRPC server: #{inspect(reason)}")
-        {:stop, {:grpc_server_failed, reason}, state}
-    end
+    Bootstrap.connect_and_wait(state, &complete_worker_initialization/3)
   end
-
-  defp wrap_grpc_connection_result({:ok, connection}), do: {:ok, connection}
-
-  defp wrap_grpc_connection_result({:error, reason}),
-    do: {:error, {:grpc_connection_failed, reason}}
 
   @impl true
   def handle_call({:execute, command, args, timeout}, _from, state) do
-    args_with_corr = ensure_correlation(args)
+    args_with_corr = Instrumentation.ensure_correlation(args)
 
-    case instrument_execute(
+    case Instrumentation.instrument_execute(
            :execute,
            state,
            command,
@@ -620,7 +301,7 @@ defmodule Snakepit.GRPCWorker do
       "[GRPCWorker] execute_stream #{command} with args #{Redaction.describe(args)}"
     )
 
-    args_with_corr = ensure_correlation(args)
+    args_with_corr = Instrumentation.ensure_correlation(args)
 
     result =
       state.adapter.grpc_execute_stream(
@@ -663,9 +344,9 @@ defmodule Snakepit.GRPCWorker do
     session_args =
       args
       |> Map.put(:session_id, session_id)
-      |> ensure_correlation()
+      |> Instrumentation.ensure_correlation()
 
-    case instrument_execute(
+    case Instrumentation.instrument_execute(
            :execute_session,
            state,
            command,
@@ -969,34 +650,14 @@ defmodule Snakepit.GRPCWorker do
 
     SLog.debug(@log_category, "gRPC worker #{state.id} terminating: #{inspect(reason)}")
 
-    emit_worker_terminated_telemetry(state, reason)
+    planned? = shutdown_reason?(reason) or reason == :normal
+    Instrumentation.emit_worker_terminated_telemetry(state, reason, planned?)
     cleanup_heartbeat(state, reason)
     ProcessManager.kill_python_process(state, reason, graceful_shutdown_timeout())
     ProcessManager.cleanup_ready_file(state.ready_file)
     cleanup_resources(state)
 
     :ok
-  end
-
-  defp emit_worker_terminated_telemetry(state, reason) do
-    start_time = Map.get(state.stats, :start_time, 0)
-    total_commands = Map.get(state.stats, :requests, 0)
-
-    :telemetry.execute(
-      [:snakepit, :pool, :worker, :terminated],
-      %{
-        lifetime: System.monotonic_time() - start_time,
-        total_commands: total_commands
-      },
-      %{
-        node: node(),
-        pool_name: state.pool_name,
-        worker_id: state.id,
-        worker_pid: self(),
-        reason: reason,
-        planned: shutdown_reason?(reason) or reason == :normal
-      }
-    )
   end
 
   defp cleanup_heartbeat(state, reason) do
@@ -1024,40 +685,8 @@ defmodule Snakepit.GRPCWorker do
     safe_close_port(server_port)
   end
 
-  defp notify_pool_ready(nil, worker_id),
-    do:
-      {:error,
-       {:pool_handshake_failed, Error.pool_error("Pool not found", %{worker_id: worker_id})}}
-
-  defp notify_pool_ready(pool_pid, worker_id) when is_pid(pool_pid) do
-    GenServer.call(pool_pid, {:worker_ready, worker_id}, Defaults.worker_ready_timeout())
-  catch
-    :exit, {:noproc, _} ->
-      {:error,
-       {:pool_handshake_failed,
-        Error.pool_error("Pool not found", %{worker_id: worker_id, pool_pid: pool_pid})}}
-
-    :exit, {:shutdown, _} = reason ->
-      {:error, {:pool_handshake_failed, reason}}
-
-    :exit, {:killed, _} = reason ->
-      {:error, {:pool_handshake_failed, reason}}
-
-    :exit, {:timeout, _} = reason ->
-      {:error, {:pool_handshake_failed, reason}}
-
-    :exit, reason ->
-      {:error, {:pool_handshake_failed, reason}}
-  else
-    :ok ->
-      :ok
-
-    other ->
-      {:error, {:pool_handshake_failed, {:unexpected_reply, other}}}
-  end
-
   defp maybe_start_heartbeat_monitor(state) do
-    config = normalize_heartbeat_config(state.heartbeat_config)
+    config = Bootstrap.normalize_heartbeat_config(state.heartbeat_config)
 
     cond do
       not config[:enabled] ->
@@ -1265,53 +894,6 @@ defmodule Snakepit.GRPCWorker do
     :ok
   end
 
-  defp normalize_heartbeat_config(config) when is_map(config) do
-    defaults = default_heartbeat_config()
-
-    normalized =
-      Enum.reduce(@heartbeat_known_keys, %{}, fn key, acc ->
-        Map.put(acc, key, get_config_value(config, key, Map.get(defaults, key)))
-      end)
-
-    extras =
-      config
-      |> Enum.reject(fn {key, _value} -> heartbeat_known_key?(key) end)
-      |> Map.new()
-
-    Map.merge(extras, normalized)
-  end
-
-  defp normalize_heartbeat_config(_config), do: default_heartbeat_config()
-
-  defp default_heartbeat_config do
-    Map.merge(
-      base_heartbeat_defaults(),
-      Snakepit.Config.heartbeat_defaults(),
-      fn _key, _base, override -> override end
-    )
-  end
-
-  defp get_config_value(config, key, default) when is_atom(key) do
-    cond do
-      Map.has_key?(config, key) ->
-        Map.get(config, key)
-
-      Map.has_key?(config, Atom.to_string(key)) ->
-        Map.get(config, Atom.to_string(key))
-
-      true ->
-        default
-    end
-  end
-
-  defp heartbeat_known_key?(key) when is_atom(key) do
-    key in @heartbeat_known_keys
-  end
-
-  defp heartbeat_known_key?(key) when is_binary(key) do
-    key in @heartbeat_known_key_strings
-  end
-
   defp disconnect_connection(nil), do: :ok
 
   defp disconnect_connection(%{channel: %GRPC.Channel{} = channel}) do
@@ -1324,21 +906,6 @@ defmodule Snakepit.GRPCWorker do
 
   defp disconnect_connection(%{channel: channel}) when not is_nil(channel), do: :ok
   defp disconnect_connection(_), do: :ok
-
-  defp get_worker_config_section(config, key) when is_map(config) and is_atom(key) do
-    cond do
-      Map.has_key?(config, key) ->
-        Map.get(config, key)
-
-      Map.has_key?(config, Atom.to_string(key)) ->
-        Map.get(config, Atom.to_string(key))
-
-      true ->
-        nil
-    end
-  end
-
-  defp get_worker_config_section(_config, _key), do: nil
 
   # CRITICAL FIX: Defensive port cleanup that handles all exit scenarios
   defp safe_close_port(port) do
@@ -1403,169 +970,6 @@ defmodule Snakepit.GRPCWorker do
     %{state | stats: stats}
   end
 
-  defp instrument_execute(kind, state, command, args, timeout, fun) when is_function(fun, 1) do
-    correlation_id = correlation_id_from(args)
-    metadata = base_execute_metadata(kind, state, command, args, correlation_id, timeout)
-    span_name = otel_span_name(kind, command)
-    span_attributes = otel_start_attributes(state, command, args, correlation_id, timeout)
-
-    :telemetry.span([:snakepit, :grpc_worker, kind], metadata, fn ->
-      Tracer.with_span span_name, %{attributes: span_attributes, kind: :client} do
-        start_time = System.monotonic_time()
-        result = fun.(args)
-
-        duration_native = System.monotonic_time() - start_time
-        duration_ms = System.convert_time_unit(duration_native, :native, :millisecond)
-
-        measurements =
-          %{duration_ms: duration_ms, executions: 1}
-          |> maybe_track_error_measurement(result)
-
-        stop_metadata = build_stop_metadata(metadata, result)
-
-        Tracer.set_attributes(otel_stop_attributes(result, duration_ms, stop_metadata))
-        maybe_set_span_status(result, stop_metadata)
-
-        {result, measurements, stop_metadata}
-      end
-    end)
-  end
-
-  defp build_stop_metadata(metadata, {:error, {kind, reason}}) do
-    metadata
-    |> Map.put(:status, :error)
-    |> Map.put(:error_kind, kind)
-    |> Map.put(:error, reason)
-  end
-
-  defp build_stop_metadata(metadata, {:error, reason}) do
-    metadata
-    |> Map.put(:status, :error)
-    |> Map.put(:error, reason)
-  end
-
-  defp build_stop_metadata(metadata, _result) do
-    Map.put(metadata, :status, :ok)
-  end
-
-  defp maybe_track_error_measurement(measurements, {:error, _reason}) do
-    Map.put(measurements, :errors, 1)
-  end
-
-  defp maybe_track_error_measurement(measurements, _result), do: measurements
-
-  defp ensure_correlation(nil) do
-    id = Correlation.new_id()
-    %{"correlation_id" => id, correlation_id: id}
-  end
-
-  defp ensure_correlation(args) when is_map(args) do
-    existing =
-      Map.get(args, :correlation_id) ||
-        Map.get(args, "correlation_id")
-
-    id = Correlation.ensure(existing)
-
-    args
-    |> Map.put(:correlation_id, id)
-    |> Map.put("correlation_id", id)
-  end
-
-  defp ensure_correlation(args) when is_list(args) do
-    args
-    |> Map.new()
-    |> ensure_correlation()
-  end
-
-  defp correlation_id_from(%{} = args) do
-    args
-    |> Map.get(:correlation_id)
-    |> case do
-      nil -> Map.get(args, "correlation_id")
-      value -> value
-    end
-    |> Correlation.ensure()
-  end
-
-  defp base_execute_metadata(kind, state, command, args, correlation_id, timeout) do
-    session_id =
-      Map.get(args, :session_id) ||
-        Map.get(args, "session_id") ||
-        state.session_id
-
-    %{
-      operation: kind,
-      worker_id: state.id,
-      worker_pid: self(),
-      command: command,
-      adapter: adapter_name(state.adapter),
-      adapter_module: state.adapter,
-      pool: state.pool_name,
-      session_id: session_id,
-      correlation_id: correlation_id,
-      timeout_ms: timeout,
-      span_kind: :client,
-      rpc_system: :grpc,
-      telemetry_source: :snakepit_grpc_worker
-    }
-  end
-
-  defp otel_span_name(kind, command) do
-    operation = kind |> Atom.to_string() |> String.replace("_", "-")
-    "snakepit.grpc.#{operation}.#{command}"
-  end
-
-  defp otel_start_attributes(state, command, args, correlation_id, timeout) do
-    session_id = Map.get(args, :session_id) || Map.get(args, "session_id") || state.session_id
-
-    [
-      {"snakepit.worker.id", state.id},
-      {"snakepit.pool", pool_attribute(state.pool_name)},
-      {"snakepit.command", command},
-      {"snakepit.session_id", session_id},
-      {"snakepit.correlation_id", correlation_id},
-      {"snakepit.timeout_ms", timeout}
-    ]
-    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-  end
-
-  defp otel_stop_attributes(result, duration_ms, metadata) do
-    [
-      {"snakepit.grpc.duration_ms", duration_ms},
-      {"snakepit.grpc.status", metadata[:status]},
-      {"snakepit.grpc.error", format_reason(metadata[:error] || error_from_result(result))},
-      {"snakepit.grpc.error_kind", metadata[:error_kind]}
-    ]
-    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-  end
-
-  defp maybe_set_span_status({:error, _}, metadata) do
-    reason = format_reason(metadata[:error]) || "snakepit.grpc.error"
-    Tracer.set_status(:error, reason)
-  end
-
-  defp maybe_set_span_status(_result, _metadata), do: :ok
-
-  defp pool_attribute(nil), do: nil
-  defp pool_attribute(pool) when is_atom(pool), do: Atom.to_string(pool)
-  defp pool_attribute(pool), do: inspect(pool)
-
-  defp format_reason(nil), do: nil
-  defp format_reason({kind, reason}), do: "#{inspect(kind)}: #{inspect(reason)}"
-  defp format_reason(reason), do: inspect(reason)
-
-  defp error_from_result({:error, {kind, reason}}), do: {kind, reason}
-  defp error_from_result({:error, reason}), do: reason
-  defp error_from_result(_), do: nil
-
-  defp adapter_name(module) when is_atom(module) do
-    module
-    |> Atom.to_string()
-    |> String.replace_prefix("Elixir.", "")
-  end
-
-  defp adapter_name(other), do: inspect(other)
-
   # Shutdown detection helpers
   # These eliminate race conditions between port exit messages and shutdown signals
 
@@ -1595,7 +999,13 @@ defmodule Snakepit.GRPCWorker do
   @doc false
   # Check if the pool is still alive - if not, we're in system shutdown
   defp pool_alive?(pool_name) do
-    case resolve_pool_pid(pool_name) do
+    pool_pid =
+      case pool_name do
+        name when is_atom(name) -> Process.whereis(name)
+        _ -> pool_name
+      end
+
+    case pool_pid do
       pid when is_pid(pid) -> Process.alive?(pid)
       _ -> false
     end

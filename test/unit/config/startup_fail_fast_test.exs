@@ -43,19 +43,17 @@ defmodule Snakepit.Config.StartupFailFastTest do
       Application.put_env(:snakepit, :pool_config, %{pool_size: 1})
       Application.put_env(:snakepit, :env_doctor_module, Snakepit.EnvDoctor)
 
-      adapter = Snakepit.TestAdapters.MockGRPCAdapter
-      Application.put_env(:snakepit, :adapter_module, adapter)
+      Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 
       Application.put_env(:snakepit, :pools, [
         %{
           name: :default,
           worker_profile: :process,
           pool_size: 1,
-          adapter_module: adapter
+          adapter_module: Snakepit.Adapters.GRPCPython
         }
       ])
 
-      Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
       Application.put_env(:snakepit, :python_executable, bad_path)
 
       case Application.ensure_all_started(:snakepit) do

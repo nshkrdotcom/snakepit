@@ -18,13 +18,13 @@ defmodule Snakepit.Integration.OrphanCleanupStressTest do
   setup do
     prev_env = capture_env()
 
-    Application.stop(:snakepit)
+    stop_snakepit_and_wait()
     configure_pooling()
     {:ok, _} = Application.ensure_all_started(:snakepit)
     assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 60_000)
 
     on_exit(fn ->
-      Application.stop(:snakepit)
+      stop_snakepit_and_wait()
       restore_env(prev_env)
       {:ok, _} = Application.ensure_all_started(:snakepit)
     end)
@@ -43,6 +43,22 @@ defmodule Snakepit.Integration.OrphanCleanupStressTest do
 
     current_run_id = ProcessRegistry.get_beam_run_id()
     assert_no_orphan_python_processes(current_run_id)
+
+    :ok = ProcessRegistry.manual_orphan_cleanup()
+
+    assert_eventually(
+      fn ->
+        :ok = ProcessRegistry.manual_orphan_cleanup()
+        {entries_info, registry_run_id} = ProcessRegistry.debug_show_all_entries()
+
+        current_entries = Enum.count(entries_info, & &1.is_current_run)
+
+        registry_run_id == current_run_id and
+          match?({:ok, ^current_entries}, ProcessRegistry.dets_table_size())
+      end,
+      timeout: 30_000,
+      interval: 250
+    )
 
     {entries_info, registry_run_id} = ProcessRegistry.debug_show_all_entries()
     assert registry_run_id == current_run_id
@@ -64,9 +80,21 @@ defmodule Snakepit.Integration.OrphanCleanupStressTest do
 
     # Second reboot ensures DETS does not grow
     reboot_snakepit()
+    :ok = ProcessRegistry.manual_orphan_cleanup()
 
     second_run_id = ProcessRegistry.get_beam_run_id()
     assert_no_orphan_python_processes(second_run_id)
+
+    assert_eventually(
+      fn ->
+        match?(
+          {:ok, dets_size_after_second} when dets_size_after_second <= @pool_size,
+          ProcessRegistry.dets_table_size()
+        )
+      end,
+      timeout: 30_000,
+      interval: 250
+    )
 
     {:ok, dets_size_after_second} = ProcessRegistry.dets_table_size()
     assert dets_size_after_second <= @pool_size
@@ -96,7 +124,7 @@ defmodule Snakepit.Integration.OrphanCleanupStressTest do
   end
 
   defp reboot_snakepit do
-    Application.stop(:snakepit)
+    stop_snakepit_and_wait()
     {:ok, _} = Application.ensure_all_started(:snakepit)
 
     assert_eventually(
@@ -109,6 +137,23 @@ defmodule Snakepit.Integration.OrphanCleanupStressTest do
     )
 
     :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 60_000)
+  end
+
+  defp stop_snakepit_and_wait do
+    sup_pid = Process.whereis(Snakepit.Supervisor)
+    sup_ref = if sup_pid && Process.alive?(sup_pid), do: Process.monitor(sup_pid)
+
+    Application.stop(:snakepit)
+
+    if sup_ref do
+      receive do
+        {:DOWN, ^sup_ref, :process, ^sup_pid, _reason} ->
+          :ok
+      after
+        10_000 ->
+          flunk("Timeout waiting for Snakepit supervisor to terminate")
+      end
+    end
   end
 
   defp assert_no_orphan_python_processes(current_run_id) do

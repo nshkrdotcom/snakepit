@@ -186,7 +186,8 @@ defmodule Snakepit.Pool.QueueManagementTest do
     state = %{state | pools: %{queue_pool: pool_state}}
 
     from_new = {self(), make_ref()}
-    {:noreply, new_state} = Pool.handle_call({:execute, "command_c", %{}, %{}}, from_new, state)
+    opts = %{__test_now_ms: now_ms}
+    {:noreply, new_state} = Pool.handle_call({:execute, "command_c", %{}, opts}, from_new, state)
 
     queue_after = new_state.pools.queue_pool.request_queue |> :queue.to_list()
     assert length(queue_after) == 1

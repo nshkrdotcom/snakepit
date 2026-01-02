@@ -606,6 +606,10 @@ Snakepit itself stops (default: `:if_started`). For embedded usage, keep `exit_m
 Warning: `exit_mode: :halt` or `:stop` terminates the entire VM regardless of `stop_mode`.
 Avoid those modes in embedded usage.
 
+Cleanup of external workers runs whenever `cleanup_timeout` is greater than zero (default),
+even if Snakepit is already started. For embedded usage where you do not own the pool,
+set `cleanup_timeout: 0` to skip cleanup.
+
 Exit mode guidance:
 - `:none` (default) - return to the caller; the script runner controls VM exit.
 - `:auto` - safe default for scripts that may run under `--no-halt`.

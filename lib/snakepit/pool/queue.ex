@@ -5,8 +5,17 @@ defmodule Snakepit.Pool.Queue do
 
   def compact_pool_queue(queue, cancelled_requests, queue_timeout) do
     now_ms = System.monotonic_time(:millisecond)
+    compact_pool_queue(queue, cancelled_requests, queue_timeout, now_ms)
+  end
+
+  def compact_pool_queue(queue, cancelled_requests, queue_timeout, now_ms)
+      when is_integer(now_ms) do
     retention_ms = cancellation_retention_ms(queue_timeout)
     compact_request_queue(queue, cancelled_requests, now_ms, retention_ms)
+  end
+
+  def compact_pool_queue(queue, cancelled_requests, queue_timeout, _now_ms) do
+    compact_pool_queue(queue, cancelled_requests, queue_timeout)
   end
 
   def drop_request_from_queue(queue, from) do

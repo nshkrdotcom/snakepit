@@ -6,7 +6,21 @@ defmodule Snakepit.Pool.ClientCancellationTest do
   @telemetry_event [:snakepit, :request, :executed]
 
   setup do
-    Application.ensure_all_started(:snakepit)
+    prev_env = capture_env()
+
+    Application.stop(:snakepit)
+    Application.load(:snakepit)
+    configure_pooling()
+
+    {:ok, _} = Application.ensure_all_started(:snakepit)
+    assert :ok = Pool.await_ready()
+
+    on_exit(fn ->
+      Application.stop(:snakepit)
+      restore_env(prev_env)
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+    end)
+
     :ok
   end
 
@@ -53,5 +67,37 @@ defmodule Snakepit.Pool.ClientCancellationTest do
     assert metadata.aborted
     assert metadata.reason == :client_down
     assert measurements.duration_us >= 0
+  end
+
+  defp configure_pooling do
+    Application.put_env(:snakepit, :pooling_enabled, true)
+    Application.put_env(:snakepit, :pool_config, %{pool_size: 1})
+
+    Application.put_env(:snakepit, :pools, [
+      %{
+        name: :default,
+        worker_profile: :process,
+        pool_size: 1,
+        adapter_module: Snakepit.TestAdapters.MockGRPCAdapter
+      }
+    ])
+
+    Application.put_env(:snakepit, :adapter_module, Snakepit.TestAdapters.MockGRPCAdapter)
+  end
+
+  defp capture_env do
+    %{
+      pooling_enabled: Application.get_env(:snakepit, :pooling_enabled),
+      pools: Application.get_env(:snakepit, :pools),
+      pool_config: Application.get_env(:snakepit, :pool_config),
+      adapter_module: Application.get_env(:snakepit, :adapter_module)
+    }
+  end
+
+  defp restore_env(env) do
+    Enum.each(env, fn
+      {key, nil} -> Application.delete_env(:snakepit, key)
+      {key, value} -> Application.put_env(:snakepit, key, value)
+    end)
   end
 end

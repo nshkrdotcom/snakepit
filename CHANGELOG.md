@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.0] - 2026-01-01
+## [0.9.0] - 2026-01-02
 
 ### Added
 - `run_as_script/2` `:exit_mode` option and `SNAKEPIT_SCRIPT_EXIT` env var for explicit exit semantics.
@@ -27,14 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Long-running integration and randomized flow tests are tagged `:slow`, and random worker flow iterations were trimmed.
 - Pool size isolation checks now wait on pool stats instead of fixed delays.
 - gRPC errors during shutdown now log at debug level to reduce noise during expected teardown.
-- Refactored `Snakepit.Pool` and `Snakepit.GRPCWorker` internals to delegate state, queue, initialization, config, and process management into focused modules without changing behavior.
+- Refactored `Snakepit.Pool` and `Snakepit.GRPCWorker` internals into focused helpers (dispatcher/scheduler/event handler, bootstrap/instrumentation) without behavior changes.
+- `Snakepit.TaskSupervisor` now starts even when pooling is disabled so queue dispatch paths can spawn tasks safely.
 
 ### Fixed
 - Removed direct IO from the script exit path to avoid hangs on closed pipes.
 - `run_as_script/2` no longer stops Snakepit in embedded usage unless explicitly requested.
+- Script shutdown now marks shutdown-in-progress whenever cleanup runs, so cleanup-only runs (when Snakepit is already started) treat Python exits as expected.
 - Shape mismatch telemetry test now filters events by operation to avoid cross-test telemetry bleed.
 - Worker lifecycle memory-probe warning test now synchronizes probe failures and log capture to prevent flakes.
-- Script shutdown now marks shutdown-in-progress so clean Python exits during teardown are treated as expected.
+- BEAM run IDs now use second-resolution timestamps plus a monotonic counter to avoid collisions during rapid restarts.
+- ProcessRegistry rebuilds DETS metadata when index corruption is detected, preventing stale entries after crash/restart cycles.
 
 ## [0.8.9] - 2026-01-01
 

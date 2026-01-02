@@ -128,6 +128,10 @@ usage where the host VM must stay alive.
 
 Warning: `exit_mode: :halt` or `:stop` terminates the entire VM regardless of `stop_mode`.
 
+Cleanup runs whenever `cleanup_timeout` is greater than zero (default), even if Snakepit
+is already started. For embedded usage where you do not own the pool, set
+`cleanup_timeout: 0` to skip cleanup.
+
 Options: `:timeout`, `:shutdown_timeout`, `:cleanup_timeout`, `:exit_mode`, `:stop_mode`
 (`:halt` is legacy and deprecated).
 

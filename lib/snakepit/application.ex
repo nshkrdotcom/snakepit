@@ -66,7 +66,7 @@ defmodule Snakepit.Application do
     # Check if pooling is enabled (default: false to prevent auto-start issues)
     pooling_enabled = Application.get_env(:snakepit, :pooling_enabled, false)
 
-    if pooling_enabled do
+    if pooling_enabled and python_adapter_in_use?() do
       ensure_python_ready()
     end
 
@@ -93,8 +93,12 @@ defmodule Snakepit.Application do
     base_children = [
       Snakepit.Bridge.SessionStore,
       Snakepit.Bridge.ToolRegistry,
+      # Registry for worker process registration (needed even without pooling)
+      Snakepit.Pool.Registry,
       # Process registry for PID tracking (always available for cleanup)
       Snakepit.Pool.ProcessRegistry,
+      # Task supervisor for async pool operations
+      {Task.Supervisor, name: Snakepit.TaskSupervisor},
       # Application cleanup for hard process termination guarantees
       # Runs after pool children terminate to catch any stragglers
       Snakepit.Pool.ApplicationCleanup
@@ -125,14 +129,8 @@ defmodule Snakepit.Application do
              socket_opts: [backlog: Defaults.grpc_socket_backlog()]
            ]},
 
-          # Task supervisor for async pool operations
-          {Task.Supervisor, name: Snakepit.TaskSupervisor},
-
           # Telemetry gRPC stream manager (for Python worker telemetry)
           Snakepit.Telemetry.GrpcStream,
-
-          # Registry for worker process registration
-          Snakepit.Pool.Registry,
 
           # Registry for worker starter supervisors
           Snakepit.Pool.Worker.StarterRegistry,
@@ -217,6 +215,23 @@ defmodule Snakepit.Application do
       reraise error, __STACKTRACE__
   end
 
+  defp python_adapter_in_use? do
+    default_adapter =
+      Application.get_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+
+    pools = Application.get_env(:snakepit, :pools)
+
+    cond do
+      is_list(pools) and pools != [] ->
+        Enum.any?(pools, fn pool ->
+          Map.get(pool, :adapter_module, default_adapter) == Snakepit.Adapters.GRPCPython
+        end)
+
+      true ->
+        default_adapter == Snakepit.Adapters.GRPCPython
+    end
+  end
+
   @requirements_checked_key {__MODULE__, :requirements_checked}
 
   defp ensure_snakepit_requirements do
@@ -251,12 +266,6 @@ defmodule Snakepit.Application do
           :persistent_term.put(@requirements_checked_key, true)
       end
     end
-  rescue
-    error ->
-      # Log warning but don't fail startup - let EnvDoctor provide detailed errors
-      require Logger
-      Logger.warning("Failed to auto-install Python requirements: #{Exception.message(error)}")
-      :ok
   end
 
   defp snakepit_requirements_path do

@@ -3,7 +3,7 @@ defmodule Snakepit.RunID do
   Generates short, unique BEAM run identifiers.
 
   Format: 7 characters, base36-encoded
-  Components: timestamp (5 chars) + random (2 chars)
+  Components: timestamp (5 chars) + counter (2 chars)
   Example: "k3x9a2p"
 
   These IDs are embedded in Python process command lines for reliable
@@ -20,21 +20,21 @@ defmodule Snakepit.RunID do
       7
   """
   def generate do
-    # Use last 5 digits of microsecond timestamp (base36)
+    # Use last 5 digits of *second* timestamp (base36)
     # Cycles every ~60 million seconds (~2 years)
-    timestamp = System.system_time(:microsecond)
+    timestamp = System.system_time(:second)
     time_component = timestamp |> rem(60_466_176) |> Integer.to_string(36) |> String.downcase()
     time_part = String.pad_leading(time_component, 5, "0")
 
-    # Add 2 random characters for collision resistance
-    random_part =
-      :rand.uniform(1296)
-      |> Kernel.-(1)
+    # Add 2 counter characters for collision resistance within the same second
+    counter_part =
+      System.unique_integer([:positive, :monotonic])
+      |> rem(1296)
       |> Integer.to_string(36)
       |> String.downcase()
       |> String.pad_leading(2, "0")
 
-    time_part <> random_part
+    time_part <> counter_part
   end
 
   @doc """

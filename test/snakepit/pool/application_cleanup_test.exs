@@ -12,25 +12,32 @@ defmodule Snakepit.Pool.ApplicationCleanupTest do
 
   @moduletag :skip_ci
   @moduletag :slow
+  @moduletag :python_integration
 
   alias Snakepit.Pool.ProcessRegistry
 
   setup do
-    # Ensure application is running (in case a previous test stopped it)
-    case Application.ensure_all_started(:snakepit) do
-      {:ok, _apps} ->
-        # Wait for pool to be ready
-        assert_eventually(
-          fn ->
-            Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
-          end,
-          timeout: 30_000,
-          interval: 1_000
-        )
+    prev_env = capture_env()
 
-      {:error, {:already_started, :snakepit}} ->
-        :ok
-    end
+    Application.stop(:snakepit)
+    Application.load(:snakepit)
+    configure_pooling()
+
+    {:ok, _} = Application.ensure_all_started(:snakepit)
+
+    assert_eventually(
+      fn ->
+        Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+      end,
+      timeout: 30_000,
+      interval: 1_000
+    )
+
+    on_exit(fn ->
+      Application.stop(:snakepit)
+      restore_env(prev_env)
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+    end)
 
     :ok
   end
@@ -99,5 +106,36 @@ defmodule Snakepit.Pool.ApplicationCleanupTest do
       {output, 0} -> output |> String.split("\n", trim: true) |> length()
       _ -> 0
     end
+  end
+
+  defp configure_pooling do
+    Application.put_env(:snakepit, :pooling_enabled, true)
+    Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
+    Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+
+    Application.put_env(:snakepit, :pools, [
+      %{
+        name: :default,
+        worker_profile: :process,
+        pool_size: 2,
+        adapter_module: Snakepit.Adapters.GRPCPython
+      }
+    ])
+  end
+
+  defp capture_env do
+    %{
+      pooling_enabled: Application.get_env(:snakepit, :pooling_enabled),
+      pools: Application.get_env(:snakepit, :pools),
+      pool_config: Application.get_env(:snakepit, :pool_config),
+      adapter_module: Application.get_env(:snakepit, :adapter_module)
+    }
+  end
+
+  defp restore_env(env) do
+    Enum.each(env, fn
+      {key, nil} -> Application.delete_env(:snakepit, key)
+      {key, value} -> Application.put_env(:snakepit, key, value)
+    end)
   end
 end

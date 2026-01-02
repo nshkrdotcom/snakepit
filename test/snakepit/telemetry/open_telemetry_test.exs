@@ -7,6 +7,7 @@ defmodule Snakepit.Telemetry.OpenTelemetryTest do
   alias Snakepit.TestAdapters.MockGRPCAdapter
 
   setup do
+    prev_env = capture_env()
     original_config = Application.get_env(:snakepit, :opentelemetry)
 
     clean_env = %{
@@ -20,10 +21,19 @@ defmodule Snakepit.Telemetry.OpenTelemetryTest do
       }
     }
 
+    Application.stop(:snakepit)
+    Application.load(:snakepit)
+    configure_pooling()
     Application.put_env(:snakepit, :opentelemetry, clean_env)
+
+    {:ok, _} = Application.ensure_all_started(:snakepit)
+    assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 5_000)
     :ok = OpenTelemetry.setup()
 
     on_exit(fn ->
+      Application.stop(:snakepit)
+      restore_env(prev_env)
+
       if original_config do
         Application.put_env(:snakepit, :opentelemetry, original_config)
       else
@@ -32,6 +42,7 @@ defmodule Snakepit.Telemetry.OpenTelemetryTest do
 
       Application.put_env(:snakepit, :opentelemetry, %{enabled: false})
       :ok = OpenTelemetry.setup()
+      {:ok, _} = Application.ensure_all_started(:snakepit)
     end)
 
     :ok
@@ -102,5 +113,38 @@ defmodule Snakepit.Telemetry.OpenTelemetryTest do
       remaining ->
         flunk("Timed out waiting for OpenTelemetry event #{inspect(tag)} for worker #{worker_id}")
     end
+  end
+
+  defp configure_pooling do
+    Application.put_env(:snakepit, :pooling_enabled, true)
+    Application.put_env(:snakepit, :pool_config, %{pool_size: 1})
+
+    Application.put_env(:snakepit, :pools, [
+      %{
+        name: :default,
+        worker_profile: :process,
+        pool_size: 1,
+        adapter_module: MockGRPCAdapter
+      }
+    ])
+
+    Application.put_env(:snakepit, :adapter_module, MockGRPCAdapter)
+  end
+
+  defp capture_env do
+    %{
+      pooling_enabled: Application.get_env(:snakepit, :pooling_enabled),
+      pools: Application.get_env(:snakepit, :pools),
+      pool_config: Application.get_env(:snakepit, :pool_config),
+      adapter_module: Application.get_env(:snakepit, :adapter_module),
+      opentelemetry: Application.get_env(:snakepit, :opentelemetry)
+    }
+  end
+
+  defp restore_env(env) do
+    Enum.each(env, fn
+      {key, nil} -> Application.delete_env(:snakepit, key)
+      {key, value} -> Application.put_env(:snakepit, key, value)
+    end)
   end
 end
