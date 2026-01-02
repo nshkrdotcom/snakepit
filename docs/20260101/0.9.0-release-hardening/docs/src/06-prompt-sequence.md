@@ -20,6 +20,26 @@ clear checkpoints and minimal cross-step conflicts.
    - Update 0.9.0 changelog summary once final behavior is known.
 
 Each prompt includes required reading (docs/src), context, and TDD steps.
-Each prompt must update README, guides, and append to the 0.9.0 CHANGELOG
-entry in addition to code/tests.
 
+**Documentation update policy (drift control)**
+
+* Prompts 01-03 MAY update only:
+
+  * `docs/20251229/documentation-overhaul/01-core-api.md` (the single source of
+    truth tables/sections), and
+  * `CHANGELOG.md` (append-only per canonical structure).
+* Prompts 01-03 SHOULD NOT update README/guides/examples to avoid conflicting
+  intermediate edits and drift.
+* Prompt 04 performs the holistic documentation pass (README + guides +
+  examples) and reconciles wording against the API docs tables and the final
+  implementation.
+* If a prompt must touch user-facing docs earlier for correctness, it must
+  only add a short, clearly marked "0.9.0 in progress" note and defer full
+  rewrites to prompt 04.
+
+**Checkpoint after Prompt 01:** API docs contain the authoritative Exit
+Selection Precedence table + Status Code Rules.
+**Checkpoint after Prompt 02:** API docs include `stop_mode` semantics and the
+`stop_mode x exit_mode` matrix.
+**Checkpoint after Prompt 03:** API docs include the Shutdown State Machine
+and Telemetry Contract (draft finalized by Prompt 04).

@@ -32,14 +32,18 @@ Tasks (TDD required)
    - Ensure Snakepit.Examples.Bootstrap.run_example/2 aligns with the new
      stop_mode behavior and remains safe for wrapper scripts.
 
-4) Update docs.
-   - README.md and guides: clarify ownership behavior and stop_mode.
-   - Update any API docs referencing run_as_script/2 options.
+4) Update API docs (single source of truth).
+   - Update `docs/20251229/documentation-overhaul/01-core-api.md`:
+     - Document `stop_mode` (`:if_started` default, `:always`, `:never`) and
+       how ownership is detected.
+     - Add/update the authoritative `stop_mode x exit_mode` matrix (embedded
+       vs standalone) and explicitly warn against embedded + `:stop`/`:halt`.
+   - Do not update README/guides/examples in this prompt (handled in Prompt 04).
 
-5) Append changes to CHANGELOG.md under the 0.9.0 entry.
+5) Append changes to `CHANGELOG.md` under the existing `## 0.9.0 - Unreleased`
+   section (Added/Changed/Fixed only). Do not create a new 0.9.0 section.
 
 Constraints
 - Use TDD: tests first, then implementation.
 - Keep existing behavior by default wherever possible.
-- Update README and all guides as described in docs/src/05-planning-docs-changelog.md.
-
+- Follow the documentation policy in docs/src/05-planning-docs-changelog.md.

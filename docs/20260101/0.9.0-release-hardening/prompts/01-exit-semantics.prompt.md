@@ -19,14 +19,20 @@ Goal
 
 Tasks (TDD required)
 1) Add tests first.
-   - Unit tests for exit mode selection and precedence:
-     - :exit_mode overrides :halt.
-     - :halt true maps to :exit_mode :halt when :exit_mode is unset.
-     - SNAKEPIT_SCRIPT_EXIT parsing (none|halt|stop|auto).
+   - Unit tests for exit mode selection and precedence (pure functions):
+     - :exit_mode overrides legacy :halt.
+     - legacy :halt true maps to exit_mode: :halt when :exit_mode is unset.
+     - Full precedence chain: :exit_mode > legacy :halt > SNAKEPIT_SCRIPT_EXIT >
+       legacy SNAKEPIT_SCRIPT_HALT > default.
+     - SNAKEPIT_SCRIPT_EXIT parsing: trim + case-insensitive; empty => unset;
+       invalid => ignored (and produces a pre-shutdown Logger warning).
    - Integration tests (external VM):
-     - exit_mode :halt exits with status 0/1.
-     - broken pipe simulation (pipe to head -1) does not hang.
-     - timeout wrapper does not hang (timeout --foreground).
+     - exit_mode :halt exits with status 0 on normal return, status 1 on
+       exception (Status Code Rules).
+     - exit_mode :stop requests VM shutdown with status 0/1 per Status Code
+       Rules (and blocks until exit).
+     - Broken pipe simulation must be portable (prefer pure Elixir
+       pipe-close harness; do not require GNU `timeout` flags).
 
 2) Implement exit_mode support.
    - Add :exit_mode option to run_as_script/2.
@@ -40,15 +46,22 @@ Tasks (TDD required)
    - :stop -> System.stop/1 and block the caller until VM shutdown.
    - :none -> return normally.
 
-4) Update docs.
-   - Update README.md, guides/getting-started.md, guides/production.md,
-     docs/20251229/documentation-overhaul/01-core-api.md.
-   - Document exit_mode, env vars, and broken pipe behavior.
+4) Update API docs (single source of truth).
+   - Update `docs/20251229/documentation-overhaul/01-core-api.md` to add
+     "Script Lifecycle (0.9.0)" including:
+     - Exit Selection Precedence table
+     - `SNAKEPIT_SCRIPT_EXIT` parsing rules
+     - Legacy `SNAKEPIT_SCRIPT_HALT` compatibility + deprecation note
+     - Status Code Rules
+   - Do not update README/guides/examples in this prompt (handled in Prompt 04).
 
-5) Append changes to CHANGELOG.md under a new 0.9.0 entry.
+5) Append changes to `CHANGELOG.md` under `## 0.9.0 - Unreleased`.
+   - Create the `0.9.0 - Unreleased` section only if missing, with subheadings
+     `### Added`, `### Changed`, `### Fixed`.
+   - Otherwise append under existing subheadings only (no duplicate 0.9.0
+     headings).
 
 Constraints
 - Use TDD: tests first, then implementation.
 - Keep behavior backward compatible unless documented as changed.
-- Update README and all guides as described in docs/src/05-planning-docs-changelog.md.
-
+- Follow the documentation policy in docs/src/05-planning-docs-changelog.md.
