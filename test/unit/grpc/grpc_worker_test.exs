@@ -68,13 +68,13 @@ defmodule Snakepit.GRPCWorkerTest do
 
     test "worker handles command timeout", %{worker: worker} do
       # Execute slow operation with short GenServer.call timeout
-      # The operation takes 200ms but we only wait 100ms for the GenServer call
+      # The operation takes 50ms but we only wait 20ms for the GenServer call
       assert catch_exit(
-               GenServer.call(worker, {:execute, "slow_operation", %{"delay" => 200}, 5_000}, 100)
+               GenServer.call(worker, {:execute, "slow_operation", %{"delay" => 50}, 5_000}, 20)
              ) ==
                {:timeout,
                 {GenServer, :call,
-                 [worker, {:execute, "slow_operation", %{"delay" => 200}, 5_000}, 100]}}
+                 [worker, {:execute, "slow_operation", %{"delay" => 50}, 5_000}, 20]}}
 
       # Worker should still be alive and responsive after timeout
       assert Process.alive?(worker)

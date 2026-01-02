@@ -91,7 +91,8 @@ defmodule Snakepit.Examples.Bootstrap do
     run_opts =
       opts
       |> Keyword.put(:await_pool, false)
-      |> Keyword.put_new(:halt, true)
+      |> maybe_put_exit_mode()
+      |> Keyword.put_new(:stop_mode, :if_started)
 
     Snakepit.run_as_script(
       fn ->
@@ -107,6 +108,14 @@ defmodule Snakepit.Examples.Bootstrap do
 
   defp pooling_enabled? do
     Application.get_env(:snakepit, :pooling_enabled, false)
+  end
+
+  defp maybe_put_exit_mode(opts) do
+    cond do
+      Keyword.has_key?(opts, :exit_mode) -> opts
+      Keyword.has_key?(opts, :halt) -> opts
+      true -> Keyword.put(opts, :exit_mode, :auto)
+    end
   end
 
   @spec ensure_grpc_port!() :: :ok

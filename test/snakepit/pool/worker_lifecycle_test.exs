@@ -43,10 +43,12 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
 
     @impl true
     def handle_call(:get_memory_usage, _from, %{memory_bytes: {:fail, reason}} = state) do
+      send(state.owner, {:memory_probe, state.worker_id, state.memory_bytes})
       {:reply, {:error, reason}, state}
     end
 
     def handle_call(:get_memory_usage, _from, state) do
+      send(state.owner, {:memory_probe, state.worker_id, state.memory_bytes})
       {:reply, {:ok, state.memory_bytes}, state}
     end
 
@@ -358,6 +360,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
     test "logs when memory probe fails and skips recycling" do
       manager = Process.whereis(LifecycleManager)
       worker_id = "mem_probe_fail_#{System.unique_integer([:positive])}"
+      original_log_level = Application.get_env(:snakepit, :log_level)
 
       {:ok, worker_pid} =
         TestProfile.start_worker(%{
@@ -366,6 +369,14 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
         })
 
       assert_receive {:profile_started, ^worker_id, ^worker_pid, _initial_config}, 1_000
+
+      on_exit(fn ->
+        if original_log_level do
+          Application.put_env(:snakepit, :log_level, original_log_level)
+        else
+          Application.delete_env(:snakepit, :log_level)
+        end
+      end)
 
       config = %{
         worker_profile: TestProfile,
@@ -379,14 +390,27 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
       LifecycleManager.track_worker(:test_pool, worker_id, worker_pid, config)
       TestLifecycleWorker.fail_memory_probe(worker_pid)
 
+      assert_eventually(
+        fn ->
+          match?({:error, :forced_failure}, GenServer.call(worker_pid, :get_memory_usage))
+        end,
+        timeout: 1_000,
+        interval: 10
+      )
+
+      drain_memory_probes(worker_id)
+
       # Use process-level log level for isolation
       log =
         capture_at_level(:warning, fn ->
+          Application.put_env(:snakepit, :log_level, :warning)
           send(manager, :lifecycle_check)
+          assert_receive {:memory_probe, ^worker_id, {:fail, :forced_failure}}, 1_000
+          Logger.flush()
 
           receive do
           after
-            50 -> :ok
+            200 -> :ok
           end
         end)
 
@@ -397,6 +421,14 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
       LifecycleManager.untrack_worker(worker_id)
       send(worker_pid, :stop)
       assert_receive {:worker_terminated, ^worker_id, ^worker_pid}, 5_000
+    end
+  end
+
+  defp drain_memory_probes(worker_id) do
+    receive do
+      {:memory_probe, ^worker_id, _payload} -> drain_memory_probes(worker_id)
+    after
+      0 -> :ok
     end
   end
 

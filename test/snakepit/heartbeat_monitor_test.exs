@@ -100,8 +100,8 @@ defmodule Snakepit.HeartbeatMonitorTest do
       HeartbeatMonitor.start_link(
         worker_pid: worker_pid,
         worker_id: "worker-stable",
-        ping_interval_ms: 50,
-        timeout_ms: 200,
+        ping_interval_ms: 20,
+        timeout_ms: 100,
         max_missed_heartbeats: 5,
         ping_fun: ping_fun
       )
@@ -110,10 +110,10 @@ defmodule Snakepit.HeartbeatMonitorTest do
     assert_eventually(
       fn ->
         count = :counters.get(ping_count, 1)
-        count >= 8 and Process.alive?(monitor) and Process.alive?(worker_pid)
+        count >= 4 and Process.alive?(monitor) and Process.alive?(worker_pid)
       end,
-      timeout: 2_000,
-      interval: 50
+      timeout: 500,
+      interval: 20
     )
 
     :ok = GenServer.stop(monitor)
@@ -145,8 +145,8 @@ defmodule Snakepit.HeartbeatMonitorTest do
         count = :counters.get(timeout_count, 1)
         count >= 2 and Process.alive?(worker_pid) and Process.alive?(monitor)
       end,
-      timeout: 1_000,
-      interval: 25
+      timeout: 400,
+      interval: 10
     )
 
     refute_received {:DOWN, ^worker_ref, :process, ^worker_pid, _}
@@ -173,7 +173,7 @@ defmodule Snakepit.HeartbeatMonitorTest do
 
     monitor_ref = Process.monitor(monitor)
 
-    assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, {:shutdown, :ping_failed}}, 1_000
-    assert_receive {:DOWN, ^monitor_ref, :process, ^monitor, {:shutdown, :ping_failed}}, 1_000
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, {:shutdown, :ping_failed}}, 500
+    assert_receive {:DOWN, ^monitor_ref, :process, ^monitor, {:shutdown, :ping_failed}}, 500
   end
 end

@@ -38,7 +38,7 @@ defmodule Snakepit.Telemetry do
     session_events() ++
       program_events() ++
       heartbeat_events() ++
-      pool_events() ++ python_events() ++ grpc_events() ++ runtime_events()
+      pool_events() ++ python_events() ++ grpc_events() ++ script_events() ++ runtime_events()
   end
 
   ## Layer 0: Session Store & Heartbeat (Legacy)
@@ -158,6 +158,18 @@ defmodule Snakepit.Telemetry do
       [:snakepit, :worker, :restarted],
       [:snakepit, :python, :exception, :mapped],
       [:snakepit, :python, :exception, :unmapped]
+    ]
+  end
+
+  @doc """
+  Script shutdown lifecycle telemetry events.
+  """
+  def script_events do
+    [
+      [:snakepit, :script, :shutdown, :start],
+      [:snakepit, :script, :shutdown, :stop],
+      [:snakepit, :script, :shutdown, :cleanup],
+      [:snakepit, :script, :shutdown, :exit]
     ]
   end
 

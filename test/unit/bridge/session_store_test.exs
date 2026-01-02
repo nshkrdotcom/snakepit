@@ -49,8 +49,8 @@ defmodule SessionStoreTest do
         SessionStore.cleanup_expired_sessions()
         match?({:error, :not_found}, SessionStore.get_session(session_id))
       end,
-      timeout: 2_000,
-      interval: 50
+      timeout: 1_200,
+      interval: 10
     )
   end
 
@@ -80,8 +80,8 @@ defmodule SessionStoreTest do
       fn ->
         SessionStore.cleanup_expired_sessions(server_name) > 0
       end,
-      timeout: 2_000,
-      interval: 50
+      timeout: 1_200,
+      interval: 10
     )
 
     assert {:ok, _} = SessionStore.create_session(server_name, "s2", ttl: 0)

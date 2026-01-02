@@ -359,7 +359,7 @@ Run the showcase app with `mix run`:
 ```bash
 cd examples/snakepit_showcase
 mix setup
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end, halt: true)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end, exit_mode: :auto)'
 ```
 
 ### `examples/snakepit_loadtest`
@@ -368,10 +368,10 @@ Run the load tests with `mix run`:
 ```bash
 cd examples/snakepit_loadtest
 mix setup
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(10) end, halt: true)'
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.StressTestDemo.run(10) end, halt: true)'
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BurstLoadDemo.run(10) end, halt: true)'
-mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(5) end, halt: true)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(10) end, exit_mode: :auto)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.StressTestDemo.run(10) end, exit_mode: :auto)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BurstLoadDemo.run(10) end, exit_mode: :auto)'
+mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoadDemo.run(5) end, exit_mode: :auto)'
 ```
 
 ---
@@ -381,7 +381,8 @@ mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.SustainedLoa
 ### Example Wrapper
 
 Examples use `Snakepit.Examples.Bootstrap.run_example/2`, which wraps `Snakepit.run_as_script/2`,
-awaits the pool when enabled, and defaults to `halt: true` so `mix run` exits cleanly.
+awaits the pool when enabled, and defaults to `exit_mode: :auto` (unless `exit_mode` or legacy
+`:halt` is set). `stop_mode` defaults to `:if_started`.
 Use `await_pool: false` for docs-only or gRPC-only demos.
 
 ### Running with Custom Configuration

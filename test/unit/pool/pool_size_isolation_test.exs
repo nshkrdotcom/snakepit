@@ -15,6 +15,7 @@ defmodule Snakepit.Pool.PoolSizeIsolationTest do
   import Snakepit.TestHelpers
 
   @moduletag :unit
+  @moduletag :slow
   @moduletag timeout: 30_000
 
   setup do
@@ -75,7 +76,7 @@ defmodule Snakepit.Pool.PoolSizeIsolationTest do
       assert_eventually(
         fn -> Snakepit.Pool.await_ready() == :ok end,
         timeout: 30_000,
-        interval: 500
+        interval: 50
       )
 
       # Check that each pool has the correct size
@@ -116,19 +117,23 @@ defmodule Snakepit.Pool.PoolSizeIsolationTest do
 
       {:ok, _} = Application.ensure_all_started(:snakepit)
 
-      # Wait a bit for initialization attempts
-      receive do
-      after
-        2_000 -> :ok
-      end
+      assert_eventually(
+        fn ->
+          case Snakepit.Pool.get_stats(Snakepit.Pool, :default) do
+            %{workers: 2} -> true
+            _ -> false
+          end
+        end,
+        timeout: 5_000,
+        interval: 50
+      )
 
       # Get pool state to verify sizes
       stats = Snakepit.Pool.get_stats(Snakepit.Pool, :default)
 
       # The default pool should have exactly 2 workers
       # (not 50 from global pool_config)
-      assert stats.workers == 2 or is_map(stats),
-             "Expected stats or error for default pool"
+      assert stats.workers == 2
 
       # Even though broken_pool workers fail, the pool should have been
       # configured with pool_size: 1, not pool_size: 50
@@ -161,7 +166,7 @@ defmodule Snakepit.Pool.PoolSizeIsolationTest do
       assert_eventually(
         fn -> Snakepit.Pool.await_ready() == :ok end,
         timeout: 30_000,
-        interval: 500
+        interval: 50
       )
 
       workers_a = Snakepit.Pool.list_workers(Snakepit.Pool, :pool_a)
@@ -207,7 +212,7 @@ defmodule Snakepit.Pool.PoolSizeIsolationTest do
           end
         end,
         timeout: 30_000,
-        interval: 500
+        interval: 50
       )
 
       # This should NOT timeout or hang - the healthy pool should be queryable

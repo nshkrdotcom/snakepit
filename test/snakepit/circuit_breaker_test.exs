@@ -29,7 +29,7 @@ defmodule Snakepit.CircuitBreakerTest do
         CircuitBreaker.start_link(
           name: :"cb_#{System.unique_integer([:positive])}",
           failure_threshold: 3,
-          reset_timeout_ms: 100,
+          reset_timeout_ms: 50,
           half_open_max_calls: 1
         )
 
@@ -63,8 +63,11 @@ defmodule Snakepit.CircuitBreakerTest do
       # Verify it's open
       assert CircuitBreaker.call(cb, fn -> {:ok, :test} end) == {:error, :circuit_open}
 
-      # Wait for reset timeout
-      Process.sleep(150)
+      TestHelpers.assert_eventually(
+        fn -> CircuitBreaker.state(cb) == :half_open end,
+        timeout: 500,
+        interval: 10
+      )
 
       # Should be half-open now - allows one call
       result = CircuitBreaker.call(cb, fn -> {:ok, :half_open_test} end)
@@ -76,10 +79,21 @@ defmodule Snakepit.CircuitBreakerTest do
       CircuitBreaker.record_failure(cb)
       CircuitBreaker.record_failure(cb)
       CircuitBreaker.record_failure(cb)
-      Process.sleep(150)
+
+      TestHelpers.assert_eventually(
+        fn -> CircuitBreaker.state(cb) == :half_open end,
+        timeout: 500,
+        interval: 10
+      )
 
       # Call succeeds in half-open state, circuit should close
       CircuitBreaker.call(cb, fn -> {:ok, :success} end)
+
+      TestHelpers.assert_eventually(
+        fn -> CircuitBreaker.state(cb) == :closed end,
+        timeout: 500,
+        interval: 10
+      )
 
       # Now should be closed - multiple calls should work
       assert CircuitBreaker.call(cb, fn -> {:ok, :test1} end) == {:ok, :test1}
@@ -91,10 +105,21 @@ defmodule Snakepit.CircuitBreakerTest do
       CircuitBreaker.record_failure(cb)
       CircuitBreaker.record_failure(cb)
       CircuitBreaker.record_failure(cb)
-      Process.sleep(150)
+
+      TestHelpers.assert_eventually(
+        fn -> CircuitBreaker.state(cb) == :half_open end,
+        timeout: 500,
+        interval: 10
+      )
 
       # Fail in half-open state
       CircuitBreaker.call(cb, fn -> {:error, :fail} end)
+
+      TestHelpers.assert_eventually(
+        fn -> CircuitBreaker.state(cb) == :open end,
+        timeout: 500,
+        interval: 10
+      )
 
       # Should be open again
       result = CircuitBreaker.call(cb, fn -> {:ok, :should_not_run} end)
@@ -108,7 +133,7 @@ defmodule Snakepit.CircuitBreakerTest do
         CircuitBreaker.start_link(
           name: :"cb_state_#{System.unique_integer([:positive])}",
           failure_threshold: 2,
-          reset_timeout_ms: 100,
+          reset_timeout_ms: 50,
           half_open_max_calls: 1
         )
 
@@ -135,9 +160,13 @@ defmodule Snakepit.CircuitBreakerTest do
     test "transitions to half-open after timeout", %{cb: cb} do
       CircuitBreaker.record_failure(cb)
       CircuitBreaker.record_failure(cb)
-      Process.sleep(150)
 
-      assert CircuitBreaker.state(cb) == :half_open
+      TestHelpers.assert_eventually(
+        fn -> CircuitBreaker.state(cb) == :half_open end,
+        timeout: 500,
+        interval: 10
+      )
+
       assert CircuitBreaker.allow_call?(cb)
     end
   end
@@ -148,7 +177,7 @@ defmodule Snakepit.CircuitBreakerTest do
         CircuitBreaker.start_link(
           name: :"cb_stats_#{System.unique_integer([:positive])}",
           failure_threshold: 2,
-          reset_timeout_ms: 100
+          reset_timeout_ms: 50
         )
 
       on_exit(fn ->
@@ -185,7 +214,7 @@ defmodule Snakepit.CircuitBreakerTest do
         CircuitBreaker.start_link(
           name: :"cb_call_#{System.unique_integer([:positive])}",
           failure_threshold: 2,
-          reset_timeout_ms: 100
+          reset_timeout_ms: 50
         )
 
       on_exit(fn ->

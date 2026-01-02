@@ -217,13 +217,151 @@ Starts the Snakepit application, executes a function, and ensures graceful shutd
 | `:cleanup_timeout` | `integer()` | `5000` | Time to wait for worker cleanup (ms) |
 | `:restart` | `:auto \| true \| false` | `:auto` | Restart Snakepit if already started |
 | `:await_pool` | `boolean()` | `pooling_enabled` setting | Wait for pool readiness |
-| `:halt` | `boolean()` | `false` or `SNAKEPIT_SCRIPT_HALT` env | Force `System.halt/1` after cleanup |
+| `:exit_mode` | `:none \| :halt \| :stop \| :auto` | `:none` | Explicit exit behavior (may also be set via `SNAKEPIT_SCRIPT_EXIT`) |
+| `:stop_mode` | `:if_started \| :always \| :never` | `:if_started` | Stop Snakepit only when owned by this call (default) or override |
+| `:halt` | `boolean()` | `false` or `SNAKEPIT_SCRIPT_HALT` env | Legacy halt flag (deprecated); maps to `exit_mode: :halt` when `:exit_mode` is unset |
 
 **Returns:**
 - The result of the provided function
 - `{:error, :pool_initialization_timeout}` if pool fails to initialize
 
 **Use Case:** Recommended for short-lived scripts or Mix tasks to prevent orphaned processes.
+
+---
+
+## Script Lifecycle (0.9.0)
+
+This section is the single source of truth for `run_as_script/2` exit behavior,
+shutdown sequencing, and environment variable semantics in 0.9.0.
+
+### Exit Selection Precedence
+
+The runtime resolves the effective `exit_mode` using the first applicable rule
+below (highest wins):
+
+| Priority | Source | Input | Effective `exit_mode` | Notes |
+|----------|--------|-------|-----------------------|-------|
+| 1 | `:exit_mode` option | `:none \| :stop \| :halt \| :auto` | as provided | Invalid atom raises `ArgumentError` |
+| 2 | legacy `:halt` option | `true \| false` | `:halt` if `true`; otherwise continue | Only evaluated when `:exit_mode` is unset |
+| 3 | `SNAKEPIT_SCRIPT_EXIT` env var | string | parsed value | Only evaluated when `:exit_mode` and `:halt` are unset |
+| 4 | legacy `SNAKEPIT_SCRIPT_HALT` env var | truthy string | `:halt` if truthy; otherwise continue | Deprecated in 0.9.0 |
+| 5 | default | n/a | `:none` | Return normally after cleanup |
+
+### `SNAKEPIT_SCRIPT_EXIT` parsing rules
+
+- Read only when higher-precedence options do not set an exit mode.
+- Parsing is case-insensitive and whitespace-tolerant (trim then lowercase).
+- Accepted values: `none`, `halt`, `stop`, `auto`.
+- Empty string is treated as unset.
+- Invalid value: ignore (treat as unset) and emit a pre-shutdown Logger warning
+  that includes the invalid value and the fallback used.
+
+### Legacy `SNAKEPIT_SCRIPT_HALT` compatibility
+
+- Truthy values (after trim + lowercase): `1`, `true`, `yes`, `y`, `on`.
+- Any other value is false.
+- Deprecated in favor of `SNAKEPIT_SCRIPT_EXIT=halt`.
+
+### Status Code Rules
+
+- If the user function returns normally: `status = 0`.
+- If the user function raises/throws/exits: `status = 1` (no IO in the exit path).
+
+Apply `status` as follows:
+
+- `exit_mode: :halt` -> `System.halt(status)` after cleanup.
+- `exit_mode: :stop` -> `System.stop(status)` after cleanup; then block the caller
+  until VM shutdown completes.
+- `exit_mode: :none` -> return/raise normally; Snakepit does not force VM termination.
+- `exit_mode: :auto` -> resolve to `:stop` or `:none` per the deterministic rule
+  below; then apply the corresponding behavior.
+
+When `exit_mode` is `:none`, errors from the user function are re-raised after shutdown.
+
+### `:auto` resolution rule
+
+`exit_mode: :auto` resolves to `:stop` only when BOTH conditions are true:
+
+- The current `run_as_script/2` invocation started `:snakepit` (owned), and
+- The VM is running with `--no-halt` (detected via `:init.get_argument(:no_halt)`).
+
+In all other cases (including embedded usage), `:auto` resolves to `:none`.
+
+### `stop_mode` x `exit_mode` matrix
+
+`stop_mode` controls whether Snakepit (OTP application) stops; `exit_mode`
+controls whether the entire VM exits. These are independent axes.
+
+Definitions:
+
+- **Owned**: this `run_as_script/2` invocation started `:snakepit`.
+- **Embedded**: `:snakepit` was already running before `run_as_script/2`.
+- **Ownership detection**: via the list returned by `Application.ensure_all_started/1`
+  (owned when `:snakepit` appears in the "started apps" list).
+
+| Context | stop_mode | exit_mode | Expected behavior | Guidance |
+|---------|-----------|-----------|-------------------|----------|
+| Standalone (Owned) | `:if_started` (default) | `:none` (default) | Stop Snakepit, run cleanup, return; script runner may exit VM | Recommended for most scripts |
+| Standalone (Owned) | `:if_started` | `:stop` | Stop Snakepit, run cleanup, request VM shutdown with status | Recommended for `--no-halt` contexts |
+| Standalone (Owned) | `:if_started` | `:halt` | Stop Snakepit, run cleanup, hard halt VM with status | Only for explicit operator intent |
+| Standalone (Owned) | `:if_started` | `:auto` | If `--no-halt` present -> behaves as `:stop`; else `:none` | Recommended safe default for scripts under `--no-halt` |
+| Embedded (Not owned) | `:if_started` (default) | `:none` | Do not stop Snakepit; run cleanup for this run only; return | Recommended for library embedding |
+| Embedded (Not owned) | `:always` | any | Stops Snakepit even though not owned | Strongly discouraged |
+| Embedded (Not owned) | any | `:stop` / `:halt` | Stops entire VM | Invalid for embedded usage |
+| Embedded (Not owned) | any | `:auto` | MUST resolve to `:none` even if `--no-halt` is present | Guardrail for host safety |
+
+**Warning:** In embedded usage, avoid `exit_mode: :stop` or `:halt` because they
+shut down the host VM regardless of `stop_mode`.
+
+### Shutdown State Machine
+
+Implementation must follow this sequence:
+
+1. Resolve `exit_mode` (precedence table) and `stop_mode`.
+2. Start Snakepit if needed; record ownership (`owned?`) and capture `run_id`.
+3. Optional: await pool readiness (`await_pool`).
+4. Execute user function; capture outcome (`status` per Status Code Rules).
+5. Shutdown orchestrator:
+   a. Emit telemetry `[:snakepit, :script, :shutdown, :start]` with `run_id`,
+      `exit_mode`, `stop_mode`, `owned?`, and `status`.
+   b. Capture cleanup targets before stopping Snakepit.
+   c. Conditional stop: stop Snakepit iff `stop_mode == :always` or
+      (`stop_mode == :if_started` and `owned?`); emit `[:snakepit, :script, :shutdown, :stop]`.
+   d. Bounded cleanup: run RuntimeCleanup with timeout; idempotent by design;
+      emit `[:snakepit, :script, :shutdown, :cleanup]`.
+   e. Conditional VM exit:
+      - `:halt` -> hard halt (cleanup MUST already be complete).
+      - `:stop` -> cooperative VM shutdown (caller blocks until exit).
+      - `:none` -> return/raise to caller.
+      Emit `[:snakepit, :script, :shutdown, :exit]` before applying the exit decision.
+
+### Telemetry Contract (0.9.0)
+
+Event prefix: `[:snakepit, :script, :shutdown, ...]`
+
+| Event | When | Required metadata |
+|-------|------|-------------------|
+| `[:snakepit, :script, :shutdown, :start]` | Before cleanup begins | `run_id`, `exit_mode`, `stop_mode`, `owned?`, `status`, `cleanup_result` |
+| `[:snakepit, :script, :shutdown, :stop]` | After stop decision | `run_id`, `exit_mode`, `stop_mode`, `owned?`, `status`, `cleanup_result` |
+| `[:snakepit, :script, :shutdown, :cleanup]` | After cleanup completes | `run_id`, `exit_mode`, `stop_mode`, `owned?`, `status`, `cleanup_result` |
+| `[:snakepit, :script, :shutdown, :exit]` | Before applying the exit decision | `run_id`, `exit_mode`, `stop_mode`, `owned?`, `status`, `cleanup_result` |
+
+Required metadata across all shutdown events:
+
+- `run_id`
+- `exit_mode`
+- `stop_mode`
+- `owned?`
+- `status`
+- `cleanup_result`
+
+`cleanup_result` values:
+
+- `:pending` for `:start` and `:stop` phases.
+- `:ok` when cleanup succeeds.
+- `:timeout` when cleanup exceeds its bounded timeout.
+- `:skipped` when cleanup is disabled (`cleanup_timeout <= 0`).
+- `{:error, reason}` when cleanup crashes.
 
 ---
 
@@ -603,7 +741,12 @@ end
 # For scripts that must exit cleanly
 Snakepit.run_as_script(fn ->
   do_work()
-end, halt: true)
+end, exit_mode: :auto)
+
+# For embedded usage, never stop the host VM
+Snakepit.run_as_script(fn ->
+  do_work()
+end, exit_mode: :none, stop_mode: :never)
 ```
 
 ### Waiting for Pool Readiness

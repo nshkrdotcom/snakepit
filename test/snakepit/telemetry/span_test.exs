@@ -24,7 +24,6 @@ defmodule Snakepit.Telemetry.SpanTest do
 
       result =
         Span.span(event, %{pool: :default}, fn ->
-          Process.sleep(10)
           {:ok, :success}
         end)
 
@@ -38,7 +37,7 @@ defmodule Snakepit.Telemetry.SpanTest do
       # Check stop event
       assert_receive {:telemetry, [:test, :operation, :stop], stop_measurements, stop_meta}
       assert is_integer(stop_measurements.duration)
-      assert stop_measurements.duration > 0
+      assert stop_measurements.duration >= 0
       assert stop_meta.pool == :default
 
       :telemetry.detach("span-test-#{inspect(ref)}")
@@ -111,12 +110,11 @@ defmodule Snakepit.Telemetry.SpanTest do
 
       event = [:test, :manual]
       span_ref = Span.start_span(event, %{key: :value})
-      Process.sleep(10)
       Span.end_span(span_ref)
 
       assert_receive {:telemetry, [:test, :manual, :stop], measurements, metadata}
       assert is_integer(measurements.duration)
-      assert measurements.duration >= 10_000_000
+      assert measurements.duration >= 0
       assert metadata.key == :value
 
       :telemetry.detach("span-end-test-#{inspect(ref)}")

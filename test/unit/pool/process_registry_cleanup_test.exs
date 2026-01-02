@@ -48,7 +48,7 @@ defmodule Snakepit.Pool.ProcessRegistryCleanupTest do
   end
 
   test "cleanup_dead_workers keeps entries while external process is alive" do
-    port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["30"]])
+    port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
     {:os_pid, process_pid} = Port.info(port, :os_pid)
 
     on_exit(fn -> safe_close_port(port) end)
@@ -91,7 +91,7 @@ defmodule Snakepit.Pool.ProcessRegistryCleanupTest do
   end
 
   test "unregister_worker defers removal while external process is alive" do
-    port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["30"]])
+    port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
     {:os_pid, process_pid} = Port.info(port, :os_pid)
 
     on_exit(fn -> safe_close_port(port) end)

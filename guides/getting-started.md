@@ -61,7 +61,7 @@ Add Snakepit as a dependency in your `mix.exs`:
 # mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.8.9"}
+    {:snakepit, "~> 0.9.0"}
   ]
 end
 ```
@@ -270,17 +270,24 @@ end
 
 ### Script Mode
 
-For scripts and Mix tasks, use `run_as_script/2` to ensure proper cleanup:
+For scripts and Mix tasks, use `run_as_script/2` to ensure proper cleanup and explicit exit behavior:
 
 ```elixir
 # my_script.exs
 Snakepit.run_as_script(fn ->
   {:ok, result} = Snakepit.execute("process_data", %{input: data})
   IO.puts("Result: #{inspect(result)}")
-end, timeout: 30_000)
+end, timeout: 30_000, exit_mode: :auto)
 ```
 
-This ensures Python workers are terminated when the script exits.
+Defaults are `exit_mode: :none` and `stop_mode: :if_started`. For embedded usage, keep
+`exit_mode: :none` and set `stop_mode: :never` to avoid shutting down the host VM.
+
+You can also set `SNAKEPIT_SCRIPT_EXIT` to `none|halt|stop|auto` when options are not
+explicitly provided. `SNAKEPIT_SCRIPT_HALT` is deprecated in favor of `SNAKEPIT_SCRIPT_EXIT`.
+
+See `docs/20251229/documentation-overhaul/01-core-api.md#script-lifecycle-090` for the
+authoritative exit precedence and shutdown tables.
 
 ---
 

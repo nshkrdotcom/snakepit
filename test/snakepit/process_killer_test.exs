@@ -64,9 +64,9 @@ defmodule Snakepit.ProcessKillerTest do
   end
 
   describe "kill_process/2" do
-    test "kills a sleep process with SIGTERM" do
-      # Spawn a sleep process
-      port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["10"]])
+    test "kills a blocking process with SIGTERM" do
+      # Spawn a blocking process
+      port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
       {:os_pid, pid} = Port.info(port, :os_pid)
 
       # Verify it's alive
@@ -178,8 +178,8 @@ defmodule Snakepit.ProcessKillerTest do
 
   describe "kill_with_escalation/2" do
     test "kills process gracefully with SIGTERM" do
-      # Spawn a sleep process
-      port = Port.open({:spawn_executable, "/bin/sleep"}, [:binary, args: ["10"]])
+      # Spawn a blocking process
+      port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
       {:os_pid, pid} = Port.info(port, :os_pid)
 
       # Kill with escalation
@@ -190,9 +190,13 @@ defmodule Snakepit.ProcessKillerTest do
     end
 
     test "escalates to SIGKILL if process doesn't die" do
-      # Spawn a process that ignores SIGTERM
-      # (using cat which will die to SIGKILL)
-      port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
+      # Spawn a process that ignores SIGTERM (forces escalation)
+      port =
+        Port.open({:spawn_executable, "/bin/sh"}, [
+          :binary,
+          args: ["-c", "trap '' TERM; exec /bin/cat"]
+        ])
+
       {:os_pid, pid} = Port.info(port, :os_pid)
 
       # Kill with short timeout (will escalate)
@@ -213,7 +217,7 @@ defmodule Snakepit.ProcessKillerTest do
               :exit_status,
               :use_stdio,
               :stderr_to_stdout,
-              args: ["/bin/sh", "-c", "echo $$; sleep 30 & echo $!; sleep 30"]
+              args: ["/bin/sh", "-c", "echo $$; /bin/cat & echo $!; wait"]
             ])
 
           on_exit(fn -> safe_close_port(port) end)
@@ -257,7 +261,7 @@ defmodule Snakepit.ProcessKillerTest do
         Port.open({:spawn_executable, python}, [
           :binary,
           :exit_status,
-          args: ["-c", "import time; time.sleep(30)"]
+          args: ["-c", "import signal; signal.pause()"]
         ])
 
       target_port =
@@ -266,7 +270,7 @@ defmodule Snakepit.ProcessKillerTest do
           :exit_status,
           args: [
             "-c",
-            "import time; time.sleep(30)",
+            "import signal; signal.pause()",
             "grpc_server.py",
             "--snakepit-run-id",
             run_id
@@ -300,7 +304,7 @@ defmodule Snakepit.ProcessKillerTest do
       cmd = [
         "python3",
         "-c",
-        "import time; time.sleep(30)",
+        "import signal; signal.pause()",
         "--run-id",
         test_run_id
       ]

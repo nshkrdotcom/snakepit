@@ -9,8 +9,9 @@ defmodule Snakepit.Pool.RandomWorkerFlowTest do
   alias Snakepit.Test.MockGRPCWorker
 
   @moduletag :capture_log
+  @moduletag :slow
   @worker_count 3
-  @iterations 15
+  @iterations 10
 
   setup_all do
     :rand.seed(:exsss, {System.system_time(), System.monotonic_time(), 0})

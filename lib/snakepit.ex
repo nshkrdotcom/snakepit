@@ -24,6 +24,9 @@ defmodule Snakepit do
 
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.ProcessRegistry
+  alias Snakepit.Shutdown
+  alias Snakepit.ScriptExit
+  alias Snakepit.ScriptStop
 
   # Type definitions
   @type command :: String.t()
@@ -201,8 +204,11 @@ defmodule Snakepit do
       (cleanup is bounded; if it exceeds `cleanup_timeout + 1000` ms the script continues)
     * `:restart` - Restart Snakepit if already started to apply script config (`:auto` | true | false)
     * `:await_pool` - Wait for pool readiness (default: `pooling_enabled` setting)
-    * `:halt` - Force `System.halt/1` after cleanup for scripts that must exit (default: false,
-      or set `SNAKEPIT_SCRIPT_HALT=true`)
+    * `:exit_mode` - Exit behavior (`:none` | `:halt` | `:stop` | `:auto`, default: `:none`).
+      May also be set with `SNAKEPIT_SCRIPT_EXIT`.
+    * `:stop_mode` - Stop behavior (`:if_started` | `:always` | `:never`, default: `:if_started`).
+    * `:halt` - Legacy boolean for `System.halt/1` after cleanup (default: false,
+      or set `SNAKEPIT_SCRIPT_HALT=true`). Ignored when `:exit_mode` is set.
 
   ## Returns
 
@@ -216,11 +222,23 @@ defmodule Snakepit do
     cleanup_timeout = Keyword.get(opts, :cleanup_timeout, 5_000)
     restart = Keyword.get(opts, :restart, :auto)
     await_pool = Keyword.get(opts, :await_pool, pooling_enabled?())
-    halt = Keyword.get(opts, :halt, env_truthy?("SNAKEPIT_SCRIPT_HALT"))
+
+    {requested_exit_mode, exit_warnings} =
+      ScriptExit.resolve_exit_mode(opts, System.get_env())
+
+    stop_mode = ScriptStop.resolve_stop_mode(opts)
 
     # Ensure all dependencies are started, including Snakepit itself
-    maybe_restart_snakepit(restart, shutdown_timeout, cleanup_timeout)
-    {:ok, _apps} = Application.ensure_all_started(:snakepit)
+    maybe_restart_snakepit(restart, stop_mode, shutdown_timeout, cleanup_timeout)
+    {:ok, started_apps} = Application.ensure_all_started(:snakepit)
+    owned? = :snakepit in started_apps
+
+    exit_mode = ScriptExit.resolve_auto_exit_mode(requested_exit_mode, owned?)
+
+    ScriptExit.log_warnings(exit_warnings)
+    log_exit_mode(requested_exit_mode, exit_mode, owned?)
+
+    beam_run_id = safe_beam_run_id()
 
     # Deterministically wait for the pool to be fully initialized
     startup_result =
@@ -232,8 +250,6 @@ defmodule Snakepit do
 
     case startup_result do
       :ok ->
-        beam_run_id = safe_beam_run_id()
-
         result =
           try do
             {:ok, fun.()}
@@ -242,18 +258,30 @@ defmodule Snakepit do
               {:error, {kind, reason, __STACKTRACE__}}
           after
             SLog.info(:shutdown, "Script execution finished. Shutting down gracefully.")
-
-            stop_snakepit(shutdown_timeout, label: "Shutdown")
-            run_cleanup_with_timeout(beam_run_id, cleanup_timeout)
           end
+
+        status =
+          case result do
+            {:ok, _} -> 0
+            {:error, _} -> 1
+          end
+
+        Shutdown.run(
+          exit_mode: exit_mode,
+          stop_mode: stop_mode,
+          owned?: owned?,
+          status: status,
+          run_id: beam_run_id,
+          shutdown_timeout: shutdown_timeout,
+          cleanup_timeout: cleanup_timeout,
+          label: "Shutdown"
+        )
 
         case result do
           {:ok, value} ->
-            maybe_halt(halt, 0)
             value
 
           {:error, {kind, reason, stacktrace}} ->
-            maybe_halt(halt, 1)
             :erlang.raise(kind, reason, stacktrace)
         end
 
@@ -262,8 +290,17 @@ defmodule Snakepit do
           timeout_ms: startup_timeout
         )
 
-        Application.stop(:snakepit)
-        maybe_halt(halt, 1)
+        Shutdown.run(
+          exit_mode: exit_mode,
+          stop_mode: stop_mode,
+          owned?: owned?,
+          status: 1,
+          run_id: beam_run_id,
+          shutdown_timeout: shutdown_timeout,
+          cleanup_timeout: cleanup_timeout,
+          label: "Startup failure"
+        )
+
         {:error, :pool_initialization_timeout}
     end
   end
@@ -272,8 +309,8 @@ defmodule Snakepit do
     Application.get_env(:snakepit, :pooling_enabled, false)
   end
 
-  defp maybe_restart_snakepit(restart, shutdown_timeout, cleanup_timeout) do
-    if should_restart?(restart) and snakepit_started?() do
+  defp maybe_restart_snakepit(restart, stop_mode, shutdown_timeout, cleanup_timeout) do
+    if snakepit_started?() and should_restart?(restart, stop_mode) do
       SLog.info(:startup, "Restarting to apply script configuration")
       beam_run_id = safe_beam_run_id()
       stop_snakepit(shutdown_timeout, label: "Restart cleanup")
@@ -281,10 +318,11 @@ defmodule Snakepit do
     end
   end
 
-  defp should_restart?(true), do: true
-  defp should_restart?(false), do: false
-  defp should_restart?(:auto), do: mix_project_loaded?()
-  defp should_restart?(_), do: false
+  defp should_restart?(true, _stop_mode), do: true
+  defp should_restart?(false, _stop_mode), do: false
+  defp should_restart?(:auto, :always), do: mix_project_loaded?()
+  defp should_restart?(:auto, _stop_mode), do: false
+  defp should_restart?(_, _stop_mode), do: false
 
   defp mix_project_loaded? do
     mix_started? =
@@ -313,29 +351,35 @@ defmodule Snakepit do
   defp stop_snakepit(shutdown_timeout, opts) do
     label = Keyword.get(opts, :label, "Shutdown")
 
-    # Monitor the supervisor to wait for actual shutdown signal
-    case Process.whereis(Snakepit.Supervisor) do
-      nil ->
-        Application.stop(:snakepit)
-        # Already shut down
-        SLog.info(:shutdown, "#{label} complete (supervisor already terminated).")
+    Shutdown.mark_in_progress()
 
-      supervisor_pid ->
-        ref = Process.monitor(supervisor_pid)
-        Application.stop(:snakepit)
+    try do
+      # Monitor the supervisor to wait for actual shutdown signal
+      case Process.whereis(Snakepit.Supervisor) do
+        nil ->
+          Application.stop(:snakepit)
+          # Already shut down
+          SLog.info(:shutdown, "#{label} complete (supervisor already terminated).")
 
-        # Wait for :DOWN signal from BEAM - no guessing with sleep
-        receive do
-          {:DOWN, ^ref, :process, ^supervisor_pid, _reason} ->
-            SLog.info(:shutdown, "#{label} complete (confirmed via :DOWN signal).")
-        after
-          shutdown_timeout ->
-            SLog.warning(
-              :shutdown,
-              "#{label} confirmation timeout after #{shutdown_timeout}ms. Proceeding anyway.",
-              shutdown_timeout_ms: shutdown_timeout
-            )
-        end
+        supervisor_pid ->
+          ref = Process.monitor(supervisor_pid)
+          Application.stop(:snakepit)
+
+          # Wait for :DOWN signal from BEAM - no guessing with sleep
+          receive do
+            {:DOWN, ^ref, :process, ^supervisor_pid, _reason} ->
+              SLog.info(:shutdown, "#{label} complete (confirmed via :DOWN signal).")
+          after
+            shutdown_timeout ->
+              SLog.warning(
+                :shutdown,
+                "#{label} confirmation timeout after #{shutdown_timeout}ms. Proceeding anyway.",
+                shutdown_timeout_ms: shutdown_timeout
+              )
+          end
+      end
+    after
+      Shutdown.clear_in_progress()
     end
   end
 
@@ -410,48 +454,20 @@ defmodule Snakepit do
     has_script and has_run_id
   end
 
-  defp run_cleanup_with_timeout(run_id, cleanup_timeout) do
-    if cleanup_timeout <= 0 or is_nil(run_id) do
-      maybe_cleanup_orphaned_workers(run_id, cleanup_timeout)
+  defp log_exit_mode(requested_exit_mode, exit_mode, owned?) do
+    if requested_exit_mode == exit_mode do
+      SLog.info(:shutdown, "Script exit_mode resolved to #{exit_mode}.",
+        exit_mode: exit_mode,
+        owned?: owned?
+      )
     else
-      task_timeout = cleanup_timeout + 1_000
-      task = Task.async(fn -> maybe_cleanup_orphaned_workers(run_id, cleanup_timeout) end)
-
-      case Task.yield(task, task_timeout) || Task.shutdown(task, :brutal_kill) do
-        {:ok, _} ->
-          :ok
-
-        nil ->
-          SLog.warning(
-            :shutdown,
-            "Cleanup exceeded #{task_timeout}ms. Skipping remaining cleanup.",
-            timeout_ms: task_timeout
-          )
-
-        {:exit, reason} ->
-          SLog.warning(:shutdown, "Cleanup crashed: #{inspect(reason)}", reason: reason)
-      end
-    end
-  end
-
-  defp maybe_halt(true, status) do
-    if status != 0 do
-      SLog.error(:shutdown, "Halting BEAM with status #{status}.", status: status)
-    end
-
-    # Flush all IO before halting to ensure output is visible
-    :ok = :io.put_chars(:standard_io, [])
-    :ok = :io.put_chars(:standard_error, [])
-
-    System.halt(status)
-  end
-
-  defp maybe_halt(_, _status), do: :ok
-
-  defp env_truthy?(name) do
-    case System.get_env(name) do
-      nil -> false
-      value -> String.downcase(String.trim(value)) in ["1", "true", "yes", "y", "on"]
+      SLog.info(
+        :shutdown,
+        "Script exit_mode resolved to #{exit_mode} (requested #{requested_exit_mode}).",
+        exit_mode: exit_mode,
+        requested_exit_mode: requested_exit_mode,
+        owned?: owned?
+      )
     end
   end
 end

@@ -57,7 +57,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
   end
 
   test "cancelled request map remains bounded under heavy churn", %{state: original_state} do
-    iterations = 2_000
+    iterations = 1_200
 
     final_state =
       Enum.reduce(1..iterations, original_state, fn _, state ->

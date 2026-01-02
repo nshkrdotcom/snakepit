@@ -66,22 +66,25 @@ defmodule Snakepit.Error.ShapeTest do
     test "emits telemetry event on creation" do
       parent = self()
       ref = make_ref()
+      operation = "test_op_#{inspect(ref)}"
 
       :telemetry.attach(
         "shape-test-#{inspect(ref)}",
         [:snakepit, :error, :shape_mismatch],
         fn _event, _measurements, metadata, _config ->
-          send(parent, {:telemetry, metadata})
+          if metadata.operation == operation do
+            send(parent, {:telemetry, metadata})
+          end
         end,
         nil
       )
 
-      _error = Shape.shape_mismatch([1, 2], [3, 4], "test_op")
+      _error = Shape.shape_mismatch([1, 2], [3, 4], operation)
 
       assert_receive {:telemetry, metadata}
       assert metadata.expected == [1, 2]
       assert metadata.got == [3, 4]
-      assert metadata.operation == "test_op"
+      assert metadata.operation == operation
 
       :telemetry.detach("shape-test-#{inspect(ref)}")
     end

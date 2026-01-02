@@ -58,7 +58,7 @@ defmodule Snakepit.Telemetry.Handlers.LoggerTest do
             %{accelerator: :cpu, platform: "linux-x86_64"}
           )
 
-          Process.sleep(10)
+          Logger.flush()
         end)
 
       # Log might be empty if telemetry executes before logger attaches
@@ -74,7 +74,7 @@ defmodule Snakepit.Telemetry.Handlers.LoggerTest do
             %{pool: :default, reason: :failures}
           )
 
-          Process.sleep(10)
+          Logger.flush()
         end)
 
       # Warning level events should be captured
@@ -90,7 +90,7 @@ defmodule Snakepit.Telemetry.Handlers.LoggerTest do
             %{device: {:cuda, 0}, utilization: 0.125}
           )
 
-          Process.sleep(10)
+          Logger.flush()
         end)
 
       assert log =~ "GPU" or log =~ "gpu" or log =~ "memory" or log == ""

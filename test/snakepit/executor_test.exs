@@ -126,7 +126,6 @@ defmodule Snakepit.ExecutorTest do
       result =
         Executor.execute_with_timeout(
           fn ->
-            Process.sleep(10)
             {:ok, :success}
           end,
           timeout_ms: 1000
@@ -139,10 +138,11 @@ defmodule Snakepit.ExecutorTest do
       result =
         Executor.execute_with_timeout(
           fn ->
-            Process.sleep(200)
-            {:ok, :success}
+            receive do
+              :complete -> {:ok, :success}
+            end
           end,
-          timeout_ms: 50
+          timeout_ms: 10
         )
 
       assert result == {:error, :timeout}

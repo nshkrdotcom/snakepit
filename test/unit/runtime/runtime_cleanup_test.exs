@@ -6,10 +6,9 @@ defmodule Snakepit.RuntimeCleanupTest do
 
   test "run/2 terminates tracked processes" do
     port =
-      Port.open({:spawn_executable, "/bin/sleep"}, [
+      Port.open({:spawn_executable, "/bin/cat"}, [
         :binary,
-        :exit_status,
-        args: ["30"]
+        :exit_status
       ])
 
     {:os_pid, pid} = Port.info(port, :os_pid)

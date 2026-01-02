@@ -920,7 +920,8 @@ defmodule Snakepit.GRPCWorker do
     effective_shutting_down? =
       state.shutting_down or
         shutdown_pending_in_mailbox?() or
-        not pool_alive?(state.pool_name)
+        not pool_alive?(state.pool_name) or
+        Snakepit.Shutdown.in_progress?()
 
     state =
       if effective_shutting_down? and not state.shutting_down do
@@ -1000,7 +1001,8 @@ defmodule Snakepit.GRPCWorker do
     effective_shutting_down? =
       state.shutting_down or
         shutdown_pending_in_mailbox?() or
-        not pool_alive?(state.pool_name)
+        not pool_alive?(state.pool_name) or
+        Snakepit.Shutdown.in_progress?()
 
     # Update state if we detected shutdown via mailbox peek or pool check
     state =

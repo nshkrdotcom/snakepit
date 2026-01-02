@@ -25,7 +25,7 @@ defmodule Snakepit.Config.StartupFailFastTest do
 
     on_exit(fn ->
       FakeDoctor.reset()
-      Application.stop(:snakepit)
+      stop_snakepit_and_wait()
       restore_env(prev_env)
       {:ok, _} = Application.ensure_all_started(:snakepit)
     end)
@@ -35,7 +35,7 @@ defmodule Snakepit.Config.StartupFailFastTest do
 
   test "application start fails when adapter executable is missing and registry stays empty" do
     capture_log(fn ->
-      Application.stop(:snakepit)
+      stop_snakepit_and_wait()
 
       bad_path = "/tmp/snakepit-missing-python-#{System.unique_integer([:positive])}"
 
@@ -69,14 +69,13 @@ defmodule Snakepit.Config.StartupFailFastTest do
 
       ensure_registry_started()
       assert %{total_registered: 0} = ProcessRegistry.get_stats()
-      assert {:ok, dets_size} = ProcessRegistry.dets_table_size()
-      assert dets_size <= 1
+      assert current_run_dets_entries() <= 1
     end)
   end
 
   test "invalid pool config fails fast before supervisor boots" do
     capture_log(fn ->
-      Application.stop(:snakepit)
+      stop_snakepit_and_wait()
 
       Application.put_env(:snakepit, :pooling_enabled, true)
       Application.put_env(:snakepit, :pools, [%{name: :broken, worker_profile: :unknown}])
@@ -110,7 +109,7 @@ defmodule Snakepit.Config.StartupFailFastTest do
 
   test "gRPC port binding conflict aborts startup without leaking workers" do
     capture_log(fn ->
-      Application.stop(:snakepit)
+      stop_snakepit_and_wait()
 
       Application.put_env(:snakepit, :pooling_enabled, true)
       Application.put_env(:snakepit, :pool_config, %{pool_size: 1})
@@ -140,7 +139,7 @@ defmodule Snakepit.Config.StartupFailFastTest do
 
   test "env doctor is invoked before pools boot" do
     capture_log(fn ->
-      Application.stop(:snakepit)
+      stop_snakepit_and_wait()
 
       FakeDoctor.reset()
       FakeDoctor.configure(pid: self())
@@ -165,7 +164,7 @@ defmodule Snakepit.Config.StartupFailFastTest do
 
   test "env doctor failure aborts startup" do
     capture_log(fn ->
-      Application.stop(:snakepit)
+      stop_snakepit_and_wait()
 
       FakeDoctor.reset()
       FakeDoctor.configure(pid: self(), action: {:raise, "doctor failure"})
@@ -237,6 +236,27 @@ defmodule Snakepit.Config.StartupFailFastTest do
       nil -> start_supervised!(ProcessRegistry)
       _ -> :ok
     end
+  end
+
+  defp stop_snakepit_and_wait(timeout_ms \\ 10_000) do
+    sup_pid = Process.whereis(Snakepit.Supervisor)
+    sup_ref = if sup_pid && Process.alive?(sup_pid), do: Process.monitor(sup_pid)
+
+    Application.stop(:snakepit)
+
+    if sup_ref do
+      assert_receive {:DOWN, ^sup_ref, :process, ^sup_pid, _reason}, timeout_ms
+    else
+      :ok
+    end
+  end
+
+  defp current_run_dets_entries do
+    {entries_info, _run_id} = ProcessRegistry.debug_show_all_entries()
+
+    entries_info
+    |> Enum.filter(& &1.is_current_run)
+    |> length()
   end
 
   defp port_conflict_error?(

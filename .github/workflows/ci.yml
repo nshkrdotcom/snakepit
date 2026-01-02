@@ -74,6 +74,9 @@ jobs:
     - name: Compile
       run: mix compile --warnings-as-errors
 
+    - name: Build docs
+      run: MIX_ENV=dev mix docs
+
     - name: Run tests
       run: mix test --exclude skip_ci
 

@@ -7,6 +7,7 @@ defmodule Snakepit.GRPC.ClientImpl do
   alias Snakepit.Error.PythonTranslation
   alias Snakepit.Logger, as: SLog
   alias Snakepit.PythonRuntime
+  alias Snakepit.Shutdown
   alias Snakepit.Telemetry.Correlation
   alias Snakepit.ZeroCopyRef
 
@@ -202,7 +203,8 @@ defmodule Snakepit.GRPC.ClientImpl do
   end
 
   defp handle_error({:error, %GRPC.RPCError{} = error}) do
-    SLog.error(@log_category, "gRPC error: #{inspect(error)}")
+    log_fun = if Shutdown.in_progress?(), do: &SLog.debug/2, else: &SLog.error/2
+    log_fun.(@log_category, "gRPC error: #{inspect(error)}")
 
     case error.status do
       3 -> {:error, :invalid_argument}

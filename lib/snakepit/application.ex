@@ -23,6 +23,7 @@ defmodule Snakepit.Application do
   @impl true
   def start(_type, _args) do
     configure_logging()
+    Snakepit.Shutdown.clear_in_progress()
 
     # Configure threading limits for Python scientific libraries and gRPC
     # This prevents fork bombs when spawning many workers concurrently

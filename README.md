@@ -31,7 +31,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.8.9"}
+    {:snakepit, "~> 0.9.0"}
   ]
 end
 ```
@@ -50,7 +50,7 @@ For higher-level Python integration with compile-time type generation, use [Snak
 
 ```elixir
 def deps do
-  [{:snakebridge, "~> 0.7.9"}]
+  [{:snakebridge, "~> 0.8.0"}]
 end
 
 def project do
@@ -596,8 +596,32 @@ For Mix tasks and scripts, use `run_as_script/2` for automatic lifecycle managem
 Snakepit.run_as_script(fn ->
   {:ok, result} = Snakepit.execute("process_data", %{})
   IO.inspect(result)
-end, halt: true)
+end, exit_mode: :auto)
 ```
+
+`exit_mode` controls VM exit behavior (default: `:none`); `stop_mode` controls whether
+Snakepit itself stops (default: `:if_started`). For embedded usage, keep `exit_mode: :none` and set
+`stop_mode: :never` to avoid stopping the host application.
+
+Warning: `exit_mode: :halt` or `:stop` terminates the entire VM regardless of `stop_mode`.
+Avoid those modes in embedded usage.
+
+Exit mode guidance:
+- `:none` (default) - return to the caller; the script runner controls VM exit.
+- `:auto` - safe default for scripts that may run under `--no-halt`.
+- `:stop` - request a graceful VM shutdown with the script status code.
+- `:halt` - immediate VM termination; use only with explicit operator intent.
+
+Wrapper commands (like `timeout`, `head`, or `tee`) can close stdout/stderr early and
+trigger broken pipes during shutdown. Avoid writing to stdout in exit paths, and note
+that GNU `timeout` is not available by default on macOS (use `gtimeout` from coreutils
+or another portable watchdog).
+
+### Script Lifecycle Reference
+
+For the authoritative exit precedence, status code rules, `stop_mode x exit_mode` matrix,
+shutdown state machine, and telemetry contract, see
+`docs/20251229/documentation-overhaul/01-core-api.md#script-lifecycle-090`.
 
 ## Mix Tasks
 

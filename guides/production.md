@@ -117,12 +117,19 @@ defmodule Mix.Tasks.MyApp.ProcessData do
     Snakepit.run_as_script(fn ->
       {:ok, result} = Snakepit.execute("process_batch", %{input: args})
       IO.puts("Complete: #{inspect(result)}")
-    end, timeout: 30_000, cleanup_timeout: 10_000)
+    end, timeout: 30_000, cleanup_timeout: 10_000, exit_mode: :auto)
   end
 end
 ```
 
-Options: `:timeout`, `:shutdown_timeout`, `:cleanup_timeout`, `:halt`
+Defaults are `exit_mode: :none` and `stop_mode: :if_started`. Use `exit_mode: :auto`
+for scripts that may run under `--no-halt`, and set `stop_mode: :never` for embedded
+usage where the host VM must stay alive.
+
+Warning: `exit_mode: :halt` or `:stop` terminates the entire VM regardless of `stop_mode`.
+
+Options: `:timeout`, `:shutdown_timeout`, `:cleanup_timeout`, `:exit_mode`, `:stop_mode`
+(`:halt` is legacy and deprecated).
 
 ## Common Troubleshooting
 
@@ -272,7 +279,8 @@ config :snakepit,
 | Variable | Description |
 |----------|-------------|
 | `SNAKEPIT_PYTHON` | Path to Python binary |
-| `SNAKEPIT_SCRIPT_HALT` | Force halt after script completion |
+| `SNAKEPIT_SCRIPT_EXIT` | Exit behavior for scripts (`none`, `halt`, `stop`, `auto`) |
+| `SNAKEPIT_SCRIPT_HALT` | Deprecated; use `SNAKEPIT_SCRIPT_EXIT=halt` |
 | `SNAKEPIT_OTEL_ENDPOINT` | OpenTelemetry collector endpoint |
 
 ## Deployment Recommendations

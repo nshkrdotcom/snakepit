@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-01-01
+
+### Added
+- `run_as_script/2` `:exit_mode` option and `SNAKEPIT_SCRIPT_EXIT` env var for explicit exit semantics.
+- Integration tests for external VM exit behavior and broken-pipe safety.
+- `run_as_script/2` `:stop_mode` option for ownership-aware application shutdown.
+- Shutdown orchestrator for script shutdown sequencing.
+- Script shutdown telemetry events (`[:snakepit, :script, :shutdown, ...]`) with required metadata.
+- CI docs build gate (`mix docs`) to catch documentation build errors.
+
+### Changed
+- Exit selection precedence now favors `:exit_mode` over legacy `:halt` and env vars.
+- `Snakepit.Examples.Bootstrap.run_example/2` now defaults to `exit_mode: :auto` and respects `stop_mode`.
+- `run_as_script/2` now captures cleanup targets before stopping and routes shutdown through the orchestrator.
+- Documentation now aligns README/guides with `exit_mode`/`stop_mode` semantics and the Script Lifecycle tables.
+- Tests now avoid timing sleeps, using deterministic polling, receive timeouts, and `Logger.flush/0` for async-safe synchronization.
+- Test timing constants were tightened (heartbeat, circuit breaker, queue churn, gRPC slow-operation paths) to reduce suite runtime.
+- Long-running integration and randomized flow tests are tagged `:slow`, and random worker flow iterations were trimmed.
+- Pool size isolation checks now wait on pool stats instead of fixed delays.
+- gRPC errors during shutdown now log at debug level to reduce noise during expected teardown.
+
+### Fixed
+- Removed direct IO from the script exit path to avoid hangs on closed pipes.
+- `run_as_script/2` no longer stops Snakepit in embedded usage unless explicitly requested.
+- Shape mismatch telemetry test now filters events by operation to avoid cross-test telemetry bleed.
+- Worker lifecycle memory-probe warning test now synchronizes probe failures and log capture to prevent flakes.
+- Script shutdown now marks shutdown-in-progress so clean Python exits during teardown are treated as expected.
+
 ## [0.8.9] - 2026-01-01
 
 ### Breaking Changes

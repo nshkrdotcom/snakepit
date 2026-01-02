@@ -28,7 +28,7 @@ defmodule Snakepit.GRPCWorkerHeartbeatDependencyTest do
                  timeout_ms: 20,
                  max_missed_heartbeats: 1,
                  dependent: true,
-                 initial_delay_ms: 50,
+                 initial_delay_ms: 20,
                  ping_fun: fail_after_first_ping()
                }
              }
@@ -36,7 +36,7 @@ defmodule Snakepit.GRPCWorkerHeartbeatDependencyTest do
          end) do
       {:ok, worker_pid} ->
         worker_ref = Process.monitor(worker_pid)
-        assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, reason}, 1_000
+        assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, reason}, 500
         assert normalize_shutdown_reason(reason) in [:ping_failed, :heartbeat_timeout]
 
       {:exit, {:shutdown, {:shutdown, reason}}} ->
@@ -62,13 +62,13 @@ defmodule Snakepit.GRPCWorkerHeartbeatDependencyTest do
             timeout_ms: 20,
             max_missed_heartbeats: 1,
             dependent: false,
-            initial_delay_ms: 50,
+            initial_delay_ms: 20,
             ping_fun: fail_after_first_ping()
           }
         }
       )
 
-    refute_receive {:DOWN, _ref, :process, ^worker_pid, _}, 500
+    refute_receive {:DOWN, _ref, :process, ^worker_pid, _}, 200
     assert Process.alive?(worker_pid)
 
     :ok = GenServer.stop(worker_pid)
