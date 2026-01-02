@@ -661,7 +661,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
     if info.beam_os_pid == current_beam_os_pid do
       info.beam_run_id != current_beam_run_id
     else
-      false
+      # Different BEAM OS PID: treat as stale to avoid PID reuse keeping old entries alive.
+      true
     end
   end
 
@@ -813,6 +814,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
     Enum.each(entries_to_remove, fn {worker_id, _info} ->
       :dets.delete(dets_table, worker_id)
     end)
+
+    # Sync immediately to ensure deletions are persisted before returning.
+    # Without this, the auto_save delay (1000ms) can cause stale entries
+    # to appear in DETS queries during rapid restart scenarios.
+    :dets.sync(dets_table)
   end
 
   defp log_cleanup_summary(

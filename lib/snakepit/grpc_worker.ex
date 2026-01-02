@@ -31,7 +31,6 @@ defmodule Snakepit.GRPCWorker do
 
   use GenServer
   require Logger
-  alias Snakepit.Adapters.GRPCPython
   alias Snakepit.Defaults
   alias Snakepit.Error
   alias Snakepit.GRPC.Client
@@ -41,7 +40,9 @@ defmodule Snakepit.GRPCWorker do
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Telemetry.Correlation
   alias Snakepit.Telemetry.GrpcStream
+  alias Snakepit.Worker.Configuration
   alias Snakepit.Worker.LifecycleManager
+  alias Snakepit.Worker.ProcessManager
   require OpenTelemetry.Tracer, as: Tracer
 
   def child_spec(opts) when is_list(opts) do
@@ -116,7 +117,7 @@ defmodule Snakepit.GRPCWorker do
     worker_id = Keyword.get(opts, :id)
     pool_name = Keyword.get(opts, :pool_name, Snakepit.Pool)
 
-    pool_identifier = resolve_pool_identifier(opts, pool_name)
+    pool_identifier = Configuration.resolve_pool_identifier(opts, pool_name)
 
     metadata =
       %{worker_module: __MODULE__, pool_name: pool_name}
@@ -234,36 +235,6 @@ defmodule Snakepit.GRPCWorker do
     GenServer.call(worker, :get_session_id)
   end
 
-  defp resolve_pool_identifier(opts, pool_name) do
-    case Keyword.get(opts, :pool_identifier) do
-      identifier when is_atom(identifier) ->
-        identifier
-
-      identifier when is_binary(identifier) ->
-        string_to_existing_atom_safe(identifier)
-
-      _ ->
-        infer_pool_identifier(pool_name)
-    end
-  end
-
-  defp string_to_existing_atom_safe(identifier) do
-    String.to_existing_atom(identifier)
-  rescue
-    ArgumentError -> nil
-  end
-
-  defp infer_pool_identifier(pool_name) when is_atom(pool_name), do: pool_name
-
-  defp infer_pool_identifier(pool_name) when is_pid(pool_name) do
-    case Process.info(pool_name, :registered_name) do
-      {:registered_name, name} when is_atom(name) -> name
-      _ -> nil
-    end
-  end
-
-  defp infer_pool_identifier(_), do: nil
-
   defp build_worker_name(nil), do: nil
 
   defp build_worker_name(worker_id) do
@@ -305,14 +276,6 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp maybe_attach_registry_metadata(_worker_id, _metadata), do: :ok
-
-  defp normalize_worker_config(config, pool_name, adapter_module, pool_identifier) do
-    config
-    |> Map.put(:worker_module, __MODULE__)
-    |> Map.put_new(:adapter_module, adapter_module)
-    |> Map.put(:pool_name, pool_name)
-    |> maybe_put_pool_identifier(pool_identifier)
-  end
 
   defp current_process_memory_bytes do
     case Process.info(self(), :memory) do
@@ -368,7 +331,7 @@ defmodule Snakepit.GRPCWorker do
     worker_config =
       opts
       |> Keyword.get(:worker_config, %{})
-      |> normalize_worker_config(pool_name, adapter, pool_identifier)
+      |> Configuration.normalize_worker_config(__MODULE__, pool_name, adapter, pool_identifier)
 
     heartbeat_config =
       worker_config
@@ -376,7 +339,7 @@ defmodule Snakepit.GRPCWorker do
       |> normalize_heartbeat_config()
 
     spawn_config =
-      build_spawn_config(
+      Configuration.build_spawn_config(
         adapter,
         worker_config,
         heartbeat_config,
@@ -385,7 +348,7 @@ defmodule Snakepit.GRPCWorker do
         worker_id
       )
 
-    server_port = spawn_grpc_server(spawn_config)
+    server_port = ProcessManager.spawn_grpc_server(spawn_config)
     process_pid = extract_and_log_pid(server_port, port)
     {pgid, process_group?} = resolve_process_group(process_pid, spawn_config)
 
@@ -421,125 +384,6 @@ defmodule Snakepit.GRPCWorker do
     "#{elixir_grpc_host}:#{elixir_grpc_port}"
   end
 
-  defp build_spawn_config(
-         adapter,
-         worker_config,
-         heartbeat_config,
-         port,
-         elixir_address,
-         worker_id
-       ) do
-    python_executable = adapter.executable_path()
-    adapter_args = resolve_adapter_args(adapter, worker_config)
-    adapter_env = worker_config |> Map.get(:adapter_env, []) |> merge_with_default_adapter_env()
-    heartbeat_env_json = encode_heartbeat_env(heartbeat_config)
-    ready_file = build_ready_file(worker_id)
-    script_path = determine_script_path(adapter, adapter_args)
-    args = build_spawn_args(adapter_args, port, elixir_address)
-
-    SLog.info(
-      @log_category,
-      "Starting gRPC server: #{python_executable} #{script_path || ""} #{Enum.join(args, " ")}"
-    )
-
-    %{
-      executable: python_executable,
-      script_path: script_path,
-      args: args,
-      process_group?: process_group_spawn?(),
-      adapter_env: adapter_env,
-      heartbeat_env_json: heartbeat_env_json,
-      ready_file: ready_file
-    }
-  end
-
-  defp resolve_adapter_args(adapter, worker_config) do
-    worker_adapter_args = Map.get(worker_config, :adapter_args, [])
-
-    if worker_adapter_args == [] do
-      adapter.script_args() || []
-    else
-      worker_adapter_args
-    end
-  end
-
-  defp determine_script_path(adapter, adapter_args) do
-    if Enum.any?(adapter_args, fn arg ->
-         is_binary(arg) and String.contains?(arg, "--max-workers")
-       end) do
-      app_dir = Application.app_dir(:snakepit)
-      Path.join([app_dir, "priv", "python", "grpc_server_threaded.py"])
-    else
-      adapter.script_path()
-    end
-  end
-
-  defp build_spawn_args(adapter_args, port, elixir_address) do
-    adapter_args
-    |> maybe_add_arg("--port", to_string(port))
-    |> maybe_add_arg("--elixir-address", elixir_address)
-    |> add_run_id_arg()
-  end
-
-  defp build_ready_file(worker_id) do
-    base_dir = System.tmp_dir() || File.cwd!()
-
-    safe_worker_id =
-      worker_id
-      |> to_string()
-      |> String.replace(~r/[^a-zA-Z0-9_.-]/, "_")
-
-    unique = :erlang.unique_integer([:positive, :monotonic])
-    Path.join(base_dir, "snakepit_ready_#{safe_worker_id}_#{unique}")
-  end
-
-  defp maybe_add_arg(args, flag, value) do
-    if Enum.any?(args, &String.contains?(&1, flag)) do
-      args
-    else
-      args ++ [flag, value]
-    end
-  end
-
-  defp add_run_id_arg(args) do
-    run_id = ProcessRegistry.get_beam_run_id()
-    args ++ ["--snakepit-run-id", run_id]
-  end
-
-  defp spawn_grpc_server(%{
-         executable: executable,
-         script_path: script_path,
-         args: args,
-         adapter_env: adapter_env,
-         heartbeat_env_json: heartbeat_env_json,
-         ready_file: ready_file
-       }) do
-    {spawn_args, port_opts} = build_port_config(script_path, args)
-    port_opts = apply_env_to_port_opts(port_opts, adapter_env, heartbeat_env_json, ready_file)
-
-    server_port = Port.open({:spawn_executable, executable}, [{:args, spawn_args} | port_opts])
-    Port.monitor(server_port)
-    server_port
-  end
-
-  defp build_port_config(script_path, args) do
-    case script_path do
-      path when is_binary(path) and byte_size(path) > 0 ->
-        {
-          [path | args],
-          [:binary, :exit_status, :use_stdio, :stderr_to_stdout, {:cd, Path.dirname(path)}]
-        }
-
-      _ ->
-        {args, [:binary, :exit_status, :use_stdio, :stderr_to_stdout]}
-    end
-  end
-
-  defp process_group_spawn? do
-    Application.get_env(:snakepit, :process_group_kill, true) and
-      Snakepit.ProcessKiller.process_group_supported?()
-  end
-
   defp resolve_process_group(process_pid, %{process_group?: true})
        when is_integer(process_pid) do
     with {:ok, pgid} <- Snakepit.ProcessKiller.get_process_group_id(process_pid),
@@ -551,21 +395,6 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp resolve_process_group(_process_pid, _spawn_config), do: {nil, false}
-
-  defp apply_env_to_port_opts(port_opts, adapter_env, heartbeat_env_json, ready_file) do
-    env_entries =
-      adapter_env
-      |> maybe_put_heartbeat_env(heartbeat_env_json)
-      |> maybe_put_ready_file_env(ready_file)
-      |> maybe_put_log_level_env()
-
-    if env_entries != [] do
-      env_tuples = Enum.map(env_entries, &to_env_tuple/1)
-      port_opts ++ [{:env, env_tuples}]
-    else
-      port_opts
-    end
-  end
 
   defp extract_and_log_pid(server_port, port) do
     case Port.info(server_port, :os_pid) do
@@ -703,7 +532,7 @@ defmodule Snakepit.GRPCWorker do
   @impl true
   def handle_continue(:connect_and_wait, state) do
     with {:ok, actual_port} <-
-           wait_for_server_ready(
+           ProcessManager.wait_for_server_ready(
              state.server_port,
              state.ready_file,
              Defaults.grpc_server_ready_timeout()
@@ -921,7 +750,8 @@ defmodule Snakepit.GRPCWorker do
       state.shutting_down or
         shutdown_pending_in_mailbox?() or
         not pool_alive?(state.pool_name) or
-        Snakepit.Shutdown.in_progress?()
+        Snakepit.Shutdown.in_progress?() or
+        system_stopping?()
 
     state =
       if effective_shutting_down? and not state.shutting_down do
@@ -962,7 +792,7 @@ defmodule Snakepit.GRPCWorker do
   @impl true
   def handle_info({port, {:data, data}}, %{server_port: port} = state) do
     output = to_string(data)
-    buffer = append_startup_output(state.python_output_buffer, output)
+    buffer = ProcessManager.append_startup_output(state.python_output_buffer, output)
 
     if log_python_output?() do
       trimmed = String.trim(output)
@@ -978,11 +808,11 @@ defmodule Snakepit.GRPCWorker do
   @impl true
   def handle_info({port, {:exit_status, status}}, %{server_port: port} = state) do
     # DIAGNOSTIC: Drain any remaining error output from the port buffer
-    remaining_output = drain_port_buffer(port, 200)
+    remaining_output = ProcessManager.drain_port_buffer(port, 200)
 
     last_output =
       state.python_output_buffer
-      |> append_startup_output(remaining_output)
+      |> ProcessManager.append_startup_output(remaining_output)
       |> String.trim()
 
     last_output =
@@ -1002,7 +832,8 @@ defmodule Snakepit.GRPCWorker do
       state.shutting_down or
         shutdown_pending_in_mailbox?() or
         not pool_alive?(state.pool_name) or
-        Snakepit.Shutdown.in_progress?()
+        Snakepit.Shutdown.in_progress?() or
+        system_stopping?()
 
     # Update state if we detected shutdown via mailbox peek or pool check
     state =
@@ -1140,8 +971,8 @@ defmodule Snakepit.GRPCWorker do
 
     emit_worker_terminated_telemetry(state, reason)
     cleanup_heartbeat(state, reason)
-    kill_python_process(state, reason)
-    cleanup_ready_file(state.ready_file)
+    ProcessManager.kill_python_process(state, reason, graceful_shutdown_timeout())
+    ProcessManager.cleanup_ready_file(state.ready_file)
     cleanup_resources(state)
 
     :ok
@@ -1172,84 +1003,6 @@ defmodule Snakepit.GRPCWorker do
     maybe_stop_heartbeat_monitor(state.heartbeat_monitor)
     maybe_notify_test_pid(state.heartbeat_config, {:heartbeat_monitor_stopped, state.id, reason})
   end
-
-  # Group all kill_python_process clauses together
-  defp kill_python_process(%{process_pid: nil}, _reason), do: :ok
-
-  defp kill_python_process(state, reason) when reason == :normal do
-    do_graceful_kill(state)
-  end
-
-  defp kill_python_process(state, :shutdown) do
-    do_graceful_kill(state)
-  end
-
-  defp kill_python_process(state, {:shutdown, _}) do
-    do_graceful_kill(state)
-  end
-
-  defp kill_python_process(state, reason) do
-    SLog.warning(
-      @log_category,
-      "Non-graceful termination (#{inspect(reason)}), immediately killing PID #{state.process_pid}"
-    )
-
-    result =
-      if use_process_group_kill?(state) do
-        Snakepit.ProcessKiller.kill_process_group(state.pgid, :sigkill)
-      else
-        Snakepit.ProcessKiller.kill_process(state.process_pid, :sigkill)
-      end
-
-    case result do
-      :ok ->
-        SLog.debug(@log_category, "✅ Immediately killed gRPC server PID #{state.process_pid}")
-
-      {:error, kill_reason} ->
-        SLog.warning(
-          @log_category,
-          "Failed to kill #{state.process_pid}: #{inspect(kill_reason)}"
-        )
-    end
-  end
-
-  defp do_graceful_kill(state) do
-    SLog.debug(
-      @log_category,
-      "Starting graceful shutdown of external gRPC process PID: #{state.process_pid}..."
-    )
-
-    result =
-      if use_process_group_kill?(state) do
-        Snakepit.ProcessKiller.kill_process_group_with_escalation(
-          state.pgid,
-          graceful_shutdown_timeout()
-        )
-      else
-        Snakepit.ProcessKiller.kill_with_escalation(
-          state.process_pid,
-          graceful_shutdown_timeout()
-        )
-      end
-
-    case result do
-      :ok ->
-        SLog.debug(@log_category, "✅ gRPC server PID #{state.process_pid} terminated gracefully")
-
-      {:error, kill_reason} ->
-        SLog.warning(
-          @log_category,
-          "Failed to gracefully kill #{state.process_pid}: #{inspect(kill_reason)}"
-        )
-    end
-  end
-
-  defp use_process_group_kill?(%{process_group?: true, pgid: pgid})
-       when is_integer(pgid) do
-    Application.get_env(:snakepit, :process_group_kill, true)
-  end
-
-  defp use_process_group_kill?(_state), do: false
 
   defp cleanup_resources(state) do
     disconnect_connection(state.connection)
@@ -1587,154 +1340,6 @@ defmodule Snakepit.GRPCWorker do
 
   defp get_worker_config_section(_config, _key), do: nil
 
-  defp encode_heartbeat_env(config) when is_map(config) do
-    config
-    |> Map.new()
-    |> Map.take([
-      :enabled,
-      :ping_interval_ms,
-      :timeout_ms,
-      :max_missed_heartbeats,
-      :initial_delay_ms,
-      :dependent
-    ])
-    |> Enum.reduce(%{}, fn
-      {:ping_interval_ms, value}, acc -> Map.put(acc, "interval_ms", value)
-      {key, value}, acc -> Map.put(acc, to_string(key), value)
-    end)
-    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
-    |> Map.new()
-    |> case do
-      %{} = map when map == %{} -> nil
-      map -> Jason.encode!(map)
-    end
-  end
-
-  defp normalize_adapter_env_entries(nil), do: []
-
-  defp normalize_adapter_env_entries(env) when is_map(env) do
-    env
-    |> Map.to_list()
-    |> normalize_adapter_env_entries()
-  end
-
-  defp normalize_adapter_env_entries(env) when is_list(env) do
-    Enum.flat_map(env, fn
-      {key, value} -> [{to_string(key), to_string(value)}]
-      key when is_binary(key) -> [{key, ""}]
-      key when is_atom(key) -> [{Atom.to_string(key), ""}]
-      _ -> []
-    end)
-  end
-
-  defp merge_with_default_adapter_env(env) do
-    existing = normalize_adapter_env_entries(env)
-    defaults = default_adapter_env()
-
-    existing_keys =
-      existing
-      |> Enum.map(fn {key, _} -> String.downcase(key) end)
-      |> MapSet.new()
-
-    defaults
-    |> Enum.reject(fn {key, _value} -> MapSet.member?(existing_keys, String.downcase(key)) end)
-    |> Kernel.++(existing)
-  end
-
-  defp default_adapter_env do
-    priv_python =
-      :code.priv_dir(:snakepit)
-      |> to_string()
-      |> Path.join("python")
-
-    repo_priv_python =
-      Path.join(File.cwd!(), "priv/python")
-
-    snakebridge_priv_python =
-      case :code.priv_dir(:snakebridge) do
-        {:error, _} -> nil
-        priv_dir -> Path.join([to_string(priv_dir), "python"])
-      end
-
-    path_sep = path_separator()
-
-    pythonpath =
-      [System.get_env("PYTHONPATH"), priv_python, repo_priv_python, snakebridge_priv_python]
-      |> Enum.reject(&(&1 in [nil, ""]))
-      |> Enum.uniq()
-      |> Enum.join(path_sep)
-
-    interpreter =
-      Application.get_env(:snakepit, :python_executable) ||
-        System.get_env("SNAKEPIT_PYTHON") ||
-        GRPCPython.executable_path()
-
-    process_group_env =
-      if Application.get_env(:snakepit, :process_group_kill, true) and
-           Snakepit.ProcessKiller.process_group_supported?() do
-        [{"SNAKEPIT_PROCESS_GROUP", "1"}]
-      else
-        []
-      end
-
-    base =
-      []
-      |> maybe_cons("PYTHONPATH", pythonpath)
-      |> maybe_cons("SNAKEPIT_PYTHON", interpreter)
-
-    extra_env =
-      Snakepit.PythonRuntime.config()
-      |> Map.get(:extra_env, %{})
-      |> normalize_adapter_env_entries()
-
-    base ++ process_group_env ++ extra_env ++ Snakepit.PythonRuntime.runtime_env()
-  end
-
-  defp maybe_cons(acc, _key, value) when value in [nil, ""], do: acc
-  defp maybe_cons(acc, key, value), do: [{key, value} | acc]
-
-  defp path_separator do
-    case :os.type() do
-      {:win32, _} -> ";"
-      _ -> ":"
-    end
-  end
-
-  defp elixir_to_python_level(:debug), do: "debug"
-  defp elixir_to_python_level(:info), do: "info"
-  defp elixir_to_python_level(:warning), do: "warning"
-  defp elixir_to_python_level(:error), do: "error"
-  defp elixir_to_python_level(:none), do: "none"
-  defp elixir_to_python_level(_), do: "error"
-
-  defp maybe_put_heartbeat_env(entries, nil), do: entries
-
-  defp maybe_put_heartbeat_env(entries, json),
-    do: maybe_put_env(entries, "SNAKEPIT_HEARTBEAT_CONFIG", json)
-
-  defp maybe_put_ready_file_env(entries, ready_file),
-    do: maybe_put_env(entries, "SNAKEPIT_READY_FILE", ready_file)
-
-  defp maybe_put_log_level_env(entries) do
-    level = Application.get_env(:snakepit, :log_level, :error)
-    maybe_put_env(entries, "SNAKEPIT_LOG_LEVEL", elixir_to_python_level(level))
-  end
-
-  defp maybe_put_env(entries, _key, value) when value in [nil, ""], do: entries
-
-  defp maybe_put_env(entries, key, value) do
-    filtered =
-      Enum.reject(entries, fn {existing_key, _value} ->
-        String.downcase(existing_key) == String.downcase(key)
-      end)
-
-    [{key, value} | filtered]
-  end
-
-  defp to_env_tuple({key, value}) do
-    {String.to_charlist(key), String.to_charlist(value)}
-  end
-
   # CRITICAL FIX: Defensive port cleanup that handles all exit scenarios
   defp safe_close_port(port) do
     Port.close(port)
@@ -1751,167 +1356,6 @@ defmodule Snakepit.GRPCWorker do
   end
 
   # Private functions
-
-  # Drain remaining output from port buffer to capture error messages
-  defp drain_port_buffer(port, timeout) do
-    drain_port_buffer(port, timeout, [])
-  end
-
-  defp drain_port_buffer(port, timeout, acc) do
-    receive do
-      {^port, {:data, data}} ->
-        output = to_string(data)
-        drain_port_buffer(port, timeout, [output | acc])
-    after
-      timeout ->
-        # No more data, return accumulated output
-        acc
-        |> Enum.reverse()
-        |> Enum.join("")
-        |> String.trim()
-    end
-  end
-
-  defp wait_for_server_ready(port, ready_file, timeout, output_buffer \\ "") do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    wait_for_server_ready_loop(port, ready_file, deadline, timeout, output_buffer)
-  end
-
-  defp wait_for_server_ready_loop(port, ready_file, deadline, timeout, output_buffer) do
-    case read_ready_file(ready_file) do
-      {:ok, actual_port} ->
-        cleanup_ready_file(ready_file)
-        {:ok, actual_port}
-
-      {:error, reason} ->
-        cleanup_ready_file(ready_file)
-        log_startup_output(output_buffer)
-        SLog.error(@log_category, "Failed to read readiness file: #{inspect(reason)}")
-        {:error, {:ready_file, reason}}
-
-      :not_ready ->
-        remaining = max(deadline - System.monotonic_time(:millisecond), 0)
-
-        if remaining == 0 do
-          cleanup_ready_file(ready_file)
-          log_startup_output(output_buffer)
-
-          SLog.error(
-            @log_category,
-            "Timeout waiting for Python gRPC server to start after #{timeout}ms"
-          )
-
-          {:error, :timeout}
-        else
-          receive do
-            {^port, {:data, data}} ->
-              output = to_string(data)
-              output_buffer = append_startup_output(output_buffer, output)
-
-              if String.trim(output) != "" do
-                SLog.debug(
-                  @log_category,
-                  "Python server output during startup: #{String.trim(output)}"
-                )
-              end
-
-              wait_for_server_ready_loop(port, ready_file, deadline, timeout, output_buffer)
-
-            {^port, {:exit_status, status}} ->
-              cleanup_ready_file(ready_file)
-
-              case status do
-                0 ->
-                  SLog.debug(
-                    @log_category,
-                    "Python gRPC server process exited with status 0 during startup (shutdown)"
-                  )
-
-                  {:error, :shutdown}
-
-                143 ->
-                  SLog.debug(
-                    @log_category,
-                    "Python gRPC server process exited with status 143 during startup (shutdown)"
-                  )
-
-                  {:error, :shutdown}
-
-                _ ->
-                  log_startup_output(output_buffer)
-
-                  SLog.error(
-                    @log_category,
-                    "Python gRPC server process exited with status #{status} during startup"
-                  )
-
-                  {:error, {:exit_status, status}}
-              end
-
-            {:DOWN, _ref, :port, ^port, reason} ->
-              cleanup_ready_file(ready_file)
-              log_startup_output(output_buffer)
-
-              SLog.error(
-                @log_category,
-                "Python gRPC server port died during startup: #{inspect(reason)}"
-              )
-
-              {:error, {:port_died, reason}}
-          after
-            min(remaining, 50) ->
-              wait_for_server_ready_loop(port, ready_file, deadline, timeout, output_buffer)
-          end
-        end
-    end
-  end
-
-  defp read_ready_file(path) do
-    case File.read(path) do
-      {:ok, contents} ->
-        case Integer.parse(String.trim(contents)) do
-          {port, _} ->
-            {:ok, port}
-
-          :error ->
-            # Empty or invalid content - file may still be mid-write (atomic rename race)
-            # Treat as not ready and keep polling
-            :not_ready
-        end
-
-      {:error, :enoent} ->
-        :not_ready
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp cleanup_ready_file(path) do
-    File.rm(path)
-    :ok
-  rescue
-    _ -> :ok
-  end
-
-  defp append_startup_output(buffer, output) do
-    max_bytes = 4096
-    buffer = buffer <> output
-
-    if byte_size(buffer) > max_bytes do
-      String.slice(buffer, byte_size(buffer) - max_bytes, max_bytes)
-    else
-      buffer
-    end
-  end
-
-  defp log_startup_output(buffer) do
-    trimmed = String.trim(buffer)
-
-    if trimmed != "" do
-      SLog.error(@log_category, "Python server output during startup:\n#{trimmed}")
-    end
-  end
 
   defp log_python_output? do
     Application.get_env(:snakepit, :log_python_output, false)
@@ -2155,5 +1599,18 @@ defmodule Snakepit.GRPCWorker do
       pid when is_pid(pid) -> Process.alive?(pid)
       _ -> false
     end
+  end
+
+  # Check if the Erlang runtime is in the process of stopping.
+  # This catches cases where Application.stop has been called but other
+  # shutdown signals haven't propagated yet.
+  defp system_stopping? do
+    case :init.get_status() do
+      {:stopping, _} -> true
+      {_, :stopping} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
   end
 end

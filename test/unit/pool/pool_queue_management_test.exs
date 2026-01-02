@@ -2,7 +2,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
   use ExUnit.Case, async: true
 
   alias Snakepit.Pool
-  alias Snakepit.Pool.PoolState
+  alias Snakepit.Pool.State
 
   setup do
     cache =
@@ -20,7 +20,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
       pool_saturated: 0
     }
 
-    pool_state = %PoolState{
+    pool_state = %State{
       name: :queue_pool,
       size: 1,
       workers: [],

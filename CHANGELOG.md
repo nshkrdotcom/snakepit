@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Long-running integration and randomized flow tests are tagged `:slow`, and random worker flow iterations were trimmed.
 - Pool size isolation checks now wait on pool stats instead of fixed delays.
 - gRPC errors during shutdown now log at debug level to reduce noise during expected teardown.
+- Refactored `Snakepit.Pool` and `Snakepit.GRPCWorker` internals to delegate state, queue, initialization, config, and process management into focused modules without changing behavior.
 
 ### Fixed
 - Removed direct IO from the script exit path to avoid hangs on closed pipes.

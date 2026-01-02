@@ -34,7 +34,13 @@ defmodule Snakepit.CircuitBreakerTest do
         )
 
       on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid)
+        if Process.alive?(pid) do
+          try do
+            GenServer.stop(pid)
+          catch
+            :exit, _reason -> :ok
+          end
+        end
       end)
 
       {:ok, cb: pid}
@@ -138,7 +144,13 @@ defmodule Snakepit.CircuitBreakerTest do
         )
 
       on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid)
+        if Process.alive?(pid) do
+          try do
+            GenServer.stop(pid)
+          catch
+            :exit, _reason -> :ok
+          end
+        end
       end)
 
       {:ok, cb: pid}
@@ -181,7 +193,13 @@ defmodule Snakepit.CircuitBreakerTest do
         )
 
       on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid)
+        if Process.alive?(pid) do
+          try do
+            GenServer.stop(pid)
+          catch
+            :exit, _reason -> :ok
+          end
+        end
       end)
 
       {:ok, cb: pid}
@@ -218,7 +236,13 @@ defmodule Snakepit.CircuitBreakerTest do
         )
 
       on_exit(fn ->
-        if Process.alive?(pid), do: GenServer.stop(pid)
+        if Process.alive?(pid) do
+          try do
+            GenServer.stop(pid)
+          catch
+            :exit, _reason -> :ok
+          end
+        end
       end)
 
       {:ok, cb: pid}

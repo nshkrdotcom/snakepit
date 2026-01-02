@@ -167,6 +167,13 @@ defmodule Snakepit.Application do
   end
 
   @impl true
+  def prep_stop(state) do
+    # Mark shutdown before children stop so workers treat clean exits as expected.
+    Snakepit.Shutdown.mark_in_progress()
+    state
+  end
+
+  @impl true
   def stop(_state) do
     SLog.debug(:shutdown, "Snakepit.Application.stop/1",
       stopped_at_ms: System.monotonic_time(:millisecond)

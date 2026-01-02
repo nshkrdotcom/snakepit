@@ -45,7 +45,7 @@ defmodule Snakepit.SessionAffinityTest do
       )
 
       # Execute with session_id - this triggers session affinity logic
-      # BUG: Will crash with "key :affinity_cache not found in PoolState"
+      # BUG: Will crash with "key :affinity_cache not found in Pool.State"
       result = Snakepit.execute("ping", %{}, session_id: "test_session_123")
 
       # Should succeed

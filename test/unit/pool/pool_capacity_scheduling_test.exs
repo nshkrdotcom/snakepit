@@ -2,7 +2,7 @@ defmodule Snakepit.Pool.CapacitySchedulingTest do
   use Snakepit.TestCase, async: true
 
   alias Snakepit.Pool
-  alias Snakepit.Pool.PoolState
+  alias Snakepit.Pool.State
 
   setup do
     if Process.whereis(Snakepit.TaskSupervisor) == nil do
@@ -24,7 +24,7 @@ defmodule Snakepit.Pool.CapacitySchedulingTest do
       pool_saturated: 0
     }
 
-    base_pool_state = %PoolState{
+    base_pool_state = %State{
       name: :capacity_pool,
       size: 1,
       workers: ["worker_a"],

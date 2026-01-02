@@ -466,7 +466,13 @@ The telemetry examples demonstrate these event types:
 - `[:snakepit, :gpu, :memory, :sampled]` - GPU memory sampled
 - `[:snakepit, :gpu, :utilization, :sampled]` - GPU utilization sampled
 
-See [`TELEMETRY.md`](../TELEMETRY.md) for the complete event catalog and integration patterns.
+### Script Shutdown Events (v0.9.0+)
+- `[:snakepit, :script, :shutdown, :start]` - Shutdown sequence started
+- `[:snakepit, :script, :shutdown, :stop]` - Snakepit application stopped
+- `[:snakepit, :script, :shutdown, :cleanup]` - Worker cleanup completed
+- `[:snakepit, :script, :shutdown, :exit]` - VM exit applied
+
+See [Observability Guide](../guides/observability.md) for the complete event catalog and integration patterns.
 
 ## Requirements
 

@@ -63,6 +63,18 @@ Key features:
 [:snakepit, :python, :cpu, :sampled]       # CPU usage
 ```
 
+### Script Shutdown Events ([:snakepit, :script, :shutdown, :*]) (v0.9.0+)
+
+```elixir
+[:snakepit, :script, :shutdown, :start]    # Shutdown sequence started
+[:snakepit, :script, :shutdown, :stop]     # Snakepit application stopped
+[:snakepit, :script, :shutdown, :cleanup]  # Worker cleanup completed
+[:snakepit, :script, :shutdown, :exit]     # VM exit applied
+```
+
+Metadata includes: `run_id`, `exit_mode`, `stop_mode`, `owned?`, `status`, `cleanup_result`.
+See `docs/20251229/documentation-overhaul/01-core-api.md#telemetry-contract-090` for details.
+
 ## Attaching Handlers
 
 Use `:telemetry.attach/4` or `:telemetry.attach_many/4`:

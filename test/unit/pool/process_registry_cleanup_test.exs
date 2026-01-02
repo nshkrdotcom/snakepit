@@ -47,6 +47,41 @@ defmodule Snakepit.Pool.ProcessRegistryCleanupTest do
     assert :dets.lookup(dets, current_worker) == [{current_worker, current_entry}]
   end
 
+  test "manual orphan cleanup removes stale entries with live non-beam os pid" do
+    state = :sys.get_state(ProcessRegistry)
+    dets = state.dets_table
+    current_run = state.beam_run_id
+
+    port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
+    {:os_pid, other_os_pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      safe_close_port(port)
+    end)
+
+    stale_worker = "stale_pid_reuse_#{System.unique_integer([:positive])}"
+
+    stale_entry = %{
+      process_pid: 99_991,
+      beam_run_id: "run_#{System.unique_integer([:positive])}",
+      beam_os_pid: other_os_pid,
+      registered_at: System.system_time(:second)
+    }
+
+    :dets.insert(dets, {stale_worker, stale_entry})
+    :dets.sync(dets)
+
+    on_exit(fn ->
+      :dets.delete(dets, stale_worker)
+      :dets.sync(dets)
+    end)
+
+    ProcessRegistry.manual_orphan_cleanup()
+
+    assert current_run != stale_entry.beam_run_id
+    assert :dets.lookup(dets, stale_worker) == []
+  end
+
   test "cleanup_dead_workers keeps entries while external process is alive" do
     port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
     {:os_pid, process_pid} = Port.info(port, :os_pid)
