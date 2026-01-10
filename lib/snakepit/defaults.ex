@@ -415,6 +415,16 @@ defmodule Snakepit.Defaults do
     Application.get_env(:snakepit, :pool_startup_batch_delay_ms, 500)
   end
 
+  @spec pool_reconcile_interval_ms() :: non_neg_integer()
+  def pool_reconcile_interval_ms do
+    Application.get_env(:snakepit, :pool_reconcile_interval_ms, 1_000)
+  end
+
+  @spec pool_reconcile_batch_size() :: pos_integer()
+  def pool_reconcile_batch_size do
+    Application.get_env(:snakepit, :pool_reconcile_batch_size, 2)
+  end
+
   # ============================================================================
   # gRPC Worker
   # ============================================================================
@@ -437,11 +447,11 @@ defmodule Snakepit.Defaults do
   Default timeout for GRPCWorker streaming calls.
   Used in `Snakepit.GRPCWorker.execute_stream/5`.
 
-  Default: 300_000 ms (5 minutes)
+  Default: derived from `stream_timeout/0`
   """
   @spec grpc_worker_stream_timeout() :: timeout()
   def grpc_worker_stream_timeout do
-    Application.get_env(:snakepit, :grpc_worker_stream_timeout, 300_000)
+    Application.get_env(:snakepit, :grpc_worker_stream_timeout, stream_timeout())
   end
 
   @doc """
@@ -761,6 +771,26 @@ defmodule Snakepit.Defaults do
     Application.get_env(:snakepit, :crash_barrier_backoff_ms, [50, 100, 200])
   end
 
+  @spec worker_starter_max_restarts() :: non_neg_integer()
+  def worker_starter_max_restarts do
+    Application.get_env(:snakepit, :worker_starter_max_restarts, 3)
+  end
+
+  @spec worker_starter_max_seconds() :: pos_integer()
+  def worker_starter_max_seconds do
+    Application.get_env(:snakepit, :worker_starter_max_seconds, 5)
+  end
+
+  @spec worker_supervisor_max_restarts() :: non_neg_integer()
+  def worker_supervisor_max_restarts do
+    Application.get_env(:snakepit, :worker_supervisor_max_restarts, 3)
+  end
+
+  @spec worker_supervisor_max_seconds() :: pos_integer()
+  def worker_supervisor_max_seconds do
+    Application.get_env(:snakepit, :worker_supervisor_max_seconds, 5)
+  end
+
   # ============================================================================
   # Lifecycle Manager
   # ============================================================================
@@ -976,11 +1006,11 @@ defmodule Snakepit.Defaults do
   Default timeout for gRPC client execute calls.
   Used in `Snakepit.GRPC.Client`.
 
-  Default: 30_000 ms (30 seconds)
+  Default: derived from `grpc_command_timeout/0`
   """
   @spec grpc_client_execute_timeout() :: timeout()
   def grpc_client_execute_timeout do
-    Application.get_env(:snakepit, :grpc_client_execute_timeout, 30_000)
+    Application.get_env(:snakepit, :grpc_client_execute_timeout, grpc_command_timeout())
   end
 
   # ============================================================================

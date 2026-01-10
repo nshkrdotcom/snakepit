@@ -114,7 +114,7 @@ defmodule Snakepit.Application do
         [
           # GRPC client supervisor - required for connecting to Python workers
           # Must be started before any gRPC client connections are attempted
-          {GRPC.Client.Supervisor, []},
+          Snakepit.GRPC.ClientSupervisor,
 
           # Start the central gRPC server that manages state
           # DIAGNOSTIC: Increase backlog to handle high concurrent connection load (200+ workers)

@@ -107,16 +107,25 @@ defmodule Snakepit.GRPCWorker do
   Execute a command and return the result.
   """
   # Header for default values
-  def execute(worker, command, args, timeout \\ nil)
+  def execute(worker, command, args, timeout_or_opts \\ nil)
 
   def execute(worker, command, args, nil) do
-    execute(worker, command, args, Defaults.grpc_worker_execute_timeout())
+    execute(worker, command, args, Defaults.grpc_worker_execute_timeout(), [])
   end
 
-  def execute(worker_id, command, args, timeout) when is_binary(worker_id) do
+  def execute(worker, command, args, opts) when is_list(opts) do
+    timeout = Keyword.get(opts, :timeout, Defaults.grpc_worker_execute_timeout())
+    execute(worker, command, args, timeout, opts)
+  end
+
+  def execute(worker, command, args, timeout) when is_integer(timeout) or timeout == :infinity do
+    execute(worker, command, args, timeout, [])
+  end
+
+  def execute(worker_id, command, args, timeout, opts) when is_binary(worker_id) do
     case PoolRegistry.get_worker_pid(worker_id) do
       {:ok, pid} ->
-        GenServer.call(pid, {:execute, command, args, timeout}, timeout + 1_000)
+        GenServer.call(pid, {:execute, command, args, timeout, opts}, call_timeout(timeout))
 
       {:error, _} ->
         {:error,
@@ -124,26 +133,37 @@ defmodule Snakepit.GRPCWorker do
     end
   end
 
-  def execute(worker_pid, command, args, timeout) when is_pid(worker_pid) do
-    GenServer.call(worker_pid, {:execute, command, args, timeout}, timeout + 1_000)
+  def execute(worker_pid, command, args, timeout, opts) when is_pid(worker_pid) do
+    GenServer.call(worker_pid, {:execute, command, args, timeout, opts}, call_timeout(timeout))
   end
 
   @doc """
   Execute a streaming command with callback.
   """
-  def execute_stream(worker, command, args, callback_fn, timeout \\ nil)
+  def execute_stream(worker, command, args, callback_fn, timeout_or_opts \\ nil)
 
   def execute_stream(worker, command, args, callback_fn, nil) do
-    execute_stream(worker, command, args, callback_fn, Defaults.grpc_worker_stream_timeout())
+    execute_stream(worker, command, args, callback_fn, Defaults.grpc_worker_stream_timeout(), [])
   end
 
-  def execute_stream(worker_id, command, args, callback_fn, timeout) when is_binary(worker_id) do
+  def execute_stream(worker, command, args, callback_fn, opts) when is_list(opts) do
+    timeout = Keyword.get(opts, :timeout, Defaults.grpc_worker_stream_timeout())
+    execute_stream(worker, command, args, callback_fn, timeout, opts)
+  end
+
+  def execute_stream(worker, command, args, callback_fn, timeout)
+      when is_integer(timeout) or timeout == :infinity do
+    execute_stream(worker, command, args, callback_fn, timeout, [])
+  end
+
+  def execute_stream(worker_id, command, args, callback_fn, timeout, opts)
+      when is_binary(worker_id) do
     case PoolRegistry.get_worker_pid(worker_id) do
       {:ok, pid} ->
         GenServer.call(
           pid,
-          {:execute_stream, command, args, callback_fn, timeout},
-          timeout + 1_000
+          {:execute_stream, command, args, callback_fn, timeout, opts},
+          call_timeout(timeout)
         )
 
       {:error, _} ->
@@ -152,28 +172,46 @@ defmodule Snakepit.GRPCWorker do
     end
   end
 
-  def execute_stream(worker_pid, command, args, callback_fn, timeout) when is_pid(worker_pid) do
+  def execute_stream(worker_pid, command, args, callback_fn, timeout, opts)
+      when is_pid(worker_pid) do
     GenServer.call(
       worker_pid,
-      {:execute_stream, command, args, callback_fn, timeout},
-      timeout + 1_000
+      {:execute_stream, command, args, callback_fn, timeout, opts},
+      call_timeout(timeout)
     )
   end
 
   @doc """
   Execute a command in a specific session.
   """
-  def execute_in_session(worker, session_id, command, args, timeout \\ nil)
+  def execute_in_session(worker, session_id, command, args, timeout_or_opts \\ nil)
 
   def execute_in_session(worker, session_id, command, args, nil) do
-    execute_in_session(worker, session_id, command, args, Defaults.grpc_worker_execute_timeout())
+    execute_in_session(
+      worker,
+      session_id,
+      command,
+      args,
+      Defaults.grpc_worker_execute_timeout(),
+      []
+    )
   end
 
-  def execute_in_session(worker, session_id, command, args, timeout) do
+  def execute_in_session(worker, session_id, command, args, opts) when is_list(opts) do
+    timeout = Keyword.get(opts, :timeout, Defaults.grpc_worker_execute_timeout())
+    execute_in_session(worker, session_id, command, args, timeout, opts)
+  end
+
+  def execute_in_session(worker, session_id, command, args, timeout)
+      when is_integer(timeout) or timeout == :infinity do
+    execute_in_session(worker, session_id, command, args, timeout, [])
+  end
+
+  def execute_in_session(worker, session_id, command, args, timeout, opts) do
     GenServer.call(
       worker,
-      {:execute_session, session_id, command, args, timeout},
-      timeout + 1_000
+      {:execute_session, session_id, command, args, timeout, opts},
+      call_timeout(timeout)
     )
   end
 
@@ -221,6 +259,9 @@ defmodule Snakepit.GRPCWorker do
   defp maybe_put_pool_identifier_opt(opts, identifier),
     do: Keyword.put(opts, :pool_identifier, identifier)
 
+  defp call_timeout(:infinity), do: :infinity
+  defp call_timeout(timeout) when is_integer(timeout), do: timeout + 1_000
+
   defp current_process_memory_bytes do
     case Process.info(self(), :memory) do
       {:memory, bytes} when is_integer(bytes) and bytes >= 0 -> bytes
@@ -265,7 +306,11 @@ defmodule Snakepit.GRPCWorker do
   end
 
   @impl true
-  def handle_call({:execute, command, args, timeout}, _from, state) do
+  def handle_call({:execute, command, args, timeout}, from, state) do
+    handle_call({:execute, command, args, timeout, []}, from, state)
+  end
+
+  def handle_call({:execute, command, args, timeout, opts}, _from, state) do
     args_with_corr = Instrumentation.ensure_correlation(args)
 
     case Instrumentation.instrument_execute(
@@ -280,7 +325,8 @@ defmodule Snakepit.GRPCWorker do
                state.session_id,
                command,
                instrumented_args,
-               timeout
+               timeout,
+               opts
              )
            end
          ) do
@@ -291,11 +337,24 @@ defmodule Snakepit.GRPCWorker do
       {:error, reason} ->
         new_state = update_stats(state, :error)
         {:reply, {:error, reason}, new_state}
+
+      other ->
+        SLog.error(
+          @log_category,
+          "Unexpected gRPC execute result: #{inspect(other)}"
+        )
+
+        new_state = update_stats(state, :error)
+        {:reply, {:error, other}, new_state}
     end
   end
 
   @impl true
-  def handle_call({:execute_stream, command, args, callback_fn, timeout}, _from, state) do
+  def handle_call({:execute_stream, command, args, callback_fn, timeout}, from, state) do
+    handle_call({:execute_stream, command, args, callback_fn, timeout, []}, from, state)
+  end
+
+  def handle_call({:execute_stream, command, args, callback_fn, timeout, opts}, _from, state) do
     SLog.debug(
       @log_category,
       "[GRPCWorker] execute_stream #{command} with args #{Redaction.describe(args)}"
@@ -310,15 +369,27 @@ defmodule Snakepit.GRPCWorker do
         command,
         args_with_corr,
         callback_fn,
-        timeout
+        timeout,
+        opts
       )
 
     SLog.debug(@log_category, "[GRPCWorker] execute_stream result: #{Redaction.describe(result)}")
 
     new_state =
       case result do
-        :ok -> update_stats(state, :success)
-        {:error, _reason} -> update_stats(state, :error)
+        :ok ->
+          update_stats(state, :success)
+
+        {:error, _reason} ->
+          update_stats(state, :error)
+
+        other ->
+          SLog.error(
+            @log_category,
+            "Unexpected gRPC execute_stream result: #{inspect(other)}"
+          )
+
+          update_stats(state, :error)
       end
 
     {:reply, result, new_state}
@@ -340,7 +411,11 @@ defmodule Snakepit.GRPCWorker do
   end
 
   @impl true
-  def handle_call({:execute_session, session_id, command, args, timeout}, _from, state) do
+  def handle_call({:execute_session, session_id, command, args, timeout}, from, state) do
+    handle_call({:execute_session, session_id, command, args, timeout, []}, from, state)
+  end
+
+  def handle_call({:execute_session, session_id, command, args, timeout, opts}, _from, state) do
     session_args =
       args
       |> Map.put(:session_id, session_id)
@@ -358,7 +433,8 @@ defmodule Snakepit.GRPCWorker do
                state.session_id,
                command,
                instrumented_args,
-               timeout
+               timeout,
+               opts
              )
            end
          ) do
@@ -369,6 +445,15 @@ defmodule Snakepit.GRPCWorker do
       {:error, reason} ->
         new_state = update_stats(state, :error)
         {:reply, {:error, reason}, new_state}
+
+      other ->
+        SLog.error(
+          @log_category,
+          "Unexpected gRPC execute_session result: #{inspect(other)}"
+        )
+
+        new_state = update_stats(state, :error)
+        {:reply, {:error, other}, new_state}
     end
   end
 

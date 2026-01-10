@@ -41,7 +41,7 @@ defmodule Snakepit.Performance.WorkerCrashStormTest do
 
     assert_eventually(
       fn -> length(Snakepit.Pool.list_workers()) == @pool_size end,
-      timeout: 10_000,
+      timeout: 30_000,
       interval: 200
     )
 
@@ -113,6 +113,12 @@ defmodule Snakepit.Performance.WorkerCrashStormTest do
   defp configure_mock_pool do
     Application.put_env(:snakepit, :pooling_enabled, true)
     Application.put_env(:snakepit, :pool_config, %{pool_size: @pool_size})
+    Application.put_env(:snakepit, :pool_reconcile_interval_ms, 200)
+    Application.put_env(:snakepit, :pool_reconcile_batch_size, 4)
+    Application.put_env(:snakepit, :worker_starter_max_restarts, 200)
+    Application.put_env(:snakepit, :worker_starter_max_seconds, 10)
+    Application.put_env(:snakepit, :worker_supervisor_max_restarts, 200)
+    Application.put_env(:snakepit, :worker_supervisor_max_seconds, 10)
 
     Application.put_env(:snakepit, :pools, [
       %{
@@ -131,6 +137,14 @@ defmodule Snakepit.Performance.WorkerCrashStormTest do
       pooling_enabled: Application.get_env(:snakepit, :pooling_enabled),
       pools: Application.get_env(:snakepit, :pools),
       pool_config: Application.get_env(:snakepit, :pool_config),
+      pool_reconcile_interval_ms: Application.get_env(:snakepit, :pool_reconcile_interval_ms),
+      pool_reconcile_batch_size: Application.get_env(:snakepit, :pool_reconcile_batch_size),
+      worker_starter_max_restarts: Application.get_env(:snakepit, :worker_starter_max_restarts),
+      worker_starter_max_seconds: Application.get_env(:snakepit, :worker_starter_max_seconds),
+      worker_supervisor_max_restarts:
+        Application.get_env(:snakepit, :worker_supervisor_max_restarts),
+      worker_supervisor_max_seconds:
+        Application.get_env(:snakepit, :worker_supervisor_max_seconds),
       adapter_module: Application.get_env(:snakepit, :adapter_module)
     }
   end

@@ -17,6 +17,7 @@ defmodule Snakepit.Shutdown do
   @type cleanup_result :: :ok | :timeout | :skipped | {:error, term()}
 
   @doc false
+  @spec in_progress?() :: boolean()
   def in_progress? do
     :persistent_term.get(@shutdown_flag_key, false) or system_stopping?()
   end
@@ -179,6 +180,7 @@ defmodule Snakepit.Shutdown do
     _, _ -> nil
   end
 
+  @spec system_stopping?() :: boolean()
   defp system_stopping? do
     case :init.get_status() do
       {status, init_status} ->
@@ -188,6 +190,7 @@ defmodule Snakepit.Shutdown do
     _ -> false
   end
 
+  @spec shutdown_status?(term()) :: boolean()
   defp shutdown_status?(status) when status in [:stopping, :stopped], do: true
   defp shutdown_status?(_), do: false
 end

@@ -45,7 +45,7 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
     {:ok, %{channel: make_ref(), port: port}}
   end
 
-  def grpc_execute(_conn, _session_id, command, args, _timeout) do
+  def grpc_execute(_conn, _session_id, command, args, _timeout, _opts \\ []) do
     # Simulate command execution
     execute_command(command, args)
   end
@@ -154,11 +154,13 @@ defmodule Snakepit.TestAdapters.EphemeralPortGRPCAdapter do
      }}
   end
 
-  def grpc_execute(_conn, _session_id, "ping", _args, _timeout) do
+  def grpc_execute(_conn, _session_id, command, _args, _timeout, _opts \\ [])
+
+  def grpc_execute(_conn, _session_id, "ping", _args, _timeout, _opts) do
     {:ok, %{"status" => "pong"}}
   end
 
-  def grpc_execute(_conn, _session_id, command, _args, _timeout) do
+  def grpc_execute(_conn, _session_id, command, _args, _timeout, _opts) do
     {:error, {:unsupported_command, command}}
   end
 

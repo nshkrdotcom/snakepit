@@ -1,7 +1,7 @@
 defmodule Snakepit.MixProject do
   use Mix.Project
 
-  @version "0.9.0"
+  @version "0.9.1"
   @source_url "https://github.com/nshkrdotcom/snakepit"
 
   def project do
@@ -35,8 +35,29 @@ defmodule Snakepit.MixProject do
   defp deps do
     [
       {:jason, "~> 1.0"},
-      {:grpc, "~> 0.11.5"},
-      {:protobuf, "~> 0.15.0"},
+      {:grpc, "0.11.5"},
+      # {:grpc_core,
+      # github: "nshkrdotcom/grpc",
+      # ref: "3cec4f8c010c7869e20ccc5068872e29faecd1a9",
+      # sparse: "grpc_core",
+      # override: true},
+      # {:grpc_server,
+      # github: "nshkrdotcom/grpc",
+      # ref: "3cec4f8c010c7869e20ccc5068872e29faecd1a9",
+      # sparse: "grpc_server",
+      # override: true},
+      # {:grpc_client,
+      # github: "nshkrdotcom/grpc",
+      # ref: "3cec4f8c010c7869e20ccc5068872e29faecd1a9",
+      # sparse: "grpc_client",
+      # override: true},
+
+      # {:protobuf, "0.16.0", override: true},
+      # {:protobuf,
+      # github: "nshkrdotcom/protobuf",
+      # ref: "250e4693ce50f4ef897fcb6e27e777dc6bdfa75c",
+      # override: true},
+
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:telemetry_metrics_prometheus, "~> 1.1"},
@@ -44,7 +65,7 @@ defmodule Snakepit.MixProject do
       {:opentelemetry_exporter, "~> 1.6"},
       {:opentelemetry_telemetry, "~> 1.0"},
       {:stream_data, "~> 1.0", only: [:test]},
-      {:supertester, "~> 0.4.0", only: :test},
+      {:supertester, "~> 0.5.1", only: :test},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
@@ -80,8 +101,6 @@ defmodule Snakepit.MixProject do
         "priv/python/snakepit_bridge/**/*.py",
         "priv/python/snakepit_bridge/**/py.typed",
         "priv/python/README_THREADING.md",
-        "assets",
-        "guides",
         # Build configuration
         ".formatter.exs",
         "mix.exs",

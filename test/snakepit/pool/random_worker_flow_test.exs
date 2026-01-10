@@ -19,7 +19,12 @@ defmodule Snakepit.Pool.RandomWorkerFlowTest do
   end
 
   setup do
+    prev_env = capture_env()
+
+    Application.stop(:snakepit)
+    configure_pool()
     {:ok, _} = Application.ensure_all_started(:snakepit)
+    assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 30_000)
 
     initial_workers =
       for _ <- 1..@worker_count do
@@ -38,6 +43,20 @@ defmodule Snakepit.Pool.RandomWorkerFlowTest do
           interval: 50
         )
       end)
+
+      Application.stop(:snakepit)
+      restore_env(prev_env)
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+
+      if prev_env.pooling_enabled do
+        assert_eventually(
+          fn ->
+            Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+          end,
+          timeout: 30_000,
+          interval: 1_000
+        )
+      end
     end)
 
     {:ok, %{worker_ids: initial_workers}}
@@ -116,4 +135,30 @@ defmodule Snakepit.Pool.RandomWorkerFlowTest do
       assert match?({:ok, pid} when is_pid(pid), PoolRegistry.get_worker_pid(worker_id))
     end
   end
+
+  defp configure_pool do
+    Application.put_env(:snakepit, :pooling_enabled, true)
+    Application.delete_env(:snakepit, :pools)
+    Application.put_env(:snakepit, :pool_config, %{pool_size: 1})
+    Application.put_env(:snakepit, :adapter_module, Snakepit.TestAdapters.MockGRPCAdapter)
+  end
+
+  defp capture_env do
+    %{
+      pooling_enabled: Application.get_env(:snakepit, :pooling_enabled),
+      pools: Application.get_env(:snakepit, :pools),
+      pool_config: Application.get_env(:snakepit, :pool_config),
+      adapter_module: Application.get_env(:snakepit, :adapter_module)
+    }
+  end
+
+  defp restore_env(env) do
+    restore_key(:pooling_enabled, env.pooling_enabled)
+    restore_key(:pools, env.pools)
+    restore_key(:pool_config, env.pool_config)
+    restore_key(:adapter_module, env.adapter_module)
+  end
+
+  defp restore_key(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_key(key, value), do: Application.put_env(:snakepit, key, value)
 end

@@ -43,7 +43,7 @@ defmodule Snakepit.Error.DeviceTest do
       error = Device.out_of_memory({:cuda, 0}, 1024 * 1024 * 1024, 512 * 1024 * 1024)
 
       assert is_list(error.suggestions)
-      assert error.suggestions != []
+      assert [_ | _] = error.suggestions
     end
   end
 

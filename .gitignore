@@ -220,3 +220,4 @@ repomix*.xml
 # Generated artifacts (machine-specific, regeneratable)
 examples/generated/
 priv/snakepit/manifests/
+protobuf/

@@ -54,7 +54,20 @@ defmodule Snakepit.TestCase do
         {:ok, base_context} =
           Supertester.UnifiedTestFoundation.setup_isolation(unquote(isolation), context)
 
+        ensure_snakepit_started()
+
         {:ok, base_context}
+      end
+
+      defp ensure_snakepit_started do
+        case Process.whereis(Snakepit.Supervisor) do
+          nil ->
+            {:ok, _} = Application.ensure_all_started(:snakepit)
+            :ok
+
+          _pid ->
+            :ok
+        end
       end
 
       import Supertester.OTPHelpers

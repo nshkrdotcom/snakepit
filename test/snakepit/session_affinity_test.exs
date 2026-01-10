@@ -7,6 +7,9 @@ defmodule Snakepit.SessionAffinityTest do
   @moduletag :python_integration
 
   setup do
+    prev_pooling = Application.get_env(:snakepit, :pooling_enabled)
+    prev_pool_size = Application.get_env(:snakepit, :pool_size)
+
     # Ensure clean state
     Application.stop(:snakepit)
     Application.load(:snakepit)
@@ -17,6 +20,8 @@ defmodule Snakepit.SessionAffinityTest do
 
     on_exit(fn ->
       Application.stop(:snakepit)
+      restore_env(:pooling_enabled, prev_pooling)
+      restore_env(:pool_size, prev_pool_size)
 
       assert_eventually(
         fn ->
@@ -25,10 +30,25 @@ defmodule Snakepit.SessionAffinityTest do
         timeout: 5_000,
         interval: 100
       )
+
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+
+      if prev_pooling do
+        assert_eventually(
+          fn ->
+            Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+          end,
+          timeout: 30_000,
+          interval: 1_000
+        )
+      end
     end)
 
     :ok
   end
+
+  defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
 
   describe "Session affinity with multi-pool (CRITICAL BUG)" do
     test "execute with session_id should not crash with KeyError" do

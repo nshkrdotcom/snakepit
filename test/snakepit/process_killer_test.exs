@@ -3,6 +3,7 @@ defmodule Snakepit.ProcessKillerTest do
   require Logger
 
   alias Snakepit.Pool.ProcessRegistry
+  alias Snakepit.Test.ProcessLeakTracker
 
   @moduletag :integration
 
@@ -141,6 +142,17 @@ defmodule Snakepit.ProcessKillerTest do
   end
 
   defp safe_close_port(port) when is_port(port) do
+    os_pid =
+      case Port.info(port, :os_pid) do
+        {:os_pid, pid} -> pid
+        _ -> nil
+      end
+
+    if is_integer(os_pid) do
+      ProcessLeakTracker.unregister_pid(os_pid)
+      _ = Snakepit.ProcessKiller.kill_with_escalation(os_pid, 1_000)
+    end
+
     Port.close(port)
   catch
     :exit, _ -> :ok
@@ -217,14 +229,14 @@ defmodule Snakepit.ProcessKillerTest do
               :exit_status,
               :use_stdio,
               :stderr_to_stdout,
-              args: ["/bin/sh", "-c", "echo $$; /bin/cat & echo $!; wait"]
+              args: ["/bin/sh", "-c", "echo $$; /bin/sleep 9999 & echo $!; wait"]
             ])
 
           on_exit(fn -> safe_close_port(port) end)
           [pgid, child_pid] = read_pids(port, 2, 1_000)
 
-          assert Snakepit.ProcessKiller.process_alive?(pgid)
           assert Snakepit.ProcessKiller.process_alive?(child_pid)
+          assert {:ok, ^pgid} = Snakepit.ProcessKiller.get_process_group_id(child_pid)
 
           assert :ok = Snakepit.ProcessKiller.kill_process_group_with_escalation(pgid, 1_000)
 
@@ -264,6 +276,8 @@ defmodule Snakepit.ProcessKillerTest do
           args: ["-c", "import signal; signal.pause()"]
         ])
 
+      ProcessLeakTracker.register_port(rogue_port)
+
       target_port =
         Port.open({:spawn_executable, python}, [
           :binary,
@@ -276,6 +290,8 @@ defmodule Snakepit.ProcessKillerTest do
             run_id
           ]
         ])
+
+      ProcessLeakTracker.register_port(target_port)
 
       {:os_pid, rogue_pid} = Port.info(rogue_port, :os_pid)
       {:os_pid, target_pid} = Port.info(target_port, :os_pid)

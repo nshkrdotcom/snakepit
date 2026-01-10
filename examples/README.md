@@ -123,7 +123,7 @@ mix run --no-start examples/stream_progress_demo.exs
 - Uses `Snakepit.execute_stream/3` (Pool → Worker path)
 - Streaming-enabled Python tools
 - Real-time chunk processing with callbacks
-- See guides/streaming.md for BridgeServer streaming (v0.8.5+)
+- See guides/streaming.md for BridgeServer streaming details
 
 ```bash
 mix run --no-start examples/execute_streaming_tool_demo.exs
@@ -179,7 +179,7 @@ mix run --no-start examples/structured_errors.exs
 
 ---
 
-## 🆕 New in v0.8.0: ML Workload Features
+## 🆕 ML Workload Features
 
 ### 🖥️ Hardware Detection
 
@@ -449,7 +449,7 @@ The telemetry examples demonstrate these event types:
 - `[:snakepit, :grpc, :stream, :opened]` - Stream opened
 - `[:snakepit, :grpc, :connection, :established]` - Connection ready
 
-### ML Workload Events (v0.8.0+)
+### ML Workload Events
 - `[:snakepit, :hardware, :detect, :start]` - Hardware detection started
 - `[:snakepit, :hardware, :detect, :stop]` - Hardware detection completed
 - `[:snakepit, :hardware, :select, :start]` - Device selection started

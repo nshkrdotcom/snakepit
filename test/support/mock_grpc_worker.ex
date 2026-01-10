@@ -7,13 +7,16 @@ defmodule Snakepit.Test.MockGRPCWorker do
   use Supertester.TestableGenServer
   require Logger
 
+  alias Snakepit.Defaults
   alias Snakepit.Pool.ProcessRegistry
 
   # Module interface expected by Pool
-  def execute(worker_id, command, args, timeout) do
+  def execute(worker_id, command, args, timeout_or_opts) do
+    {timeout, opts} = normalize_execute_opts(timeout_or_opts)
+
     case Registry.lookup(Snakepit.Pool.Registry, worker_id) do
       [{pid, _}] ->
-        GenServer.call(pid, {:execute, command, args, timeout}, timeout)
+        GenServer.call(pid, {:execute, command, args, timeout, opts}, timeout)
 
       [] ->
         {:error, :worker_not_found}
@@ -73,8 +76,19 @@ defmodule Snakepit.Test.MockGRPCWorker do
   end
 
   @impl true
-  def handle_call({:execute, command, args, timeout}, _from, state) do
-    case state.adapter.grpc_execute(state.connection, state.session_id, command, args, timeout) do
+  def handle_call({:execute, command, args, timeout}, from, state) do
+    handle_call({:execute, command, args, timeout, []}, from, state)
+  end
+
+  def handle_call({:execute, command, args, timeout, opts}, _from, state) do
+    case state.adapter.grpc_execute(
+           state.connection,
+           state.session_id,
+           command,
+           args,
+           timeout,
+           opts
+         ) do
       {:ok, result} ->
         new_state = update_in(state.stats.requests, &(&1 + 1))
         {:reply, {:ok, result}, new_state}
@@ -122,5 +136,13 @@ defmodule Snakepit.Test.MockGRPCWorker do
       {:memory, bytes} when is_integer(bytes) and bytes >= 0 -> bytes
       _ -> 0
     end
+  end
+
+  defp normalize_execute_opts(opts) when is_list(opts) do
+    {Keyword.get(opts, :timeout, Defaults.grpc_worker_execute_timeout()), opts}
+  end
+
+  defp normalize_execute_opts(timeout) when is_integer(timeout) or timeout == :infinity do
+    {timeout, []}
   end
 end

@@ -8,6 +8,6 @@ defmodule Snakepit.GRPC.Endpoint do
 
   use GRPC.Endpoint
 
-  intercept(GRPC.Server.Interceptors.Logger)
+  intercept(Snakepit.GRPC.Interceptors.ServerLogger, level: :info)
   run(Snakepit.GRPC.BridgeServer)
 end

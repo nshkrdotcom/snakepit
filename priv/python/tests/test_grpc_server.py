@@ -1,6 +1,8 @@
 import asyncio
 import importlib.util
+import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
@@ -10,6 +12,7 @@ import pytest
 
 import snakepit_bridge_pb2 as pb2
 from snakepit_bridge import telemetry
+from snakepit_bridge.serialization import TypeSerializer
 from snakepit_bridge.session_context import SessionContext
 
 
@@ -23,6 +26,21 @@ class CaptureAdapter:
     def execute_tool(self, tool_name: str, arguments: dict, context) -> dict:
         CaptureAdapter.captured_metadata = getattr(context, "request_metadata", None)
         CaptureAdapter.captured_correlation = telemetry.get_correlation_id()
+        return {"ok": True}
+
+
+class ThreadCaptureAdapter:
+    captured_main_thread = None
+    captured_thread_ident = None
+
+    def set_session_context(self, context: SessionContext) -> None:
+        self._context = context
+
+    def execute_tool(self, tool_name: str, arguments: dict, context) -> dict:
+        ThreadCaptureAdapter.captured_thread_ident = threading.get_ident()
+        ThreadCaptureAdapter.captured_main_thread = (
+            threading.current_thread() is threading.main_thread()
+        )
         return {"ok": True}
 
 
@@ -84,13 +102,13 @@ def test_execute_tool_sets_correlation_from_header_and_exposes_request_metadata(
     CaptureAdapter.captured_metadata = None
     CaptureAdapter.captured_correlation = None
 
-    servicer = grpc_module.BridgeServiceServicer(
-        CaptureAdapter,
-        "localhost:50051",
-        heartbeat_options={"enabled": False},
-    )
-
     async def run_call():
+        servicer = grpc_module.BridgeServiceServicer(
+            CaptureAdapter,
+            "localhost:50051",
+            heartbeat_options={"enabled": False},
+            loop=asyncio.get_running_loop(),
+        )
         request = pb2.ExecuteToolRequest(
             session_id="session-123",
             tool_name="noop",
@@ -104,6 +122,84 @@ def test_execute_tool_sets_correlation_from_header_and_exposes_request_metadata(
     assert CaptureAdapter.captured_metadata == {"correlation_id": "cid-metadata", "trace": "value"}
     assert CaptureAdapter.captured_correlation == "cid-header"
     assert telemetry.get_correlation_id() is None
+
+
+def test_execute_tool_runs_sync_calls_in_worker_thread_by_default(stub_factory):
+    _created, grpc_module = stub_factory
+
+    ThreadCaptureAdapter.captured_main_thread = None
+
+    async def run_call():
+        servicer = grpc_module.BridgeServiceServicer(
+            ThreadCaptureAdapter,
+            "localhost:50051",
+            heartbeat_options={"enabled": False},
+            loop=asyncio.get_running_loop(),
+        )
+        request = pb2.ExecuteToolRequest(
+            session_id="session-123",
+            tool_name="noop",
+        )
+        context = FakeContext()
+        await servicer.ExecuteTool(request, context)
+
+    asyncio.run(run_call())
+
+    assert ThreadCaptureAdapter.captured_main_thread is False
+
+
+def test_execute_tool_runs_on_main_thread_when_thread_sensitive_metadata_set(stub_factory):
+    _created, grpc_module = stub_factory
+
+    ThreadCaptureAdapter.captured_main_thread = None
+
+    async def run_call():
+        servicer = grpc_module.BridgeServiceServicer(
+            ThreadCaptureAdapter,
+            "localhost:50051",
+            heartbeat_options={"enabled": False},
+            loop=asyncio.get_running_loop(),
+        )
+        request = pb2.ExecuteToolRequest(
+            session_id="session-123",
+            tool_name="noop",
+            metadata={"thread_sensitive": "true"},
+        )
+        context = FakeContext()
+        await servicer.ExecuteTool(request, context)
+
+    asyncio.run(run_call())
+
+    assert ThreadCaptureAdapter.captured_main_thread is True
+
+
+def test_execute_tool_thread_sensitive_env_override(stub_factory, monkeypatch):
+    _created, grpc_module = stub_factory
+
+    ThreadCaptureAdapter.captured_main_thread = None
+    monkeypatch.setenv("SNAKEPIT_THREAD_SENSITIVE", "math_verify.verify")
+
+    module_any, _ = TypeSerializer.encode_any("math_verify", "string")
+    function_any, _ = TypeSerializer.encode_any("verify", "string")
+
+    async def run_call():
+        servicer = grpc_module.BridgeServiceServicer(
+            ThreadCaptureAdapter,
+            "localhost:50051",
+            heartbeat_options={"enabled": False},
+            loop=asyncio.get_running_loop(),
+        )
+        request = pb2.ExecuteToolRequest(
+            session_id="session-123",
+            tool_name="noop",
+            parameters={"module_path": module_any, "function": function_any},
+        )
+        context = FakeContext()
+        await servicer.ExecuteTool(request, context)
+
+    asyncio.run(run_call())
+
+    assert ThreadCaptureAdapter.captured_main_thread is True
 
 
 # --- Streaming cancellation tests ---

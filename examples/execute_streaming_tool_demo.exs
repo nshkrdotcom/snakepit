@@ -46,7 +46,7 @@ defmodule StreamingToolDemo do
      - Uses `Snakepit.execute_stream/3`
      - Best for Elixir applications consuming streaming tools
 
-  2. **BridgeServer Streaming** (v0.8.5+): External gRPC client → BridgeServer → Worker
+  2. **BridgeServer Streaming**: External gRPC client → BridgeServer → Worker
      - Uses `ExecuteStreamingTool` RPC
      - For external clients calling Snakepit as a gRPC service
      - Requires tools with `supports_streaming: true` metadata

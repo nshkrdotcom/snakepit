@@ -72,6 +72,9 @@ defmodule TestHelperShutdown do
   end
 end
 
+Snakepit.Test.ProcessLeakTracker.init()
+System.at_exit(fn _ -> Snakepit.Test.ProcessLeakTracker.cleanup!() end)
+
 include_tags_from_args =
   System.argv()
   |> Enum.chunk_every(2, 1, :discard)
@@ -139,6 +142,7 @@ IO.puts("Started applications: #{inspect(apps)}")
 # See docs/20251226/test-harness-remediation/REMEDIATION_PLAN.md
 ExUnit.after_suite(fn _results ->
   IO.puts("\n=== Shutting down Snakepit application after test suite ===")
+  Snakepit.Test.ProcessLeakTracker.cleanup!()
 
   # Get beam_run_id BEFORE stopping application
   beam_run_id =

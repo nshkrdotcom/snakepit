@@ -158,7 +158,7 @@ defmodule Snakepit.ProcessKiller do
     case File.read(stat_path) do
       {:ok, content} ->
         case parse_proc_state(content) do
-          {:ok, state} -> state not in ["Z", "X", "x"]
+          {:ok, state} -> process_state_alive?(state)
           :error -> File.exists?(stat_path)
         end
 
@@ -181,6 +181,98 @@ defmodule Snakepit.ProcessKiller do
       _ ->
         :error
     end
+  end
+
+  defp process_group_alive?(pgid) when is_integer(pgid) do
+    case :os.type() do
+      {:unix, :linux} ->
+        process_group_alive_via_proc(pgid)
+
+      {:unix, _} ->
+        process_group_alive_via_ps(pgid)
+
+      _ ->
+        false
+    end
+  end
+
+  defp process_group_alive_via_proc(pgid) do
+    case File.ls("/proc") do
+      {:ok, entries} ->
+        Enum.any?(entries, fn entry ->
+          case Integer.parse(entry) do
+            {pid, ""} ->
+              process_in_group_alive?(pid, pgid)
+
+            _ ->
+              false
+          end
+        end)
+
+      {:error, _} ->
+        process_group_alive_via_ps(pgid)
+    end
+  end
+
+  defp process_in_group_alive?(pid, pgid) do
+    stat_path = "/proc/#{pid}/stat"
+
+    case File.read(stat_path) do
+      {:ok, content} ->
+        case parse_proc_state_and_pgid(content) do
+          {:ok, state, group_id} -> group_id == pgid and process_state_alive?(state)
+          :error -> false
+        end
+
+      {:error, _} ->
+        false
+    end
+  end
+
+  defp parse_proc_state_and_pgid(content) when is_binary(content) do
+    case String.split(content, ") ", parts: 2) do
+      [_prefix, rest] ->
+        case String.split(rest, " ", trim: true, parts: 4) do
+          [state, _ppid, pgrp, _rest] ->
+            case Integer.parse(pgrp) do
+              {pgid, ""} -> {:ok, state, pgid}
+              _ -> :error
+            end
+
+          _ ->
+            :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp process_group_alive_via_ps(pgid) do
+    with {:ok, ps_path} <- require_executable("ps", @ps_command_candidates),
+         {:ok, output, 0} <-
+           run_command(ps_path, ["-o", "pid=,state=", "--pgid", Integer.to_string(pgid)]) do
+      output
+      |> String.split("\n", trim: true)
+      |> Enum.any?(fn line ->
+        case String.split(String.trim(line), ~r/\s+/, parts: 2) do
+          [pid_str, state] ->
+            match?({_, ""}, Integer.parse(pid_str)) and process_state_alive?(state)
+
+          [pid_str] ->
+            match?({_, ""}, Integer.parse(pid_str))
+
+          _ ->
+            false
+        end
+      end)
+    else
+      _ -> false
+    end
+  end
+
+  defp process_state_alive?(state) when is_binary(state) do
+    state not in ["Z", "X", "x"]
   end
 
   @doc """
@@ -470,7 +562,7 @@ defmodule Snakepit.ProcessKiller do
   def kill_process_group_with_escalation(pgid, timeout_ms \\ 2000) when is_integer(pgid) do
     case kill_process_group(pgid, :sigterm) do
       :ok ->
-        if wait_for_death(pgid, timeout_ms) do
+        if wait_for_group_death(pgid, timeout_ms) do
           SLog.debug(@log_category, "✅ Process group #{pgid} terminated gracefully")
           :ok
         else
@@ -486,6 +578,11 @@ defmodule Snakepit.ProcessKiller do
   defp wait_for_death(os_pid, timeout_ms) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     wait_for_death_loop(os_pid, deadline, 1)
+  end
+
+  defp wait_for_group_death(pgid, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    wait_for_group_death_loop(pgid, deadline, 1)
   end
 
   # Non-blocking polling with exponential backoff using receive after.
@@ -505,6 +602,25 @@ defmodule Snakepit.ProcessKiller do
         end
 
         wait_for_death_loop(os_pid, deadline, backoff * 2)
+      else
+        true
+      end
+    end
+  end
+
+  defp wait_for_group_death_loop(pgid, deadline, backoff) do
+    if System.monotonic_time(:millisecond) >= deadline do
+      false
+    else
+      if process_group_alive?(pgid) do
+        delay = min(backoff, 100)
+
+        receive do
+        after
+          delay -> :ok
+        end
+
+        wait_for_group_death_loop(pgid, deadline, backoff * 2)
       else
         true
       end

@@ -82,6 +82,12 @@ These options apply to all pools or the Snakepit application as a whole.
 | `pool_startup_timeout` | `pos_integer()` | `10000` | Maximum time (ms) to wait for a worker to start. |
 | `pool_queue_timeout` | `pos_integer()` | `5000` | Maximum time (ms) a request waits in queue. |
 | `pool_max_queue_size` | `pos_integer()` | `1000` | Maximum queued requests before rejecting new ones. |
+| `pool_reconcile_interval_ms` | `non_neg_integer()` | `1000` | Interval (ms) for pool reconciliation to restore worker count (`0` disables). |
+| `pool_reconcile_batch_size` | `pos_integer()` | `2` | Max workers respawned per reconciliation tick (ignored if reconcile disabled). |
+| `worker_starter_max_restarts` | `non_neg_integer()` | `3` | Restart intensity: max restarts for worker starter supervisor. |
+| `worker_starter_max_seconds` | `pos_integer()` | `5` | Restart intensity window (seconds) for worker starter supervisor. |
+| `worker_supervisor_max_restarts` | `non_neg_integer()` | `3` | Restart intensity: max restarts for worker supervisor. |
+| `worker_supervisor_max_seconds` | `pos_integer()` | `5` | Restart intensity window (seconds) for worker supervisor. |
 | `grpc_port` | `pos_integer()` | `50051` | Port for the Elixir gRPC server (Python-to-Elixir calls). |
 | `grpc_host` | `String.t()` | `"localhost"` | Host for gRPC connections. |
 | `graceful_shutdown_timeout_ms` | `pos_integer()` | `6000` | Time (ms) to wait for Python to terminate gracefully before SIGKILL. |

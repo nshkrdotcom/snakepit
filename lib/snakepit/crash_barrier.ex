@@ -44,6 +44,7 @@ defmodule Snakepit.CrashBarrier do
     |> normalize_config()
   end
 
+  @spec enabled?(map()) :: boolean()
   def enabled?(config), do: config.enabled == true
 
   def idempotent?(args) when is_map(args) do
@@ -62,6 +63,7 @@ defmodule Snakepit.CrashBarrier do
 
   def crash_info(_result, _config), do: :error
 
+  @spec retry_allowed?(map(), boolean(), non_neg_integer()) :: boolean()
   def retry_allowed?(config, idempotent, attempt) do
     max_retries = retry_limit(config)
 
@@ -94,6 +96,7 @@ defmodule Snakepit.CrashBarrier do
     :ok
   end
 
+  @spec worker_tainted?(String.t()) :: boolean()
   def worker_tainted?(worker_id), do: TaintRegistry.worker_tainted?(worker_id)
 
   def maybe_emit_restart(pool_name, worker_id) do

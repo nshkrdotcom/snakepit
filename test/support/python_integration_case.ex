@@ -22,77 +22,57 @@ defmodule Snakepit.PythonIntegrationCase do
   end
 
   setup_all do
-    # Temporarily enable pooling to start the gRPC server
-    original_pooling = Application.get_env(:snakepit, :pooling_enabled, false)
-    original_adapter = Application.get_env(:snakepit, :adapter_module)
+    original_env = capture_env()
 
-    # Don't use pooling, start services manually
-    Application.put_env(:snakepit, :pooling_enabled, false)
-    Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-    Application.put_env(:snakepit, :grpc_port, 50_051)
+    try do
+      # Don't use pooling, start services manually
+      Application.put_env(:snakepit, :pooling_enabled, false)
+      Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+      Application.put_env(:snakepit, :grpc_port, 50_051)
 
-    # Stop the application if it's running
-    Application.stop(:snakepit)
-
-    # Start the application without pooling
-    {:ok, _} = Application.ensure_all_started(:snakepit)
-
-    # Start the services we need manually
-    children = [
-      # GRPC client supervisor - required for GRPC.Stub.connect() calls
-      {GRPC.Client.Supervisor, []},
-      # Start the gRPC server
-      {GRPC.Server.Supervisor, endpoint: Snakepit.GRPC.Endpoint, port: 50_051, start_server: true}
-    ]
-
-    # SessionStore is already started by the application, no need to start it again
-
-    # Start a supervisor for our test services
-    {:ok, sup} = Supervisor.start_link(children, strategy: :one_for_one)
-
-    # Wait for gRPC server to be ready
-    wait_for_grpc_server()
-
-    # Store supervisor PID for cleanup
-    Process.put(:test_supervisor, sup)
-
-    on_exit(fn ->
-      # Stop test supervisor if it exists
-      if sup = Process.get(:test_supervisor) do
-        Supervisor.stop(sup)
-      end
-
-      # Restore original configuration
+      # Stop the application if it's running
       Application.stop(:snakepit)
 
-      # Wait for processes to actually stop
-      assert_eventually(
-        fn ->
-          Process.whereis(Snakepit.Pool) == nil
-        end,
-        timeout: 5_000,
-        interval: 100
-      )
-
-      Application.put_env(:snakepit, :pooling_enabled, original_pooling)
-      Application.put_env(:snakepit, :adapter_module, original_adapter)
-
-      # Restart the application with original config for subsequent tests
+      # Start the application without pooling
       {:ok, _} = Application.ensure_all_started(:snakepit)
 
-      # Wait for new pool to be ready
-      if original_pooling do
-        assert_eventually(
-          fn ->
-            Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
-          end,
-          timeout: 30_000,
-          interval: 1_000
-        )
-      end
-    end)
+      # Start the services we need manually
+      children = [
+        # GRPC client supervisor - required for GRPC.Stub.connect() calls
+        Snakepit.GRPC.ClientSupervisor,
+        # Start the gRPC server
+        {GRPC.Server.Supervisor,
+         endpoint: Snakepit.GRPC.Endpoint, port: 50_051, start_server: true}
+      ]
 
-    {:ok, %{}}
+      # SessionStore is already started by the application, no need to start it again
+
+      # Start a supervisor for our test services
+      case Supervisor.start_link(children, strategy: :one_for_one) do
+        {:ok, sup} ->
+          # Wait for gRPC server to be ready
+          wait_for_grpc_server()
+
+          # Store supervisor PID for cleanup
+          Process.put(:test_supervisor, sup)
+
+          on_exit(fn -> restore_env(original_env) end)
+
+          {:ok, %{}}
+
+        {:error, reason} ->
+          restore_env(original_env)
+          raise "Failed to start test supervisor: #{inspect(reason)}"
+      end
+    rescue
+      error ->
+        restore_env(original_env)
+        reraise error, __STACKTRACE__
+    catch
+      :exit, reason ->
+        restore_env(original_env)
+        exit(reason)
+    end
   end
 
   defp wait_for_grpc_server do
@@ -111,4 +91,54 @@ defmodule Snakepit.PythonIntegrationCase do
       interval: 100
     )
   end
+
+  defp capture_env do
+    %{
+      pooling_enabled: Application.get_env(:snakepit, :pooling_enabled, false),
+      adapter_module: Application.get_env(:snakepit, :adapter_module),
+      grpc_port: Application.get_env(:snakepit, :grpc_port)
+    }
+  end
+
+  defp restore_env(env) do
+    stop_test_supervisor()
+    Application.stop(:snakepit)
+
+    # Wait for processes to actually stop
+    assert_eventually(
+      fn ->
+        Process.whereis(Snakepit.Pool) == nil
+      end,
+      timeout: 5_000,
+      interval: 100
+    )
+
+    restore_key(:pooling_enabled, env.pooling_enabled)
+    restore_key(:adapter_module, env.adapter_module)
+    restore_key(:grpc_port, env.grpc_port)
+
+    # Restart the application with original config for subsequent tests
+    {:ok, _} = Application.ensure_all_started(:snakepit)
+
+    # Wait for new pool to be ready
+    if env.pooling_enabled do
+      assert_eventually(
+        fn ->
+          Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+        end,
+        timeout: 30_000,
+        interval: 1_000
+      )
+    end
+  end
+
+  defp stop_test_supervisor do
+    if sup = Process.get(:test_supervisor) do
+      Supervisor.stop(sup)
+      Process.delete(:test_supervisor)
+    end
+  end
+
+  defp restore_key(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_key(key, value), do: Application.put_env(:snakepit, key, value)
 end

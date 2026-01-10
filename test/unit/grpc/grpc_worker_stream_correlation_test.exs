@@ -2,7 +2,15 @@ defmodule Snakepit.GRPCWorkerStreamCorrelationTest do
   use ExUnit.Case, async: true
 
   defmodule CaptureAdapter do
-    def grpc_execute_stream(_connection, _session_id, _command, args, _callback_fn, _timeout) do
+    def grpc_execute_stream(
+          _connection,
+          _session_id,
+          _command,
+          args,
+          _callback_fn,
+          _timeout,
+          _opts
+        ) do
       if test_pid = Process.get(:test_pid) do
         send(test_pid, {:captured_stream_args, args})
       end

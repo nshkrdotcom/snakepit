@@ -33,6 +33,18 @@ defmodule Snakepit.GRPC.HeartbeatEndToEndTest do
       Application.stop(:snakepit)
       restore_env(:pools, prev_pools)
       restore_env(:pooling_enabled, prev_pooling)
+
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+
+      if prev_pooling do
+        assert_eventually(
+          fn ->
+            Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+          end,
+          timeout: 30_000,
+          interval: 1_000
+        )
+      end
     end)
 
     :ok

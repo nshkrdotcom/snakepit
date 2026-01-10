@@ -23,6 +23,8 @@ defmodule Snakepit.Pool do
   alias Snakepit.Pool.Initializer
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Pool.State
+  alias Snakepit.Pool.Worker.StarterRegistry
+  alias Snakepit.Shutdown
   alias Snakepit.Worker.LifecycleManager
   alias Snakepit.WorkerProfile.Thread.CapacityStore
 
@@ -38,8 +40,10 @@ defmodule Snakepit.Pool do
     # Default pool name for backward compatibility
     initializing: false,
     # Set to true while async initialization is in progress
-    init_start_time: nil
+    init_start_time: nil,
     # Timestamp for measuring initialization duration
+    reconcile_ref: nil
+    # Periodic pool reconciliation timer reference
   ]
 
   # Client API
@@ -58,12 +62,18 @@ defmodule Snakepit.Pool do
     pool = opts[:pool] || __MODULE__
     timeout = opts[:timeout] || Defaults.pool_request_timeout()
 
-    # Store deadline_ms for queue-aware remaining-time calculations
-    deadline_ms = System.monotonic_time(:millisecond) + timeout
-    opts_with_deadline = Keyword.put(opts, :deadline_ms, deadline_ms)
+    {call_timeout, opts_with_deadline} =
+      case timeout do
+        :infinity ->
+          {:infinity, opts}
+
+        timeout_ms when is_integer(timeout_ms) ->
+          deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
+          {timeout_ms, Keyword.put(opts, :deadline_ms, deadline_ms)}
+      end
 
     try do
-      GenServer.call(pool, {:execute, command, args, opts_with_deadline}, timeout)
+      GenServer.call(pool, {:execute, command, args, opts_with_deadline}, call_timeout)
     catch
       :exit, {:timeout, _} ->
         {:error,
@@ -191,7 +201,7 @@ defmodule Snakepit.Pool do
 
         result =
           try do
-            execute_on_worker_stream(worker_id, command, args, callback_fn, timeout)
+            execute_on_worker_stream(worker_id, command, args, callback_fn, timeout, opts)
           after
             # This block ALWAYS executes, preventing worker leaks on crashes
             SLog.debug(
@@ -224,7 +234,7 @@ defmodule Snakepit.Pool do
     GenServer.cast(pool, {:checkin_worker, worker_id})
   end
 
-  defp execute_on_worker_stream(worker_id, command, args, callback_fn, timeout) do
+  defp execute_on_worker_stream(worker_id, command, args, callback_fn, timeout, opts) do
     worker_module = get_worker_module(worker_id)
     SLog.debug(@log_category, "[Pool] execute_on_worker_stream using #{inspect(worker_module)}")
 
@@ -234,7 +244,15 @@ defmodule Snakepit.Pool do
         "[Pool] Invoking #{worker_module}.execute_stream with timeout #{timeout}"
       )
 
-      result = worker_module.execute_stream(worker_id, command, args, callback_fn, timeout)
+      result =
+        worker_module.execute_stream(
+          worker_id,
+          command,
+          args,
+          callback_fn,
+          Keyword.put(opts, :timeout, timeout)
+        )
+
       SLog.debug(@log_category, "[Pool] execute_stream result: #{Redaction.describe(result)}")
       result
     else
@@ -434,7 +452,16 @@ defmodule Snakepit.Pool do
         end)
         |> Enum.into(%{})
 
-      new_state = %{state | pools: merged_pools, initializing: false, init_start_time: nil}
+      reconcile_ref = schedule_reconcile(Defaults.pool_reconcile_interval_ms())
+
+      new_state = %{
+        state
+        | pools: merged_pools,
+          initializing: false,
+          init_start_time: nil,
+          reconcile_ref: reconcile_ref
+      }
+
       {:noreply, new_state}
     else
       SLog.error(
@@ -503,6 +530,12 @@ defmodule Snakepit.Pool do
     # PERFORMANCE FIX: Staggered reply to avoid thundering herd
     GenServer.reply(from, :ok)
     {:noreply, state}
+  end
+
+  def handle_info(:reconcile_pools, state) do
+    new_state = maybe_reconcile_pools(state)
+    reconcile_ref = schedule_reconcile(Defaults.pool_reconcile_interval_ms())
+    {:noreply, %{new_state | reconcile_ref: reconcile_ref}}
   end
 
   @doc false
@@ -722,6 +755,104 @@ defmodule Snakepit.Pool do
       end
     end)
     |> Enum.into(%{})
+  end
+
+  defp schedule_reconcile(interval_ms) when is_integer(interval_ms) and interval_ms > 0 do
+    Process.send_after(self(), :reconcile_pools, interval_ms)
+  end
+
+  defp schedule_reconcile(_interval_ms), do: nil
+
+  defp maybe_reconcile_pools(%{initializing: true} = state), do: state
+
+  defp maybe_reconcile_pools(state) do
+    if Shutdown.in_progress?() do
+      state
+    else
+      reconcile_pools(state)
+    end
+  end
+
+  defp reconcile_pools(state) do
+    if supervisor_alive?() do
+      Enum.each(state.pools, fn {pool_name, pool_state} ->
+        maybe_spawn_replacements(pool_name, pool_state)
+      end)
+    end
+
+    state
+  end
+
+  defp maybe_spawn_replacements(pool_name, pool_state) do
+    desired = desired_worker_count(pool_state)
+    starter_count = starter_count_for_pool(pool_name)
+    deficit = max(desired - starter_count, 0)
+
+    if deficit > 0 do
+      spawn_count = min(deficit, Defaults.pool_reconcile_batch_size())
+      spawn_replacement_workers(pool_name, pool_state, spawn_count)
+    end
+  end
+
+  defp starter_count_for_pool(pool_name) do
+    prefix = "#{pool_name}_worker_"
+
+    StarterRegistry.list_starters()
+    |> Enum.count(&String.starts_with?(&1, prefix))
+  end
+
+  defp spawn_replacement_workers(_pool_name, _pool_state, count) when count <= 0, do: :ok
+
+  defp spawn_replacement_workers(pool_name, pool_state, count) do
+    Enum.each(1..count, fn _ ->
+      start_replacement_worker(pool_name, pool_state)
+    end)
+  end
+
+  defp start_replacement_worker(pool_name, pool_state) do
+    worker_id =
+      "#{pool_name}_worker_#{:erlang.unique_integer([:positive, :monotonic])}"
+
+    if Map.has_key?(pool_state.pool_config, :worker_profile) do
+      profile_module = Config.get_profile_module(pool_state.pool_config)
+
+      worker_config =
+        pool_state.pool_config
+        |> Map.put(:worker_id, worker_id)
+        |> Map.put(:worker_module, pool_state.worker_module)
+        |> Map.put(:adapter_module, pool_state.adapter_module)
+        |> Map.put(:pool_name, self())
+        |> Map.put(:pool_identifier, pool_name)
+
+      _ = profile_module.start_worker(worker_config)
+    else
+      _ =
+        Snakepit.Pool.WorkerSupervisor.start_worker(
+          worker_id,
+          pool_state.worker_module,
+          pool_state.adapter_module,
+          self(),
+          %{pool_identifier: pool_name}
+        )
+    end
+  end
+
+  defp desired_worker_count(pool_state) do
+    legacy_pool_config = Application.get_env(:snakepit, :pool_config, %{})
+
+    max_workers =
+      Map.get(pool_state.pool_config, :max_workers) ||
+        Map.get(legacy_pool_config, :max_workers, Defaults.pool_max_workers())
+
+    min(pool_state.size, max_workers)
+  end
+
+  @spec supervisor_alive?() :: boolean()
+  defp supervisor_alive? do
+    case Process.whereis(Snakepit.Pool.WorkerSupervisor) do
+      nil -> false
+      pid -> Process.alive?(pid)
+    end
   end
 
   defp dispatcher_context do
@@ -1009,7 +1140,13 @@ defmodule Snakepit.Pool do
     worker_module = get_worker_module(worker_id)
 
     try do
-      result = worker_module.execute(worker_id, command, args, timeout)
+      result =
+        worker_module.execute(
+          worker_id,
+          command,
+          args,
+          Keyword.put(opts, :timeout, timeout)
+        )
 
       # Increment request count for lifecycle management (on success only)
       case result do
@@ -1270,10 +1407,15 @@ defmodule Snakepit.Pool do
   end
 
   defp validate_atom_pool_name(pool_name) do
-    if module_atom?(pool_name) do
-      {:error, {:pool_metadata_module_atom, pool_name}}
-    else
-      {:ok, pool_name}
+    cond do
+      pool_name == Snakepit.Pool ->
+        {:ok, :default}
+
+      module_atom?(pool_name) ->
+        {:error, {:pool_metadata_module_atom, pool_name}}
+
+      true ->
+        {:ok, pool_name}
     end
   end
 

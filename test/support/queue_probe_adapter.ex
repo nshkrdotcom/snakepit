@@ -74,18 +74,20 @@ defmodule Snakepit.TestAdapters.QueueProbeAdapter do
 
   def uses_grpc?, do: Mock.uses_grpc?()
 
-  def grpc_execute(connection, session_id, @slow_probe_command, args, timeout) do
+  def grpc_execute(connection, session_id, command, args, timeout, opts \\ [])
+
+  def grpc_execute(connection, session_id, @slow_probe_command, args, timeout, opts) do
     record_probe_execution(args)
 
     slow_args =
       args
       |> Map.put_new("delay", queue_delay())
 
-    Mock.grpc_execute(connection, session_id, "slow_operation", slow_args, timeout)
+    Mock.grpc_execute(connection, session_id, "slow_operation", slow_args, timeout, opts)
   end
 
-  def grpc_execute(connection, session_id, command, args, timeout) do
-    Mock.grpc_execute(connection, session_id, command, args, timeout)
+  def grpc_execute(connection, session_id, command, args, timeout, opts) do
+    Mock.grpc_execute(connection, session_id, command, args, timeout, opts)
   end
 
   defp record_probe_execution(args) do

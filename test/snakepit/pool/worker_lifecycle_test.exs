@@ -5,6 +5,7 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
   """
   use ExUnit.Case, async: false
   @moduletag :slow
+  @moduletag :python_integration
   import Snakepit.TestHelpers
   import Snakepit.Logger.TestHelper
 
@@ -102,10 +103,19 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
   end
 
   setup do
-    # Ensure application is running (in case a previous test stopped it)
-    case Application.ensure_all_started(:snakepit) do
-      {:ok, _apps} ->
-        # Wait for pool to be ready
+    prev_env = capture_env()
+
+    Application.stop(:snakepit)
+    configure_pool()
+    {:ok, _} = Application.ensure_all_started(:snakepit)
+    assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 30_000)
+
+    on_exit(fn ->
+      Application.stop(:snakepit)
+      restore_env(prev_env)
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+
+      if prev_env.pooling_enabled do
         assert_eventually(
           fn ->
             Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
@@ -113,10 +123,8 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
           timeout: 30_000,
           interval: 1_000
         )
-
-      {:error, {:already_started, :snakepit}} ->
-        :ok
-    end
+      end
+    end)
 
     :ok
   end
@@ -431,6 +439,32 @@ defmodule Snakepit.Pool.WorkerLifecycleTest do
       0 -> :ok
     end
   end
+
+  defp configure_pool do
+    Application.put_env(:snakepit, :pooling_enabled, true)
+    Application.delete_env(:snakepit, :pools)
+    Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
+    Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+  end
+
+  defp capture_env do
+    %{
+      pooling_enabled: Application.get_env(:snakepit, :pooling_enabled),
+      pools: Application.get_env(:snakepit, :pools),
+      pool_config: Application.get_env(:snakepit, :pool_config),
+      adapter_module: Application.get_env(:snakepit, :adapter_module)
+    }
+  end
+
+  defp restore_env(env) do
+    restore_key(:pooling_enabled, env.pooling_enabled)
+    restore_key(:pools, env.pools)
+    restore_key(:pool_config, env.pool_config)
+    restore_key(:adapter_module, env.adapter_module)
+  end
+
+  defp restore_key(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_key(key, value), do: Application.put_env(:snakepit, key, value)
 
   test "track_worker stores lifecycle config struct in manager state" do
     worker_id = "config_struct_#{System.unique_integer([:positive])}"

@@ -227,9 +227,9 @@ end
 4. **Memory**: Streaming reduces peak memory by processing incrementally
 5. **gRPC required**: Streaming only works with gRPC adapters
 
-## Server-Side Streaming Implementation (v0.8.5+)
+## Server-Side Streaming Implementation
 
-Starting in v0.8.5, Snakepit's BridgeServer fully implements `ExecuteStreamingTool`,
+Snakepit's BridgeServer fully implements `ExecuteStreamingTool`,
 enabling end-to-end gRPC streaming from external clients through to Python workers.
 
 ### Requirements for Streaming Tools

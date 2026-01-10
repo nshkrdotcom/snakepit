@@ -126,6 +126,71 @@ def _build_error_payload(exc: Exception, request, arguments: Optional[Dict[str, 
     }
 
 
+def _truthy_metadata(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "t", "yes", "y", "on")
+
+
+def _thread_sensitive_from_metadata(request) -> bool:
+    try:
+        metadata = getattr(request, "metadata", None)
+        if metadata and _truthy_metadata(metadata.get("thread_sensitive")):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _thread_sensitive_from_env(arguments: Optional[Dict[str, Any]]) -> bool:
+    if not arguments:
+        return False
+
+    raw = os.environ.get("SNAKEPIT_THREAD_SENSITIVE", "")
+    if not raw:
+        return False
+
+    entries = {item.strip() for item in raw.split(",") if item.strip()}
+    if not entries:
+        return False
+
+    module = (
+        arguments.get("module_path")
+        or arguments.get("python_module")
+        or arguments.get("library")
+    )
+    function = arguments.get("function") or arguments.get("method")
+
+    if module and module in entries:
+        return True
+    if module and function and f"{module}.{function}" in entries:
+        return True
+    return False
+
+
+async def _call_maybe_async(func, *args, **kwargs):
+    """
+    Call a function that may be sync or async without blocking the event loop.
+
+    Sync functions are executed in a worker thread to keep the gRPC event loop
+    responsive (critical for long-running model initialization).
+    """
+    thread_sensitive = kwargs.pop("_thread_sensitive", False)
+
+    if inspect.iscoroutinefunction(func):
+        return await func(*args, **kwargs), "async"
+
+    if thread_sensitive:
+        result = func(*args, **kwargs)
+    else:
+        result = await asyncio.to_thread(func, *args, **kwargs)
+
+    if inspect.isawaitable(result):
+        return await result, "awaitable"
+
+    return result, "thread"
+
+
 async def _maybe_cleanup(adapter) -> None:
     """
     Call adapter.cleanup() if it exists, handling both sync and async implementations.
@@ -444,6 +509,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         start_time = time.time()
         metadata = context.invocation_metadata()
         adapter = None
+        thread_sensitive = _thread_sensitive_from_metadata(request)
 
         with telemetry.otel_span(
             "BridgeService/ExecuteTool",
@@ -454,6 +520,16 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             },
         ):
             try:
+                if hasattr(context, "time_remaining"):
+                    remaining = context.time_remaining()
+                    if remaining is not None:
+                        logger.debug(
+                            "ExecuteTool deadline remaining: %.2fs (tool=%s, session=%s)",
+                            remaining,
+                            request.tool_name,
+                            request.session_id,
+                        )
+
                 # Ensure session exists in Elixir
                 init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
                 try:
@@ -481,9 +557,18 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
                 # Initialize adapter if needed (uses isawaitable for robustness)
                 if hasattr(adapter, 'initialize'):
-                    result = adapter.initialize()
-                    if inspect.isawaitable(result):
-                        await result
+                    init_start = time.monotonic()
+                    _init_result, init_mode = await _call_maybe_async(
+                        adapter.initialize,
+                        _thread_sensitive=thread_sensitive,
+                    )
+                    init_duration = time.monotonic() - init_start
+                    logger.debug(
+                        "Adapter initialize completed in %.2fs (mode=%s, tool=%s)",
+                        init_duration,
+                        init_mode,
+                        request.tool_name,
+                    )
 
                 # Decode parameters from protobuf Any using TypeSerializer
                 arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
@@ -496,20 +581,29 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                         # Treat as opaque bytes (images, audio, etc.)
                         arguments[key] = binary_val
 
+                if not thread_sensitive:
+                    thread_sensitive = _thread_sensitive_from_env(arguments)
+
                 # Execute the tool
                 if not hasattr(adapter, 'execute_tool'):
                     raise grpc.RpcError(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support 'execute_tool'")
 
                 # Execute - handle both sync and async
-                result = adapter.execute_tool(
+                exec_start = time.monotonic()
+                result_data, exec_mode = await _call_maybe_async(
+                    adapter.execute_tool,
                     tool_name=request.tool_name,
                     arguments=arguments,
-                    context=session_context
+                    context=session_context,
+                    _thread_sensitive=thread_sensitive,
                 )
-                if inspect.isawaitable(result):
-                    result_data = await result
-                else:
-                    result_data = result
+                exec_duration = time.monotonic() - exec_start
+                logger.debug(
+                    "Adapter execute_tool completed in %.2fs (mode=%s, tool=%s)",
+                    exec_duration,
+                    exec_mode,
+                    request.tool_name,
+                )
 
                 # Check if a generator was mistakenly returned (should have been called via streaming endpoint)
                 if inspect.isgenerator(result_data) or inspect.isasyncgen(result_data):
@@ -568,6 +662,7 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         metadata = context.invocation_metadata()
         adapter = None
         stream_iterator = None
+        thread_sensitive = _thread_sensitive_from_metadata(request)
 
         with telemetry.otel_span(
             "BridgeService/ExecuteStreamingTool",
@@ -578,6 +673,16 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
             },
         ):
             try:
+                if hasattr(context, "time_remaining"):
+                    remaining = context.time_remaining()
+                    if remaining is not None:
+                        logger.debug(
+                            "ExecuteStreamingTool deadline remaining: %.2fs (tool=%s, session=%s)",
+                            remaining,
+                            request.tool_name,
+                            request.session_id,
+                        )
+
                 # Ensure session exists in Elixir
                 init_request = pb2.InitializeSessionRequest(session_id=request.session_id)
                 try:
@@ -607,9 +712,18 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
 
                 # Initialize adapter (uses isawaitable for robustness)
                 if hasattr(adapter, 'initialize'):
-                    result = adapter.initialize()
-                    if inspect.isawaitable(result):
-                        await result
+                    init_start = time.monotonic()
+                    _init_result, init_mode = await _call_maybe_async(
+                        adapter.initialize,
+                        _thread_sensitive=thread_sensitive,
+                    )
+                    init_duration = time.monotonic() - init_start
+                    logger.debug(
+                        "Adapter initialize completed in %.2fs (mode=%s, tool=%s)",
+                        init_duration,
+                        init_mode,
+                        request.tool_name,
+                    )
 
                 # Decode parameters from protobuf Any using TypeSerializer
                 arguments = {key: TypeSerializer.decode_any(any_msg) for key, any_msg in request.parameters.items()}
@@ -622,21 +736,30 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
                         # Treat as opaque bytes (images, audio, etc.)
                         arguments[key] = binary_val
 
+                if not thread_sensitive:
+                    thread_sensitive = _thread_sensitive_from_env(arguments)
+
                 # Execute the tool
                 if not hasattr(adapter, 'execute_tool'):
                     await context.abort(grpc.StatusCode.UNIMPLEMENTED, "Adapter does not support tool execution")
                     return
 
                 # Execute - handle both sync and async
-                result = adapter.execute_tool(
+                exec_start = time.monotonic()
+                stream_iterator, exec_mode = await _call_maybe_async(
+                    adapter.execute_tool,
                     tool_name=request.tool_name,
                     arguments=arguments,
-                    context=session_context
+                    context=session_context,
+                    _thread_sensitive=thread_sensitive,
                 )
-                if inspect.isawaitable(result):
-                    stream_iterator = await result
-                else:
-                    stream_iterator = result
+                exec_duration = time.monotonic() - exec_start
+                logger.debug(
+                    "Adapter execute_tool completed in %.2fs (mode=%s, tool=%s)",
+                    exec_duration,
+                    exec_mode,
+                    request.tool_name,
+                )
 
                 loop = self.loop
                 # Bounded queue prevents unbounded memory growth if consumer is slow

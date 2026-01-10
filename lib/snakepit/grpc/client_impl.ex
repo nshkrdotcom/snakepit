@@ -4,6 +4,7 @@ defmodule Snakepit.GRPC.ClientImpl do
   """
 
   alias Snakepit.Bridge
+  alias Snakepit.Defaults
   alias Snakepit.Error.PythonTranslation
   alias Snakepit.Logger, as: SLog
   alias Snakepit.PythonRuntime
@@ -11,7 +12,6 @@ defmodule Snakepit.GRPC.ClientImpl do
   alias Snakepit.Telemetry.Correlation
   alias Snakepit.ZeroCopyRef
 
-  @default_timeout 30_000
   @log_category :grpc
 
   def connect(port) when is_integer(port) do
@@ -37,8 +37,8 @@ defmodule Snakepit.GRPC.ClientImpl do
   def ping(channel, message, opts \\ []) do
     request = %Bridge.PingRequest{message: message}
 
-    timeout = opts[:timeout] || @default_timeout
-    call_opts = [timeout: timeout]
+    timeout = normalize_timeout(opts[:timeout] || Defaults.grpc_client_execute_timeout())
+    call_opts = call_opts_with_timeout(timeout)
 
     case Bridge.BridgeService.Stub.ping(channel, request, call_opts) do
       {:ok, response, _headers} ->
@@ -71,8 +71,8 @@ defmodule Snakepit.GRPC.ClientImpl do
       config: session_config
     }
 
-    timeout = opts[:timeout] || @default_timeout
-    call_opts = [timeout: timeout]
+    timeout = normalize_timeout(opts[:timeout] || Defaults.grpc_client_execute_timeout())
+    call_opts = call_opts_with_timeout(timeout)
 
     case Bridge.BridgeService.Stub.initialize_session(channel, request, call_opts) do
       {:ok, response, _headers} ->
@@ -94,8 +94,8 @@ defmodule Snakepit.GRPC.ClientImpl do
       force: force
     }
 
-    timeout = opts[:timeout] || @default_timeout
-    call_opts = [timeout: timeout]
+    timeout = normalize_timeout(opts[:timeout] || Defaults.grpc_client_execute_timeout())
+    call_opts = call_opts_with_timeout(timeout)
 
     case Bridge.BridgeService.Stub.cleanup_session(channel, request, call_opts) do
       {:ok, response, _headers} ->
@@ -115,8 +115,8 @@ defmodule Snakepit.GRPC.ClientImpl do
       session_id: session_id
     }
 
-    timeout = opts[:timeout] || @default_timeout
-    call_opts = [timeout: timeout]
+    timeout = normalize_timeout(opts[:timeout] || Defaults.grpc_client_execute_timeout())
+    call_opts = call_opts_with_timeout(timeout)
 
     case Bridge.BridgeService.Stub.get_session(channel, request, call_opts) do
       {:ok, response, _headers} ->
@@ -144,8 +144,8 @@ defmodule Snakepit.GRPC.ClientImpl do
       session_id: session_id
     }
 
-    timeout = opts[:timeout] || @default_timeout
-    call_opts = [timeout: timeout]
+    timeout = normalize_timeout(opts[:timeout] || Defaults.grpc_client_execute_timeout())
+    call_opts = call_opts_with_timeout(timeout)
 
     case Bridge.BridgeService.Stub.heartbeat(channel, request, call_opts) do
       {:ok, response, _headers} ->
@@ -202,12 +202,15 @@ defmodule Snakepit.GRPC.ClientImpl do
     }
   end
 
+  defp handle_error(%GRPC.RPCError{} = error), do: handle_error({:error, error})
+
   defp handle_error({:error, %GRPC.RPCError{} = error}) do
     log_fun = if Shutdown.in_progress?(), do: &SLog.debug/2, else: &SLog.error/2
     log_fun.(@log_category, "gRPC error: #{inspect(error)}")
 
     case error.status do
       3 -> {:error, :invalid_argument}
+      4 -> {:error, :timeout}
       5 -> {:error, :not_found}
       13 -> {:error, :internal}
       14 -> {:error, :unavailable}
@@ -341,7 +344,7 @@ defmodule Snakepit.GRPC.ClientImpl do
       parameters,
       binary_params,
       opts,
-      @default_timeout,
+      Defaults.grpc_command_timeout(),
       false
     )
   end
@@ -354,7 +357,7 @@ defmodule Snakepit.GRPC.ClientImpl do
       parameters,
       binary_params,
       opts,
-      300_000,
+      Defaults.grpc_worker_stream_timeout(),
       true
     )
   end
@@ -373,14 +376,18 @@ defmodule Snakepit.GRPC.ClientImpl do
 
     with {:ok, proto_params} <- encode_parameters(parameters),
          {:ok, encoded_binary} <- encode_binary_parameters(binary_params) do
-      metadata = build_request_metadata(correlation_id)
+      metadata = build_request_metadata(correlation_id, opts)
 
       request =
         build_execute_tool_request(session_id, tool_name, proto_params, encoded_binary, metadata)
         |> maybe_put_stream(stream?)
 
-      timeout = opts[:timeout] || default_timeout
-      call_opts = [timeout: timeout] |> maybe_put_correlation_metadata(correlation_id)
+      timeout = normalize_timeout(opts[:timeout] || default_timeout)
+
+      call_opts =
+        timeout
+        |> call_opts_with_timeout()
+        |> maybe_put_correlation_metadata(correlation_id)
 
       {:ok, request, call_opts}
     end
@@ -410,10 +417,32 @@ defmodule Snakepit.GRPC.ClientImpl do
 
   defp extract_correlation_id(_), do: nil
 
-  defp build_request_metadata(correlation_id) when is_binary(correlation_id) do
+  defp build_request_metadata(correlation_id, opts) when is_binary(correlation_id) do
     %{"correlation_id" => correlation_id}
     |> Map.merge(PythonRuntime.runtime_metadata())
+    |> maybe_put_thread_sensitive(opts)
   end
+
+  defp maybe_put_thread_sensitive(metadata, opts) do
+    case Keyword.get(opts, :thread_sensitive, false) do
+      true -> Map.put(metadata, "thread_sensitive", "true")
+      "true" -> Map.put(metadata, "thread_sensitive", "true")
+      _ -> metadata
+    end
+  end
+
+  defp call_opts_with_timeout(timeout) do
+    SLog.debug(@log_category, "gRPC call timeout", timeout: timeout)
+
+    case timeout do
+      nil -> []
+      _ -> [timeout: timeout]
+    end
+  end
+
+  defp normalize_timeout(:infinity), do: :infinity
+  defp normalize_timeout(timeout) when is_integer(timeout) and timeout > 0, do: timeout
+  defp normalize_timeout(_), do: nil
 
   defp maybe_put_correlation_metadata(call_opts, correlation_id) when is_binary(correlation_id) do
     existing = Keyword.get(call_opts, :metadata, [])

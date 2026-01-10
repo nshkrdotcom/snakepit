@@ -6,7 +6,7 @@
 # including unit tests, integration tests, and property-based tests.
 #
 # Usage:
-#   mix run test/run_bridge_tests.exs [options]
+#   mix run test/run_bridge_test.exs [options]
 #
 # Options:
 #   --all              Run all tests (default)
@@ -63,7 +63,7 @@ defmodule BridgeTestRunner do
       )
 
     # Default to all if no specific type is selected
-    if opts[:unit] or opts[:integration] or opts[:property] do
+    if opts[:unit] || opts[:integration] || opts[:property] do
       opts
     else
       Keyword.put(opts, :all, true)
@@ -74,7 +74,7 @@ defmodule BridgeTestRunner do
     types = []
 
     types =
-      if options[:all] or options[:unit] do
+      if options[:all] || options[:unit] do
         types ++
           [
             {:unit,
@@ -90,7 +90,7 @@ defmodule BridgeTestRunner do
       end
 
     types =
-      if options[:all] or options[:integration] do
+      if options[:all] || options[:integration] do
         types ++
           [
             {:integration,
@@ -104,7 +104,7 @@ defmodule BridgeTestRunner do
       end
 
     types =
-      if options[:all] or options[:property] do
+      if options[:all] || options[:property] do
         types ++
           [
             {:property,
@@ -128,12 +128,10 @@ defmodule BridgeTestRunner do
   end
 
   defp build_env_vars(options) do
-    vars = %{}
-
     if options[:verbose] do
-      Map.put(vars, "TRACE", "1")
+      [{"TRACE", "1"}]
     else
-      vars
+      []
     end
   end
 
@@ -180,11 +178,16 @@ defmodule BridgeTestRunner do
     # Run the tests
     start_time = System.monotonic_time(:millisecond)
 
-    {output, exit_code} =
-      System.cmd("mix", args,
-        into: if(options[:verbose], do: IO.stream(:stdio, :line), else: ""),
-        env: env_vars
-      )
+    cmd_opts =
+      if options[:verbose] do
+        [env: env_vars, into: IO.stream(:stdio, :line)]
+      else
+        [env: env_vars]
+      end
+
+    args = Enum.map(args, &to_string/1)
+
+    {output, exit_code} = System.cmd("mix", args, cmd_opts)
 
     duration = System.monotonic_time(:millisecond) - start_time
 
@@ -226,7 +229,7 @@ defmodule BridgeTestRunner do
     Snakepit Bridge Test Runner
 
     Usage:
-      mix run test/run_bridge_tests.exs [options]
+      mix run test/run_bridge_test.exs [options]
 
     Options:
       --all              Run all tests (default)
@@ -239,18 +242,23 @@ defmodule BridgeTestRunner do
 
     Examples:
       # Run all tests
-      mix run test/run_bridge_tests.exs
+      mix run test/run_bridge_test.exs
       
       # Run only integration tests with verbose output
-      mix run test/run_bridge_tests.exs --integration --verbose
+      mix run test/run_bridge_test.exs --integration --verbose
       
       # Run unit and property tests
-      mix run test/run_bridge_tests.exs --unit --property
+      mix run test/run_bridge_test.exs --unit --property
       
       # Run all tests including performance
-      mix run test/run_bridge_tests.exs --all --performance
+      mix run test/run_bridge_test.exs --all --performance
     """)
   end
 end
 
-BridgeTestRunner.main(System.argv())
+if System.get_env("MIX_ENV") == "test" or
+     (Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) and Mix.env() == :test) do
+  :ok
+else
+  BridgeTestRunner.main(System.argv())
+end

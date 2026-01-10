@@ -9,6 +9,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   """
 
   use DynamicSupervisor
+  alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Pool.Worker.StarterRegistry
@@ -25,7 +26,9 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   def init(_init_arg) do
     DynamicSupervisor.init(
       strategy: :one_for_one,
-      extra_arguments: []
+      extra_arguments: [],
+      max_restarts: Defaults.worker_supervisor_max_restarts(),
+      max_seconds: Defaults.worker_supervisor_max_seconds()
     )
   end
 

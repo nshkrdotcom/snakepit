@@ -60,7 +60,7 @@ clean:
 # Run tests
 test:
 	@echo "Running tests..."
-	PYTHONPATH=priv/python $(PYTHON) -m pytest priv/python/tests
+	mix snakepit.python_test
 	mix test --color
 
 bootstrap:

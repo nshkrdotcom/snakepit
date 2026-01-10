@@ -110,4 +110,20 @@ defmodule Snakepit.GRPC.ClientImplTest do
              )
     end
   end
+
+  describe "thread-sensitive metadata propagation" do
+    test "prepare_execute_tool_request marks thread-sensitive calls" do
+      {:ok, request, _call_opts} =
+        ClientImpl.prepare_execute_tool_request(
+          "session-123",
+          "noop",
+          %{},
+          %{},
+          timeout: 1_000,
+          thread_sensitive: true
+        )
+
+      assert request.metadata["thread_sensitive"] == "true"
+    end
+  end
 end

@@ -29,6 +29,18 @@ defmodule Snakepit.PoolThroughputTest do
         timeout: 5_000,
         interval: 100
       )
+
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+
+      if prev_pooling do
+        assert_eventually(
+          fn ->
+            Snakepit.Pool.await_ready(Snakepit.Pool, 5_000) == :ok
+          end,
+          timeout: 30_000,
+          interval: 1_000
+        )
+      end
     end)
 
     :ok

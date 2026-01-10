@@ -1,6 +1,6 @@
 # Timeout Configuration Guide
 
-Snakepit v0.8.8 introduces a unified timeout architecture designed for reliability in production deployments. This guide covers timeout profiles, deadline propagation, and configuration strategies for different workloads.
+Snakepit includes a unified timeout architecture designed for reliability in production deployments. This guide covers timeout profiles, deadline propagation, and configuration strategies for different workloads.
 
 ---
 
@@ -20,7 +20,7 @@ Snakepit v0.8.8 introduces a unified timeout architecture designed for reliabili
 
 ### The Problem
 
-Prior to v0.8.8, Snakepit had fragmented timeout configuration with 7+ independent timeout keys that didn't coordinate:
+Earlier releases had fragmented timeout configuration with 7+ independent timeout keys that didn't coordinate:
 
 | Issue | Symptom |
 |-------|---------|
@@ -410,12 +410,12 @@ iex> Defaults.rpc_timeout(60_000)
 
 ## Migration Guide
 
-### From v0.8.7 and Earlier
+### Legacy Configuration (Pre-Unified Timeouts)
 
 The timeout architecture is **fully backward compatible**. Existing configurations continue to work:
 
 ```elixir
-# This still works in v0.8.8+
+# This still works in current releases
 config :snakepit,
   pool_request_timeout: 60_000,
   grpc_command_timeout: 30_000
@@ -433,14 +433,14 @@ config :snakepit,
 3. **Fine-tune if needed**: Override specific values that don't fit
 
 ```elixir
-# Before (v0.8.7)
+# Before (legacy timeouts)
 config :snakepit,
   pool_request_timeout: 300_000,
   pool_streaming_timeout: 900_000,
   pool_queue_timeout: 10_000,
   grpc_command_timeout: 280_000
 
-# After (v0.8.8+) - equivalent behavior
+# After (unified timeouts) - equivalent behavior
 config :snakepit, timeout_profile: :balanced
 ```
 

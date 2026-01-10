@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-01-09
+
+### Added
+- `ClientSupervisor` wrapper for safe gRPC client supervision across gRPC variants.
+- gRPC server request logging interceptor with optional `:grpc_request_logging` and category-aware debug output.
+- `mix snakepit.python_test` task to bootstrap and run the Python test suite (supports `--no-bootstrap`).
+- Pool reconciliation loop to restore minimum worker counts after crash storms (configurable via `pool_reconcile_interval_ms` and `pool_reconcile_batch_size`).
+- Configurable restart intensity for worker starters and worker supervisors (`worker_starter_*` and `worker_supervisor_*` defaults).
+
+### Changed
+- gRPC client and worker stream defaults now derive from `grpc_command_timeout/0` and `stream_timeout/0`.
+- Pool and worker execution now handle `:infinity` timeouts without deadline bookkeeping.
+- Python gRPC server now runs sync adapter calls in worker threads by default; use `thread_sensitive` metadata or `SNAKEPIT_THREAD_SENSITIVE` to keep execution on the main thread.
+- `Snakepit.Pool` metadata validation now accepts `Snakepit.Pool` as the default pool identifier.
+- gRPC is pinned to `0.11.5` and protobuf is pinned to `0.16.0` (override).
+
+### Fixed
+- gRPC status code 4 now maps to `{:error, :timeout}` in the client.
+- Process group shutdown waits for group exit using `/proc` or `ps`, avoiding zombie false positives.
+- Test suite now tracks and terminates leaked external Python processes after runs.
+
 ## [0.9.0] - 2026-01-02
 
 ### Added
@@ -1505,7 +1526,9 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
-[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.5...HEAD
+[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.9.1
+[0.9.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.9.0
 [0.8.5]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.5
 [0.8.4]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.4
 [0.8.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.3

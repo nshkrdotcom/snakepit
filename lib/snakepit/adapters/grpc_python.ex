@@ -203,20 +203,22 @@ defmodule Snakepit.Adapters.GRPCPython do
   @doc """
   Execute a command via gRPC.
   """
-  def grpc_execute(connection, session_id, command, args, timeout \\ nil)
+  def grpc_execute(connection, session_id, command, args, timeout \\ nil, opts \\ [])
 
-  def grpc_execute(connection, session_id, command, args, nil) do
-    grpc_execute(connection, session_id, command, args, Defaults.grpc_command_timeout())
+  def grpc_execute(connection, session_id, command, args, nil, opts) do
+    grpc_execute(connection, session_id, command, args, Defaults.grpc_command_timeout(), opts)
   end
 
-  def grpc_execute(connection, session_id, command, args, timeout) do
+  def grpc_execute(connection, session_id, command, args, timeout, opts) do
     if grpc_available?() do
+      call_opts = opts |> List.wrap() |> Keyword.put(:timeout, timeout)
+
       Client.execute_tool(
         connection.channel,
         session_id,
         command,
         args,
-        timeout: timeout
+        call_opts
       )
     else
       {:error, :grpc_not_available}
@@ -226,9 +228,17 @@ defmodule Snakepit.Adapters.GRPCPython do
   @doc """
   Execute a streaming command via gRPC with callback.
   """
-  def grpc_execute_stream(connection, session_id, command, args, callback_fn, timeout \\ nil)
+  def grpc_execute_stream(
+        connection,
+        session_id,
+        command,
+        args,
+        callback_fn,
+        timeout \\ nil,
+        opts \\ []
+      )
 
-  def grpc_execute_stream(connection, session_id, command, args, callback_fn, nil)
+  def grpc_execute_stream(connection, session_id, command, args, callback_fn, nil, opts)
       when is_function(callback_fn, 1) do
     grpc_execute_stream(
       connection,
@@ -236,19 +246,22 @@ defmodule Snakepit.Adapters.GRPCPython do
       command,
       args,
       callback_fn,
-      Defaults.grpc_worker_stream_timeout()
+      Defaults.grpc_worker_stream_timeout(),
+      opts
     )
   end
 
-  def grpc_execute_stream(connection, session_id, command, args, callback_fn, timeout)
+  def grpc_execute_stream(connection, session_id, command, args, callback_fn, timeout, opts)
       when is_function(callback_fn, 1) do
     if grpc_available?() do
+      call_opts = opts |> List.wrap() |> Keyword.put(:timeout, timeout)
+
       connection.channel
       |> Client.execute_streaming_tool(
         session_id,
         command,
         args,
-        timeout: timeout
+        call_opts
       )
       |> consume_stream(callback_fn)
     else

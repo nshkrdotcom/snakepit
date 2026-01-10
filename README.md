@@ -31,7 +31,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.9.0"}
+    {:snakepit, "~> 0.9.1"}
   ]
 end
 ```
@@ -50,7 +50,7 @@ For higher-level Python integration with compile-time type generation, use [Snak
 
 ```elixir
 def deps do
-  [{:snakebridge, "~> 0.8.0"}]
+  [{:snakebridge, "~> 0.9.1"}]
 end
 
 def project do
@@ -126,7 +126,7 @@ config :snakepit, log_level: :none           # Complete silence
 config :snakepit, log_level: :debug, log_categories: [:grpc, :pool]
 ```
 
-### Runtime Configurable Defaults (v0.8.8+)
+### Runtime Configurable Defaults
 
 All hardcoded timeout and sizing values are now configurable via `Application.get_env/3`.
 Values are read at runtime, allowing configuration changes without recompilation.
@@ -150,6 +150,16 @@ config :snakepit,
   pool_max_workers: 150,                 # Maximum workers per pool
   pool_startup_batch_size: 10,           # Workers started per batch
   pool_startup_batch_delay_ms: 500,      # Delay between startup batches
+
+  # Pool recovery
+  pool_reconcile_interval_ms: 1_000,     # Reconcile worker count interval (0 disables)
+  pool_reconcile_batch_size: 2,          # Max workers respawned per tick
+
+  # Worker supervisor restart intensity
+  worker_starter_max_restarts: 3,
+  worker_starter_max_seconds: 5,
+  worker_supervisor_max_restarts: 3,
+  worker_supervisor_max_seconds: 5,
 
   # Retry policy
   retry_max_attempts: 3,

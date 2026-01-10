@@ -54,6 +54,7 @@ defmodule Snakepit.Pool.Worker.Starter do
   """
 
   use Supervisor
+  alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.Worker.StarterRegistry
   @log_category :pool
@@ -176,7 +177,11 @@ defmodule Snakepit.Pool.Worker.Starter do
       }
     ]
 
-    Supervisor.init(children, strategy: :one_for_one)
+    Supervisor.init(children,
+      strategy: :one_for_one,
+      max_restarts: Defaults.worker_starter_max_restarts(),
+      max_seconds: Defaults.worker_starter_max_seconds()
+    )
   end
 
   defp maybe_put_pool_identifier(opts, pool_name, worker_config) do

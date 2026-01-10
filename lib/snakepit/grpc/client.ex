@@ -93,7 +93,7 @@ defmodule Snakepit.GRPC.Client do
 
   # Existing methods for backward compatibility
   def execute(channel, command, args, timeout \\ nil) do
-    timeout = timeout || Defaults.grpc_client_execute_timeout()
+    timeout = timeout || Defaults.grpc_command_timeout()
     # Legacy support - redirect to execute_tool
     execute_tool(channel, "default_session", command, args, timeout: timeout)
   end
