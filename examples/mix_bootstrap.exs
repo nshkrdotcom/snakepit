@@ -24,6 +24,7 @@ defmodule Snakepit.Examples.Bootstrap do
 
     Application.ensure_all_started(:telemetry)
 
+    maybe_set_instance_name()
     maybe_apply_snakepit_log_level()
     configure_logger_from_snakepit()
 
@@ -68,6 +69,17 @@ defmodule Snakepit.Examples.Bootstrap do
   defp map_snakepit_level(:error), do: :error
   defp map_snakepit_level(:debug), do: :debug
   defp map_snakepit_level(_), do: :info
+
+  defp maybe_set_instance_name do
+    instance_name =
+      Application.get_env(:snakepit, :instance_name) ||
+        System.get_env("SNAKEPIT_INSTANCE_NAME")
+
+    if is_nil(instance_name) or instance_name == "" do
+      env = System.get_env("MIX_ENV") || "dev"
+      Application.put_env(:snakepit, :instance_name, "snakepit_examples_#{env}")
+    end
+  end
 
   @spec await_pool_ready!(timeout()) :: :ok
   def await_pool_ready!(timeout \\ 15_000) do
@@ -121,11 +133,7 @@ defmodule Snakepit.Examples.Bootstrap do
 
   @spec ensure_grpc_port!() :: :ok
   def ensure_grpc_port! do
-    if Application.get_env(:snakepit, :grpc_listener) do
-      ensure_listener_port!()
-    else
-      ensure_legacy_port!()
-    end
+    ensure_listener_port!()
   end
 
   defp ensure_listener_port! do
@@ -148,19 +156,6 @@ defmodule Snakepit.Examples.Bootstrap do
     end
   end
 
-  defp ensure_legacy_port! do
-    port = Application.get_env(:snakepit, :grpc_port, 50_051)
-
-    if port_available?(port) do
-      :ok
-    else
-      available = find_available_port()
-      Application.put_env(:snakepit, :grpc_port, available)
-      IO.puts("ℹ️  grpc_port #{port} in use; using #{available} instead")
-      :ok
-    end
-  end
-
   defp port_available?(port) do
     case :gen_tcp.listen(port, [:binary, active: false, reuseaddr: true]) do
       {:ok, socket} ->
@@ -173,13 +168,6 @@ defmodule Snakepit.Examples.Bootstrap do
       {:error, _reason} ->
         false
     end
-  end
-
-  defp find_available_port do
-    {:ok, socket} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
-    {:ok, {_ip, port}} = :inet.sockname(socket)
-    :gen_tcp.close(socket)
-    port
   end
 
   @spec format_error(term()) :: String.t()

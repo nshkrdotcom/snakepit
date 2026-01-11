@@ -85,15 +85,15 @@ Snakepit.Examples.Bootstrap.ensure_mix!([
 
 alias Snakepit.Bridge.{SessionStore, ToolRegistry}
 
-Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_listener, %{mode: :internal})
 Application.put_env(:snakepit, :pooling_enabled, false)
-Snakepit.Examples.Bootstrap.ensure_grpc_port!()
-grpc_port = Application.get_env(:snakepit, :grpc_port)
 
 defmodule BidirectionalToolsDemoAuto do
-  def run(grpc_port, auto_stop_ms) do
-    {:ok, grpc_supervisor} = start_grpc_supervisor(grpc_port)
-    Process.unlink(grpc_supervisor)
+  def run(auto_stop_ms) do
+    {:ok, listener} = Snakepit.GRPC.Listener.start_link(name: nil)
+    Process.unlink(listener)
+    {:ok, info} = Snakepit.GRPC.Listener.await_ready(5_000)
+    grpc_address = "#{info.host}:#{info.port}"
 
     try do
       session_id = "bidirectional-demo"
@@ -107,7 +107,7 @@ defmodule BidirectionalToolsDemoAuto do
 
       IO.puts("\n=== Bidirectional Tool Bridge Server ===")
       IO.puts("Session ID: #{session_id}")
-      IO.puts("gRPC Server running on port #{grpc_port}\n")
+      IO.puts("gRPC Server running on #{grpc_address}\n")
 
       IO.puts("Registering Elixir tools...")
 
@@ -160,7 +160,11 @@ defmodule BidirectionalToolsDemoAuto do
 
       IO.puts("\nServer is ready for Python connections!")
       IO.puts("Run the Python demo in another terminal:")
-      IO.puts("  SNAKEPIT_GRPC_PORT=#{grpc_port} python examples/python_elixir_tools_demo.py")
+
+      IO.puts(
+        "  SNAKEPIT_GRPC_ADDRESS=#{grpc_address} python examples/python_elixir_tools_demo.py"
+      )
+
       IO.puts("\nPress Ctrl+C to stop the server.")
       IO.puts("Set SNAKEPIT_DEMO_DURATION_MS to auto-stop for scripted runs.")
 
@@ -171,24 +175,14 @@ defmodule BidirectionalToolsDemoAuto do
     after
       SessionStore.delete_session("bidirectional-demo")
       ToolRegistry.cleanup_session("bidirectional-demo")
-      stop_grpc_supervisor(grpc_supervisor)
+      stop_grpc_supervisor(listener)
       IO.puts("Cleanup complete.")
     end
   end
 
-  defp start_grpc_supervisor(grpc_port) do
-    Supervisor.start_link(
-      [
-        {GRPC.Server.Supervisor,
-         endpoint: Snakepit.GRPC.Endpoint, port: grpc_port, start_server: true}
-      ],
-      strategy: :one_for_one
-    )
-  end
-
   defp stop_grpc_supervisor(pid) when is_pid(pid) do
     if Process.alive?(pid) do
-      Supervisor.stop(pid, :shutdown, 5_000)
+      GenServer.stop(pid, :shutdown, 5_000)
     else
       :ok
     end
@@ -228,6 +222,6 @@ auto_stop_ms =
   end
 
 Snakepit.Examples.Bootstrap.run_example(
-  fn -> BidirectionalToolsDemoAuto.run(grpc_port, auto_stop_ms) end,
+  fn -> BidirectionalToolsDemoAuto.run(auto_stop_ms) end,
   await_pool: false
 )

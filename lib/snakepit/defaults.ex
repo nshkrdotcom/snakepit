@@ -867,6 +867,20 @@ defmodule Snakepit.Defaults do
   end
 
   # ============================================================================
+  # Instance Isolation
+  # ============================================================================
+
+  @doc """
+  Default instance token for runtime isolation.
+
+  Default: nil
+  """
+  @spec instance_token() :: String.t() | nil
+  def instance_token do
+    Application.get_env(:snakepit, :instance_token, nil)
+  end
+
+  # ============================================================================
   # Process Registry
   # ============================================================================
 

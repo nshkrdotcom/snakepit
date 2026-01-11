@@ -7,6 +7,7 @@ defmodule Snakepit.Pool.ApplicationCleanup do
   """
 
   use GenServer
+  alias Snakepit.Config
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.ProcessKiller
@@ -48,7 +49,19 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     SLog.debug(@log_category, "ApplicationCleanup process info: #{inspect(Process.info(self()))}")
 
     beam_run_id = ProcessRegistry.get_beam_run_id()
-    orphaned_pids = find_orphaned_processes(beam_run_id)
+    instance_name = Config.instance_name_identifier()
+    allow_missing_instance = not Config.instance_name_configured?()
+    instance_token = Config.instance_token_identifier()
+    allow_missing_token = not Config.instance_token_configured?()
+
+    orphaned_pids =
+      find_orphaned_processes(
+        beam_run_id,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token
+      )
 
     if Enum.empty?(orphaned_pids) do
       SLog.info(@log_category, "✅ No orphaned processes - supervision tree cleaned up correctly")
@@ -65,7 +78,7 @@ defmodule Snakepit.Pool.ApplicationCleanup do
       emit_telemetry(:orphaned_processes_found, length(orphaned_pids))
 
       # Emergency kill - use SIGKILL directly since supervision already tried SIGTERM
-      kill_count = emergency_kill_processes(beam_run_id)
+      kill_count = emergency_kill_processes(orphaned_pids)
 
       if kill_count > 0 do
         SLog.debug(@log_category, "Cleanup: Killed #{kill_count} orphaned processes")
@@ -76,7 +89,13 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     :ok
   end
 
-  defp find_orphaned_processes(run_id) do
+  defp find_orphaned_processes(
+         run_id,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     # CRITICAL: Get all registered workers from ProcessRegistry
     # A process is only "orphaned" if its Python process is alive BUT
     # its Elixir GenServer is dead (supervision tree failed to clean it up)
@@ -85,7 +104,15 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     # Find Python processes for this run_id
     python_pids = ProcessKiller.find_python_processes()
 
-    grpc_pids_for_run = filter_grpc_pids_by_run_id(python_pids, run_id)
+    grpc_pids_for_run =
+      filter_grpc_pids_by_run_id(
+        python_pids,
+        run_id,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token
+      )
 
     # Filter out processes whose Elixir GenServer is still alive
     # Those are NOT orphans - the supervision tree will clean them up
@@ -94,20 +121,48 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     end)
   end
 
-  defp filter_grpc_pids_by_run_id(python_pids, run_id) do
+  defp filter_grpc_pids_by_run_id(
+         python_pids,
+         run_id,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     Enum.filter(python_pids, fn pid ->
-      matches_grpc_run_id?(pid, run_id)
+      matches_grpc_run_id?(
+        pid,
+        run_id,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token
+      )
     end)
   end
 
-  defp matches_grpc_run_id?(pid, run_id) do
+  defp matches_grpc_run_id?(
+         pid,
+         run_id,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     case ProcessKiller.get_process_command(pid) do
       {:ok, cmd} ->
         has_grpc_server = String.contains?(cmd, "grpc_server.py")
         has_old_format = String.contains?(cmd, "--snakepit-run-id #{run_id}")
         has_new_format = String.contains?(cmd, "--run-id #{run_id}")
 
-        has_grpc_server and (has_old_format or has_new_format)
+        instance_ok =
+          ProcessKiller.command_matches_instance?(cmd, instance_name,
+            allow_missing: allow_missing_instance,
+            instance_token: instance_token,
+            allow_missing_token: allow_missing_token
+          )
+
+        has_grpc_server and (has_old_format or has_new_format) and instance_ok
 
       _ ->
         false
@@ -147,10 +202,17 @@ defmodule Snakepit.Pool.ApplicationCleanup do
     is_orphan
   end
 
-  defp emergency_kill_processes(run_id) do
-    # Use ProcessKiller with run_id-based cleanup
-    {:ok, killed_count} = ProcessKiller.kill_by_run_id(run_id)
-    killed_count
+  defp emergency_kill_processes(orphaned_pids) do
+    Enum.reduce(orphaned_pids, 0, fn pid, acc ->
+      case ProcessKiller.kill_with_escalation(pid) do
+        :ok ->
+          acc + 1
+
+        {:error, reason} ->
+          SLog.error(@log_category, "Failed to kill orphaned PID #{pid}: #{inspect(reason)}")
+          acc
+      end
+    end)
   end
 
   defp emit_telemetry(event, count) do

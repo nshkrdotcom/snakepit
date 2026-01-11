@@ -2,6 +2,7 @@ defmodule Snakepit.Worker.Configuration do
   @moduledoc false
 
   alias Snakepit.Adapters.GRPCPython
+  alias Snakepit.Config
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.ProcessRegistry
 
@@ -108,6 +109,8 @@ defmodule Snakepit.Worker.Configuration do
     |> maybe_add_arg("--port", to_string(port))
     |> maybe_add_arg("--elixir-address", elixir_address)
     |> add_run_id_arg()
+    |> add_instance_name_arg()
+    |> add_instance_token_arg()
   end
 
   defp build_ready_file(worker_id) do
@@ -133,6 +136,26 @@ defmodule Snakepit.Worker.Configuration do
   defp add_run_id_arg(args) do
     run_id = ProcessRegistry.get_beam_run_id()
     args ++ ["--snakepit-run-id", run_id]
+  end
+
+  defp add_instance_name_arg(args) do
+    case Config.instance_name_identifier() do
+      name when is_binary(name) and name != "" ->
+        maybe_add_arg(args, "--snakepit-instance-name", name)
+
+      _ ->
+        args
+    end
+  end
+
+  defp add_instance_token_arg(args) do
+    case Config.instance_token_identifier() do
+      token when is_binary(token) and token != "" ->
+        maybe_add_arg(args, "--snakepit-instance-token", token)
+
+      _ ->
+        args
+    end
   end
 
   defp process_group_spawn? do

@@ -8,12 +8,11 @@ python_executable = if File.exists?(python_executable_path), do: python_executab
 # Configure Snakepit for load testing
 config :snakepit,
   adapter_module: Snakepit.Adapters.GRPCPython,
+  instance_name: "snakepit_loadtest",
   bootstrap_project_root: snakepit_root,
   pooling_enabled: true,
   grpc_listener: %{
-    mode: :external,
-    host: "localhost",
-    port: 50051
+    mode: :internal
   },
   # 60 seconds for load testing
   grpc_timeout: 60_000,

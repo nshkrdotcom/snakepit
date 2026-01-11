@@ -409,7 +409,13 @@ defmodule Snakepit do
         timeout_ms: timeout_ms
       )
 
-      Snakepit.ProcessKiller.kill_by_run_id(run_id)
+      Snakepit.ProcessKiller.kill_by_run_id(
+        run_id,
+        instance_name: Snakepit.Config.instance_name_identifier(),
+        allow_missing_instance: not Snakepit.Config.instance_name_configured?(),
+        instance_token: Snakepit.Config.instance_token_identifier(),
+        allow_missing_token: not Snakepit.Config.instance_token_configured?()
+      )
 
       if not wait_for_run_id_shutdown(run_id, timeout_ms) do
         SLog.warning(:shutdown, "Worker processes still running after forced cleanup.")

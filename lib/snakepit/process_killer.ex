@@ -384,8 +384,18 @@ defmodule Snakepit.ProcessKiller do
   Kills all processes matching a run ID.
   Pure Erlang implementation, no pkill.
   """
-  def kill_by_run_id(run_id) when is_binary(run_id) do
-    SLog.warning(@log_category, "🔪 Killing all processes with run_id: #{run_id}")
+  def kill_by_run_id(run_id, opts \\ []) when is_binary(run_id) and is_list(opts) do
+    instance_name = Keyword.get(opts, :instance_name)
+    instance_token = Keyword.get(opts, :instance_token)
+    allow_missing_instance = Keyword.get(opts, :allow_missing_instance, true)
+    allow_missing_token = Keyword.get(opts, :allow_missing_token, true)
+
+    SLog.warning(
+      @log_category,
+      "🔪 Killing all processes with run_id: #{run_id} " <>
+        "(instance=#{inspect(instance_name)}, token=#{inspect(instance_token)})"
+    )
+
     SLog.debug(@log_category, "kill_by_run_id called at: #{System.monotonic_time(:millisecond)}")
     caller_info = Process.info(self(), [:registered_name, :current_stacktrace])
     SLog.debug(@log_category, "Called from: #{inspect(caller_info)}")
@@ -404,7 +414,14 @@ defmodule Snakepit.ProcessKiller do
             has_old_format = String.contains?(cmd, "--snakepit-run-id #{run_id}")
             has_new_format = String.contains?(cmd, "--run-id #{run_id}")
 
-            has_grpc_server and (has_old_format or has_new_format)
+            instance_ok =
+              command_matches_instance?(cmd, instance_name,
+                instance_token: instance_token,
+                allow_missing: allow_missing_instance,
+                allow_missing_token: allow_missing_token
+              )
+
+            has_grpc_server and (has_old_format or has_new_format) and instance_ok
 
           _ ->
             false
@@ -427,6 +444,128 @@ defmodule Snakepit.ProcessKiller do
       end)
 
     {:ok, killed_count}
+  end
+
+  @doc false
+  def instance_name_from_command(command) when is_binary(command) do
+    case Regex.run(~r/--snakepit-instance-name\s+([^\s]+)/, command) do
+      [_, instance_name] -> {:ok, instance_name}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc false
+  def instance_token_from_command(command) when is_binary(command) do
+    case Regex.run(~r/--snakepit-instance-token\s+([^\s]+)/, command) do
+      [_, instance_token] -> {:ok, instance_token}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc false
+  def command_matches_instance?(command, instance_name, opts \\ []) do
+    allow_missing_instance = Keyword.get(opts, :allow_missing, true)
+    instance_token = Keyword.get(opts, :instance_token)
+    allow_missing_token = Keyword.get(opts, :allow_missing_token, true)
+
+    normalized_instance = normalize_instance_name(instance_name)
+    normalized_token = normalize_instance_token(instance_token)
+    cmd_instance = normalized_cmd_instance(command)
+    cmd_token = normalized_cmd_token(command)
+
+    if is_nil(cmd_instance) and is_nil(cmd_token) do
+      allow_missing_instance and allow_missing_token and
+        command_matches_app_dir?(command, current_app_dir())
+    else
+      instance_ok =
+        cond do
+          is_nil(normalized_instance) -> true
+          is_nil(cmd_instance) -> allow_missing_instance
+          true -> cmd_instance == normalized_instance
+        end
+
+      token_ok =
+        cond do
+          is_nil(normalized_token) -> is_nil(cmd_token)
+          is_nil(cmd_token) -> allow_missing_token
+          true -> cmd_token == normalized_token
+        end
+
+      instance_ok and token_ok
+    end
+  end
+
+  defp normalized_cmd_instance(command) when is_binary(command) do
+    case instance_name_from_command(command) do
+      {:ok, instance} -> normalize_instance_name(instance)
+      _ -> nil
+    end
+  end
+
+  defp normalized_cmd_token(command) when is_binary(command) do
+    case instance_token_from_command(command) do
+      {:ok, token} -> normalize_instance_token(token)
+      _ -> nil
+    end
+  end
+
+  defp normalize_instance_name(value) when is_binary(value) do
+    trimmed = String.trim(value)
+
+    case String.downcase(trimmed) do
+      "" -> nil
+      "nil" -> nil
+      "null" -> nil
+      "none" -> nil
+      _ -> trimmed
+    end
+  end
+
+  defp normalize_instance_name(value) when is_atom(value) do
+    if value in [nil, nil] do
+      nil
+    else
+      Atom.to_string(value)
+    end
+  end
+
+  defp normalize_instance_name(_), do: nil
+
+  defp normalize_instance_token(value) when is_binary(value) do
+    trimmed = String.trim(value)
+
+    case String.downcase(trimmed) do
+      "" -> nil
+      "nil" -> nil
+      "null" -> nil
+      "none" -> nil
+      _ -> trimmed
+    end
+  end
+
+  defp normalize_instance_token(value) when is_atom(value) do
+    if value in [nil, nil] do
+      nil
+    else
+      Atom.to_string(value)
+    end
+  end
+
+  defp normalize_instance_token(_), do: nil
+
+  defp command_matches_app_dir?(command, app_dir)
+       when is_binary(command) and is_binary(app_dir) and app_dir != "" do
+    String.contains?(command, app_dir)
+  end
+
+  defp command_matches_app_dir?(_command, _app_dir), do: false
+
+  defp current_app_dir do
+    try do
+      Application.app_dir(:snakepit) |> to_string()
+    rescue
+      _ -> nil
+    end
   end
 
   defp find_python_processes_linux do

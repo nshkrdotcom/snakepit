@@ -105,7 +105,7 @@ def test_execute_tool_sets_correlation_from_header_and_exposes_request_metadata(
     async def run_call():
         servicer = grpc_module.BridgeServiceServicer(
             CaptureAdapter,
-            "localhost:50051",
+            "127.0.0.1:0",
             heartbeat_options={"enabled": False},
             loop=asyncio.get_running_loop(),
         )
@@ -132,7 +132,7 @@ def test_execute_tool_runs_sync_calls_in_worker_thread_by_default(stub_factory):
     async def run_call():
         servicer = grpc_module.BridgeServiceServicer(
             ThreadCaptureAdapter,
-            "localhost:50051",
+            "127.0.0.1:0",
             heartbeat_options={"enabled": False},
             loop=asyncio.get_running_loop(),
         )
@@ -156,7 +156,7 @@ def test_execute_tool_runs_on_main_thread_when_thread_sensitive_metadata_set(stu
     async def run_call():
         servicer = grpc_module.BridgeServiceServicer(
             ThreadCaptureAdapter,
-            "localhost:50051",
+            "127.0.0.1:0",
             heartbeat_options={"enabled": False},
             loop=asyncio.get_running_loop(),
         )
@@ -185,7 +185,7 @@ def test_execute_tool_thread_sensitive_env_override(stub_factory, monkeypatch):
     async def run_call():
         servicer = grpc_module.BridgeServiceServicer(
             ThreadCaptureAdapter,
-            "localhost:50051",
+            "127.0.0.1:0",
             heartbeat_options={"enabled": False},
             loop=asyncio.get_running_loop(),
         )
@@ -269,7 +269,7 @@ def test_streaming_cleanup_called_on_normal_completion(stub_factory):
         # Create servicer inside async context where event loop exists
         servicer = grpc_module.BridgeServiceServicer(
             StreamingAdapter,
-            "localhost:50051",
+            "127.0.0.1:0",
             heartbeat_options={"enabled": False},
         )
         request = pb2.ExecuteToolRequest(
@@ -300,7 +300,7 @@ def test_streaming_producer_stops_on_client_disconnect(stub_factory):
         # Create servicer inside async context where event loop exists
         servicer = grpc_module.BridgeServiceServicer(
             StreamingAdapter,
-            "localhost:50051",
+            "127.0.0.1:0",
             heartbeat_options={"enabled": False},
         )
         request = pb2.ExecuteToolRequest(
@@ -373,7 +373,7 @@ def test_async_streaming_cleanup_called(stub_factory):
         # Create servicer inside async context where event loop exists
         servicer = grpc_module.BridgeServiceServicer(
             AsyncStreamingAdapter,
-            "localhost:50051",
+            "127.0.0.1:0",
             heartbeat_options={"enabled": False},
         )
         request = pb2.ExecuteToolRequest(
@@ -433,7 +433,7 @@ def test_streaming_completes_under_backpressure(stub_factory):
     async def run_high_volume_streaming():
         servicer = grpc_module.BridgeServiceServicer(
             HighVolumeStreamingAdapter,
-            "localhost:50051",
+            "127.0.0.1:0",
             heartbeat_options={"enabled": False},
         )
         request = pb2.ExecuteToolRequest(
@@ -507,7 +507,7 @@ def test_boolean_true_type_inference(stub_factory):
     async def run_call():
         servicer = grpc_module.BridgeServiceServicer(
             BooleanAdapter,
-            "localhost:50051",
+            "127.0.0.1:0",
             heartbeat_options={"enabled": False},
         )
         request = pb2.ExecuteToolRequest(
@@ -545,7 +545,7 @@ def test_boolean_false_type_inference(stub_factory):
     async def run_call():
         servicer = grpc_module.BridgeServiceServicer(
             BooleanAdapter,
-            "localhost:50051",
+            "127.0.0.1:0",
             heartbeat_options={"enabled": False},
         )
         request = pb2.ExecuteToolRequest(
@@ -571,7 +571,7 @@ def test_integer_still_inferred_as_float(stub_factory):
     async def run_call():
         servicer = grpc_module.BridgeServiceServicer(
             BooleanAdapter,
-            "localhost:50051",
+            "127.0.0.1:0",
             heartbeat_options={"enabled": False},
         )
         request = pb2.ExecuteToolRequest(

@@ -4,6 +4,7 @@ Example usage of the enhanced SessionContext with variable support.
 """
 
 import grpc
+import os
 import time
 from snakepit_bridge import SessionContext, VariableType
 from snakepit_bridge_pb2_grpc import BridgeServiceStub
@@ -159,10 +160,23 @@ def constraint_validation(ctx: SessionContext):
         print(f"Invalid update failed (expected): {e}")
 
 
+def _grpc_address() -> str:
+    address = os.getenv("SNAKEPIT_GRPC_ADDRESS")
+    if address:
+        return address
+    port = os.getenv("SNAKEPIT_GRPC_PORT")
+    if not port:
+        raise SystemExit(
+            "Missing gRPC address; set SNAKEPIT_GRPC_ADDRESS or SNAKEPIT_GRPC_PORT."
+        )
+    host = os.getenv("SNAKEPIT_GRPC_HOST", "localhost")
+    return f"{host}:{port}"
+
+
 def main():
     """Run all examples."""
     # Connect to gRPC server
-    channel = grpc.insecure_channel('localhost:50051')
+    channel = grpc.insecure_channel(_grpc_address())
     stub = BridgeServiceStub(channel)
     
     # Create session context

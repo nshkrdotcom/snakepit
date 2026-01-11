@@ -174,7 +174,7 @@ defmodule Snakepit.Adapters.GRPCPython do
         SLog.debug(@log_category, "gRPC connection established to port #{port}")
         {:ok, %{channel: channel, port: port}}
 
-      {:error, reason} when reason in [:connection_refused, :unavailable, :internal] ->
+      {:error, reason} when reason in [:connection_refused, :unavailable, :internal, :timeout] ->
         # Socket not ready yet - retry with exponential backoff + jitter
         delay = min(base_delay * backoff, 500)
         # Add ±25% jitter to prevent synchronized retries (thundering herd)

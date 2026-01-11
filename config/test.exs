@@ -1,7 +1,11 @@
 import Config
 
+test_partition = System.get_env("MIX_TEST_PARTITION") || "1"
+test_instance = System.get_env("SNAKEPIT_INSTANCE_NAME") || "snakepit_test_#{test_partition}"
+
 # Test configuration
 config :snakepit,
+  instance_name: test_instance,
   # Disable pooling by default so unit tests do not spawn Python workers.
   # Integration tests explicitly enable pooling in their setup blocks.
   pooling_enabled: false,

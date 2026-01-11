@@ -9,7 +9,7 @@ Snakepit.Examples.Bootstrap.ensure_mix!([
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
 Application.put_env(:snakepit, :pooling_enabled, true)
 Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
-Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_listener, %{mode: :internal})
 Application.put_env(:snakepit, :grpc_host, "localhost")
 Application.put_env(:snakepit, :log_level, :error)
 Snakepit.Examples.Bootstrap.ensure_grpc_port!()

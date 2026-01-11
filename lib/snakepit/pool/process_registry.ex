@@ -26,7 +26,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
     :table,
     :dets_table,
     :beam_run_id,
-    :beam_os_pid
+    :beam_os_pid,
+    :instance_name,
+    :allow_missing_instance,
+    :instance_token,
+    :allow_missing_token
   ]
 
   # Client API
@@ -208,15 +212,29 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # Create a proper file path for DETS
     # Namespace by instance name to support shared deployment directories.
     data_dir = Config.data_dir()
-    instance_name = Config.instance_name()
+    raw_instance_name = Config.instance_name()
+    raw_instance_token = Config.instance_token()
+    instance_name = Config.instance_name_identifier()
+    instance_token = Config.instance_token_identifier()
+    allow_missing_instance = not Config.instance_name_configured?()
+    allow_missing_token = not Config.instance_token_configured?()
     node_name = sanitize_name(node())
-    identifier = sanitize_name(instance_name || node_name || "default")
+
+    identifier =
+      [instance_name, instance_token]
+      |> Enum.filter(&present_identifier?/1)
+      |> case do
+        [] -> node_name || "default"
+        parts -> Enum.join(parts, "__")
+      end
+      |> sanitize_name()
+
     dets_file = Path.join([data_dir, "process_registry_#{identifier}.dets"])
 
     # Ensure directory exists for DETS file
     File.mkdir_p!(data_dir)
 
-    warn_if_default_instance(instance_name, node())
+    warn_if_default_instance(raw_instance_name, raw_instance_token, node())
 
     # Open DETS for persistence with repair option
     # Generate an unguessable table identifier so callers cannot mutate DETS directly.
@@ -272,7 +290,15 @@ defmodule Snakepit.Pool.ProcessRegistry do
     )
 
     # Perform startup cleanup of orphaned processes FIRST
-    cleanup_orphaned_processes(dets_table, beam_run_id, beam_os_pid)
+    cleanup_orphaned_processes(
+      dets_table,
+      beam_run_id,
+      beam_os_pid,
+      instance_name,
+      allow_missing_instance,
+      instance_token,
+      allow_missing_token
+    )
 
     # Load current run's processes into ETS
     load_current_run_processes(dets_table, table, beam_run_id)
@@ -286,7 +312,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
        table: table,
        dets_table: dets_table,
        beam_run_id: beam_run_id,
-       beam_os_pid: beam_os_pid
+       beam_os_pid: beam_os_pid,
+       instance_name: instance_name,
+       allow_missing_instance: allow_missing_instance,
+       instance_token: instance_token,
+       allow_missing_token: allow_missing_token
      }}
   end
 
@@ -458,13 +488,23 @@ defmodule Snakepit.Pool.ProcessRegistry do
   @impl true
   def handle_call(:manual_orphan_cleanup, _from, state) do
     SLog.info(@log_category, "Manual orphan cleanup triggered")
-    cleanup_orphaned_processes(state.dets_table, state.beam_run_id, state.beam_os_pid)
+
+    cleanup_orphaned_processes(
+      state.dets_table,
+      state.beam_run_id,
+      state.beam_os_pid,
+      state.instance_name,
+      state.allow_missing_instance,
+      state.instance_token,
+      state.allow_missing_token
+    )
+
     {:reply, :ok, state}
   end
 
   @impl true
   def handle_call(:debug_show_all_entries, _from, state) do
-    all_entries = :dets.match_object(state.dets_table, :_)
+    all_entries = safe_dets_entries(state.dets_table)
 
     entries_info =
       Enum.map(all_entries, fn {worker_id, info} ->
@@ -523,7 +563,15 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @impl true
   def handle_info({:post_start_orphan_cleanup, attempts_left}, state) do
-    cleanup_orphaned_processes(state.dets_table, state.beam_run_id, state.beam_os_pid)
+    cleanup_orphaned_processes(
+      state.dets_table,
+      state.beam_run_id,
+      state.beam_os_pid,
+      state.instance_name,
+      state.allow_missing_instance,
+      state.instance_token,
+      state.allow_missing_token
+    )
 
     if attempts_left > 1 do
       schedule_post_start_cleanup(attempts_left - 1)
@@ -563,7 +611,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     SLog.info(@log_category, "Snakepit Pool Process Registry terminating: #{inspect(reason)}")
 
     # Log current state before closing
-    all_entries = :dets.match_object(state.dets_table, :_)
+    all_entries = safe_dets_entries(state.dets_table)
 
     SLog.info(
       @log_category,
@@ -606,13 +654,21 @@ defmodule Snakepit.Pool.ProcessRegistry do
     )
   end
 
-  defp cleanup_orphaned_processes(dets_table, current_beam_run_id, current_beam_os_pid) do
+  defp cleanup_orphaned_processes(
+         dets_table,
+         current_beam_run_id,
+         current_beam_os_pid,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     SLog.debug(
       @log_category,
       "Starting orphan cleanup for BEAM run #{current_beam_run_id}, BEAM OS PID #{current_beam_os_pid}"
     )
 
-    all_entries = :dets.match_object(dets_table, :_)
+    all_entries = safe_dets_entries(dets_table)
     SLog.info(@log_category, "Total entries in DETS: #{length(all_entries)}")
 
     stale_entries = find_stale_entries(all_entries, current_beam_run_id, current_beam_os_pid)
@@ -632,15 +688,38 @@ defmodule Snakepit.Pool.ProcessRegistry do
     abandoned_reservations = find_abandoned_reservations(all_entries, current_beam_run_id)
     SLog.info(@log_category, "Found #{length(abandoned_reservations)} abandoned reservations")
 
-    killed_count = kill_orphaned_processes(old_run_orphans, current_beam_run_id)
-    abandoned_killed = kill_abandoned_reservation_processes(abandoned_reservations)
+    killed_count =
+      kill_orphaned_processes(
+        old_run_orphans,
+        current_beam_run_id,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token
+      )
+
+    abandoned_killed =
+      kill_abandoned_reservation_processes(
+        abandoned_reservations,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token
+      )
 
     entries_to_remove =
       combine_entries_to_remove(old_run_orphans, abandoned_reservations, stale_entries)
 
     remove_dets_entries(dets_table, entries_to_remove)
 
-    rogue_killed = cleanup_rogue_processes(current_beam_run_id)
+    rogue_killed =
+      cleanup_rogue_processes(
+        current_beam_run_id,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token
+      )
 
     log_cleanup_summary(
       killed_count,
@@ -718,16 +797,51 @@ defmodule Snakepit.Pool.ProcessRegistry do
          now - Map.get(info, :reserved_at, 0) > 60)
   end
 
-  defp kill_orphaned_processes(old_run_orphans, current_beam_run_id) do
+  defp kill_orphaned_processes(
+         old_run_orphans,
+         current_beam_run_id,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     Enum.reduce(old_run_orphans, 0, fn {worker_id, info}, acc ->
-      attempt_kill_orphaned_process(worker_id, info, current_beam_run_id, acc)
+      attempt_kill_orphaned_process(
+        worker_id,
+        info,
+        current_beam_run_id,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token,
+        acc
+      )
     end)
   end
 
-  defp attempt_kill_orphaned_process(worker_id, info, current_beam_run_id, acc) do
+  defp attempt_kill_orphaned_process(
+         worker_id,
+         info,
+         current_beam_run_id,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token,
+         acc
+       ) do
     if Snakepit.ProcessKiller.process_alive?(info.process_pid) do
       log_orphan_found(info.process_pid, worker_id, info.beam_run_id)
-      verify_and_kill_process(info.process_pid, info.beam_run_id, current_beam_run_id)
+
+      verify_and_kill_process(
+        info.process_pid,
+        info.beam_run_id,
+        current_beam_run_id,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token
+      )
+
       acc + 1
     else
       SLog.debug(
@@ -747,24 +861,57 @@ defmodule Snakepit.Pool.ProcessRegistry do
     )
   end
 
-  defp verify_and_kill_process(process_pid, expected_run_id, current_beam_run_id) do
+  defp verify_and_kill_process(
+         process_pid,
+         expected_run_id,
+         current_beam_run_id,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     case Snakepit.ProcessKiller.get_process_command(process_pid) do
       {:ok, cmd} ->
-        handle_process_command(process_pid, cmd, expected_run_id, current_beam_run_id)
+        handle_process_command(
+          process_pid,
+          cmd,
+          expected_run_id,
+          current_beam_run_id,
+          instance_name,
+          allow_missing_instance,
+          instance_token,
+          allow_missing_token
+        )
 
       {:error, _} ->
         SLog.debug(@log_category, "Process #{process_pid} not found, already dead")
     end
   end
 
-  defp handle_process_command(process_pid, cmd, expected_run_id, current_beam_run_id) do
+  defp handle_process_command(
+         process_pid,
+         cmd,
+         expected_run_id,
+         current_beam_run_id,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     has_grpc_server = String.contains?(cmd, "grpc_server.py")
     has_old_run_id = String.contains?(cmd, "--snakepit-run-id #{expected_run_id}")
     has_new_run_id = String.contains?(cmd, "--run-id #{expected_run_id}")
 
+    instance_ok =
+      Snakepit.ProcessKiller.command_matches_instance?(cmd, instance_name,
+        allow_missing: allow_missing_instance,
+        instance_token: instance_token,
+        allow_missing_token: allow_missing_token
+      )
+
     log_pid_reuse_check(process_pid, expected_run_id, current_beam_run_id, cmd)
 
-    if has_grpc_server and (has_old_run_id or has_new_run_id) do
+    if has_grpc_server and (has_old_run_id or has_new_run_id) and instance_ok do
       kill_confirmed_orphan(process_pid)
     else
       log_pid_reuse_detected(process_pid, has_grpc_server, cmd)
@@ -809,22 +956,50 @@ defmodule Snakepit.Pool.ProcessRegistry do
     end
   end
 
-  defp kill_abandoned_reservation_processes(abandoned_reservations) do
+  defp kill_abandoned_reservation_processes(
+         abandoned_reservations,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     abandoned_reservations
     |> Enum.map(fn {worker_id, info} ->
-      kill_abandoned_reservation(worker_id, info)
+      kill_abandoned_reservation(
+        worker_id,
+        info,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token
+      )
     end)
     |> Enum.sum()
   end
 
-  defp kill_abandoned_reservation(worker_id, info) do
+  defp kill_abandoned_reservation(
+         worker_id,
+         info,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     SLog.debug(
       @log_category,
       "Found abandoned reservation #{worker_id} from run #{info.beam_run_id}. " <>
         "Attempting cleanup..."
     )
 
-    {:ok, count} = Snakepit.ProcessKiller.kill_by_run_id(info.beam_run_id)
+    {:ok, count} =
+      Snakepit.ProcessKiller.kill_by_run_id(
+        info.beam_run_id,
+        instance_name: instance_name,
+        allow_missing_instance: allow_missing_instance,
+        instance_token: instance_token,
+        allow_missing_token: allow_missing_token
+      )
+
     SLog.info(@log_category, "Killed #{count} processes for run #{info.beam_run_id}")
     count
   end
@@ -862,7 +1037,13 @@ defmodule Snakepit.Pool.ProcessRegistry do
     )
   end
 
-  defp cleanup_rogue_processes(current_beam_run_id) do
+  defp cleanup_rogue_processes(
+         current_beam_run_id,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     cleanup_config =
       Application.get_env(:snakepit, :rogue_cleanup, enabled: true)
       |> normalize_cleanup_config()
@@ -875,16 +1056,40 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
       0
     else
-      do_cleanup_rogue_processes(current_beam_run_id, cleanup_config)
+      do_cleanup_rogue_processes(
+        current_beam_run_id,
+        cleanup_config,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token
+      )
     end
   end
 
-  defp do_cleanup_rogue_processes(current_beam_run_id, cleanup_config) do
+  defp do_cleanup_rogue_processes(
+         current_beam_run_id,
+         cleanup_config,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     scripts = Map.get(cleanup_config, :scripts, default_cleanup_scripts())
     run_markers = Map.get(cleanup_config, :run_markers, default_run_markers())
 
     python_commands = get_python_commands()
-    owned_processes = filter_owned_processes(python_commands, scripts, run_markers)
+
+    owned_processes =
+      filter_owned_processes(
+        python_commands,
+        scripts,
+        run_markers,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token
+      )
 
     SLog.info(
       @log_category,
@@ -892,7 +1097,16 @@ defmodule Snakepit.Pool.ProcessRegistry do
     )
 
     rogue_processes =
-      find_rogue_processes(owned_processes, current_beam_run_id, scripts, run_markers)
+      find_rogue_processes(
+        owned_processes,
+        current_beam_run_id,
+        scripts,
+        run_markers,
+        instance_name,
+        allow_missing_instance,
+        instance_token,
+        allow_missing_token
+      )
 
     log_rogue_processes(rogue_processes)
     kill_rogue_processes(rogue_processes)
@@ -908,15 +1122,44 @@ defmodule Snakepit.Pool.ProcessRegistry do
     end)
   end
 
-  defp filter_owned_processes(python_commands, scripts, run_markers) do
+  defp filter_owned_processes(
+         python_commands,
+         scripts,
+         run_markers,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     Enum.filter(python_commands, fn {_pid, cmd} ->
-      snakepit_command?(cmd, scripts) and has_run_marker?(cmd, run_markers)
+      snakepit_command?(cmd, scripts) and has_run_marker?(cmd, run_markers) and
+        Snakepit.ProcessKiller.command_matches_instance?(cmd, instance_name,
+          allow_missing: allow_missing_instance,
+          instance_token: instance_token,
+          allow_missing_token: allow_missing_token
+        )
     end)
   end
 
-  defp find_rogue_processes(owned_processes, current_beam_run_id, scripts, run_markers) do
+  defp find_rogue_processes(
+         owned_processes,
+         current_beam_run_id,
+         scripts,
+         run_markers,
+         instance_name,
+         allow_missing_instance,
+         instance_token,
+         allow_missing_token
+       ) do
     Enum.filter(owned_processes, fn {_pid, cmd} ->
-      cleanup_candidate?(cmd, current_beam_run_id, scripts: scripts, run_markers: run_markers)
+      cleanup_candidate?(cmd, current_beam_run_id,
+        scripts: scripts,
+        run_markers: run_markers,
+        instance_name: instance_name,
+        allow_missing_instance: allow_missing_instance,
+        instance_token: instance_token,
+        allow_missing_token: allow_missing_token
+      )
     end)
   end
 
@@ -956,9 +1199,20 @@ defmodule Snakepit.Pool.ProcessRegistry do
   def cleanup_candidate?(command, current_run_id, opts \\ []) when is_binary(command) do
     scripts = Keyword.get(opts, :scripts, default_cleanup_scripts())
     markers = Keyword.get(opts, :run_markers, default_run_markers())
+    instance_name = Keyword.get(opts, :instance_name)
+    instance_token = Keyword.get(opts, :instance_token)
+    allow_missing_instance = Keyword.get(opts, :allow_missing_instance, false)
+    allow_missing_token = Keyword.get(opts, :allow_missing_token, false)
+
+    instance_ok =
+      Snakepit.ProcessKiller.command_matches_instance?(command, instance_name,
+        allow_missing: allow_missing_instance,
+        instance_token: instance_token,
+        allow_missing_token: allow_missing_token
+      )
 
     snakepit_command?(command, scripts) and has_run_marker?(command, markers) and
-      not has_run_id?(command, current_run_id, markers)
+      instance_ok and not has_run_id?(command, current_run_id, markers)
   end
 
   defp snakepit_command?(command, scripts) do
@@ -1019,18 +1273,27 @@ defmodule Snakepit.Pool.ProcessRegistry do
   defp ensure_dets_consistency(dets_table, dets_file) do
     size = :dets.info(dets_table, :size)
 
-    entries =
+    entries_result =
       if size > 0 do
-        :dets.match_object(dets_table, :_)
+        dets_entries(dets_table)
       else
-        []
+        {:ok, []}
       end
 
-    case entries do
-      [] ->
+    case entries_result do
+      {:error, reason} ->
+        SLog.warning(
+          @log_category,
+          "DETS read failed; rebuilding process registry table",
+          reason: reason
+        )
+
+        rebuild_dets_table(dets_table, dets_file, [])
+
+      {:ok, []} ->
         dets_table
 
-      [{sample_key, _} | _] ->
+      {:ok, [{sample_key, _} | _] = entries} ->
         if :dets.lookup(dets_table, sample_key) == [] do
           SLog.warning(
             @log_category,
@@ -1092,15 +1355,18 @@ defmodule Snakepit.Pool.ProcessRegistry do
     |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
   end
 
-  defp warn_if_default_instance(nil, :nonode@nohost) do
+  defp present_identifier?(value) when is_binary(value), do: String.trim(value) != ""
+  defp present_identifier?(_), do: false
+
+  defp warn_if_default_instance(nil, nil, :nonode@nohost) do
     SLog.warning(
       @log_category,
-      "No instance_name set and node is :nonode@nohost; " <>
-        "multi-instance deployments should set :instance_name to avoid DETS collisions"
+      "No instance_name or instance_token set and node is :nonode@nohost; " <>
+        "multi-instance deployments should set :instance_name or :instance_token to avoid DETS collisions"
     )
   end
 
-  defp warn_if_default_instance(_instance_name, _node), do: :ok
+  defp warn_if_default_instance(_instance_name, _instance_token, _node), do: :ok
 
   defp safe_close_dets(nil), do: :ok
 
@@ -1121,6 +1387,24 @@ defmodule Snakepit.Pool.ProcessRegistry do
       {:error, _} ->
         File.rm(dets_file)
         :ok
+    end
+  end
+
+  defp dets_entries(dets_table) do
+    case :dets.match_object(dets_table, :_) do
+      {:error, reason} -> {:error, reason}
+      entries -> {:ok, entries}
+    end
+  end
+
+  defp safe_dets_entries(dets_table) do
+    case dets_entries(dets_table) do
+      {:ok, entries} ->
+        entries
+
+      {:error, reason} ->
+        SLog.warning(@log_category, "Failed to read DETS entries", reason: reason)
+        []
     end
   end
 

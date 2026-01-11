@@ -61,7 +61,7 @@ Add Snakepit as a dependency in your `mix.exs`:
 # mix.exs
 def deps do
   [
-    {:snakepit, "~> 0.9.2"}
+    {:snakepit, "~> 0.10.0"}
   ]
 end
 ```

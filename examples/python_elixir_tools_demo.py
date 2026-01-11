@@ -9,7 +9,8 @@ This example shows:
 4. Combining Python and Elixir capabilities
 
 Configuration:
-- Use --host/--port (or SNAKEPIT_GRPC_HOST/SNAKEPIT_GRPC_PORT) to target Elixir
+- Use --address (or SNAKEPIT_GRPC_ADDRESS) for the full gRPC address
+- Use --host/--port (or SNAKEPIT_GRPC_HOST/SNAKEPIT_GRPC_PORT) if you prefer split args
 - Use --session-id (or SNAKEPIT_SESSION_ID) to skip the prompt
 """
 
@@ -37,18 +38,37 @@ from snakepit_bridge.base_adapter import BaseAdapter, tool
 logger = get_logger(__name__)
 
 
-def _default_port() -> int:
+def _default_port() -> int | None:
     value = os.getenv("SNAKEPIT_GRPC_PORT")
     if not value:
-        return 50051
+        return None
     try:
         return int(value)
     except ValueError as exc:
         raise SystemExit(f"Invalid SNAKEPIT_GRPC_PORT={value!r}; expected an integer.") from exc
 
 
+def _parse_address(value: str) -> tuple[str, int]:
+    host, _, port = value.rpartition(":")
+    if not host or not port:
+        raise SystemExit(
+            f"Invalid SNAKEPIT_GRPC_ADDRESS={value!r}; expected host:port."
+        )
+    try:
+        return host, int(port)
+    except ValueError as exc:
+        raise SystemExit(
+            f"Invalid SNAKEPIT_GRPC_ADDRESS={value!r}; expected host:port."
+        ) from exc
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Python → Elixir tools demo")
+    parser.add_argument(
+        "--address",
+        default=os.getenv("SNAKEPIT_GRPC_ADDRESS"),
+        help="Elixir gRPC address (default: SNAKEPIT_GRPC_ADDRESS)",
+    )
     parser.add_argument(
         "--host",
         default=os.getenv("SNAKEPIT_GRPC_HOST", "localhost"),
@@ -58,14 +78,23 @@ def _parse_args() -> argparse.Namespace:
         "--port",
         type=int,
         default=_default_port(),
-        help="Elixir gRPC port (default: 50051 or SNAKEPIT_GRPC_PORT)",
+        help="Elixir gRPC port (default: SNAKEPIT_GRPC_PORT)",
     )
     parser.add_argument(
         "--session-id",
         default=os.getenv("SNAKEPIT_SESSION_ID"),
         help="Session ID to use (default: prompt or SNAKEPIT_SESSION_ID)",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if args.address:
+        args.host, args.port = _parse_address(args.address)
+    elif args.port is None:
+        raise SystemExit(
+            "Missing gRPC address; provide --address/--port or set SNAKEPIT_GRPC_ADDRESS/SNAKEPIT_GRPC_PORT."
+        )
+
+    return args
 
 
 class DemoAdapter(BaseAdapter):

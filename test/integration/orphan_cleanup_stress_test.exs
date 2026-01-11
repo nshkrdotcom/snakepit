@@ -8,6 +8,7 @@ defmodule Snakepit.Integration.OrphanCleanupStressTest do
 
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.ProcessKiller
+  alias Snakepit.Config
 
   @moduletag :integration
   @moduletag timeout: 120_000
@@ -20,6 +21,9 @@ defmodule Snakepit.Integration.OrphanCleanupStressTest do
 
     stop_snakepit_and_wait()
     configure_pooling()
+    instance_name = "snakepit_test_#{System.unique_integer([:positive])}"
+    Application.put_env(:snakepit, :instance_name, instance_name)
+    Application.put_env(:snakepit, :instance_token, "snakepit_test_#{Snakepit.RunID.generate()}")
     {:ok, _} = Application.ensure_all_started(:snakepit)
     assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 60_000)
 
@@ -157,16 +161,29 @@ defmodule Snakepit.Integration.OrphanCleanupStressTest do
   end
 
   defp assert_no_orphan_python_processes(current_run_id) do
+    instance_name = Config.instance_name_identifier()
+    instance_token = Config.instance_token_identifier()
     python_pids = ProcessKiller.find_python_processes()
-    offenders = Enum.flat_map(python_pids, &check_for_orphan(&1, current_run_id))
+
+    offenders =
+      Enum.flat_map(
+        python_pids,
+        &check_for_orphan(&1, current_run_id, instance_name, instance_token)
+      )
 
     assert offenders == [],
            "Found grpc_server processes from another run: #{inspect(offenders)}"
   end
 
-  defp check_for_orphan(pid, current_run_id) do
+  defp check_for_orphan(pid, current_run_id, instance_name, instance_token) do
     with {:ok, cmd} <- ProcessKiller.get_process_command(pid),
          true <- String.contains?(cmd, "grpc_server.py"),
+         true <-
+           ProcessKiller.command_matches_instance?(cmd, instance_name,
+             allow_missing: false,
+             instance_token: instance_token,
+             allow_missing_token: false
+           ),
          {:ok, run_id} <- Snakepit.RunID.extract_from_command(cmd),
          true <- run_id != current_run_id do
       [{pid, cmd}]
@@ -194,7 +211,9 @@ defmodule Snakepit.Integration.OrphanCleanupStressTest do
       pooling_enabled: Application.get_env(:snakepit, :pooling_enabled),
       pools: Application.get_env(:snakepit, :pools),
       pool_config: Application.get_env(:snakepit, :pool_config),
-      adapter_module: Application.get_env(:snakepit, :adapter_module)
+      adapter_module: Application.get_env(:snakepit, :adapter_module),
+      instance_name: Application.get_env(:snakepit, :instance_name),
+      instance_token: Application.get_env(:snakepit, :instance_token)
     }
   end
 

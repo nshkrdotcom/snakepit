@@ -500,7 +500,7 @@ See [Observability Guide](../guides/observability.md) for the complete event cat
 ### "Worker failed to start"
 - Ensure Python dependencies are installed
 - Check Python version (3.9+)
-- Verify gRPC port is available (50051)
+- Verify the gRPC listener configuration/port is available (or use internal mode)
 
 ### "Connection refused"
 - Workers may take a few seconds to start

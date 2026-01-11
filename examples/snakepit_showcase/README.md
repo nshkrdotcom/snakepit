@@ -170,7 +170,7 @@ Required packages:
 ### Common Issues
 
 1. **Import errors**: Ensure Python path includes the project root
-2. **gRPC errors**: Check that ports 50051-50151 are available
+2. **gRPC errors**: Check that the configured listener port is available (or use internal mode)
 3. **State not persisting**: Verify you're using SessionContext, not local variables
 4. **High memory usage**: Check for state accumulation in Python workers
 

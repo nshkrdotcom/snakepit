@@ -268,6 +268,8 @@ defmodule Snakepit.ProcessKillerTest do
     test "kills only processes that match the provided run_id" do
       run_id = Snakepit.RunID.generate()
       python = python_executable()
+      {instance_name, instance_token} = instance_identifiers()
+      opts = instance_opts(instance_name, instance_token)
 
       rogue_port =
         Port.open({:spawn_executable, python}, [
@@ -282,13 +284,9 @@ defmodule Snakepit.ProcessKillerTest do
         Port.open({:spawn_executable, python}, [
           :binary,
           :exit_status,
-          args: [
-            "-c",
-            "import signal; signal.pause()",
-            "grpc_server.py",
-            "--snakepit-run-id",
-            run_id
-          ]
+          args:
+            ["-c", "import signal; signal.pause()", "grpc_server.py", "--snakepit-run-id", run_id]
+            |> add_instance_args(instance_name, instance_token)
         ])
 
       ProcessLeakTracker.register_port(target_port)
@@ -299,7 +297,7 @@ defmodule Snakepit.ProcessKillerTest do
       assert Snakepit.ProcessKiller.process_alive?(target_pid)
       assert Snakepit.ProcessKiller.process_alive?(rogue_pid)
 
-      assert {:ok, killed} = Snakepit.ProcessKiller.kill_by_run_id(run_id)
+      assert {:ok, killed} = Snakepit.ProcessKiller.kill_by_run_id(run_id, opts)
       assert killed >= 1
 
       assert wait_for_death(target_pid, 5_000)
@@ -356,79 +354,250 @@ defmodule Snakepit.ProcessKillerTest do
       flunk("python executable not found on PATH")
   end
 
+  defp instance_identifiers do
+    {Snakepit.Config.instance_name_identifier(), Snakepit.Config.instance_token_identifier()}
+  end
+
+  defp instance_opts(instance_name, instance_token) do
+    [
+      instance_name: instance_name,
+      instance_token: instance_token,
+      allow_missing_instance: false,
+      allow_missing_token: false
+    ]
+  end
+
+  defp add_instance_args(args, instance_name, instance_token) do
+    args =
+      if is_binary(instance_name) and instance_name != "" do
+        args ++ ["--snakepit-instance-name", instance_name]
+      else
+        args
+      end
+
+    if is_binary(instance_token) and instance_token != "" do
+      args ++ ["--snakepit-instance-token", instance_token]
+    else
+      args
+    end
+  end
+
+  defp with_instance_markers(command, instance_name, instance_token) do
+    command =
+      if is_binary(instance_name) and instance_name != "" do
+        command <> " --snakepit-instance-name #{instance_name}"
+      else
+        command
+      end
+
+    if is_binary(instance_token) and instance_token != "" do
+      command <> " --snakepit-instance-token #{instance_token}"
+    else
+      command
+    end
+  end
+
   describe "rogue cleanup filter" do
-    test "ignores python processes without snakepit markers" do
+    setup do
+      {instance_name, instance_token} = instance_identifiers()
+      {:ok, instance_name: instance_name, instance_token: instance_token}
+    end
+
+    test "ignores python processes without snakepit markers", %{
+      instance_name: instance_name,
+      instance_token: instance_token
+    } do
+      opts = instance_opts(instance_name, instance_token)
+
       refute ProcessRegistry.cleanup_candidate?(
-               "python3 other_server.py --snakepit-run-id 123",
-               "abc"
+               with_instance_markers(
+                 "python3 other_server.py --snakepit-run-id 123",
+                 instance_name,
+                 instance_token
+               ),
+               "abc",
+               opts
              )
     end
 
-    test "ignores commands without run markers" do
-      refute ProcessRegistry.cleanup_candidate?("python grpc_server.py", "abc")
+    test "ignores commands without run markers", %{
+      instance_name: instance_name,
+      instance_token: instance_token
+    } do
+      opts = instance_opts(instance_name, instance_token)
+
+      refute ProcessRegistry.cleanup_candidate?(
+               with_instance_markers("python grpc_server.py", instance_name, instance_token),
+               "abc",
+               opts
+             )
     end
 
-    test "detects commands with different run_id" do
+    test "detects commands with different run_id", %{
+      instance_name: instance_name,
+      instance_token: instance_token
+    } do
+      opts = instance_opts(instance_name, instance_token)
+
       assert ProcessRegistry.cleanup_candidate?(
-               "python grpc_server.py --snakepit-run-id other",
-               "abc"
+               with_instance_markers(
+                 "python grpc_server.py --snakepit-run-id other",
+                 instance_name,
+                 instance_token
+               ),
+               "abc",
+               opts
              )
     end
 
-    test "ignores commands with current run_id" do
+    test "ignores commands with current run_id", %{
+      instance_name: instance_name,
+      instance_token: instance_token
+    } do
+      opts = instance_opts(instance_name, instance_token)
+
       refute ProcessRegistry.cleanup_candidate?(
-               "python grpc_server.py --snakepit-run-id abc",
-               "abc"
+               with_instance_markers(
+                 "python grpc_server.py --snakepit-run-id abc",
+                 instance_name,
+                 instance_token
+               ),
+               "abc",
+               opts
              )
     end
 
-    test "supports legacy --run-id marker" do
+    test "supports legacy --run-id marker", %{
+      instance_name: instance_name,
+      instance_token: instance_token
+    } do
+      opts = instance_opts(instance_name, instance_token)
+
       assert ProcessRegistry.cleanup_candidate?(
-               "python grpc_server_threaded.py --run-id old",
-               "new"
+               with_instance_markers(
+                 "python grpc_server_threaded.py --run-id old",
+                 instance_name,
+                 instance_token
+               ),
+               "new",
+               opts
              )
 
       refute ProcessRegistry.cleanup_candidate?(
-               "python grpc_server_threaded.py --run-id new",
-               "new"
+               with_instance_markers(
+                 "python grpc_server_threaded.py --run-id new",
+                 instance_name,
+                 instance_token
+               ),
+               "new",
+               opts
              )
     end
 
-    test "custom scripts and markers can be supplied" do
-      command = "python custom_bridge.py --snakepit-run-id old"
+    test "custom scripts and markers can be supplied", %{
+      instance_name: instance_name,
+      instance_token: instance_token
+    } do
+      opts = instance_opts(instance_name, instance_token)
 
-      refute ProcessRegistry.cleanup_candidate?(command, "new")
+      command =
+        with_instance_markers(
+          "python custom_bridge.py --snakepit-run-id old",
+          instance_name,
+          instance_token
+        )
 
-      assert ProcessRegistry.cleanup_candidate?(command, "new",
-               scripts: ["custom_bridge.py"],
-               run_markers: ["--snakepit-run-id"]
+      refute ProcessRegistry.cleanup_candidate?(command, "new", opts)
+
+      assert ProcessRegistry.cleanup_candidate?(
+               command,
+               "new",
+               opts
+               |> Keyword.merge(
+                 scripts: ["custom_bridge.py"],
+                 run_markers: ["--snakepit-run-id"]
+               )
              )
     end
 
-    test "foreign, current, and stale processes behave as expected" do
+    test "instance_name marker scopes rogue cleanup candidates", %{
+      instance_token: instance_token
+    } do
+      opts = instance_opts("instance_a", instance_token)
+
+      assert ProcessRegistry.cleanup_candidate?(
+               with_instance_markers(
+                 "python grpc_server.py --snakepit-run-id old --snakepit-instance-name instance_a",
+                 nil,
+                 instance_token
+               ),
+               "current",
+               opts
+             )
+
+      refute ProcessRegistry.cleanup_candidate?(
+               with_instance_markers(
+                 "python grpc_server.py --snakepit-run-id old --snakepit-instance-name instance_b",
+                 nil,
+                 instance_token
+               ),
+               "current",
+               opts
+             )
+
+      refute ProcessRegistry.cleanup_candidate?(
+               with_instance_markers(
+                 "python grpc_server.py --snakepit-run-id old",
+                 nil,
+                 instance_token
+               ),
+               "current",
+               opts
+             )
+    end
+
+    test "foreign, current, and stale processes behave as expected", %{
+      instance_name: instance_name,
+      instance_token: instance_token
+    } do
       run_id = "current"
-      opts = [scripts: ["grpc_server.py"], run_markers: ["--snakepit-run-id"]]
+
+      opts =
+        instance_opts(instance_name, instance_token)
+        |> Keyword.merge(scripts: ["grpc_server.py"], run_markers: ["--snakepit-run-id"])
 
       refute ProcessRegistry.cleanup_candidate?(
-               "python other_server.py --snakepit-run-id stale",
+               with_instance_markers(
+                 "python other_server.py --snakepit-run-id stale",
+                 instance_name,
+                 instance_token
+               ),
                run_id,
                opts
              )
 
       refute ProcessRegistry.cleanup_candidate?(
-               "python grpc_server.py",
+               with_instance_markers("python grpc_server.py", instance_name, instance_token),
                run_id,
                opts
              )
 
       refute ProcessRegistry.cleanup_candidate?(
-               "python grpc_server.py --snakepit-run-id current",
+               with_instance_markers(
+                 "python grpc_server.py --snakepit-run-id current",
+                 instance_name,
+                 instance_token
+               ),
                run_id,
                opts
              )
 
       assert ProcessRegistry.cleanup_candidate?(
-               "python grpc_server.py --snakepit-run-id stale",
+               with_instance_markers(
+                 "python grpc_server.py --snakepit-run-id stale",
+                 instance_name,
+                 instance_token
+               ),
                run_id,
                opts
              )

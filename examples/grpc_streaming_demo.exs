@@ -42,7 +42,7 @@ Application.put_env(:snakepit, :pools, [
 
 Application.put_env(:snakepit, :pool_config, %{pool_size: pool_size})
 Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_listener, %{mode: :internal})
 Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 defmodule StreamingDemo do

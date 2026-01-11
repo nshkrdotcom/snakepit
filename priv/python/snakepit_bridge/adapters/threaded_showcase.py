@@ -16,7 +16,7 @@ Usage:
     python grpc_server_threaded.py \
         --port 50052 \
         --adapter snakepit_bridge.adapters.threaded_showcase.ThreadedShowcaseAdapter \
-        --elixir-address localhost:50051 \
+        --elixir-address "${SNAKEPIT_GRPC_ADDRESS}" \
         --max-workers 16
 
     # From Elixir

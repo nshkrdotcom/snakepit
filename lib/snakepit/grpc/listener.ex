@@ -5,6 +5,7 @@ defmodule Snakepit.GRPC.Listener do
 
   alias Snakepit.Config
   alias Snakepit.Defaults
+  alias Snakepit.GRPC.EndpointRegistry
   alias Snakepit.Logger, as: SLog
 
   @listener_key {__MODULE__, :listener_info}
@@ -12,6 +13,7 @@ defmodule Snakepit.GRPC.Listener do
   @log_category :grpc
 
   @type listener_info :: %{
+          pid: pid() | nil,
           host: String.t(),
           bind_host: String.t(),
           port: non_neg_integer(),
@@ -41,7 +43,7 @@ defmodule Snakepit.GRPC.Listener do
 
   @spec listener_info() :: listener_info() | nil
   def listener_info do
-    :persistent_term.get(@listener_key, nil)
+    :persistent_term.get(listener_key(current_endpoint()), nil)
   end
 
   @spec host() :: String.t() | nil
@@ -81,14 +83,15 @@ defmodule Snakepit.GRPC.Listener do
 
   @spec clear_listener_info() :: :ok
   def clear_listener_info do
-    :persistent_term.erase(@listener_key)
+    :persistent_term.erase(listener_key(current_endpoint()))
     :ok
   end
 
   @spec await_ready(pos_integer()) :: {:ok, listener_info()} | {:error, :timeout}
-  def await_ready(timeout \\ Defaults.grpc_listener_ready_timeout_ms()) do
+  def await_ready(timeout \\ Config.grpc_listener_ready_timeout_ms()) do
+    endpoint_module = current_endpoint()
     deadline = System.monotonic_time(:millisecond) + timeout
-    await_ready_loop(deadline)
+    await_ready_loop(deadline, endpoint_module)
   end
 
   @impl true
@@ -96,11 +99,13 @@ defmodule Snakepit.GRPC.Listener do
     config = Keyword.get(opts, :config) || Config.grpc_listener_config!()
     start_fun = Keyword.get(opts, :start_fun, @default_start_fun)
     adapter_opts = Keyword.get(opts, :adapter_opts, build_adapter_opts(config))
+    endpoint_module = Keyword.get(opts, :endpoint_module, EndpointRegistry.endpoint_module())
 
     state = %{
       config: config,
       start_fun: start_fun,
       adapter_opts: adapter_opts,
+      endpoint_module: endpoint_module,
       server_pid: nil,
       manage_server?: start_fun == @default_start_fun,
       published?: false
@@ -118,7 +123,7 @@ defmodule Snakepit.GRPC.Listener do
   @impl true
   def handle_info({:listener_started, {:ok, %{pid: pid} = info}}, state) do
     Process.link(pid)
-    publish_listener(info)
+    publish_listener(info, state.endpoint_module)
 
     manage_server? = Map.get(info, :manage_server?, state.manage_server?)
     {:noreply, %{state | server_pid: pid, manage_server?: manage_server?, published?: true}}
@@ -135,30 +140,61 @@ defmodule Snakepit.GRPC.Listener do
     :ok
   end
 
-  defp await_ready_loop(deadline) do
-    case listener_info() do
+  defp await_ready_loop(deadline, endpoint_module) do
+    case :persistent_term.get(listener_key(endpoint_module), nil) do
       nil ->
         if System.monotonic_time(:millisecond) >= deadline do
           {:error, :timeout}
         else
           receive do
           after
-            Config.grpc_listener_port_check_interval_ms() -> await_ready_loop(deadline)
+            Config.grpc_listener_port_check_interval_ms() ->
+              await_ready_loop(deadline, endpoint_module)
           end
         end
 
       info ->
-        {:ok, info}
+        cond do
+          is_pid(info[:pid]) and Process.alive?(info[:pid]) ->
+            {:ok, info}
+
+          listener_running?(endpoint_module) ->
+            {:ok, info}
+
+          true ->
+            clear_listener_info(endpoint_module)
+
+            if System.monotonic_time(:millisecond) >= deadline do
+              {:error, :timeout}
+            else
+              receive do
+              after
+                Config.grpc_listener_port_check_interval_ms() ->
+                  await_ready_loop(deadline, endpoint_module)
+              end
+            end
+        end
     end
   end
 
-  defp publish_listener(%{host: host, bind_host: bind_host, port: port, mode: mode}) do
-    :persistent_term.put(@listener_key, %{
+  defp publish_listener(
+         %{host: host, bind_host: bind_host, port: port, mode: mode} = info,
+         endpoint_module
+       ) do
+    payload = %{
       host: host,
       bind_host: bind_host,
       port: port,
       mode: mode
-    })
+    }
+
+    payload =
+      case Map.get(info, :pid) do
+        pid when is_pid(pid) -> Map.put(payload, :pid, pid)
+        _ -> payload
+      end
+
+    :persistent_term.put(listener_key(endpoint_module), payload)
   end
 
   defp start_listener(%{config: %{mode: :internal} = config} = state) do
@@ -197,14 +233,18 @@ defmodule Snakepit.GRPC.Listener do
   defp start_with_port(
          config,
          port,
-         %{start_fun: start_fun, adapter_opts: adapter_opts, manage_server?: manage_server?} =
-           state,
+         %{
+           start_fun: start_fun,
+           adapter_opts: adapter_opts,
+           manage_server?: manage_server?,
+           endpoint_module: endpoint_module
+         } = state,
          attempts_left
        )
        when attempts_left > 0 do
     opts = [adapter_opts: adapter_opts]
 
-    case start_fun.(Snakepit.GRPC.Endpoint, port, opts) do
+    case start_fun.(endpoint_module, port, opts) do
       {:ok, pid, actual_port} ->
         {:ok, build_info(pid, actual_port, config, manage_server?)}
 
@@ -261,9 +301,9 @@ defmodule Snakepit.GRPC.Listener do
 
   defp parse_ip(_), do: :error
 
-  defp reuse_existing_listener(config, pid, timeout_ms) do
+  defp reuse_existing_listener(config, pid, timeout_ms, endpoint_module) do
     if Process.alive?(pid) do
-      case port_from_listener_info() do
+      case port_from_listener_info(endpoint_module) do
         {:ok, port} ->
           case validate_existing_port(config, port) do
             :ok ->
@@ -274,7 +314,7 @@ defmodule Snakepit.GRPC.Listener do
           end
 
         :error ->
-          case wait_for_existing_port(pid, timeout_ms) do
+          case wait_for_existing_port(pid, timeout_ms, endpoint_module) do
             {:ok, port} ->
               case validate_existing_port(config, port) do
                 :ok ->
@@ -293,8 +333,8 @@ defmodule Snakepit.GRPC.Listener do
     end
   end
 
-  defp existing_listener_port do
-    listener_name = listener_name()
+  defp existing_listener_port(endpoint_module) do
+    listener_name = listener_name(endpoint_module)
 
     try do
       port = :ranch.get_port(listener_name)
@@ -309,42 +349,50 @@ defmodule Snakepit.GRPC.Listener do
     end
   end
 
-  defp listener_name do
-    inspect(Snakepit.GRPC.Endpoint)
+  defp listener_name(endpoint_module) do
+    inspect(endpoint_module)
   end
 
-  defp maybe_stop_endpoint(%{manage_server?: true, server_pid: pid}) when is_pid(pid) do
+  defp maybe_stop_endpoint(%{
+         manage_server?: true,
+         server_pid: pid,
+         endpoint_module: endpoint_module
+       })
+       when is_pid(pid) do
     try do
-      GRPC.Server.stop_endpoint(Snakepit.GRPC.Endpoint)
+      GRPC.Server.stop_endpoint(endpoint_module)
     rescue
       _ -> :ok
+    catch
+      :exit, _ -> :ok
     end
 
-    _ = await_listener_stopped(Defaults.grpc_listener_ready_timeout_ms())
+    _ = await_listener_stopped(Config.grpc_listener_ready_timeout_ms(), endpoint_module)
   end
 
   defp maybe_stop_endpoint(_state), do: :ok
 
-  defp maybe_clear_listener_info(%{manage_server?: true, published?: true}) do
-    clear_listener_info()
+  defp maybe_clear_listener_info(%{manage_server?: true, published?: true} = state) do
+    clear_listener_info(state.endpoint_module)
   end
 
   defp maybe_clear_listener_info(_state), do: :ok
 
-  defp await_listener_stopped(timeout_ms) when is_integer(timeout_ms) and timeout_ms > 0 do
+  defp await_listener_stopped(timeout_ms, endpoint_module)
+       when is_integer(timeout_ms) and timeout_ms > 0 do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
-    await_listener_stopped_loop(deadline)
+    await_listener_stopped_loop(deadline, endpoint_module)
   end
 
-  defp await_listener_stopped_loop(deadline) do
-    if listener_running?() do
+  defp await_listener_stopped_loop(deadline, endpoint_module) do
+    if listener_running?(endpoint_module) do
       if System.monotonic_time(:millisecond) >= deadline do
         {:error, :timeout}
       else
         receive do
         after
           Config.grpc_listener_port_check_interval_ms() ->
-            await_listener_stopped_loop(deadline)
+            await_listener_stopped_loop(deadline, endpoint_module)
         end
       end
     else
@@ -352,8 +400,8 @@ defmodule Snakepit.GRPC.Listener do
     end
   end
 
-  defp listener_running? do
-    listener_name = listener_name()
+  defp listener_running?(endpoint_module) do
+    listener_name = listener_name(endpoint_module)
 
     try do
       _ = :ranch.info(listener_name)
@@ -363,22 +411,22 @@ defmodule Snakepit.GRPC.Listener do
     end
   end
 
-  defp wait_for_existing_port(pid, timeout_ms)
+  defp wait_for_existing_port(pid, timeout_ms, endpoint_module)
        when is_pid(pid) and is_integer(timeout_ms) and timeout_ms > 0 do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     ref = Process.monitor(pid)
-    result = wait_for_existing_port(pid, ref, deadline)
+    result = wait_for_existing_port(pid, ref, deadline, endpoint_module)
     Process.demonitor(ref, [:flush])
     result
   end
 
-  defp wait_for_existing_port(pid, ref, deadline) do
-    case port_from_listener_info() do
+  defp wait_for_existing_port(pid, ref, deadline, endpoint_module) do
+    case port_from_listener_info(endpoint_module) do
       {:ok, port} ->
         if Process.alive?(pid), do: {:ok, port}, else: {:error, :listener_stale}
 
       :error ->
-        case existing_listener_port() do
+        case existing_listener_port(endpoint_module) do
           {:ok, port} ->
             if Process.alive?(pid), do: {:ok, port}, else: {:error, :listener_stale}
 
@@ -391,7 +439,7 @@ defmodule Snakepit.GRPC.Listener do
                   {:error, :listener_stale}
               after
                 Config.grpc_listener_port_check_interval_ms() ->
-                  wait_for_existing_port(pid, ref, deadline)
+                  wait_for_existing_port(pid, ref, deadline, endpoint_module)
               end
             end
         end
@@ -403,15 +451,17 @@ defmodule Snakepit.GRPC.Listener do
       if attempts_left > 1 do
         Config.grpc_listener_reuse_wait_timeout_ms()
       else
-        Defaults.grpc_listener_ready_timeout_ms()
+        Config.grpc_listener_ready_timeout_ms()
       end
 
-    case reuse_existing_listener(config, pid, timeout_ms) do
+    case reuse_existing_listener(config, pid, timeout_ms, state.endpoint_module) do
       {:ok, info} ->
         {:ok, info}
 
       {:error, reason}
       when attempts_left > 1 and reason in [:listener_stale, :listener_port_unavailable] ->
+        _ = await_listener_stopped(Config.grpc_listener_ready_timeout_ms(), state.endpoint_module)
+
         SLog.debug(
           @log_category,
           "gRPC listener reuse failed (#{inspect(reason)}); retrying start"
@@ -428,8 +478,8 @@ defmodule Snakepit.GRPC.Listener do
     end
   end
 
-  defp port_from_listener_info do
-    case listener_info() do
+  defp port_from_listener_info(endpoint_module) do
+    case :persistent_term.get(listener_key(endpoint_module), nil) do
       %{port: port} when is_integer(port) and port > 0 -> {:ok, port}
       _ -> :error
     end
@@ -466,6 +516,19 @@ defmodule Snakepit.GRPC.Listener do
       mode: config.mode,
       manage_server?: manage_server?
     }
+  end
+
+  defp current_endpoint do
+    EndpointRegistry.endpoint_module()
+  end
+
+  defp listener_key(endpoint_module) do
+    {@listener_key, endpoint_module}
+  end
+
+  defp clear_listener_info(endpoint_module) do
+    :persistent_term.erase(listener_key(endpoint_module))
+    :ok
   end
 
   @doc false

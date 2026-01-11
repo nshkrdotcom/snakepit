@@ -72,6 +72,27 @@ defmodule TestHelperShutdown do
   end
 end
 
+instance_name =
+  Application.get_env(:snakepit, :instance_name) ||
+    System.get_env("SNAKEPIT_INSTANCE_NAME")
+
+if is_nil(instance_name) or instance_name == "" do
+  partition = System.get_env("MIX_TEST_PARTITION")
+  suffix = if partition in [nil, ""], do: "test", else: "test_p#{partition}"
+  Application.put_env(:snakepit, :instance_name, "snakepit_#{suffix}")
+end
+
+instance_token =
+  Application.get_env(:snakepit, :instance_token) ||
+    System.get_env("SNAKEPIT_INSTANCE_TOKEN")
+
+if is_nil(instance_token) or instance_token == "" do
+  partition = System.get_env("MIX_TEST_PARTITION")
+  suffix = if partition in [nil, ""], do: "test", else: "test_p#{partition}"
+  token = "snakepit_#{suffix}_#{Snakepit.RunID.generate()}"
+  Application.put_env(:snakepit, :instance_token, token)
+end
+
 Snakepit.Test.ProcessLeakTracker.init()
 System.at_exit(fn _ -> Snakepit.Test.ProcessLeakTracker.cleanup!() end)
 

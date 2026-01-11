@@ -941,12 +941,28 @@ def main():
     parser = argparse.ArgumentParser(description='Snakepit Multi-Threaded gRPC Server')
     parser.add_argument('--port', type=int, default=0, help='Port to listen on')
     parser.add_argument('--adapter', type=str, required=True, help='Adapter class path')
-    parser.add_argument('--elixir-address', type=str, required=True, help='Elixir server address')
+    default_elixir_address = os.environ.get("SNAKEPIT_GRPC_ADDRESS") or os.environ.get(
+        "SNAKEPIT_ELIXIR_ADDRESS"
+    )
+    parser.add_argument(
+        '--elixir-address',
+        type=str,
+        required=False,
+        default=default_elixir_address,
+        help='Elixir server address (or SNAKEPIT_GRPC_ADDRESS)',
+    )
     parser.add_argument('--max-workers', type=int, default=10, help='Thread pool size')
     parser.add_argument('--thread-safety-check', action='store_true', help='Enable thread safety checks')
     parser.add_argument('--snakepit-run-id', type=str, default='', help='Snakepit run ID')
+    parser.add_argument('--snakepit-instance-name', type=str, default='', help='Snakepit instance name')
+    parser.add_argument('--snakepit-instance-token', type=str, default='', help='Snakepit instance token')
 
     args = parser.parse_args()
+
+    if not args.elixir_address:
+        parser.error(
+            "--elixir-address is required (set --elixir-address or SNAKEPIT_GRPC_ADDRESS)"
+        )
 
     maybe_create_process_group()
 

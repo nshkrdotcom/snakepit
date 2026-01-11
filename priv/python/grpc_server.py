@@ -1085,7 +1085,7 @@ async def wait_for_elixir_server(
     the Elixir gRPC Bridge Server has fully bound to its socket.
 
     Args:
-        elixir_address: The address of the Elixir server (e.g., 'localhost:50051')
+        elixir_address: The address of the Elixir server (e.g., '127.0.0.1:50051')
         max_retries: Maximum number of connection attempts
         initial_delay: Initial delay in seconds (doubles each retry)
 
@@ -1319,10 +1319,22 @@ def main():
                         help='Port to listen on (0 for dynamic allocation)')
     parser.add_argument('--adapter', type=str, required=False,
                         help='Python module path to adapter class')
-    parser.add_argument('--elixir-address', type=str, required=False,
-                        help='Address of the Elixir gRPC server (e.g., localhost:50051)')
+    default_elixir_address = os.environ.get("SNAKEPIT_GRPC_ADDRESS") or os.environ.get(
+        "SNAKEPIT_ELIXIR_ADDRESS"
+    )
+    parser.add_argument(
+        '--elixir-address',
+        type=str,
+        required=False,
+        default=default_elixir_address,
+        help='Address of the Elixir gRPC server (e.g., 127.0.0.1:50051 or SNAKEPIT_GRPC_ADDRESS)',
+    )
     parser.add_argument('--snakepit-run-id', type=str, default='',
                         help='Snakepit run ID for process cleanup')
+    parser.add_argument('--snakepit-instance-name', type=str, default='',
+                        help='Snakepit instance name for process scoping')
+    parser.add_argument('--snakepit-instance-token', type=str, default='',
+                        help='Snakepit instance token for process scoping')
     parser.add_argument('--heartbeat-enabled', action='store_true',
                         help='Enable Python heartbeat client')
     parser.add_argument('--heartbeat-interval-ms', type=int, default=None,
@@ -1363,7 +1375,9 @@ def main():
         parser.error("--adapter is required (try --adapter snakepit_bridge.adapters.showcase.ShowcaseAdapter)")
 
     if not args.elixir_address:
-        parser.error("--elixir-address is required (e.g., localhost:50051)")
+        parser.error(
+            "--elixir-address is required (set --elixir-address or SNAKEPIT_GRPC_ADDRESS)"
+        )
 
     maybe_create_process_group()
 

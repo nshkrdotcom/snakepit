@@ -9,9 +9,7 @@ config :snakepit,
   },
   adapter_module: Snakepit.Adapters.GRPCPython,
   grpc_listener: %{
-    mode: :external,
-    host: "localhost",
-    port: 50051
+    mode: :internal
   }
 
 # Logger configuration for development

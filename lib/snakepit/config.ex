@@ -33,6 +33,39 @@ defmodule Snakepit.Config do
           }
         ]
 
+  ## gRPC Listener Configuration
+
+  Snakepit exposes a gRPC server for Python workers. Configure it with
+  `:grpc_listener` (preferred) or legacy `:grpc_port` / `:grpc_host`.
+
+      config :snakepit,
+        grpc_listener: [mode: :internal]
+
+      config :snakepit,
+        grpc_listener: [mode: :external, host: "localhost", port: 50_051]
+
+      config :snakepit,
+        grpc_listener: [mode: :external_pool, host: "localhost", base_port: 50_051, pool_size: 8]
+
+  Listener tuning knobs (all optional):
+  - `:grpc_listener_ready_timeout_ms`
+  - `:grpc_listener_port_check_interval_ms`
+  - `:grpc_listener_reuse_attempts`
+  - `:grpc_listener_reuse_wait_timeout_ms`
+  - `:grpc_listener_reuse_retry_delay_ms`
+
+  ## Instance Isolation
+
+  Snakepit can scope runtime resources to avoid cross-instance collisions.
+  Use `:instance_name` (or `SNAKEPIT_INSTANCE_NAME`) for a human-readable name,
+  and `:instance_token` (or `SNAKEPIT_INSTANCE_TOKEN`) for strong isolation
+  across concurrent runs. Runtime state is persisted under `:data_dir`.
+
+      config :snakepit,
+        instance_name: "my_app",
+        instance_token: "run_a",
+        data_dir: "/var/lib/snakepit"
+
   ## Configuration Schema
 
   Per-pool configuration options:
@@ -586,6 +619,17 @@ defmodule Snakepit.Config do
   end
 
   @doc """
+  Timeout for waiting on the gRPC listener to publish its assigned port.
+  """
+  @spec grpc_listener_ready_timeout_ms() :: pos_integer()
+  def grpc_listener_ready_timeout_ms do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :grpc_listener_ready_timeout_ms),
+      Defaults.grpc_listener_ready_timeout_ms()
+    )
+  end
+
+  @doc """
   Interval (ms) between port readiness checks when reusing an existing gRPC listener.
   """
   @spec grpc_listener_port_check_interval_ms() :: pos_integer()
@@ -638,11 +682,62 @@ defmodule Snakepit.Config do
       Application.get_env(:snakepit, :instance_name) ||
         System.get_env("SNAKEPIT_INSTANCE_NAME")
 
-    cond do
-      is_binary(value) -> value
-      is_atom(value) -> Atom.to_string(value)
-      true -> nil
+    normalize_instance_name_config(value)
+  end
+
+  @doc """
+  Resolve the instance token used for runtime isolation.
+  """
+  @spec instance_token() :: String.t() | nil
+  def instance_token do
+    value =
+      Application.get_env(:snakepit, :instance_token) ||
+        System.get_env("SNAKEPIT_INSTANCE_TOKEN") ||
+        Defaults.instance_token()
+
+    normalize_instance_token_config(value)
+  end
+
+  @doc false
+  @spec instance_name_configured?() :: boolean()
+  def instance_name_configured? do
+    app_value = Application.get_env(:snakepit, :instance_name)
+    env_value = System.get_env("SNAKEPIT_INSTANCE_NAME")
+
+    not is_nil(normalize_instance_name_config(app_value)) or
+      not is_nil(normalize_instance_name_config(env_value))
+  end
+
+  @doc false
+  @spec instance_token_configured?() :: boolean()
+  def instance_token_configured? do
+    app_value = Application.get_env(:snakepit, :instance_token)
+    env_value = System.get_env("SNAKEPIT_INSTANCE_TOKEN")
+
+    not is_nil(normalize_instance_token_config(app_value)) or
+      not is_nil(normalize_instance_token_config(env_value))
+  end
+
+  @doc """
+  Resolve a CLI-safe instance name identifier for process scoping.
+  """
+  @spec instance_name_identifier() :: String.t() | nil
+  def instance_name_identifier do
+    instance_name()
+    |> normalize_instance_name_identifier()
+    |> case do
+      nil -> default_instance_name_identifier()
+      normalized -> normalized
     end
+  end
+
+  @doc """
+  Resolve a CLI-safe instance token identifier for process scoping.
+  """
+  @spec instance_token_identifier() :: String.t() | nil
+  def instance_token_identifier do
+    instance_token()
+    |> normalize_instance_token_identifier()
   end
 
   @doc """
@@ -656,6 +751,107 @@ defmodule Snakepit.Config do
       value
     else
       default_data_dir()
+    end
+  end
+
+  defp normalize_instance_name_config(value) when is_binary(value) do
+    trimmed = String.trim(value)
+
+    case String.downcase(trimmed) do
+      "" -> nil
+      "nil" -> nil
+      "null" -> nil
+      "none" -> nil
+      _ -> trimmed
+    end
+  end
+
+  defp normalize_instance_name_config(value) when is_atom(value) do
+    if value in [nil, nil] do
+      nil
+    else
+      Atom.to_string(value)
+    end
+  end
+
+  defp normalize_instance_name_config(_), do: nil
+
+  defp normalize_instance_token_config(value) when is_binary(value) do
+    trimmed = String.trim(value)
+
+    case String.downcase(trimmed) do
+      "" -> nil
+      "nil" -> nil
+      "null" -> nil
+      "none" -> nil
+      _ -> trimmed
+    end
+  end
+
+  defp normalize_instance_token_config(value) when is_atom(value) do
+    if value in [nil, nil] do
+      nil
+    else
+      Atom.to_string(value)
+    end
+  end
+
+  defp normalize_instance_token_config(_), do: nil
+
+  defp normalize_instance_name_identifier(nil), do: nil
+
+  defp normalize_instance_name_identifier(value) do
+    value
+    |> to_string()
+    |> String.trim()
+    |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
+    |> case do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_instance_token_identifier(nil), do: nil
+
+  defp normalize_instance_token_identifier(value) do
+    value
+    |> to_string()
+    |> String.trim()
+    |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
+    |> case do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp default_instance_name_identifier do
+    env = System.get_env("MIX_ENV") || mix_env()
+
+    cwd =
+      case File.cwd() do
+        {:ok, path} -> Path.basename(path)
+        _ -> nil
+      end
+
+    node_name = node() |> to_string()
+
+    [env, cwd, node_name]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join("_")
+    |> normalize_instance_name_identifier()
+    |> case do
+      nil -> "default"
+      normalized -> normalized
+    end
+  end
+
+  defp mix_env do
+    if Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) do
+      try do
+        Mix.env() |> to_string()
+      rescue
+        _ -> nil
+      end
     end
   end
 

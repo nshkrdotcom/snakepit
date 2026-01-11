@@ -24,7 +24,7 @@ Application.put_env(:snakepit, :pools, [
 ])
 
 Application.put_env(:snakepit, :pool_config, %{pool_size: 2})
-Application.put_env(:snakepit, :grpc_port, 50051)
+Application.put_env(:snakepit, :grpc_listener, %{mode: :internal})
 Snakepit.Examples.Bootstrap.ensure_grpc_port!()
 
 # Suppress Snakepit internal logs for clean output

@@ -106,7 +106,7 @@ def test_initialize_session_propagates_correlation(stub_factory):
 
     servicer = threaded_module.ThreadedBridgeServiceServicer(
         DummyAdapter,
-        "localhost:50051",
+        "127.0.0.1:0",
         max_workers=4,
     )
 
@@ -133,7 +133,7 @@ def test_execute_tool_exposes_request_metadata_and_header_correlation(stub_facto
 
     servicer = threaded_module.ThreadedBridgeServiceServicer(
         CaptureAdapter,
-        "localhost:50051",
+        "127.0.0.1:0",
         max_workers=4,
     )
 

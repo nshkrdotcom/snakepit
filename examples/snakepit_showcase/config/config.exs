@@ -12,6 +12,7 @@ config :snakepit_showcase,
 config :snakepit,
   # Suppress Snakepit internal logs for clean demo output
   log_level: :error,
+  instance_name: "snakepit_showcase",
   adapter_module: Snakepit.Adapters.GRPCPython,
   bootstrap_project_root: snakepit_root,
   pooling_enabled: true,
@@ -25,9 +26,7 @@ config :snakepit,
     ]
   },
   grpc_listener: %{
-    mode: :external,
-    host: "localhost",
-    port: 50051
+    mode: :internal
   }
 
 if python_executable do

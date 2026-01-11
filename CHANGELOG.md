@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.2] - 2026-01-10
+## [0.10.0] - 2026-01-10
 
 ### Changed
 - gRPC listener defaults to internal-only mode (port 0) and now publishes its assigned port to workers via the `grpc_listener` config.
@@ -1541,8 +1541,8 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
-[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.9.2...HEAD
-[0.9.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.9.2
+[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.10.0
 [0.9.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.9.1
 [0.9.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.9.0
 [0.8.5]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.5

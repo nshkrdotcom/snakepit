@@ -8,6 +8,7 @@ defmodule Snakepit.Config.StartupFailFastTest do
   @moduletag :slow
   import ExUnit.CaptureLog
 
+  alias Snakepit.Config
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.ProcessKiller
   alias Snakepit.Test.FakeDoctor
@@ -21,8 +22,14 @@ defmodule Snakepit.Config.StartupFailFastTest do
       python_executable: Application.get_env(:snakepit, :python_executable),
       grpc_port: Application.get_env(:snakepit, :grpc_port),
       grpc_listener: Application.get_env(:snakepit, :grpc_listener),
-      env_doctor_module: Application.get_env(:snakepit, :env_doctor_module)
+      env_doctor_module: Application.get_env(:snakepit, :env_doctor_module),
+      instance_name: Application.get_env(:snakepit, :instance_name),
+      instance_token: Application.get_env(:snakepit, :instance_token)
     }
+
+    instance_name = "snakepit_test_#{System.unique_integer([:positive])}"
+    Application.put_env(:snakepit, :instance_name, instance_name)
+    Application.put_env(:snakepit, :instance_token, "snakepit_test_#{Snakepit.RunID.generate()}")
 
     on_exit(fn ->
       FakeDoctor.reset()
@@ -125,14 +132,16 @@ defmodule Snakepit.Config.StartupFailFastTest do
         }
       ])
 
+      {:ok, socket} =
+        :gen_tcp.listen(0, [:binary, packet: 0, active: false, reuseaddr: true])
+
+      {:ok, {_ip, port}} = :inet.sockname(socket)
+
       Application.put_env(:snakepit, :grpc_listener, %{
         mode: :external,
         host: "localhost",
-        port: 50_051
+        port: port
       })
-
-      {:ok, socket} =
-        :gen_tcp.listen(50_051, [:binary, packet: 0, active: false, reuseaddr: true])
 
       result = Application.ensure_all_started(:snakepit)
       assert port_conflict_error?(result)
@@ -200,11 +209,22 @@ defmodule Snakepit.Config.StartupFailFastTest do
   end
 
   defp assert_no_active_grpc_servers do
+    instance_name = Config.instance_name_identifier()
+    instance_token = Config.instance_token_identifier()
+
     ProcessKiller.find_python_processes()
     |> Enum.map(fn pid -> {pid, ProcessKiller.get_process_command(pid)} end)
     |> Enum.filter(fn
-      {_pid, {:ok, cmd}} -> String.contains?(cmd, "grpc_server.py")
-      _ -> false
+      {_pid, {:ok, cmd}} ->
+        String.contains?(cmd, "grpc_server.py") and
+          ProcessKiller.command_matches_instance?(cmd, instance_name,
+            allow_missing: false,
+            instance_token: instance_token,
+            allow_missing_token: false
+          )
+
+      _ ->
+        false
     end)
     |> case do
       [] ->

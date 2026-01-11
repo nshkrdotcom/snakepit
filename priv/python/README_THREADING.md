@@ -53,10 +53,13 @@ Snakepit includes **multi-threaded Python workers** that can handle multiple con
 python grpc_server_threaded.py \
     --port 50052 \
     --adapter snakepit_bridge.adapters.threaded_showcase.ThreadedShowcaseAdapter \
-    --elixir-address localhost:50051 \
+    --elixir-address "${SNAKEPIT_GRPC_ADDRESS}" \
     --max-workers 16 \
     --thread-safety-check
 ```
+
+Set `SNAKEPIT_GRPC_ADDRESS` to the Elixir listener address (for internal listeners,
+use `Snakepit.GRPC.Listener.address()` to fetch the ephemeral port).
 
 ### 2. Configure Pool in Elixir
 
