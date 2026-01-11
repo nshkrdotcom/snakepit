@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-01-11
+
+### Fixed
+- `Pool.handle_call/3` now resolves string `pool_name` options to configured pool atoms via `resolve_pool_name_opt/2`, fixing routing when callers pass pool names as strings.
+
 ## [0.10.0] - 2026-01-10
 
 ### Changed

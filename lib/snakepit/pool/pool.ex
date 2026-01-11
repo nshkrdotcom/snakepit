@@ -554,7 +554,7 @@ defmodule Snakepit.Pool do
   @impl true
   def handle_call({:execute, command, args, opts}, from, state) do
     # Backward compatibility: route to default pool
-    pool_name = opts[:pool_name] || state.default_pool
+    pool_name = resolve_pool_name_opt(opts, state.default_pool)
     Dispatcher.execute(state, pool_name, command, args, opts, from, dispatcher_context())
   end
 

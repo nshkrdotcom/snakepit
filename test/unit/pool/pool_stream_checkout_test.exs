@@ -94,4 +94,18 @@ defmodule Snakepit.Pool.StreamCheckoutTest do
     assert new_state.pools.pool_b.worker_loads["worker_b"] == 1
     assert new_state.pools.pool_a.worker_loads == %{}
   end
+
+  test "execute resolves string pool_name to configured pool", %{state: state} do
+    from = {self(), make_ref()}
+
+    pool_b = %{state.pools.pool_b | available: MapSet.new()}
+    pools = Map.put(state.pools, :pool_b, pool_b)
+    state = %{state | pools: pools}
+
+    {:noreply, new_state} =
+      Pool.handle_call({:execute, "ping", %{}, [pool_name: "pool_b"]}, from, state)
+
+    assert :queue.len(new_state.pools.pool_b.request_queue) == 1
+    assert :queue.len(new_state.pools.pool_a.request_queue) == 0
+  end
 end
