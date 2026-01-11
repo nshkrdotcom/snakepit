@@ -126,6 +126,52 @@ config :snakepit, log_level: :none           # Complete silence
 config :snakepit, log_level: :debug, log_categories: [:grpc, :pool]
 ```
 
+### gRPC Listener Configuration
+
+By default, Snakepit runs an internal-only gRPC listener on an ephemeral port
+and publishes the assigned port to Python workers at runtime:
+
+```elixir
+config :snakepit,
+  grpc_listener: %{
+    mode: :internal
+  }
+```
+
+Explicit external bindings are opt-in and require host/port configuration:
+
+```elixir
+config :snakepit,
+  grpc_listener: %{
+    mode: :external,
+    host: "localhost",
+    bind_host: "0.0.0.0",
+    port: 50051
+  }
+```
+
+For multi-instance deployments sharing a host, use the pooled external mode:
+
+```elixir
+config :snakepit,
+  grpc_listener: %{
+    mode: :external_pool,
+    host: "localhost",
+    bind_host: "0.0.0.0",
+    base_port: 50051,
+    pool_size: 32
+  }
+```
+
+To isolate process registry state when sharing a deployment directory, set
+an explicit instance name and data directory:
+
+```elixir
+config :snakepit,
+  instance_name: "my-app-a",
+  data_dir: "/var/lib/snakepit"
+```
+
 ### Runtime Configurable Defaults
 
 All hardcoded timeout and sizing values are now configurable via `Application.get_env/3`.
@@ -193,8 +239,15 @@ config :snakepit,
   session_max_sessions: 10_000,
   session_warning_threshold: 0.8,
 
-  # gRPC server
-  grpc_port: 50_051,
+  # gRPC listener
+  grpc_listener: %{mode: :internal},
+  grpc_internal_host: "127.0.0.1",
+  grpc_port_pool_size: 32,
+  grpc_listener_ready_timeout_ms: 5_000,
+  grpc_listener_port_check_interval_ms: 25,
+  grpc_listener_reuse_attempts: 3,
+  grpc_listener_reuse_wait_timeout_ms: 500,
+  grpc_listener_reuse_retry_delay_ms: 100,
   grpc_num_acceptors: 20,
   grpc_max_connections: 1000,
   grpc_socket_backlog: 512

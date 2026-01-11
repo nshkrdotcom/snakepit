@@ -20,6 +20,7 @@ defmodule Snakepit.Config.StartupFailFastTest do
       adapter_module: Application.get_env(:snakepit, :adapter_module),
       python_executable: Application.get_env(:snakepit, :python_executable),
       grpc_port: Application.get_env(:snakepit, :grpc_port),
+      grpc_listener: Application.get_env(:snakepit, :grpc_listener),
       env_doctor_module: Application.get_env(:snakepit, :env_doctor_module)
     }
 
@@ -123,6 +124,12 @@ defmodule Snakepit.Config.StartupFailFastTest do
           adapter_module: adapter
         }
       ])
+
+      Application.put_env(:snakepit, :grpc_listener, %{
+        mode: :external,
+        host: "localhost",
+        port: 50_051
+      })
 
       {:ok, socket} =
         :gen_tcp.listen(50_051, [:binary, packet: 0, active: false, reuseaddr: true])
@@ -265,6 +272,13 @@ defmodule Snakepit.Config.StartupFailFastTest do
   defp port_conflict_error?(
          {:error,
           {:snakepit, {{:shutdown, {:failed_to_start_child, GRPC.Server.Supervisor, _}}, _}}}
+       ),
+       do: true
+
+  defp port_conflict_error?({:error, {:snakepit, {:grpc_listener_failed, _}}}), do: true
+
+  defp port_conflict_error?(
+         {:error, {:snakepit, {{:grpc_listener_failed, _}, {Snakepit.Application, :start, _}}}}
        ),
        do: true
 

@@ -121,6 +121,34 @@ defmodule Snakepit.Examples.Bootstrap do
 
   @spec ensure_grpc_port!() :: :ok
   def ensure_grpc_port! do
+    if Application.get_env(:snakepit, :grpc_listener) do
+      ensure_listener_port!()
+    else
+      ensure_legacy_port!()
+    end
+  end
+
+  defp ensure_listener_port! do
+    case Snakepit.Config.grpc_listener_config() do
+      {:ok, %{mode: :internal}} ->
+        :ok
+
+      {:ok, %{mode: :external, port: port}} ->
+        if port_available?(port) do
+          :ok
+        else
+          raise "gRPC port #{port} is already in use; update grpc_listener config"
+        end
+
+      {:ok, %{mode: :external_pool}} ->
+        :ok
+
+      {:error, reason} ->
+        raise "Invalid grpc_listener config: #{inspect(reason)}"
+    end
+  end
+
+  defp ensure_legacy_port! do
     port = Application.get_env(:snakepit, :grpc_port, 50_051)
 
     if port_available?(port) do

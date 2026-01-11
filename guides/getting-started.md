@@ -351,10 +351,16 @@ python3 -c "from my_adapter import MyAdapter; print('OK')"
 
 ### Port Conflicts
 
-If port 50051 is in use:
+Internal-only mode uses an ephemeral port, so conflicts only apply when
+you explicitly bind a fixed port. If port 50051 is in use:
 
 ```elixir
-config :snakepit, grpc_port: 60051
+config :snakepit,
+  grpc_listener: %{
+    mode: :external,
+    host: "localhost",
+    port: 60051
+  }
 ```
 
 See [Production Guide](production.md) for comprehensive troubleshooting.

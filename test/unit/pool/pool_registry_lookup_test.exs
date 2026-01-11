@@ -92,6 +92,7 @@ defmodule Snakepit.Pool.RegistryLookupTest do
           adapter: Snakepit.TestAdapters.EphemeralPortGRPCAdapter,
           pool_name: pool_pid,
           pool_identifier: :analytics_pool,
+          elixir_address: "localhost:0",
           worker_config: %{
             heartbeat: %{enabled: false}
           }

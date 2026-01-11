@@ -8,8 +8,14 @@ defmodule Snakepit.Adapters.GRPCPython do
     ## Configuration
 
         Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
-        Application.put_env(:snakepit, :grpc_port, 50051)
-        Application.put_env(:snakepit, :grpc_host, "localhost")
+        Application.put_env(:snakepit, :grpc_listener, %{mode: :internal})
+
+        # External access (explicit opt-in)
+        Application.put_env(:snakepit, :grpc_listener, %{
+          mode: :external,
+          host: "localhost",
+          port: 50051
+        })
 
     Worker ports are OS-assigned (ephemeral) and reported back during startup.
 

@@ -89,9 +89,58 @@ These options apply to all pools or the Snakepit application as a whole.
 | `worker_starter_max_seconds` | `pos_integer()` | `5` | Restart intensity window (seconds) for worker starter supervisor. |
 | `worker_supervisor_max_restarts` | `non_neg_integer()` | `3` | Restart intensity: max restarts for worker supervisor. |
 | `worker_supervisor_max_seconds` | `pos_integer()` | `5` | Restart intensity window (seconds) for worker supervisor. |
-| `grpc_port` | `pos_integer()` | `50051` | Port for the Elixir gRPC server (Python-to-Elixir calls). |
-| `grpc_host` | `String.t()` | `"localhost"` | Host for gRPC connections. |
+| `grpc_listener` | `map()` | `%{mode: :internal}` | gRPC listener configuration (mode/host/port). |
+| `grpc_internal_host` | `String.t()` | `"127.0.0.1"` | Default host for internal-only gRPC listeners. |
+| `grpc_port_pool_size` | `pos_integer()` | `32` | Default pool size for `:external_pool` listeners. |
+| `grpc_listener_ready_timeout_ms` | `pos_integer()` | `5000` | Time (ms) to wait for gRPC listener to publish its port before pool startup. |
+| `grpc_listener_port_check_interval_ms` | `pos_integer()` | `25` | Interval (ms) between port readiness checks when reusing an existing listener. |
+| `grpc_listener_reuse_attempts` | `pos_integer()` | `3` | Number of attempts to reuse or rebind a listener before failing. |
+| `grpc_listener_reuse_wait_timeout_ms` | `pos_integer()` | `500` | Max wait (ms) for an already-started listener to publish its port before retrying. |
+| `grpc_listener_reuse_retry_delay_ms` | `pos_integer()` | `100` | Delay (ms) between listener reuse retries. |
+| `instance_name` | `String.t()` | `nil` | Instance identifier for isolating runtime state. |
+| `data_dir` | `String.t()` | `priv/data` | Directory for runtime persistence (DETS, cleanup state). |
 | `graceful_shutdown_timeout_ms` | `pos_integer()` | `6000` | Time (ms) to wait for Python to terminate gracefully before SIGKILL. |
+
+`grpc_port` and `grpc_host` remain supported for legacy configurations, but
+new deployments should use `grpc_listener`.
+
+### gRPC Listener Modes
+
+Internal-only mode binds to an ephemeral port and advertises localhost to workers:
+
+```elixir
+config :snakepit,
+  grpc_listener: %{
+    mode: :internal
+  }
+```
+
+External bindings require explicit host/port configuration:
+
+```elixir
+config :snakepit,
+  grpc_listener: %{
+    mode: :external,
+    host: "localhost",
+    bind_host: "0.0.0.0",
+    port: 50051
+  }
+```
+
+To run multiple instances on the same host, use pooled external ports:
+
+```elixir
+config :snakepit,
+  grpc_listener: %{
+    mode: :external_pool,
+    host: "localhost",
+    bind_host: "0.0.0.0",
+    base_port: 50051,
+    pool_size: 32
+  }
+```
+
+Use `instance_name` and `data_dir` to isolate registry state when sharing a deployment directory.
 
 ### Capacity Strategies
 
@@ -402,7 +451,12 @@ config :snakepit,
   pool_startup_timeout: 30_000,
   pool_queue_timeout: 10_000,
   pool_max_queue_size: 5000,
-  grpc_port: 50051,
+  grpc_listener: %{
+    mode: :external,
+    host: "snakepit.internal",
+    bind_host: "0.0.0.0",
+    port: 50051
+  },
 
   # Logging
   log_level: :info,

@@ -13,13 +13,16 @@ defmodule Snakepit.Bridge.PythonIntegrationTest do
   use Snakepit.PythonIntegrationCase
 
   describe "Full Stack Integration" do
-    setup do
+    setup %{grpc_address: grpc_address} do
       session_id = "integration_test_#{:erlang.unique_integer([:positive])}"
-      {:ok, session_id: session_id}
+      {:ok, session_id: session_id, grpc_address: grpc_address}
     end
 
-    test "heartbeat and session timeout", %{session_id: session_id} do
-      {:ok, channel} = GRPC.Stub.connect("localhost:50051")
+    test "heartbeat and session timeout", %{
+      session_id: session_id,
+      grpc_address: grpc_address
+    } do
+      {:ok, channel} = GRPC.Stub.connect(grpc_address)
 
       on_exit(fn ->
         GRPC.Stub.disconnect(channel)

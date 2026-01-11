@@ -34,6 +34,7 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
     [
       id: worker_id,
       adapter: MockGRPCAdapter,
+      elixir_address: "localhost:0",
       worker_config: %{}
     ]
     |> Keyword.merge(overrides)

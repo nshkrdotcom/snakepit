@@ -66,6 +66,8 @@ defmodule Snakepit.Pool.Initializer do
   # Helper to perform blocking pool initialization in a separate process
   # pool_genserver_name is the registered name of the Pool GenServer (captured before spawn)
   defp do_pool_initialization(pools_data, _baseline_resources, pool_genserver_name) do
+    ensure_grpc_listener_ready!()
+
     Enum.map(pools_data, fn {pool_name, pool_state} ->
       SLog.info(
         @log_category,
@@ -112,6 +114,17 @@ defmodule Snakepit.Pool.Initializer do
       {pool_name, updated_pool_state}
     end)
     |> Enum.into(%{})
+  end
+
+  defp ensure_grpc_listener_ready! do
+    case Snakepit.GRPC.Listener.await_ready() do
+      {:ok, _info} ->
+        :ok
+
+      {:error, :timeout} ->
+        SLog.error(@log_category, "gRPC listener failed to publish port within timeout")
+        exit({:grpc_listener_unavailable, :timeout})
+    end
   end
 
   defp start_workers_concurrently(

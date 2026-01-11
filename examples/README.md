@@ -1,6 +1,6 @@
 # Snakepit Examples
 
-This directory contains working examples demonstrating Snakepit's features. Run from the project root with `mix run --no-start` so the scripts can set `:grpc_port` and `:pooling_enabled` before Snakepit starts. Plain `mix run` also works, but it will restart Snakepit if Mix already started the app.
+This directory contains working examples demonstrating Snakepit's features. Run from the project root with `mix run --no-start` so the scripts can set `:grpc_listener` (or legacy `:grpc_port`) and `:pooling_enabled` before Snakepit starts. Plain `mix run` also works, but it will restart Snakepit if Mix already started the app.
 
 ## Quick Start
 

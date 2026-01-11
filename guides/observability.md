@@ -106,6 +106,19 @@ defmodule MyApp.Application do
 end
 ```
 
+## Exporter Strategy (Planning)
+
+Snakepit emits `:telemetry` events only. Exporters are intentionally owned by
+the host application so it can choose collection strategies without port
+conflicts:
+
+- Prefer **push-based exporters** (OTLP, StatsD, Prometheus Pushgateway) for
+  multi-instance deployments that share a host or release directory.
+- Use an `instance_name` label (or metadata key) to disambiguate metrics across
+  concurrent Snakepit instances.
+- If you do use a pull-based Prometheus exporter, run a single exporter per host
+  app and pass Snakepit metrics into it.
+
 ## Measurements and Metadata
 
 ```elixir

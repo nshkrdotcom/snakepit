@@ -137,7 +137,24 @@ defmodule Snakepit.GRPCWorker.Bootstrap do
 
     session_id = generate_session_id()
     Logger.metadata(session_id: session_id)
-    elixir_address = build_elixir_address()
+
+    elixir_address =
+      opts
+      |> Keyword.get(:elixir_address)
+      |> case do
+        nil ->
+          opts
+          |> Keyword.get(:worker_config, %{})
+          |> Map.get(:elixir_address)
+
+        value ->
+          value
+      end
+      |> case do
+        nil -> build_elixir_address()
+        value -> value
+      end
+
     port = adapter.get_port()
 
     worker_config =
@@ -196,9 +213,13 @@ defmodule Snakepit.GRPCWorker.Bootstrap do
   end
 
   defp build_elixir_address do
-    elixir_grpc_host = Application.get_env(:snakepit, :grpc_host, "localhost")
-    elixir_grpc_port = Application.get_env(:snakepit, :grpc_port, 50_051)
-    "#{elixir_grpc_host}:#{elixir_grpc_port}"
+    case Snakepit.GRPC.Listener.address() do
+      address when is_binary(address) ->
+        address
+
+      _ ->
+        raise "gRPC listener address not available; ensure listener has started"
+    end
   end
 
   defp resolve_process_group(process_pid, %{process_group?: true})

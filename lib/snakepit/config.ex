@@ -109,6 +109,16 @@ defmodule Snakepit.Config do
   @type pool_config :: map()
   @type normalized_pool_config :: map()
   @type validation_result :: {:ok, [pool_config()]} | {:error, term()}
+  @type grpc_listener_mode :: :internal | :external | :external_pool
+
+  @type grpc_listener_config :: %{
+          mode: grpc_listener_mode(),
+          host: String.t(),
+          bind_host: String.t(),
+          port: non_neg_integer() | nil,
+          base_port: pos_integer() | nil,
+          pool_size: pos_integer() | nil
+        }
 
   # Base heartbeat config - actual runtime defaults are in Snakepit.Defaults
   @base_heartbeat_config_template %{
@@ -543,6 +553,292 @@ defmodule Snakepit.Config do
   rescue
     ArgumentError ->
       key
+  end
+
+  @doc """
+  Load and validate the gRPC listener configuration.
+
+  Returns `{:ok, config}` or `{:error, reason}`.
+  """
+  @spec grpc_listener_config() :: {:ok, grpc_listener_config()} | {:error, term()}
+  def grpc_listener_config do
+    case Application.get_env(:snakepit, :grpc_listener) do
+      nil ->
+        legacy_grpc_listener_config()
+
+      config when is_map(config) or is_list(config) ->
+        normalize_grpc_listener_config(config)
+
+      invalid ->
+        {:error, {:invalid_grpc_listener_config, invalid}}
+    end
+  end
+
+  @doc """
+  Load the gRPC listener configuration or raise on error.
+  """
+  @spec grpc_listener_config!() :: grpc_listener_config()
+  def grpc_listener_config! do
+    case grpc_listener_config() do
+      {:ok, config} -> config
+      {:error, reason} -> raise ArgumentError, format_grpc_listener_error(reason)
+    end
+  end
+
+  @doc """
+  Interval (ms) between port readiness checks when reusing an existing gRPC listener.
+  """
+  @spec grpc_listener_port_check_interval_ms() :: pos_integer()
+  def grpc_listener_port_check_interval_ms do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :grpc_listener_port_check_interval_ms),
+      Defaults.grpc_listener_port_check_interval_ms()
+    )
+  end
+
+  @doc """
+  Number of attempts to reuse or rebind a gRPC listener before failing.
+  """
+  @spec grpc_listener_reuse_attempts() :: pos_integer()
+  def grpc_listener_reuse_attempts do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :grpc_listener_reuse_attempts),
+      Defaults.grpc_listener_reuse_attempts()
+    )
+  end
+
+  @doc """
+  Max wait (ms) for an already-started gRPC listener to publish its port before retrying.
+  """
+  @spec grpc_listener_reuse_wait_timeout_ms() :: pos_integer()
+  def grpc_listener_reuse_wait_timeout_ms do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :grpc_listener_reuse_wait_timeout_ms),
+      Defaults.grpc_listener_reuse_wait_timeout_ms()
+    )
+  end
+
+  @doc """
+  Delay (ms) between gRPC listener reuse retries.
+  """
+  @spec grpc_listener_reuse_retry_delay_ms() :: pos_integer()
+  def grpc_listener_reuse_retry_delay_ms do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :grpc_listener_reuse_retry_delay_ms),
+      Defaults.grpc_listener_reuse_retry_delay_ms()
+    )
+  end
+
+  @doc """
+  Resolve the instance name used for runtime isolation.
+  """
+  @spec instance_name() :: String.t() | nil
+  def instance_name do
+    value =
+      Application.get_env(:snakepit, :instance_name) ||
+        System.get_env("SNAKEPIT_INSTANCE_NAME")
+
+    cond do
+      is_binary(value) -> value
+      is_atom(value) -> Atom.to_string(value)
+      true -> nil
+    end
+  end
+
+  @doc """
+  Resolve the data directory used for runtime persistence.
+  """
+  @spec data_dir() :: String.t()
+  def data_dir do
+    value = Application.get_env(:snakepit, :data_dir) || System.get_env("SNAKEPIT_DATA_DIR")
+
+    if is_binary(value) and value != "" do
+      value
+    else
+      default_data_dir()
+    end
+  end
+
+  defp legacy_grpc_listener_config do
+    case Application.fetch_env(:snakepit, :grpc_port) do
+      {:ok, port} when port in [0, "0"] ->
+        {:ok, default_internal_listener()}
+
+      {:ok, port} ->
+        host =
+          Application.get_env(:snakepit, :grpc_host, Defaults.grpc_internal_host())
+
+        normalize_grpc_listener_config(%{mode: :external, host: host, port: port})
+
+      :error ->
+        {:ok, default_internal_listener()}
+    end
+  end
+
+  defp default_internal_listener do
+    host = Defaults.grpc_internal_host()
+
+    %{
+      mode: :internal,
+      host: host,
+      bind_host: host,
+      port: 0,
+      base_port: nil,
+      pool_size: nil
+    }
+  end
+
+  defp normalize_grpc_listener_config(config) when is_list(config) do
+    config
+    |> Enum.into(%{}, fn
+      {key, value} when is_atom(key) -> {key, value}
+      {key, value} when is_binary(key) -> {key, value}
+      _ -> {:invalid, :ignored}
+    end)
+    |> Map.drop([:invalid])
+    |> normalize_grpc_listener_config()
+  end
+
+  defp normalize_grpc_listener_config(config) when is_map(config) do
+    mode = normalize_grpc_mode(fetch_value(config, :mode))
+
+    with {:ok, mode} <- validate_grpc_mode(mode) do
+      case mode do
+        :internal ->
+          {:ok, normalize_internal_listener(config)}
+
+        :external ->
+          normalize_external_listener(config)
+
+        :external_pool ->
+          normalize_external_pool_listener(config)
+      end
+    end
+  end
+
+  defp normalize_internal_listener(config) do
+    host = fetch_value(config, :host) || Defaults.grpc_internal_host()
+    bind_host = fetch_value(config, :bind_host) || host
+
+    %{
+      mode: :internal,
+      host: host,
+      bind_host: bind_host,
+      port: 0,
+      base_port: nil,
+      pool_size: nil
+    }
+  end
+
+  defp normalize_external_listener(config) do
+    host = fetch_value(config, :host)
+    bind_host = fetch_value(config, :bind_host) || host
+    port = normalize_integer(fetch_value(config, :port))
+
+    cond do
+      not is_binary(host) or host == "" ->
+        {:error, {:invalid_grpc_listener_config, :missing_host}}
+
+      not is_integer(port) or port <= 0 ->
+        {:error, {:invalid_grpc_listener_config, :missing_port}}
+
+      true ->
+        {:ok,
+         %{
+           mode: :external,
+           host: host,
+           bind_host: bind_host,
+           port: port,
+           base_port: nil,
+           pool_size: nil
+         }}
+    end
+  end
+
+  defp normalize_external_pool_listener(config) do
+    host = fetch_value(config, :host)
+    bind_host = fetch_value(config, :bind_host) || host
+    base_port = normalize_integer(fetch_value(config, :base_port))
+
+    pool_size =
+      normalize_integer(fetch_value(config, :pool_size)) || Defaults.grpc_port_pool_size()
+
+    cond do
+      not is_binary(host) or host == "" ->
+        {:error, {:invalid_grpc_listener_config, :missing_host}}
+
+      not is_integer(base_port) or base_port <= 0 ->
+        {:error, {:invalid_grpc_listener_config, :missing_base_port}}
+
+      not is_integer(pool_size) or pool_size <= 0 ->
+        {:error, {:invalid_grpc_listener_config, :invalid_pool_size}}
+
+      true ->
+        {:ok,
+         %{
+           mode: :external_pool,
+           host: host,
+           bind_host: bind_host,
+           port: nil,
+           base_port: base_port,
+           pool_size: pool_size
+         }}
+    end
+  end
+
+  defp normalize_grpc_mode(nil), do: :internal
+  defp normalize_grpc_mode(mode) when is_atom(mode), do: mode
+
+  defp normalize_grpc_mode(mode) when is_binary(mode) do
+    case String.downcase(mode) do
+      "internal" -> :internal
+      "external" -> :external
+      "external_pool" -> :external_pool
+      "external-pool" -> :external_pool
+      _ -> :invalid
+    end
+  end
+
+  defp normalize_grpc_mode(_), do: :invalid
+
+  defp validate_grpc_mode(:internal), do: {:ok, :internal}
+  defp validate_grpc_mode(:external), do: {:ok, :external}
+  defp validate_grpc_mode(:external_pool), do: {:ok, :external_pool}
+
+  defp validate_grpc_mode(_mode) do
+    {:error, {:invalid_grpc_listener_config, :invalid_mode}}
+  end
+
+  defp fetch_value(config, key) do
+    Map.get(config, key) || Map.get(config, Atom.to_string(key))
+  end
+
+  defp normalize_integer(nil), do: nil
+  defp normalize_integer(value) when is_integer(value), do: value
+
+  defp normalize_integer(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {int, _rest} -> int
+      :error -> nil
+    end
+  end
+
+  defp normalize_integer(_), do: nil
+
+  defp normalize_positive_integer(value, default) do
+    case normalize_integer(value) do
+      int when is_integer(int) and int > 0 -> int
+      _ -> default
+    end
+  end
+
+  defp format_grpc_listener_error(reason) do
+    "Invalid gRPC listener configuration: #{inspect(reason)}"
+  end
+
+  defp default_data_dir do
+    priv_dir = :code.priv_dir(:snakepit) |> to_string()
+    Path.join([priv_dir, "data"])
   end
 
   defp normalize_affinity(:hint), do: :hint

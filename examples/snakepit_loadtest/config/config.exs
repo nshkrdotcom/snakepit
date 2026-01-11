@@ -10,8 +10,11 @@ config :snakepit,
   adapter_module: Snakepit.Adapters.GRPCPython,
   bootstrap_project_root: snakepit_root,
   pooling_enabled: true,
-  grpc_port: 50051,
-  grpc_host: "localhost",
+  grpc_listener: %{
+    mode: :external,
+    host: "localhost",
+    port: 50051
+  },
   # 60 seconds for load testing
   grpc_timeout: 60_000,
   # Slightly less than gRPC timeout

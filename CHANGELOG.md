@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.2] - 2026-01-10
 
+### Changed
+- gRPC listener defaults to internal-only mode (port 0) and now publishes its assigned port to workers via the `grpc_listener` config.
+- Added explicit external binding modes (`:external`, `:external_pool`) with required host/port configuration and pooled port selection for multi-instance deployments.
+- ProcessRegistry DETS paths are now namespaced by `instance_name` and `data_dir` to prevent shared-deployment collisions.
+
 ### Fixed
 - **Session affinity now supports strict routing** - Requests with `session_id` can be guaranteed to route to the same worker where refs exist by enabling strict affinity modes, preventing "Unknown reference" errors for in-memory Python refs.
   - Added `affinity: :strict_queue` to queue on the preferred worker when busy.

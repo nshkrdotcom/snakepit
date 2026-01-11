@@ -103,15 +103,6 @@ config :snakepit,
     }
   },
 
-  # gRPC configuration
-  # Port for the central Elixir gRPC server (source of truth for state)
-  grpc_port: 50051,
-
-  # Host for the central Elixir gRPC server
-  # This is used by Python workers to callback to Elixir
-  # Can be overridden for distributed deployments (Docker, K8s, etc.)
-  grpc_host: "localhost",
-
   # Worker ports are OS-assigned (ephemeral); no range configuration required.
 
   # Python scientific library threading limits

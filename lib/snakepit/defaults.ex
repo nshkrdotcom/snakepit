@@ -1015,12 +1015,88 @@ defmodule Snakepit.Defaults do
   end
 
   # ============================================================================
+  # gRPC Listener
+  # ============================================================================
+
+  @doc """
+  Default host for internal-only gRPC listeners.
+  Used when `grpc_listener.mode` is `:internal`.
+
+  Default: "127.0.0.1"
+  """
+  @spec grpc_internal_host() :: String.t()
+  def grpc_internal_host do
+    Application.get_env(:snakepit, :grpc_internal_host, "127.0.0.1")
+  end
+
+  @doc """
+  Default port pool size for external pooled listeners.
+  Used when `grpc_listener.mode` is `:external_pool`.
+
+  Default: 32
+  """
+  @spec grpc_port_pool_size() :: pos_integer()
+  def grpc_port_pool_size do
+    Application.get_env(:snakepit, :grpc_port_pool_size, 32)
+  end
+
+  @doc """
+  Timeout for waiting on the gRPC listener to publish its assigned port.
+
+  Default: 5_000 ms
+  """
+  @spec grpc_listener_ready_timeout_ms() :: pos_integer()
+  def grpc_listener_ready_timeout_ms do
+    Application.get_env(:snakepit, :grpc_listener_ready_timeout_ms, 5_000)
+  end
+
+  @doc """
+  Interval (ms) between port readiness checks when reusing an existing gRPC listener.
+
+  Default: 25 ms
+  """
+  @spec grpc_listener_port_check_interval_ms() :: pos_integer()
+  def grpc_listener_port_check_interval_ms do
+    Application.get_env(:snakepit, :grpc_listener_port_check_interval_ms, 25)
+  end
+
+  @doc """
+  Number of attempts to reuse or rebind a gRPC listener before failing.
+
+  Default: 3
+  """
+  @spec grpc_listener_reuse_attempts() :: pos_integer()
+  def grpc_listener_reuse_attempts do
+    Application.get_env(:snakepit, :grpc_listener_reuse_attempts, 3)
+  end
+
+  @doc """
+  Max wait (ms) for an already-started gRPC listener to publish its port before retrying.
+
+  Default: 500 ms
+  """
+  @spec grpc_listener_reuse_wait_timeout_ms() :: pos_integer()
+  def grpc_listener_reuse_wait_timeout_ms do
+    Application.get_env(:snakepit, :grpc_listener_reuse_wait_timeout_ms, 500)
+  end
+
+  @doc """
+  Delay (ms) between gRPC listener reuse retries.
+
+  Default: 100 ms
+  """
+  @spec grpc_listener_reuse_retry_delay_ms() :: pos_integer()
+  def grpc_listener_reuse_retry_delay_ms do
+    Application.get_env(:snakepit, :grpc_listener_reuse_retry_delay_ms, 100)
+  end
+
+  # ============================================================================
   # Application
   # ============================================================================
 
   @doc """
   Default gRPC port for Elixir server.
-  Used in `Snakepit.Application`.
+  Legacy: used when `grpc_listener` is not configured.
 
   Default: 50_051
   """

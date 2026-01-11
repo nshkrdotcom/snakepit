@@ -8,8 +8,11 @@ config :snakepit,
     max_workers: 10
   },
   adapter_module: Snakepit.Adapters.GRPCPython,
-  grpc_port: 50051,
-  grpc_host: "localhost"
+  grpc_listener: %{
+    mode: :external,
+    host: "localhost",
+    port: 50051
+  }
 
 # Logger configuration for development
 config :logger, :console,

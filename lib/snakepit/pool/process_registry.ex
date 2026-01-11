@@ -12,6 +12,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
   """
 
   use GenServer
+  alias Snakepit.Config
   alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
 
@@ -205,16 +206,17 @@ defmodule Snakepit.Pool.ProcessRegistry do
     beam_os_pid = System.pid() |> String.to_integer()
 
     # Create a proper file path for DETS
-    # Include node name to prevent conflicts between multiple BEAM instances
-    priv_dir = :code.priv_dir(:snakepit) |> to_string()
-
-    # Sanitize node name for filesystem usage
-    node_name = node() |> to_string() |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
-    dets_file = Path.join([priv_dir, "data", "process_registry_#{node_name}.dets"])
+    # Namespace by instance name to support shared deployment directories.
+    data_dir = Config.data_dir()
+    instance_name = Config.instance_name()
+    node_name = sanitize_name(node())
+    identifier = sanitize_name(instance_name || node_name || "default")
+    dets_file = Path.join([data_dir, "process_registry_#{identifier}.dets"])
 
     # Ensure directory exists for DETS file
-    dets_dir = Path.dirname(dets_file)
-    File.mkdir_p!(dets_dir)
+    File.mkdir_p!(data_dir)
+
+    warn_if_default_instance(instance_name, node())
 
     # Open DETS for persistence with repair option
     # Generate an unguessable table identifier so callers cannot mutate DETS directly.
@@ -1081,6 +1083,24 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   defp entry_timestamp(_info), do: 0
+
+  defp sanitize_name(nil), do: nil
+
+  defp sanitize_name(name) do
+    name
+    |> to_string()
+    |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
+  end
+
+  defp warn_if_default_instance(nil, :nonode@nohost) do
+    SLog.warning(
+      @log_category,
+      "No instance_name set and node is :nonode@nohost; " <>
+        "multi-instance deployments should set :instance_name to avoid DETS collisions"
+    )
+  end
+
+  defp warn_if_default_instance(_instance_name, _node), do: :ok
 
   defp safe_close_dets(nil), do: :ok
 

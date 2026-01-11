@@ -65,6 +65,7 @@ defmodule Snakepit.GRPCWorkerEphemeralPortTest do
         id: worker_id,
         adapter: EphemeralPortGRPCAdapter,
         pool_name: pool_pid,
+        elixir_address: "localhost:0",
         worker_config: %{
           heartbeat: %{
             enabled: false
@@ -98,6 +99,7 @@ defmodule Snakepit.GRPCWorkerEphemeralPortTest do
         id: worker_id,
         adapter: EphemeralPortGRPCAdapter,
         pool_name: pool_pid,
+        elixir_address: "localhost:0",
         worker_config: %{
           heartbeat: %{enabled: false}
         }

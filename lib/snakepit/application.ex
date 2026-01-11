@@ -13,6 +13,7 @@ defmodule Snakepit.Application do
 
   use Application
   require Logger
+  alias Snakepit.Config
   alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
   alias Snakepit.PythonThreadLimits
@@ -84,9 +85,6 @@ defmodule Snakepit.Application do
       environment: @runtime_env
     )
 
-    # Get gRPC config for the Elixir server
-    grpc_port = Defaults.grpc_port()
-
     # Always start SessionStore as it's needed for tests and bridge functionality
     telemetry_children = Snakepit.TelemetryMetrics.reporter_children()
 
@@ -116,18 +114,8 @@ defmodule Snakepit.Application do
           # Must be started before any gRPC client connections are attempted
           Snakepit.GRPC.ClientSupervisor,
 
-          # Start the central gRPC server that manages state
-          # DIAGNOSTIC: Increase backlog to handle high concurrent connection load (200+ workers)
-          # Default Cowboy backlog is ~128, which causes connection refusals during startup
-          {GRPC.Server.Supervisor,
-           endpoint: Snakepit.GRPC.Endpoint,
-           port: grpc_port,
-           start_server: true,
-           adapter_opts: [
-             num_acceptors: Defaults.grpc_num_acceptors(),
-             max_connections: Defaults.grpc_max_connections(),
-             socket_opts: [backlog: Defaults.grpc_socket_backlog()]
-           ]},
+          # Start the central gRPC listener and publish its assigned port
+          Snakepit.GRPC.Listener,
 
           # Telemetry gRPC stream manager (for Python worker telemetry)
           Snakepit.Telemetry.GrpcStream,
@@ -161,7 +149,21 @@ defmodule Snakepit.Application do
       started_at_ms: System.monotonic_time(:millisecond)
     )
 
-    result
+    case result do
+      {:ok, pid} ->
+        case ensure_grpc_listener_ready(pooling_enabled) do
+          :ok ->
+            {:ok, pid}
+
+          {:error, reason} ->
+            SLog.error(:startup, "gRPC listener failed to start", reason: reason)
+            Supervisor.stop(pid)
+            {:error, {:grpc_listener_failed, reason}}
+        end
+
+      other ->
+        other
+    end
   end
 
   @impl true
@@ -202,6 +204,40 @@ defmodule Snakepit.Application do
       end
     end
   end
+
+  defp ensure_grpc_listener_ready(false), do: :ok
+
+  defp ensure_grpc_listener_ready(true) do
+    with {:ok, config} <- Config.grpc_listener_config(),
+         {:ok, info} <- Snakepit.GRPC.Listener.await_ready(),
+         :ok <- validate_listener_info(config, info) do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp validate_listener_info(%{mode: :external, port: expected}, %{port: actual}) do
+    if expected == actual do
+      :ok
+    else
+      {:error, {:grpc_listener_port_mismatch, expected, actual}}
+    end
+  end
+
+  defp validate_listener_info(
+         %{mode: :external_pool, base_port: base_port, pool_size: pool_size},
+         %{port: actual}
+       )
+       when is_integer(base_port) and is_integer(pool_size) do
+    if actual in base_port..(base_port + pool_size - 1) do
+      :ok
+    else
+      {:error, {:grpc_listener_port_mismatch, base_port, actual}}
+    end
+  end
+
+  defp validate_listener_info(_config, _info), do: :ok
 
   defp ensure_python_ready do
     # Ensure snakepit's Python requirements are installed (auto-upgrade if needed)

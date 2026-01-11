@@ -22,6 +22,8 @@ defmodule Snakepit.EnvDoctor do
 
   @runtime_checks [:python_exec, :grpc_import, :grpc_server, :adapter_imports]
   alias Snakepit.Adapters.GRPCPython
+  alias Snakepit.Config
+  alias Snakepit.Defaults
   alias Snakepit.PythonRuntime
 
   @doc """
@@ -90,7 +92,7 @@ defmodule Snakepit.EnvDoctor do
         Application.get_env(:snakepit, :require_python_313?, false)
       )
 
-    grpc_port = opts[:grpc_port] || Application.get_env(:snakepit, :grpc_port, 50_051)
+    grpc_listener = resolve_grpc_listener(opts)
 
     %{
       project_root: project_root,
@@ -98,7 +100,7 @@ defmodule Snakepit.EnvDoctor do
       python_runtime: python_runtime,
       runner: runner,
       require_python_313?: require_python_313?,
-      grpc_port: grpc_port
+      grpc_listener: grpc_listener
     }
   end
 
@@ -219,7 +221,69 @@ defmodule Snakepit.EnvDoctor do
     end
   end
 
-  defp run_check(:grpc_port, %{grpc_port: port}) do
+  defp run_check(:grpc_port, %{grpc_listener: {:error, reason}}) do
+    error(:grpc_port, "Invalid gRPC listener config: #{inspect(reason)}")
+  end
+
+  defp run_check(:grpc_port, %{grpc_listener: %{mode: :internal}}) do
+    ok(:grpc_port, "Internal gRPC listener uses port 0 (ephemeral)")
+  end
+
+  defp run_check(:grpc_port, %{grpc_listener: %{mode: :external, port: port}}) do
+    check_grpc_port_available(port)
+  end
+
+  defp run_check(:grpc_port, %{
+         grpc_listener: %{mode: :external_pool, base_port: base_port, pool_size: pool_size}
+       })
+       when is_integer(base_port) and is_integer(pool_size) do
+    ports = base_port..(base_port + pool_size - 1)
+
+    case Enum.find(ports, &port_available?/1) do
+      nil ->
+        error(
+          :grpc_port,
+          "No available ports in pool #{base_port}-#{base_port + pool_size - 1}. " <>
+            "Adjust grpc_listener config."
+        )
+
+      port ->
+        ok(:grpc_port, "Port #{port} available for pooled gRPC listener")
+    end
+  end
+
+  defp run_check(:grpc_port, %{grpc_listener: %{mode: :external_pool}}) do
+    error(:grpc_port, "Invalid grpc_listener pool configuration")
+  end
+
+  defp run_check(:grpc_port, _state) do
+    warning(:grpc_port, "Unable to resolve gRPC listener configuration")
+  end
+
+  defp resolve_grpc_listener(opts) do
+    cond do
+      Keyword.has_key?(opts, :grpc_listener) ->
+        opts[:grpc_listener]
+
+      Keyword.has_key?(opts, :grpc_port) ->
+        host = opts[:grpc_host] || Defaults.grpc_internal_host()
+        port = opts[:grpc_port]
+
+        if port in [0, "0"] do
+          %{mode: :internal, host: host, bind_host: host, port: 0}
+        else
+          %{mode: :external, host: host, bind_host: host, port: port}
+        end
+
+      true ->
+        case Config.grpc_listener_config() do
+          {:ok, config} -> config
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp check_grpc_port_available(port) do
     case :gen_tcp.listen(port, [:binary, active: false, reuseaddr: true]) do
       {:ok, socket} ->
         :gen_tcp.close(socket)
@@ -228,11 +292,22 @@ defmodule Snakepit.EnvDoctor do
       {:error, :eaddrinuse} ->
         error(
           :grpc_port,
-          "Port #{port} is already in use. Stop the conflicting service or adjust :grpc_port."
+          "Port #{port} is already in use. Stop the conflicting service or adjust the listener config."
         )
 
       {:error, reason} ->
         warning(:grpc_port, "Unable to verify port #{port}: #{inspect(reason)}")
+    end
+  end
+
+  defp port_available?(port) do
+    case :gen_tcp.listen(port, [:binary, active: false, reuseaddr: true]) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        true
+
+      _ ->
+        false
     end
   end
 

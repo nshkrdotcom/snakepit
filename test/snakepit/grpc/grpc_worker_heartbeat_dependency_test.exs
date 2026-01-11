@@ -39,6 +39,7 @@ defmodule Snakepit.GRPCWorkerHeartbeatDependencyTest do
              id: worker_id,
              adapter: Snakepit.TestAdapters.MockGRPCAdapter,
              pool_name: pool_pid,
+             elixir_address: "localhost:0",
              worker_config: %{
                heartbeat: %{
                  enabled: true,
@@ -75,6 +76,7 @@ defmodule Snakepit.GRPCWorkerHeartbeatDependencyTest do
         id: worker_id,
         adapter: Snakepit.TestAdapters.MockGRPCAdapter,
         pool_name: pool_pid,
+        elixir_address: "localhost:0",
         worker_config: %{
           heartbeat: %{
             enabled: true,

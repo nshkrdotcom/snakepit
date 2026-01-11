@@ -24,8 +24,11 @@ config :snakepit,
       "snakepit_bridge.adapters.showcase.showcase_adapter.ShowcaseAdapter"
     ]
   },
-  grpc_port: 50051,
-  grpc_host: "localhost"
+  grpc_listener: %{
+    mode: :external,
+    host: "localhost",
+    port: 50051
+  }
 
 if python_executable do
   config :snakepit, :python_executable, python_executable

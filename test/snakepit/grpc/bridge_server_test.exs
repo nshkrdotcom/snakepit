@@ -142,6 +142,7 @@ defmodule Snakepit.GRPC.BridgeServerTest do
           id: worker_id,
           adapter: Snakepit.TestAdapters.EphemeralPortGRPCAdapter,
           pool_name: pool_pid,
+          elixir_address: "localhost:0",
           worker_config: %{
             heartbeat: %{enabled: false}
           }
