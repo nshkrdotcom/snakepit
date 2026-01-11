@@ -65,6 +65,7 @@ defmodule Snakepit.Defaults do
         session_default_ttl: 3600,
         session_max_sessions: 10_000,
         session_warning_threshold: 0.8,
+        affinity: :hint,
 
         # Process registry settings
         process_registry_cleanup_interval: 30_000,
@@ -1123,5 +1124,19 @@ defmodule Snakepit.Defaults do
   @spec affinity_cache_ttl_seconds() :: pos_integer()
   def affinity_cache_ttl_seconds do
     Application.get_env(:snakepit, :affinity_cache_ttl_seconds, 60)
+  end
+
+  @doc """
+  Default session affinity mode for pools.
+
+  - `:hint` - Prefer the last worker when available, otherwise fall back
+  - `:strict_queue` - Queue when preferred worker is busy
+  - `:strict_fail_fast` - Return `{:error, :worker_busy}` when preferred worker is busy
+
+  Default: `:hint`
+  """
+  @spec default_affinity_mode() :: :hint | :strict_queue | :strict_fail_fast
+  def default_affinity_mode do
+    Application.get_env(:snakepit, :affinity, :hint)
   end
 end

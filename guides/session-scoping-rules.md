@@ -126,7 +126,14 @@ class MyAdapter(BaseAdapter):
 
 **Session IDs**: Yes, session IDs are plain strings and can be passed freely.
 
-**Worker Affinity**: Sessions track their `last_worker_id` for affinity, but this is a hint rather than a hard constraint. Any worker can service any session.
+**Worker Affinity**: Sessions track their `last_worker_id` for affinity. By default this is a hint rather than a hard constraint, so any worker can service any session.
+
+**Affinity Modes** (configurable per pool):
+- `:hint` (default) — Prefer the last worker if available; otherwise fall back to any available worker.
+- `:strict_queue` — If the preferred worker is busy, queue the request until it becomes available. This can increase latency and queue timeouts under load.
+- `:strict_fail_fast` — If the preferred worker is busy, return `{:error, :worker_busy}` immediately.
+
+If the preferred worker is tainted or missing, strict modes return `{:error, :session_worker_unavailable}` so callers can reinitialize state or create a new session.
 
 ### What happens when the owner process dies?
 
@@ -135,6 +142,8 @@ If an Elixir process that created a session terminates:
 1. The session remains in the SessionStore until TTL expires
 2. Other processes can still access the session by ID
 3. Worker affinity is preserved for warm cache hits
+
+For in-memory Python refs (objects stored only inside a worker), use `affinity: :strict_queue` or `:strict_fail_fast`, or isolate sessions in a dedicated pool (or `pool_size: 1`). Hint mode can route to a different worker under load and invalidate those refs.
 
 For cleanup on process death, use a process monitor:
 

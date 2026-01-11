@@ -1,11 +1,11 @@
 # Snakepit Examples
 
-This directory contains working examples demonstrating Snakepit's features. Run from the project root with `mix run` (or `--no-start` if you prefer); each script restarts Snakepit as needed so it can set `:grpc_port` and `:pooling_enabled` safely.
+This directory contains working examples demonstrating Snakepit's features. Run from the project root with `mix run --no-start` so the scripts can set `:grpc_port` and `:pooling_enabled` before Snakepit starts. Plain `mix run` also works, but it will restart Snakepit if Mix already started the app.
 
 ## Quick Start
 
 ```bash
-mix run examples/grpc_basic.exs
+mix run --no-start examples/grpc_basic.exs
 ```
 
 ## Run Everything
@@ -72,6 +72,16 @@ mix run --no-start examples/grpc_streaming.exs 5
 
 ```bash
 mix run --no-start examples/grpc_sessions.exs
+```
+
+#### `grpc_session_affinity_modes.exs`
+**Affinity modes in practice (hint vs strict queue vs strict fail-fast)**
+- Busy-worker behavior comparisons
+- Queueing vs fail-fast semantics
+- Session routing outcomes under load
+
+```bash
+mix run --no-start examples/grpc_session_affinity_modes.exs
 ```
 
 ### ⚡ Concurrency & Performance

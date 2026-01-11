@@ -30,6 +30,10 @@ For simple request-response patterns, use `Snakepit.execute/3` instead.
 | `:pool` | `Snakepit.Pool` | Pool to use |
 | `:timeout` | `300000` | Timeout in ms |
 | `:session_id` | `nil` | Session affinity |
+| `:affinity` | `nil` | Override affinity mode (`:hint`, `:strict_queue`, `:strict_fail_fast`) |
+
+When using `:session_id` with strict affinity, streaming may return `{:error, :worker_busy}` or
+`{:error, :session_worker_unavailable}` if the preferred worker is busy or unavailable.
 
 ### Basic Example
 

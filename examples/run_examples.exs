@@ -43,6 +43,13 @@ defmodule ExampleRunner do
           file: "grpc_sessions.exs",
           description: "Session-based execution with worker affinity",
           duration: "< 1 minute"
+        },
+        %{
+          id: "affinity_modes",
+          name: "Session Affinity Modes",
+          file: "grpc_session_affinity_modes.exs",
+          description: "Hint vs strict queue vs strict fail-fast",
+          duration: "< 1 minute"
         }
       ]
     },

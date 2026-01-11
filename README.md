@@ -14,7 +14,7 @@
 ## Features
 
 - **High-performance process pooling** with concurrent worker initialization
-- **Session affinity** for stateful operations across requests
+- **Session affinity** for stateful operations across requests (hint by default, strict modes available)
 - **gRPC streaming** for real-time progress updates and large data transfers
 - **Bidirectional tool bridge** allowing Python to call Elixir functions and vice versa
 - **Production-ready process management** with automatic orphan cleanup
@@ -31,7 +31,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.9.1"}
+    {:snakepit, "~> 0.9.2"}
   ]
 end
 ```
@@ -50,7 +50,7 @@ For higher-level Python integration with compile-time type generation, use [Snak
 
 ```elixir
 def deps do
-  [{:snakebridge, "~> 0.9.1"}]
+  [{:snakebridge, "~> 0.8.2"}]
 end
 
 def project do
@@ -67,7 +67,7 @@ end
 # Execute a command on any available worker
 {:ok, result} = Snakepit.execute("ping", %{})
 
-# Execute with session affinity (same worker for related requests)
+# Execute with session affinity (prefer the same worker for related requests)
 {:ok, result} = Snakepit.execute_in_session("session_123", "process_data", %{input: data})
 
 # Stream results for long-running operations
@@ -219,7 +219,7 @@ See `Snakepit.Defaults` module documentation for the complete list of configurab
 
 ### Session Affinity
 
-Sessions route related requests to the same worker, enabling stateful operations:
+Sessions route related requests to the same worker when possible, enabling stateful operations:
 
 ```elixir
 session_id = "user_#{user.id}"
@@ -227,10 +227,24 @@ session_id = "user_#{user.id}"
 # First call establishes worker affinity
 {:ok, _} = Snakepit.execute_in_session(session_id, "load_model", %{model: "gpt-4"})
 
-# Subsequent calls go to the same worker
+# Subsequent calls prefer the same worker
 {:ok, result} = Snakepit.execute_in_session(session_id, "generate", %{prompt: "Hello"})
 {:ok, result} = Snakepit.execute_in_session(session_id, "generate", %{prompt: "Continue"})
 ```
+
+By default, affinity is a hint. If the preferred worker is busy or tainted, Snakepit can fall back to another worker. For strict pinning, configure affinity modes at the pool level:
+
+```elixir
+config :snakepit,
+  pools: [
+    %{name: :default, pool_size: 4, affinity: :strict_queue},
+    %{name: :latency_sensitive, pool_size: 4, affinity: :strict_fail_fast}
+  ]
+```
+
+- `:strict_queue` queues requests for the preferred worker when it is busy.
+- `:strict_fail_fast` returns `{:error, :worker_busy}` when the preferred worker is busy.
+- If the preferred worker is tainted or missing, strict modes return `{:error, :session_worker_unavailable}`.
 
 ### Streaming Operations
 

@@ -1,13 +1,22 @@
 defmodule Snakepit.Pool.Scheduler do
   @moduledoc false
 
-  def handle_no_workers_available(pool_name, pool_state, command, args, opts, from, state) do
+  def handle_no_workers_available(
+        pool_name,
+        pool_state,
+        command,
+        args,
+        opts,
+        from,
+        state,
+        affinity_worker_id \\ nil
+      ) do
     current_queue_size = :queue.len(pool_state.request_queue)
 
     if current_queue_size >= pool_state.max_queue_size do
       handle_pool_saturated(pool_name, pool_state, current_queue_size, state)
     else
-      queue_request(pool_name, pool_state, command, args, opts, from, state)
+      queue_request(pool_name, pool_state, command, args, opts, from, state, affinity_worker_id)
     end
   end
 
@@ -31,11 +40,11 @@ defmodule Snakepit.Pool.Scheduler do
     {:reply, {:error, :pool_saturated}, %{state | pools: updated_pools}}
   end
 
-  defp queue_request(pool_name, pool_state, command, args, opts, from, state) do
+  defp queue_request(pool_name, pool_state, command, args, opts, from, state, affinity_worker_id) do
     timer_ref =
       Process.send_after(self(), {:queue_timeout, pool_name, from}, pool_state.queue_timeout)
 
-    request = {from, command, args, opts, System.monotonic_time(), timer_ref}
+    request = {from, command, args, opts, System.monotonic_time(), timer_ref, affinity_worker_id}
     new_queue = :queue.in(request, pool_state.request_queue)
 
     updated_stats =

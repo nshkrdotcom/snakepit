@@ -90,6 +90,7 @@ fi
 EXAMPLE_SCRIPTS=(
   "examples/grpc_basic.exs"
   "examples/grpc_sessions.exs"
+  "examples/grpc_session_affinity_modes.exs"
   "examples/grpc_streaming.exs"
   "examples/grpc_concurrent.exs"
   "examples/grpc_advanced.exs"

@@ -58,7 +58,7 @@ defmodule Snakepit.Pool.Dispatcher do
 
     session_id = opts[:session_id]
 
-    case context.checkout_worker.(pool_state, session_id, state.affinity_cache) do
+    case context.checkout_worker.(pool_state, session_id, state.affinity_cache, opts) do
       {:ok, worker_id, new_pool_state} ->
         execute_with_worker(
           pool_name,
@@ -82,6 +82,24 @@ defmodule Snakepit.Pool.Dispatcher do
           from,
           state
         )
+
+      {:error, {:affinity_busy, preferred_worker_id}} ->
+        Scheduler.handle_no_workers_available(
+          pool_name,
+          pool_state,
+          command,
+          args,
+          opts,
+          from,
+          state,
+          preferred_worker_id
+        )
+
+      {:error, :worker_busy} ->
+        {:reply, {:error, :worker_busy}, state}
+
+      {:error, :session_worker_unavailable} ->
+        {:reply, {:error, :session_worker_unavailable}, state}
     end
   end
 

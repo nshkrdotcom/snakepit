@@ -92,6 +92,7 @@ defmodule Snakepit.Examples.Bootstrap do
       opts
       |> Keyword.put(:await_pool, false)
       |> maybe_put_exit_mode()
+      |> Keyword.put_new(:restart, true)
       |> Keyword.put_new(:stop_mode, :if_started)
 
     Snakepit.run_as_script(

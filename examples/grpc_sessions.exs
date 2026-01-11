@@ -42,8 +42,8 @@ defmodule SessionExample do
     sessions = for i <- 1..3, do: "demo_session_#{i}_#{System.unique_integer([:positive])}"
     IO.puts("Created #{length(sessions)} sessions")
 
-    # 1. Session affinity - same session should prefer same worker
-    IO.puts("\n1. Testing session affinity:")
+    # 1. Session affinity - same session should prefer same worker when available
+    IO.puts("\n1. Testing session affinity (hint mode):")
 
     Enum.each(sessions, fn session_id ->
       # Make multiple calls with the same session_id

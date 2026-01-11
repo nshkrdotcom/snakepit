@@ -4,7 +4,7 @@ defmodule Snakepit do
 
   Extracted from DSPex V3 pool implementation, Snakepit provides:
   - Concurrent worker initialization and management
-  - Stateless pool system with session affinity
+  - Stateless pool system with session affinity (hint by default, strict modes available)
   - Generalized adapter pattern for any external process
   - High-performance OTP-based process management
 
@@ -48,6 +48,7 @@ defmodule Snakepit do
     * `:pool` - The pool to use (default: `Snakepit.Pool`)
     * `:timeout` - Request timeout in ms (default: 60000)
     * `:session_id` - Execute with session affinity
+    * `:affinity` - Override affinity mode (`:hint`, `:strict_queue`, `:strict_fail_fast`)
   """
   @spec execute(command(), args(), keyword()) :: {:ok, result()} | {:error, Snakepit.Error.t()}
   def execute(command, args, opts \\ []) do
@@ -60,6 +61,10 @@ defmodule Snakepit do
   This function executes commands with session-based worker affinity,
   ensuring that subsequent calls with the same session_id prefer
   the same worker when possible for state continuity.
+
+  By default, affinity is a hint: if the preferred worker is busy or tainted,
+  the pool can fall back to another worker. To guarantee pinning for in-memory
+  refs, configure `affinity: :strict_queue` or `:strict_fail_fast` at the pool level.
 
   Args are passed through unchanged - no domain-specific enhancement.
   """
@@ -107,6 +112,7 @@ defmodule Snakepit do
     * `:pool` - The pool to use (default: `Snakepit.Pool`)
     * `:timeout` - Request timeout in ms (default: 300000)
     * `:session_id` - Run in a specific session
+    * `:affinity` - Override affinity mode (`:hint`, `:strict_queue`, `:strict_fail_fast`)
 
   ## Returns
 

@@ -79,6 +79,7 @@ These options apply to all pools or the Snakepit application as a whole.
 | `adapter_module` | `module()` | `nil` | Default adapter module for pools that do not specify one. |
 | `pool_size` | `pos_integer()` | `System.schedulers_online() * 2` | Default pool size. Typically 2x CPU cores. |
 | `capacity_strategy` | `:pool \| :profile \| :hybrid` | `:pool` | How worker capacity is managed across pools. |
+| `affinity` | `:hint \| :strict_queue \| :strict_fail_fast` | `:hint` | Default session affinity mode for pools. |
 | `pool_startup_timeout` | `pos_integer()` | `10000` | Maximum time (ms) to wait for a worker to start. |
 | `pool_queue_timeout` | `pos_integer()` | `5000` | Maximum time (ms) a request waits in queue. |
 | `pool_max_queue_size` | `pos_integer()` | `1000` | Maximum queued requests before rejecting new ones. |
@@ -127,6 +128,25 @@ Each pool can be configured independently with these options.
 | `adapter_args` | `list(String.t())` | `[]` | CLI arguments passed to the Python server. |
 | `adapter_env` | `list({String.t(), String.t()})` | `[]` | Environment variables for Python processes. |
 | `adapter_spec` | `String.t()` | `nil` | Python adapter module path (e.g., `"myapp.adapters.MyAdapter"`). |
+| `affinity` | `:hint \| :strict_queue \| :strict_fail_fast` | Global setting | Session affinity behavior for this pool. |
+
+### Session Affinity Modes
+
+```elixir
+config :snakepit,
+  affinity: :hint  # global default
+
+config :snakepit,
+  pools: [
+    %{name: :default, affinity: :strict_queue, pool_size: 4}
+  ]
+```
+
+- `:hint` (default) — Prefer the last worker if available; otherwise fall back.
+- `:strict_queue` — Queue when the preferred worker is busy; guarantees same-worker routing but can increase latency and queue timeouts.
+- `:strict_fail_fast` — Return `{:error, :worker_busy}` when the preferred worker is busy.
+
+If the preferred worker is tainted or missing, strict modes return `{:error, :session_worker_unavailable}`.
 
 ### Process Profile Options
 

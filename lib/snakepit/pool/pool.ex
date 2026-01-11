@@ -227,7 +227,7 @@ defmodule Snakepit.Pool do
 
   defp checkout_worker_for_stream(pool, opts) do
     timeout = opts[:checkout_timeout] || Defaults.checkout_timeout()
-    GenServer.call(pool, {:checkout_worker, opts[:session_id]}, timeout)
+    GenServer.call(pool, {:checkout_worker, opts[:session_id], opts}, timeout)
   end
 
   defp checkin_worker(pool, worker_id) do
@@ -572,13 +572,52 @@ defmodule Snakepit.Pool do
 
       pool_state ->
         # Pass affinity_cache from top-level state
-        case checkout_worker(pool_state, session_id, state.affinity_cache) do
+        case checkout_worker(pool_state, session_id, state.affinity_cache, []) do
           {:ok, worker_id, new_pool_state} ->
             updated_pools = Map.put(state.pools, pool_name, new_pool_state)
             {:reply, {:ok, worker_id}, %{state | pools: updated_pools}}
 
           {:error, :no_workers} ->
             {:reply, {:error, :no_workers_available}, state}
+
+          {:error, {:affinity_busy, _preferred_worker_id}} ->
+            {:reply, {:error, :worker_busy}, state}
+
+          {:error, :worker_busy} ->
+            {:reply, {:error, :worker_busy}, state}
+
+          {:error, :session_worker_unavailable} ->
+            {:reply, {:error, :session_worker_unavailable}, state}
+        end
+    end
+  end
+
+  def handle_call({:checkout_worker, session_id, opts}, _from, state)
+      when is_list(opts) or is_map(opts) do
+    # Backward compat: use default pool unless a valid pool_name is provided in opts
+    pool_name = resolve_pool_name_opt(opts, state.default_pool)
+
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        {:reply, {:error, :pool_not_found}, state}
+
+      pool_state ->
+        case checkout_worker(pool_state, session_id, state.affinity_cache, opts) do
+          {:ok, worker_id, new_pool_state} ->
+            updated_pools = Map.put(state.pools, pool_name, new_pool_state)
+            {:reply, {:ok, worker_id}, %{state | pools: updated_pools}}
+
+          {:error, :no_workers} ->
+            {:reply, {:error, :no_workers_available}, state}
+
+          {:error, {:affinity_busy, _preferred_worker_id}} ->
+            {:reply, {:error, :worker_busy}, state}
+
+          {:error, :worker_busy} ->
+            {:reply, {:error, :worker_busy}, state}
+
+          {:error, :session_worker_unavailable} ->
+            {:reply, {:error, :session_worker_unavailable}, state}
         end
     end
   end
@@ -590,13 +629,49 @@ defmodule Snakepit.Pool do
         {:reply, {:error, :pool_not_found}, state}
 
       pool_state ->
-        case checkout_worker(pool_state, session_id, state.affinity_cache) do
+        case checkout_worker(pool_state, session_id, state.affinity_cache, []) do
           {:ok, worker_id, new_pool_state} ->
             updated_pools = Map.put(state.pools, pool_name, new_pool_state)
             {:reply, {:ok, worker_id}, %{state | pools: updated_pools}}
 
           {:error, :no_workers} ->
             {:reply, {:error, :no_workers_available}, state}
+
+          {:error, {:affinity_busy, _preferred_worker_id}} ->
+            {:reply, {:error, :worker_busy}, state}
+
+          {:error, :worker_busy} ->
+            {:reply, {:error, :worker_busy}, state}
+
+          {:error, :session_worker_unavailable} ->
+            {:reply, {:error, :session_worker_unavailable}, state}
+        end
+    end
+  end
+
+  def handle_call({:checkout_worker, pool_name, session_id, opts}, _from, state)
+      when is_atom(pool_name) do
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        {:reply, {:error, :pool_not_found}, state}
+
+      pool_state ->
+        case checkout_worker(pool_state, session_id, state.affinity_cache, opts) do
+          {:ok, worker_id, new_pool_state} ->
+            updated_pools = Map.put(state.pools, pool_name, new_pool_state)
+            {:reply, {:ok, worker_id}, %{state | pools: updated_pools}}
+
+          {:error, :no_workers} ->
+            {:reply, {:error, :no_workers_available}, state}
+
+          {:error, {:affinity_busy, _preferred_worker_id}} ->
+            {:reply, {:error, :worker_busy}, state}
+
+          {:error, :worker_busy} ->
+            {:reply, {:error, :worker_busy}, state}
+
+          {:error, :session_worker_unavailable} ->
+            {:reply, {:error, :session_worker_unavailable}, state}
         end
     end
   end
@@ -857,7 +932,7 @@ defmodule Snakepit.Pool do
 
   defp dispatcher_context do
     %{
-      checkout_worker: &checkout_worker/3,
+      checkout_worker: &checkout_worker/4,
       execute_with_crash_barrier: &execute_with_crash_barrier/7,
       async_with_context: &async_with_context/1,
       maybe_checkin_worker: &maybe_checkin_worker/2
@@ -944,22 +1019,66 @@ defmodule Snakepit.Pool do
     end
   end
 
-  defp checkout_worker(pool_state, session_id, affinity_cache) do
+  defp checkout_worker(pool_state, session_id, affinity_cache, opts) do
+    affinity_mode = resolve_affinity_mode(pool_state, opts)
+
     case try_checkout_preferred_worker(pool_state, session_id, affinity_cache) do
       {:ok, worker_id, new_state} ->
         {:ok, worker_id, new_state}
 
-      :no_preferred_worker ->
-        case next_available_worker(pool_state) do
-          {:ok, worker_id} ->
-            new_pool_state = State.increment_worker_load(pool_state, worker_id)
-            maybe_track_capacity(new_pool_state, worker_id, :increment)
-            maybe_store_session_affinity(session_id, worker_id)
-            {:ok, worker_id, new_pool_state}
+      {:unavailable, preferred_worker_id, :busy} ->
+        handle_preferred_busy(pool_state, session_id, affinity_mode, preferred_worker_id)
 
-          :no_workers ->
-            {:error, :no_workers}
-        end
+      {:unavailable, preferred_worker_id, reason} ->
+        handle_preferred_unavailable(
+          pool_state,
+          session_id,
+          affinity_mode,
+          preferred_worker_id,
+          reason
+        )
+
+      :no_preferred_worker ->
+        checkout_any_available(pool_state, session_id)
+    end
+  end
+
+  defp handle_preferred_busy(pool_state, session_id, :hint, _preferred_worker_id) do
+    checkout_any_available(pool_state, session_id)
+  end
+
+  defp handle_preferred_busy(_pool_state, _session_id, :strict_queue, preferred_worker_id) do
+    {:error, {:affinity_busy, preferred_worker_id}}
+  end
+
+  defp handle_preferred_busy(_pool_state, _session_id, :strict_fail_fast, _preferred_worker_id) do
+    {:error, :worker_busy}
+  end
+
+  defp handle_preferred_unavailable(pool_state, session_id, :hint, _preferred_worker_id, _reason) do
+    checkout_any_available(pool_state, session_id)
+  end
+
+  defp handle_preferred_unavailable(
+         _pool_state,
+         _session_id,
+         _affinity_mode,
+         _preferred_worker_id,
+         _reason
+       ) do
+    {:error, :session_worker_unavailable}
+  end
+
+  defp checkout_any_available(pool_state, session_id) do
+    case next_available_worker(pool_state) do
+      {:ok, worker_id} ->
+        new_pool_state = State.increment_worker_load(pool_state, worker_id)
+        maybe_track_capacity(new_pool_state, worker_id, :increment)
+        maybe_store_session_affinity(session_id, worker_id)
+        {:ok, worker_id, new_pool_state}
+
+      :no_workers ->
+        {:error, :no_workers}
     end
   end
 
@@ -969,27 +1088,104 @@ defmodule Snakepit.Pool do
     # PERFORMANCE FIX: Use shared affinity_cache from top-level state
     case get_preferred_worker(session_id, affinity_cache) do
       {:ok, preferred_worker_id} ->
-        # Check if preferred worker is available and not tainted
-        if MapSet.member?(pool_state.available, preferred_worker_id) and
-             not CrashBarrier.worker_tainted?(preferred_worker_id) do
-          new_pool_state = State.increment_worker_load(pool_state, preferred_worker_id)
-          maybe_track_capacity(new_pool_state, preferred_worker_id, :increment)
-          maybe_store_session_affinity(session_id, preferred_worker_id)
-
-          SLog.debug(
-            @log_category,
-            "Using preferred worker #{preferred_worker_id} for session #{session_id}"
-          )
-
-          {:ok, preferred_worker_id, new_pool_state}
-        else
-          :no_preferred_worker
-        end
+        preferred_worker_status(pool_state, preferred_worker_id)
+        |> handle_preferred_status(pool_state, session_id, preferred_worker_id)
 
       {:error, :not_found} ->
         :no_preferred_worker
     end
   end
+
+  defp handle_preferred_status(:available, pool_state, session_id, preferred_worker_id) do
+    new_pool_state = State.increment_worker_load(pool_state, preferred_worker_id)
+    maybe_track_capacity(new_pool_state, preferred_worker_id, :increment)
+    maybe_store_session_affinity(session_id, preferred_worker_id)
+
+    SLog.debug(
+      @log_category,
+      "Using preferred worker #{preferred_worker_id} for session #{session_id}"
+    )
+
+    {:ok, preferred_worker_id, new_pool_state}
+  end
+
+  defp handle_preferred_status(status, _pool_state, _session_id, preferred_worker_id) do
+    {:unavailable, preferred_worker_id, status}
+  end
+
+  defp preferred_worker_status(pool_state, preferred_worker_id) do
+    cond do
+      CrashBarrier.worker_tainted?(preferred_worker_id) ->
+        :tainted
+
+      not Enum.member?(pool_state.workers, preferred_worker_id) ->
+        :missing
+
+      MapSet.member?(pool_state.available, preferred_worker_id) ->
+        :available
+
+      true ->
+        :busy
+    end
+  end
+
+  defp resolve_affinity_mode(pool_state, opts) do
+    mode =
+      fetch_affinity_opt(opts) ||
+        Map.get(pool_state.pool_config || %{}, :affinity) ||
+        Defaults.default_affinity_mode()
+
+    normalize_affinity_mode(mode)
+  end
+
+  defp fetch_affinity_opt(opts) when is_list(opts), do: Keyword.get(opts, :affinity)
+
+  defp fetch_affinity_opt(opts) when is_map(opts) do
+    Map.get(opts, :affinity) || Map.get(opts, "affinity")
+  end
+
+  defp fetch_affinity_opt(_opts), do: nil
+
+  defp resolve_pool_name_opt(opts, default_pool) do
+    case fetch_pool_name_opt(opts) do
+      nil ->
+        default_pool
+
+      name when is_atom(name) ->
+        name
+
+      name when is_binary(name) ->
+        case convert_string_to_pool_name(name) do
+          {:ok, atom_name} -> atom_name
+          {:error, _} -> default_pool
+        end
+
+      _ ->
+        default_pool
+    end
+  end
+
+  defp fetch_pool_name_opt(opts) when is_list(opts), do: Keyword.get(opts, :pool_name)
+
+  defp fetch_pool_name_opt(opts) when is_map(opts) do
+    Map.get(opts, :pool_name) || Map.get(opts, "pool_name")
+  end
+
+  defp fetch_pool_name_opt(_opts), do: nil
+
+  defp normalize_affinity_mode(mode) when mode in [:hint, :strict_queue, :strict_fail_fast],
+    do: mode
+
+  defp normalize_affinity_mode(mode) when is_binary(mode) do
+    case String.downcase(mode) do
+      "hint" -> :hint
+      "strict_queue" -> :strict_queue
+      "strict_fail_fast" -> :strict_fail_fast
+      _ -> Defaults.default_affinity_mode()
+    end
+  end
+
+  defp normalize_affinity_mode(_mode), do: Defaults.default_affinity_mode()
 
   defp next_available_worker(pool_state) do
     pool_state.available
@@ -1114,7 +1310,7 @@ defmodule Snakepit.Pool do
         {:error, :not_found}
 
       worker_id ->
-        expires_at = current_time + 60
+        expires_at = current_time + Defaults.affinity_cache_ttl_seconds()
         :ets.insert(cache_table, {session_id, worker_id, expires_at})
         {:ok, worker_id}
     end
@@ -1271,7 +1467,7 @@ defmodule Snakepit.Pool do
 
     GenServer.call(
       pool_pid,
-      {:checkout_worker, pool_name, session_id},
+      {:checkout_worker, pool_name, session_id, opts},
       Defaults.crash_barrier_checkout_timeout()
     )
   end

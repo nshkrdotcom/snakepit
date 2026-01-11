@@ -2,6 +2,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
   use ExUnit.Case, async: true
 
   alias Snakepit.Pool
+  alias Snakepit.Pool.Queue
   alias Snakepit.Pool.State
 
   setup do
@@ -63,7 +64,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
       Enum.reduce(1..iterations, original_state, fn _, state ->
         from = {self(), make_ref()}
         tag = elem(from, 1)
-        request = {from, "command", %{}, %{}, System.monotonic_time(), nil}
+        request = {from, "command", %{}, %{}, System.monotonic_time(), nil, nil}
 
         pool_state = state.pools.queue_pool
 
@@ -84,7 +85,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
   test "queue timeout removes request from the in-memory queue", %{state: state} do
     from = {self(), make_ref()}
     tag = elem(from, 1)
-    request = {from, "command", %{}, %{}, System.monotonic_time(), nil}
+    request = {from, "command", %{}, %{}, System.monotonic_time(), nil, nil}
 
     pool_state = %{
       state.pools.queue_pool
@@ -103,7 +104,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
   test "queue timeout message is ignored once the request has been dequeued", %{state: state} do
     from = {self(), make_ref()}
     tag = elem(from, 1)
-    request = {from, "command", %{}, %{}, System.monotonic_time(), nil}
+    request = {from, "command", %{}, %{}, System.monotonic_time(), nil, nil}
 
     pool_state = state.pools.queue_pool
     queued_state = %{pool_state | request_queue: :queue.in(request, pool_state.request_queue)}
@@ -137,7 +138,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
 
   test "cancelled queue entries are dropped on checkin", %{state: state} do
     queued_from = {self(), make_ref()}
-    request = {queued_from, "command", %{}, %{}, System.monotonic_time(), nil}
+    request = {queued_from, "command", %{}, %{}, System.monotonic_time(), nil, nil}
 
     pool_state = %{
       state.pools.queue_pool
@@ -166,8 +167,8 @@ defmodule Snakepit.Pool.QueueManagementTest do
     now_ms = System.monotonic_time(:millisecond)
 
     {from_a, from_b} = {{self(), make_ref()}, {self(), make_ref()}}
-    request_a = {from_a, "command_a", %{}, %{}, System.monotonic_time(), nil}
-    request_b = {from_b, "command_b", %{}, %{}, System.monotonic_time(), nil}
+    request_a = {from_a, "command_a", %{}, %{}, System.monotonic_time(), nil, nil}
+    request_b = {from_b, "command_b", %{}, %{}, System.monotonic_time(), nil, nil}
 
     queue = :queue.from_list([request_a, request_b])
 
@@ -191,7 +192,10 @@ defmodule Snakepit.Pool.QueueManagementTest do
 
     queue_after = new_state.pools.queue_pool.request_queue |> :queue.to_list()
     assert length(queue_after) == 1
-    assert Enum.map(queue_after, fn {queued_from, _, _, _, _, _} -> queued_from end) == [from_new]
+
+    assert Enum.map(queue_after, fn {queued_from, _, _, _, _, _, _} -> queued_from end) ==
+             [from_new]
+
     assert new_state.pools.queue_pool.cancelled_requests == %{}
 
     # Drain any queue timeout messages scheduled during the enqueue
@@ -201,6 +205,40 @@ defmodule Snakepit.Pool.QueueManagementTest do
     after
       20 -> :ok
     end
+  end
+
+  test "affinity-aware dequeue skips pinned requests for other workers", %{state: _state} do
+    from_pinned = {self(), make_ref()}
+    from_free = {self(), make_ref()}
+
+    pinned_request =
+      {from_pinned, "command", %{}, %{}, System.monotonic_time(), nil, "worker_a"}
+
+    free_request = {from_free, "command", %{}, %{}, System.monotonic_time(), nil, nil}
+
+    queue = :queue.from_list([pinned_request, free_request])
+
+    {request, updated_queue} = Queue.pop_request_for_worker(queue, "worker_b")
+
+    assert request == free_request
+    assert :queue.to_list(updated_queue) == [pinned_request]
+  end
+
+  test "affinity-aware dequeue selects pinned request for matching worker", %{state: _state} do
+    from_pinned = {self(), make_ref()}
+    from_free = {self(), make_ref()}
+
+    pinned_request =
+      {from_pinned, "command", %{}, %{}, System.monotonic_time(), nil, "worker_a"}
+
+    free_request = {from_free, "command", %{}, %{}, System.monotonic_time(), nil, nil}
+
+    queue = :queue.from_list([pinned_request, free_request])
+
+    {request, updated_queue} = Queue.pop_request_for_worker(queue, "worker_a")
+
+    assert request == pinned_request
+    assert :queue.to_list(updated_queue) == [free_request]
   end
 end
 

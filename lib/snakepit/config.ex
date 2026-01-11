@@ -49,6 +49,7 @@ defmodule Snakepit.Config do
   - `adapter_args` - CLI arguments for adapter
   - `adapter_env` - Environment variables
   - `capacity_strategy` - `:pool`, `:profile`, or `:hybrid` (default: `:pool`)
+  - `affinity` - `:hint`, `:strict_queue`, or `:strict_fail_fast` (default: `:hint`)
 
   ### Process Profile Specific
   - `startup_batch_size` - Workers per batch (default: 8)
@@ -92,6 +93,7 @@ defmodule Snakepit.Config do
     adapter_args: list(),
     adapter_env: list(),
     capacity_strategy: :pool | :profile | :hybrid,
+    affinity: :hint | :strict_queue | :strict_fail_fast,
     pool_identifier: atom() | nil,
     worker_ttl: :infinity | {integer(), :seconds | :minutes | :hours},
     worker_max_requests: :infinity | pos_integer(),
@@ -166,6 +168,7 @@ defmodule Snakepit.Config do
          :ok <- validate_profile(config),
          :ok <- validate_capacity_strategy(config),
          :ok <- validate_pool_size(config),
+         :ok <- validate_affinity(config),
          :ok <- validate_lifecycle_options(config) do
       {:ok, normalize_pool_config(config)}
     end
@@ -205,6 +208,10 @@ defmodule Snakepit.Config do
       |> Map.put_new(:worker_ttl, :infinity)
       |> Map.put_new(:worker_max_requests, :infinity)
       |> Map.put(:capacity_strategy, capacity_strategy)
+      |> Map.put(
+        :affinity,
+        normalize_affinity(Map.get(config, :affinity, Defaults.default_affinity_mode()))
+      )
 
     heartbeat =
       config
@@ -311,6 +318,12 @@ defmodule Snakepit.Config do
   # Private functions
 
   defp convert_legacy_config do
+    legacy_pool_config = Application.get_env(:snakepit, :pool_config, %{})
+
+    affinity =
+      Map.get(legacy_pool_config, :affinity) ||
+        Application.get_env(:snakepit, :affinity, Defaults.default_affinity_mode())
+
     # Build a default pool from legacy config options
     base_pool = %{
       name: :default,
@@ -320,21 +333,24 @@ defmodule Snakepit.Config do
       adapter_args: [],
       adapter_env: [],
       capacity_strategy:
-        Application.get_env(:snakepit, :capacity_strategy, Defaults.default_capacity_strategy())
+        Application.get_env(:snakepit, :capacity_strategy, Defaults.default_capacity_strategy()),
+      affinity: affinity
     }
 
     # Add pool_config if present
     legacy_pool =
-      if pool_config = Application.get_env(:snakepit, :pool_config) do
-        Map.merge(base_pool, %{
-          startup_batch_size:
-            Map.get(pool_config, :startup_batch_size, Defaults.config_default_batch_size()),
-          startup_batch_delay_ms:
-            Map.get(pool_config, :startup_batch_delay_ms, Defaults.config_default_batch_delay()),
-          max_workers: Map.get(pool_config, :max_workers, 1000)
-        })
-      else
-        base_pool
+      case legacy_pool_config do
+        %{} = pool_config when map_size(pool_config) > 0 ->
+          Map.merge(base_pool, %{
+            startup_batch_size:
+              Map.get(pool_config, :startup_batch_size, Defaults.config_default_batch_size()),
+            startup_batch_delay_ms:
+              Map.get(pool_config, :startup_batch_delay_ms, Defaults.config_default_batch_delay()),
+            max_workers: Map.get(pool_config, :max_workers, 1000)
+          })
+
+        _ ->
+          base_pool
       end
 
     case validate_pool_config(legacy_pool) do
@@ -426,6 +442,27 @@ defmodule Snakepit.Config do
     end
   end
 
+  defp validate_affinity(config) do
+    case Map.get(config, :affinity) do
+      nil ->
+        :ok
+
+      mode when mode in [:hint, :strict_queue, :strict_fail_fast] ->
+        :ok
+
+      mode when is_binary(mode) ->
+        case String.downcase(mode) do
+          "hint" -> :ok
+          "strict_queue" -> :ok
+          "strict_fail_fast" -> :ok
+          _ -> {:error, {:invalid_affinity, mode}}
+        end
+
+      invalid ->
+        {:error, {:invalid_affinity, invalid}}
+    end
+  end
+
   defp validate_lifecycle_options(config) do
     with :ok <- validate_ttl(config) do
       validate_max_requests(config)
@@ -507,4 +544,19 @@ defmodule Snakepit.Config do
     ArgumentError ->
       key
   end
+
+  defp normalize_affinity(:hint), do: :hint
+  defp normalize_affinity(:strict_queue), do: :strict_queue
+  defp normalize_affinity(:strict_fail_fast), do: :strict_fail_fast
+
+  defp normalize_affinity(mode) when is_binary(mode) do
+    case String.downcase(mode) do
+      "hint" -> :hint
+      "strict_queue" -> :strict_queue
+      "strict_fail_fast" -> :strict_fail_fast
+      _ -> Defaults.default_affinity_mode()
+    end
+  end
+
+  defp normalize_affinity(_mode), do: Defaults.default_affinity_mode()
 end

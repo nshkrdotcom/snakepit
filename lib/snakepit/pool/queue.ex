@@ -22,14 +22,15 @@ defmodule Snakepit.Pool.Queue do
     {remaining, dropped?} =
       queue
       |> :queue.to_list()
-      |> Enum.reduce({[], false}, fn
-        {queued_from, _command, _args, _opts, _queued_at, timer_ref}, {acc, _}
-        when queued_from == from ->
+      |> Enum.reduce({[], false}, fn request, {acc, dropped?} ->
+        {queued_from, timer_ref} = request_from_and_timer(request)
+
+        if queued_from == from do
           cancel_queue_timer(timer_ref)
           {acc, true}
-
-        request, {acc, dropped?} ->
+        else
           {[request | acc], dropped?}
+        end
       end)
 
     new_queue =
@@ -81,27 +82,49 @@ defmodule Snakepit.Pool.Queue do
     :ok
   end
 
+  def pop_request_for_worker(queue, worker_id) do
+    case :queue.out(queue) do
+      {:empty, _} ->
+        {:empty, queue}
+
+      {{:value, request}, rest} ->
+        if request_compatible?(request, worker_id) do
+          {request, rest}
+        else
+          list = [request | :queue.to_list(rest)]
+
+          case pop_request_for_worker_from_list(list, worker_id) do
+            {:ok, found, remaining} ->
+              {found, :queue.from_list(remaining)}
+
+            :empty ->
+              {:empty, queue}
+          end
+        end
+    end
+  end
+
   defp compact_request_queue(queue, cancelled_requests, now_ms, retention_ms) do
     pruned_cancelled = prune_cancelled_requests(cancelled_requests, now_ms, retention_ms)
 
     {filtered, updated_cancelled} =
       queue
       |> :queue.to_list()
-      |> Enum.reduce({[], pruned_cancelled}, fn
-        {from, _command, _args, _opts, _queued_at, timer_ref} = request,
-        {acc, current_cancelled} ->
-          cond do
-            Map.has_key?(current_cancelled, from) ->
-              cancel_queue_timer(timer_ref)
-              {acc, drop_cancelled_request(current_cancelled, from)}
+      |> Enum.reduce({[], pruned_cancelled}, fn request, {acc, current_cancelled} ->
+        {from, timer_ref} = request_from_and_timer(request)
 
-            not alive_from?(from) ->
-              cancel_queue_timer(timer_ref)
-              {acc, drop_cancelled_request(current_cancelled, from)}
+        cond do
+          Map.has_key?(current_cancelled, from) ->
+            cancel_queue_timer(timer_ref)
+            {acc, drop_cancelled_request(current_cancelled, from)}
 
-            true ->
-              {[request | acc], current_cancelled}
-          end
+          not alive_from?(from) ->
+            cancel_queue_timer(timer_ref)
+            {acc, drop_cancelled_request(current_cancelled, from)}
+
+          true ->
+            {[request | acc], current_cancelled}
+        end
       end)
 
     new_queue =
@@ -114,6 +137,45 @@ defmodule Snakepit.Pool.Queue do
 
   defp alive_from?({pid, _ref}) when is_pid(pid), do: Process.alive?(pid)
   defp alive_from?(_), do: false
+
+  defp pop_request_for_worker_from_list(list, worker_id) do
+    do_pop_request_for_worker(list, worker_id, [])
+  end
+
+  defp do_pop_request_for_worker([], _worker_id, _acc), do: :empty
+
+  defp do_pop_request_for_worker([request | rest], worker_id, acc) do
+    if request_compatible?(request, worker_id) do
+      {:ok, request, Enum.reverse(acc, rest)}
+    else
+      do_pop_request_for_worker(rest, worker_id, [request | acc])
+    end
+  end
+
+  defp request_compatible?(request, worker_id) do
+    case request_affinity_worker_id(request) do
+      nil -> true
+      ^worker_id -> true
+      _ -> false
+    end
+  end
+
+  defp request_affinity_worker_id(
+         {_from, _command, _args, _opts, _queued_at, _timer_ref, affinity}
+       ) do
+    affinity
+  end
+
+  defp request_affinity_worker_id({_from, _command, _args, _opts, _queued_at, _timer_ref}) do
+    nil
+  end
+
+  defp request_from_and_timer({from, _command, _args, _opts, _queued_at, timer_ref}),
+    do: {from, timer_ref}
+
+  defp request_from_and_timer({from, _command, _args, _opts, _queued_at, timer_ref, _affinity}) do
+    {from, timer_ref}
+  end
 
   defp trim_cancelled_requests(cancelled_requests) do
     max_entries = Defaults.pool_max_cancelled_entries()

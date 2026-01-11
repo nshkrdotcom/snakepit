@@ -213,7 +213,7 @@ defmodule ConcurrentExample do
     update_results = Task.await_many(update_tasks, 10_000)
     IO.puts("  Completed #{length(update_results)} concurrent session operations")
 
-    # Verify session affinity (same session always uses same worker)
+    # Verify session affinity preference (hint mode can fall back under load)
     affinity_tasks =
       for _ <- 1..3 do
         Task.async(fn ->
@@ -225,7 +225,8 @@ defmodule ConcurrentExample do
 
     affinity_results = Task.await_many(affinity_tasks)
     all_same_worker = Enum.all?(affinity_results, fn {w1, w2} -> w1 == w2 end)
-    IO.puts("  Session affinity verified: #{all_same_worker}")
+    IO.puts("  Session affinity preference observed: #{all_same_worker}")
+    IO.puts("  Hint mode can fall back; use :strict_queue for guarantees")
 
     # Sessions auto-cleanup via SessionStore TTL - no manual cleanup needed
 

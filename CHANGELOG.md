@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-01-10
+
+### Fixed
+- **Session affinity now supports strict routing** - Requests with `session_id` can be guaranteed to route to the same worker where refs exist by enabling strict affinity modes, preventing "Unknown reference" errors for in-memory Python refs.
+  - Added `affinity: :strict_queue` to queue on the preferred worker when busy.
+  - Added `affinity: :strict_fail_fast` to return `{:error, :worker_busy}` when the preferred worker is busy.
+  - Kept `affinity: :hint` as the default for legacy behavior (falls back to any available worker).
+- Documentation now clarifies hint vs strict affinity behavior, and the new `grpc_session_affinity_modes.exs` example demonstrates both modes in practice.
+- Examples now restart Snakepit when run via `mix run` so example configs are applied consistently; README recommends `mix run --no-start` for predictable startup.
+
 ## [0.9.1] - 2026-01-09
 
 ### Added
@@ -1526,7 +1536,8 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
-[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.9.2
 [0.9.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.9.1
 [0.9.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.9.0
 [0.8.5]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.5

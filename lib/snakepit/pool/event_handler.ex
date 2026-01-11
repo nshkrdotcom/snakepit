@@ -181,8 +181,13 @@ defmodule Snakepit.Pool.EventHandler do
        ) do
     case context.select_queue_worker.(pool_state, worker_id) do
       {:ok, queue_worker} ->
-        case :queue.out(pool_state.request_queue) do
-          {{:value, request}, new_queue} ->
+        case Queue.pop_request_for_worker(pool_state.request_queue, queue_worker) do
+          {:empty, _queue} ->
+            updated_pool_state = %{pool_state | cancelled_requests: pruned_cancelled}
+            updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
+            {:noreply, %{state | pools: updated_pools}}
+
+          {request, new_queue} ->
             handle_queued_request(
               pool_name,
               queue_worker,
@@ -193,11 +198,6 @@ defmodule Snakepit.Pool.EventHandler do
               state,
               context
             )
-
-          {:empty, _} ->
-            updated_pool_state = %{pool_state | cancelled_requests: pruned_cancelled}
-            updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-            {:noreply, %{state | pools: updated_pools}}
         end
 
       :no_worker ->
@@ -211,12 +211,13 @@ defmodule Snakepit.Pool.EventHandler do
          pool_name,
          worker_id,
          pool_state,
-         {queued_from, command, args, opts, _queued_at, timer_ref},
+         request,
          new_queue,
          pruned_cancelled,
          state,
          context
        ) do
+    {queued_from, command, args, opts, _queued_at, timer_ref} = normalize_request(request)
     Queue.cancel_queue_timer(timer_ref)
 
     ctx = %{
@@ -352,5 +353,13 @@ defmodule Snakepit.Pool.EventHandler do
 
     updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
     {:noreply, %{state | pools: updated_pools}}
+  end
+
+  defp normalize_request({from, command, args, opts, queued_at, timer_ref}) do
+    {from, command, args, opts, queued_at, timer_ref}
+  end
+
+  defp normalize_request({from, command, args, opts, queued_at, timer_ref, _affinity_worker_id}) do
+    {from, command, args, opts, queued_at, timer_ref}
   end
 end
