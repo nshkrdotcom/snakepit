@@ -139,6 +139,39 @@ mix run --no-start examples/stream_progress_demo.exs
 mix run --no-start examples/execute_streaming_tool_demo.exs
 ```
 
+### 🔄 Serialization
+
+#### `graceful_serialization.exs`
+**Graceful handling of non-JSON-serializable Python objects**
+- datetime/date objects converted via `isoformat()`
+- Objects with `model_dump()`/`to_dict()` are automatically converted
+- Custom objects get informative markers with type info and repr
+- Nested structures preserve all serializable data
+
+Many Python libraries return objects that aren't directly JSON-serializable
+(datetime, custom classes, Pydantic models, etc.). Snakepit handles these
+gracefully instead of failing:
+
+1. Tries conversion methods: `model_dump`, `to_dict`, `_asdict`, `tolist`, `isoformat`
+2. Falls back to a marker dict for truly non-serializable objects:
+   ```elixir
+   %{
+     "__ffi_unserializable__" => true,
+     "__type__" => "module.ClassName"
+   }
+   ```
+
+**Safe by default**: Markers only include type info. To include repr for debugging:
+- `SNAKEPIT_UNSERIALIZABLE_DETAIL=repr_redacted_truncated` (redacts common secrets)
+- `SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN=200` (truncate length)
+
+Use `Snakepit.Serialization.unserializable?/1` to detect markers and
+`Snakepit.Serialization.unserializable_info/1` to extract type/repr info.
+
+```bash
+mix run --no-start examples/graceful_serialization.exs
+```
+
 ### 🔄 Bidirectional Tools
 
 #### `bidirectional_tools_demo.exs`

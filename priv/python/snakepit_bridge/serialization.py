@@ -3,6 +3,21 @@ Type serialization system for Python side of the bridge.
 
 Supports both JSON and binary serialization for efficient handling
 of large numerical data like tensors and embeddings.
+
+Graceful Serialization Policy
+-----------------------------
+When encountering non-serializable objects, the serializer creates a marker.
+By default, the marker only includes type info (safe). The repr can be
+optionally included via environment variables:
+
+    SNAKEPIT_UNSERIALIZABLE_DETAIL:
+        none (default)         - Only type, no repr (safe for production)
+        type                   - Placeholder string with type name
+        repr_truncated         - Include truncated repr (may leak secrets)
+        repr_redacted_truncated - Truncated repr with common secrets redacted
+
+    SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN:
+        Maximum length for repr strings (default: 500, max: 2000)
 """
 
 # Try to import orjson for 6x performance boost, fallback to stdlib json
@@ -10,10 +25,12 @@ try:
     import orjson
     _use_orjson = True
 except ImportError:
-    import json
     _use_orjson = False
 
+import json
+import os
 import pickle
+import re
 import numpy as np
 from typing import Any, Dict, Union, Tuple, Optional
 from google.protobuf import any_pb2
@@ -21,6 +38,155 @@ from snakepit_bridge.zero_copy import ZeroCopyRef
 
 # Size threshold for using binary serialization (10KB)
 BINARY_THRESHOLD = 10_240
+
+# =============================================================================
+# Unserializable Marker Constants and Policy
+# =============================================================================
+
+# Marker keys - use layer-agnostic naming since this is a transport concern
+UNSERIALIZABLE_KEY = "__ffi_unserializable__"
+TYPE_KEY = "__type__"
+REPR_KEY = "__repr__"
+
+# Policy configuration from environment
+_DETAIL_MODE = os.getenv("SNAKEPIT_UNSERIALIZABLE_DETAIL", "none").strip().lower()
+_MAXLEN_RAW = int(os.getenv("SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN", "500"))
+_MAXLEN = max(0, min(_MAXLEN_RAW, 2000))  # Clamp to 0-2000
+
+# Secret redaction patterns - best-effort mitigation, not a security boundary
+_SECRET_PATTERNS = [
+    # Authorization headers
+    (re.compile(r"(Authorization:\s*Bearer\s+)[^\s'\"\\]+", re.IGNORECASE), r"\1<REDACTED>"),
+    # Bearer tokens
+    (re.compile(r"(Bearer\s+)[A-Za-z0-9\-\._~\+/]+=*", re.IGNORECASE), r"\1<REDACTED>"),
+    # OpenAI-style API keys (sk-...)
+    (re.compile(r"\bsk-[A-Za-z0-9]{10,}\b"), "sk-<REDACTED>"),
+    # JSON-style sensitive fields
+    (re.compile(r'("?(api[_-]?key|token|secret|password)"?\s*[:=]\s*["\'])([^"\']+)(["\'])', re.IGNORECASE), r'\1<REDACTED>\4'),
+]
+
+
+def _redact_secrets(s: str) -> str:
+    """
+    Best-effort redaction of common secret patterns in text.
+
+    This is a mitigation to reduce accidental leakage, NOT a security boundary.
+    It catches common patterns like API keys, bearer tokens, and JSON credentials.
+    """
+    for pattern, replacement in _SECRET_PATTERNS:
+        s = pattern.sub(replacement, s)
+    return s
+
+
+def _unserializable_detail(obj) -> Optional[str]:
+    """
+    Compute the optional detail string for an unserializable marker.
+
+    Returns None if detail should not be included (default safe mode).
+    """
+    if _DETAIL_MODE == "none":
+        return None
+
+    if _DETAIL_MODE == "type":
+        t = f"{type(obj).__module__}.{type(obj).__name__}"
+        return f"<unserializable {t}>"
+
+    if _DETAIL_MODE in ("repr_truncated", "repr_redacted_truncated"):
+        try:
+            s = repr(obj)
+        except Exception:
+            s = f"<repr failed for {type(obj).__module__}.{type(obj).__name__}>"
+
+        if _DETAIL_MODE == "repr_redacted_truncated":
+            s = _redact_secrets(s)
+
+        if _MAXLEN == 0:
+            return ""
+        return s[:_MAXLEN]
+
+    # Unknown mode => safest behavior (no detail)
+    return None
+
+
+def _unserializable_marker(obj) -> dict:
+    """
+    Build the marker dict for an unserializable object.
+
+    This is the single source of truth for marker construction.
+    Policy determines whether repr is included.
+    """
+    marker = {
+        UNSERIALIZABLE_KEY: True,
+        TYPE_KEY: f"{type(obj).__module__}.{type(obj).__name__}",
+    }
+
+    detail = _unserializable_detail(obj)
+    if detail is not None:
+        marker[REPR_KEY] = detail
+
+    return marker
+
+
+class GracefulJSONEncoder(json.JSONEncoder):
+    """
+    JSON encoder that gracefully handles non-serializable objects.
+
+    Instead of raising TypeError for non-serializable objects, this encoder:
+    1. Tries common conversion methods (model_dump, to_dict, _asdict, tolist, isoformat)
+    2. Falls back to a policy-aware marker dict (see module docstring for policy options)
+
+    This allows returning partial data even when some fields contain non-serializable
+    objects (like DSPy's ModelResponse, OpenAI's ChatCompletion, etc.).
+
+    By default, markers do NOT include repr (safe for production). Set
+    SNAKEPIT_UNSERIALIZABLE_DETAIL to enable repr output.
+    """
+
+    def default(self, obj):
+        # Try common conversion methods in order of preference
+        for method in ('model_dump', 'to_dict', '_asdict', 'tolist'):
+            if hasattr(obj, method):
+                try:
+                    return getattr(obj, method)()
+                except Exception:
+                    pass
+
+        # datetime/date objects
+        if hasattr(obj, 'isoformat'):
+            try:
+                return obj.isoformat()
+            except Exception:
+                pass
+
+        # Fallback: create policy-aware unserializable marker
+        return _unserializable_marker(obj)
+
+
+def _orjson_default(obj):
+    """
+    Default handler for orjson serialization.
+
+    Same logic as GracefulJSONEncoder but as a function for orjson's API.
+    Uses the centralized policy-aware marker builder.
+    """
+    # Try common conversion methods in order of preference
+    for method in ('model_dump', 'to_dict', '_asdict', 'tolist'):
+        if hasattr(obj, method):
+            try:
+                return getattr(obj, method)()
+            except Exception:
+                pass
+
+    # datetime/date objects
+    if hasattr(obj, 'isoformat'):
+        try:
+            return obj.isoformat()
+        except Exception:
+            pass
+
+    # Fallback: create policy-aware unserializable marker
+    return _unserializable_marker(obj)
+
 
 class TypeSerializer:
     """Unified type serialization for Python side."""
@@ -172,11 +338,11 @@ class TypeSerializer:
             value_to_serialize = value
 
         # Use orjson if available, otherwise stdlib json
+        # Both use graceful fallback for non-serializable objects
         if _use_orjson:
-            return orjson.dumps(value_to_serialize)
+            return orjson.dumps(value_to_serialize, default=_orjson_default)
         else:
-            import json
-            return json.dumps(value_to_serialize).encode('utf-8')
+            return json.dumps(value_to_serialize, cls=GracefulJSONEncoder).encode('utf-8')
     
     @staticmethod
     def _deserialize_json(json_payload: Union[str, bytes, bytearray]) -> Any:

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-01-11
+
+### Added
+- **Graceful serialization fallback** for non-JSON-serializable Python objects. Instead of failing, Snakepit now:
+  - Tries common conversion methods (`model_dump`, `to_dict`, `_asdict`, `tolist`, `isoformat`)
+  - Falls back to a marker dict with type info for truly non-serializable objects (safe by default, repr excluded)
+- **`Snakepit.Serialization` Elixir module** with helpers for detecting and inspecting unserializable markers:
+  - `unserializable?/1` - checks if a value is an unserializable marker
+  - `unserializable_info/1` - extracts type and repr info from markers
+- **Configurable marker detail policy** via environment variables on Python workers:
+  - `SNAKEPIT_UNSERIALIZABLE_DETAIL` - controls what info is included (`none` default, `type`, `repr_truncated`, `repr_redacted_truncated`)
+  - `SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN` - maximum repr length (default 500, max 2000)
+- **Secret redaction** in `repr_redacted_truncated` mode - redacts common patterns (API keys, bearer tokens, passwords) from repr output.
+- `GracefulJSONEncoder` class and `_orjson_default` function in `serialization.py` for both stdlib json and orjson paths.
+- `serialization_demo` tool in the showcase adapter demonstrating datetime, custom class, and convertible object handling.
+- `graceful_serialization.exs` example showing the feature in action.
+- Unit tests for graceful serialization (Python: 24 tests, Elixir: 14 tests) plus policy behavior tests.
+
 ## [0.10.1] - 2026-01-11
 
 ### Fixed

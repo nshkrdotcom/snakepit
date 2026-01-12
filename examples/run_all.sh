@@ -116,6 +116,8 @@ EXAMPLE_SCRIPTS=(
   "examples/ml_telemetry.exs"
   # Streaming
   "examples/execute_streaming_tool_demo.exs"
+  # Serialization
+  "examples/graceful_serialization.exs"
 )
 
 EXAMPLE_DURATION_MS="${SNAKEPIT_EXAMPLE_DURATION_MS:-3000}"
