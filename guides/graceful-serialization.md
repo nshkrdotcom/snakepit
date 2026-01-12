@@ -5,23 +5,25 @@ failing with serialization errors, non-serializable objects are replaced with in
 markers containing type information.
 
 This enables returning partial data even when some fields contain non-serializable objects
-like `datetime.datetime`, library-specific response objects (OpenAI, DSPy, requests), or
-custom classes.
+like `datetime.datetime`, custom classes, or library-specific response objects.
 
 ## How It Works
 
 When Python returns data to Elixir, the serialization layer processes each value:
 
-1. **JSON-serializable values** pass through unchanged (strings, numbers, lists, dicts, etc.)
+1. **JSON-serializable values** pass through unchanged (strings, numbers, lists, dicts, booleans, None)
 
-2. **Objects with conversion methods** are automatically converted:
-   - `model_dump()` - Pydantic v2 models
-   - `to_dict()` - Custom dict conversion
-   - `_asdict()` - Named tuples
-   - `tolist()` - NumPy arrays (with size guards)
-   - `isoformat()` - datetime/date objects
+2. **Objects with conversion methods** are automatically converted by calling the first available method:
+   - `model_dump()` - returns a dict representation
+   - `to_dict()` - returns a dict representation
+   - `_asdict()` - returns a dict representation (named tuples)
+   - `tolist()` - returns a list representation (arrays, with size guards)
+   - `isoformat()` - returns an ISO 8601 string (datetime/date objects)
 
 3. **Non-convertible objects** become marker maps with type information
+
+The system uses **duck typing** - it checks if methods exist, not what class the object is.
+Any object with `to_dict()` will be converted, regardless of what library it comes from.
 
 ## Using the Elixir Helpers
 
@@ -29,14 +31,14 @@ Check for and inspect unserializable markers using the `Snakepit.Serialization` 
 
 ```elixir
 # Execute Python code that returns mixed data
-{:ok, result} = Snakepit.execute("get_api_response", %{})
+{:ok, result} = Snakepit.execute("get_data", %{})
 
 # Check if a specific field is an unserializable marker
 if Snakepit.Serialization.unserializable?(result["response"]) do
   {:ok, info} = Snakepit.Serialization.unserializable_info(result["response"])
 
   IO.puts("Type: #{info.type}")
-  # => "requests.models.Response"
+  # => "mymodule.MyClass"
 
   IO.puts("Repr: #{info.repr || "(not included)"}")
   # Only present if detail mode is enabled
@@ -127,7 +129,7 @@ Snakepit guards against this in two ways:
 
 1. **Pre-check for known types**: Size is checked **before** calling `tolist()` to prevent
    the allocation from happening at all:
-   - **numpy.ndarray**: Precise detection via `isinstance()` (numpy is already imported)
+   - **numpy.ndarray**: Precise detection via `isinstance()`
    - **scipy sparse matrices**: Best-effort heuristic using `nnz` + `shape` attributes
    - **pandas DataFrame/Series**: Best-effort heuristic using `size` + `values` attributes
 
@@ -169,7 +171,7 @@ end
 
 When using `repr_redacted_truncated` mode, common secret patterns are redacted:
 
-- OpenAI-style API keys (`sk-...`)
+- API keys matching `sk-...` pattern
 - Bearer tokens
 - JSON-style credentials (`"api_key": "..."`, `"password": "..."`, etc.)
 
@@ -217,37 +219,26 @@ Key properties:
 **Note**: Since events are deduplicated and capped, you cannot use this to count total markers
 created. Use it to track "types seen" for debugging, not volume metrics.
 
-## Real-World Examples
+## Examples
 
-### DSPy History
+### Objects with Conversion Methods
 
-DSPy stores model responses in `GLOBAL_HISTORY` which contains non-serializable objects:
-
-```elixir
-{:ok, result} = Snakepit.execute("get_dspy_history", %{})
-
-# History entries have serializable fields plus non-serializable response
-Enum.each(result["history"], fn entry ->
-  IO.puts("Model: #{entry["model"]}")
-  IO.puts("Cost: #{entry["cost"]}")
-
-  if Snakepit.Serialization.unserializable?(entry["response"]) do
-    {:ok, info} = Snakepit.Serialization.unserializable_info(entry["response"])
-    IO.puts("Response type: #{info.type}")
-  end
-end)
-```
-
-### OpenAI Responses
-
-OpenAI's ChatCompletion objects have a `model_dump()` method, so they convert automatically:
+If an object has `to_dict()`, `model_dump()`, or similar, it converts automatically:
 
 ```python
-response = openai.chat.completions.create(...)
-return {"response": response}  # Automatically converts via model_dump()
+class MyResponse:
+    def __init__(self, data, status):
+        self.data = data
+        self.status = status
+
+    def to_dict(self):
+        return {"data": self.data, "status": self.status}
+
+return {"response": MyResponse("hello", 200)}
+# Elixir receives: %{"response" => %{"data" => "hello", "status" => 200}}
 ```
 
-### Custom Classes
+### Custom Classes Without Conversion
 
 Classes without conversion methods become markers:
 
@@ -272,6 +263,25 @@ info.type
 # => "__main__.DatabaseConnection"
 ```
 
+### Mixed Structures
+
+Structures with both serializable and non-serializable fields work - serializable data
+is preserved, non-serializable objects become markers:
+
+```python
+import datetime
+
+class InternalState:
+    pass
+
+return {
+    "timestamp": datetime.datetime.now(),  # converts via isoformat()
+    "count": 42,                            # passes through
+    "items": ["a", "b", "c"],               # passes through
+    "internal": InternalState()             # becomes marker
+}
+```
+
 ## Best Practices
 
 1. **Use safe defaults in production**: Don't enable repr modes unless needed for debugging
@@ -280,7 +290,7 @@ info.type
    non-serializable objects, check with `unserializable?/1`
 
 3. **Add conversion methods to your classes**: If you control the Python code, add
-   `to_dict()` or `model_dump()` to make objects serializable
+   `to_dict()` to make objects serializable
 
 4. **Monitor marker creation**: Use telemetry to track when markers are created - excessive
    markers might indicate a serialization issue to fix

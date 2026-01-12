@@ -88,7 +88,6 @@ defmodule Snakepit.MixProject do
       maintainers: ["nshkrdotcom"],
       links: %{
         "GitHub" => @source_url,
-        "Documentation" => "https://hexdocs.pm/snakepit",
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
       },
       files: [

@@ -190,4 +190,108 @@ class BasicOpsHandler:
                 ApiResponse(201, "Created"),
             ]
 
+        if demo_type in ("complex", "all"):
+            result["complex_demo"] = self._build_complex_demo()
+
         return result
+
+    def _build_complex_demo(self) -> Dict[str, Any]:
+        """
+        Build a complex demo showing nested structures with various conversion patterns.
+
+        Demonstrates:
+        - Objects with model_dump() -> converted to dict
+        - Objects with to_dict() -> converted to dict
+        - Objects without conversion methods -> become markers
+        - Nested structures mixing serializable and non-serializable
+        - Secret redaction in repr (when enabled)
+        """
+        import uuid
+
+        # Object with model_dump() method - converts automatically
+        class ServiceResponse:
+            def __init__(self, data, metadata):
+                self.id = f"resp-{uuid.uuid4().hex[:8]}"
+                self.data = data
+                self.metadata = metadata
+                self.created = datetime.now()
+
+            def model_dump(self):
+                return {
+                    "id": self.id,
+                    "data": self.data,
+                    "metadata": self.metadata,
+                    "created": self.created.isoformat(),
+                }
+
+        # Object with to_dict() method - converts automatically
+        class QueryResult:
+            def __init__(self, value, score=None):
+                self.value = value
+                self.score = score
+                self._internal = []  # Internal state not exposed
+
+            def to_dict(self):
+                return {
+                    "value": self.value,
+                    "score": self.score,
+                }
+
+        # Object WITHOUT conversion methods - becomes marker
+        class InternalClient:
+            def __init__(self, endpoint):
+                self.endpoint = endpoint
+                self._api_key = "sk-secret-key-12345"  # Has secret
+
+            def __repr__(self):
+                # Real repr might accidentally expose secrets
+                return f"InternalClient(endpoint={self.endpoint}, api_key={self._api_key})"
+
+        # Another object without conversion - becomes marker
+        class RequestLog:
+            def __init__(self, request_id, payload, response_obj):
+                self.request_id = request_id
+                self.payload = payload
+                self.response = response_obj  # Nested non-serializable
+                self.timestamp = datetime.now()
+
+            # No conversion method
+
+        # Build nested structure
+        client = InternalClient("https://api.example.com")
+
+        logs = [
+            RequestLog(
+                request_id="req-001",
+                payload={"query": "test"},
+                response_obj=ServiceResponse(
+                    data={"result": "success"},
+                    metadata={"latency_ms": 245}
+                )
+            ),
+            RequestLog(
+                request_id="req-002",
+                payload={"query": "another"},
+                response_obj=ServiceResponse(
+                    data={"result": "partial"},
+                    metadata={"latency_ms": 1820}
+                )
+            ),
+        ]
+
+        result = QueryResult(value="computed result", score=0.95)
+
+        return {
+            "description": "Complex nested structure with mixed serialization",
+            "client": client,  # Marker (with redacted secret if repr enabled)
+            "result": result,  # Converts via to_dict()
+            "logs": logs,  # List of RequestLog markers
+            "summary": {
+                "total_requests": len(logs),
+                "request_ids": [log.request_id for log in logs],
+            },
+            "latest_response": ServiceResponse(  # Converts via model_dump()
+                data={"final": "output"},
+                metadata={"processed": True}
+            ),
+        }

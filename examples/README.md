@@ -144,12 +144,13 @@ mix run --no-start examples/execute_streaming_tool_demo.exs
 #### `graceful_serialization.exs`
 **Graceful handling of non-JSON-serializable Python objects**
 - datetime/date objects converted via `isoformat()`
-- Objects with `model_dump()`/`to_dict()` are automatically converted
-- Custom objects get informative markers with type info and repr
+- Objects with `model_dump()`/`to_dict()`/`_asdict()` are automatically converted
+- Arrays with `tolist()` are converted (with size guards)
+- Custom objects get informative markers with type info
 - Nested structures preserve all serializable data
 
-Many Python libraries return objects that aren't directly JSON-serializable
-(datetime, custom classes, Pydantic models, etc.). Snakepit handles these
+Python code often returns objects that aren't directly JSON-serializable
+(datetime, custom classes, library response objects, etc.). Snakepit handles these
 gracefully instead of failing:
 
 1. Tries conversion methods: `model_dump`, `to_dict`, `_asdict`, `tolist`, `isoformat`

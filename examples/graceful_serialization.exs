@@ -54,6 +54,7 @@ defmodule GracefulSerializationDemo do
     demo_convertible()
     demo_custom_class()
     demo_mixed_list()
+    demo_complex()
     demo_all()
 
     IO.puts("\n=== Demo Complete ===")
@@ -156,8 +157,68 @@ defmodule GracefulSerializationDemo do
     IO.puts("")
   end
 
+  defp demo_complex do
+    IO.puts("--- Demo 5: Complex nested structures ---")
+    IO.puts("Real applications return nested objects mixing serializable")
+    IO.puts("and non-serializable data. All serializable data is preserved.\n")
+
+    case Snakepit.execute("serialization_demo", %{demo_type: "complex"}) do
+      {:ok, result} ->
+        complex = result["complex_demo"]
+
+        # QueryResult converts via to_dict()
+        query_result = complex["result"]
+        IO.puts("  result (via to_dict):")
+        IO.puts("    value: #{query_result["value"]}")
+        IO.puts("    score: #{query_result["score"]}")
+
+        # ServiceResponse converts via model_dump()
+        response = complex["latest_response"]
+        IO.puts("\n  latest_response (via model_dump):")
+        IO.puts("    id: #{response["id"]}")
+        IO.puts("    data: #{inspect(response["data"])}")
+
+        # InternalClient becomes marker (with redacted secret if repr enabled)
+        client = complex["client"]
+
+        if Snakepit.Serialization.unserializable?(client) do
+          {:ok, info} = Snakepit.Serialization.unserializable_info(client)
+          IO.puts("\n  client (marker - internal state not exposed):")
+          IO.puts("    type: #{info.type}")
+
+          if info.repr do
+            IO.puts("    repr: #{info.repr}")
+            IO.puts("    ^ Note: API key is REDACTED in repr_redacted_truncated mode")
+          end
+        end
+
+        # RequestLog entries become markers
+        logs = complex["logs"]
+        IO.puts("\n  logs (#{length(logs)} entries, each becomes marker):")
+
+        Enum.with_index(logs, 1)
+        |> Enum.each(fn {entry, idx} ->
+          if Snakepit.Serialization.unserializable?(entry) do
+            {:ok, info} = Snakepit.Serialization.unserializable_info(entry)
+            IO.puts("    [#{idx}] #{info.type}")
+          end
+        end)
+
+        # Summary is plain data - always serializes
+        summary = complex["summary"]
+        IO.puts("\n  summary (plain data, always serializes):")
+        IO.puts("    total_requests: #{summary["total_requests"]}")
+        IO.puts("    request_ids: #{inspect(summary["request_ids"])}")
+
+      {:error, reason} ->
+        IO.puts("  Error: #{inspect(reason)}")
+    end
+
+    IO.puts("")
+  end
+
   defp demo_all do
-    IO.puts("--- Demo 5: Full structure (simulates real-world scenario) ---")
+    IO.puts("--- Demo 6: Full structure (simulates real-world scenario) ---")
     IO.puts("Complex nested structures with mixed types serialize successfully")
 
     case Snakepit.execute("serialization_demo", %{demo_type: "all"}) do

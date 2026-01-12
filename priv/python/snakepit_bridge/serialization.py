@@ -88,7 +88,7 @@ _SECRET_PATTERNS = [
     (re.compile(r"(Authorization:\s*Bearer\s+)[^\s'\"\\]+", re.IGNORECASE), r"\1<REDACTED>"),
     # Bearer tokens
     (re.compile(r"(Bearer\s+)[A-Za-z0-9\-\._~\+/]+=*", re.IGNORECASE), r"\1<REDACTED>"),
-    # OpenAI-style API keys (sk-...)
+    # API keys with sk- prefix
     (re.compile(r"\bsk-[A-Za-z0-9]{10,}\b"), "sk-<REDACTED>"),
     # JSON-style sensitive fields
     (re.compile(r'("?(api[_-]?key|token|secret|password)"?\s*[:=]\s*["\'])([^"\']+)(["\'])', re.IGNORECASE), r'\1<REDACTED>\4'),
@@ -256,7 +256,7 @@ class GracefulJSONEncoder(json.JSONEncoder):
     2. Falls back to a policy-aware marker dict (see module docstring for policy options)
 
     This allows returning partial data even when some fields contain non-serializable
-    objects (like DSPy's ModelResponse, OpenAI's ChatCompletion, etc.).
+    objects like custom classes, datetime objects, or library response objects.
 
     By default, markers do NOT include repr (safe for production). Set
     SNAKEPIT_UNSERIALIZABLE_DETAIL to enable repr output.
