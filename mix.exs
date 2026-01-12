@@ -152,6 +152,7 @@ defmodule Snakepit.MixProject do
         {"guides/hardware-detection.md", title: "Hardware Detection"},
         {"guides/fault-tolerance.md", title: "Fault Tolerance"},
         {"guides/streaming.md", title: "Streaming"},
+        {"guides/graceful-serialization.md", title: "Graceful Serialization"},
         {"guides/python-adapters.md", title: "Python Adapters"},
         {"guides/observability.md", title: "Observability"},
         {"guides/production.md", title: "Production"},
@@ -177,7 +178,8 @@ defmodule Snakepit.MixProject do
         Features: [
           "guides/hardware-detection.md",
           "guides/fault-tolerance.md",
-          "guides/streaming.md"
+          "guides/streaming.md",
+          "guides/graceful-serialization.md"
         ],
         Development: [
           "guides/python-adapters.md",
@@ -262,6 +264,9 @@ defmodule Snakepit.MixProject do
           Snakepit.Telemetry.Handlers.Logger,
           Snakepit.Telemetry.Handlers.Metrics,
           Snakepit.TelemetryMetrics
+        ],
+        Serialization: [
+          Snakepit.Serialization
         ],
         Utilities: [
           Snakepit.RunID,

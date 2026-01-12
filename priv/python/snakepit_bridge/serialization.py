@@ -35,6 +35,7 @@ import numpy as np
 from typing import Any, Dict, Union, Tuple, Optional
 from google.protobuf import any_pb2
 from snakepit_bridge.zero_copy import ZeroCopyRef
+from snakepit_bridge import telemetry
 
 # Size threshold for using binary serialization (10KB)
 BINARY_THRESHOLD = 10_240
@@ -50,8 +51,36 @@ REPR_KEY = "__repr__"
 
 # Policy configuration from environment
 _DETAIL_MODE = os.getenv("SNAKEPIT_UNSERIALIZABLE_DETAIL", "none").strip().lower()
-_MAXLEN_RAW = int(os.getenv("SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN", "500"))
-_MAXLEN = max(0, min(_MAXLEN_RAW, 2000))  # Clamp to 0-2000
+
+# Parse MAXLEN defensively - bad values should not crash worker startup
+_MAXLEN_DEFAULT = 500
+_MAXLEN_MAX = 2000
+
+def _parse_maxlen() -> int:
+    """Parse MAXLEN from env var with graceful fallback."""
+    raw = os.getenv("SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN", str(_MAXLEN_DEFAULT))
+    try:
+        val = int(raw.strip())
+    except (ValueError, TypeError):
+        # Bad value - fall back to default, don't crash the worker
+        return _MAXLEN_DEFAULT
+    return max(0, min(val, _MAXLEN_MAX))
+
+_MAXLEN = _parse_maxlen()
+
+# Tolist size guard - prevents explosive expansion of sparse arrays
+_TOLIST_MAX_ELEMENTS_DEFAULT = 1_000_000  # ~8MB for floats
+
+def _parse_tolist_max() -> int:
+    """Parse TOLIST_MAX_ELEMENTS from env var with graceful fallback."""
+    raw = os.getenv("SNAKEPIT_TOLIST_MAX_ELEMENTS", str(_TOLIST_MAX_ELEMENTS_DEFAULT))
+    try:
+        val = int(raw.strip())
+    except (ValueError, TypeError):
+        return _TOLIST_MAX_ELEMENTS_DEFAULT
+    return max(0, val)
+
+_TOLIST_MAX_ELEMENTS = _parse_tolist_max()
 
 # Secret redaction patterns - best-effort mitigation, not a security boundary
 _SECRET_PATTERNS = [
@@ -108,21 +137,112 @@ def _unserializable_detail(obj) -> Optional[str]:
     return None
 
 
+def _count_list_elements(lst, max_count: int) -> int:
+    """
+    Count elements in a (possibly nested) list, stopping early if over threshold.
+
+    Returns the count up to max_count + 1 (to detect exceeding threshold).
+    """
+    count = 0
+    stack = [lst]
+    while stack and count <= max_count:
+        item = stack.pop()
+        if isinstance(item, list):
+            for elem in item:
+                if isinstance(elem, list):
+                    stack.append(elem)
+                else:
+                    count += 1
+                    if count > max_count:
+                        return count
+        else:
+            count += 1
+    return count
+
+
+def _pre_check_tolist_size(obj) -> bool:
+    """
+    Pre-check if tolist() is safe to call without massive allocation.
+
+    Returns True if safe to call tolist(), False if it would exceed threshold.
+    This prevents memory blowup BEFORE allocation, not after.
+
+    Uses isinstance() for numpy (precise), heuristics for other types (best-effort).
+    """
+    # numpy.ndarray: use isinstance for precise detection (numpy is already imported)
+    if isinstance(obj, np.ndarray):
+        try:
+            return int(obj.size) <= _TOLIST_MAX_ELEMENTS
+        except Exception:
+            pass
+
+    # scipy sparse matrices: check shape product vs nnz
+    # For sparse→dense, the allocation size is shape product, not nnz
+    # Use int() cast to prevent overflow with numpy scalar types
+    if hasattr(obj, 'nnz') and hasattr(obj, 'shape'):
+        try:
+            # Sparse matrix - dense conversion would allocate shape product elements
+            dense_size = 1
+            for dim in obj.shape:
+                dense_size *= int(dim)  # Cast to Python int to prevent overflow
+            return dense_size <= _TOLIST_MAX_ELEMENTS
+        except Exception:
+            pass
+
+    # pandas DataFrame/Series: best-effort heuristic (size + values attributes)
+    if hasattr(obj, 'size') and hasattr(obj, 'values'):
+        try:
+            return int(obj.size) <= _TOLIST_MAX_ELEMENTS
+        except Exception:
+            pass
+
+    # Unknown type with tolist() - we can't pre-check, so be conservative
+    # Return True to allow tolist() but rely on post-check and MemoryError catch
+    return True
+
+
+# Telemetry deduplication: track emitted types per process to avoid high cardinality
+# Capped to prevent unbounded growth in long-running workers with many distinct types
+_emitted_marker_types: set = set()
+_EMITTED_MARKER_TYPES_MAX = 10_000  # Cap to prevent unbounded memory growth
+
+
 def _unserializable_marker(obj) -> dict:
     """
     Build the marker dict for an unserializable object.
 
     This is the single source of truth for marker construction.
     Policy determines whether repr is included.
+    Emits telemetry with type info only (never repr) for observability.
+    Telemetry is deduplicated per-type-per-process to avoid high cardinality.
     """
+    type_str = f"{type(obj).__module__}.{type(obj).__name__}"
+
     marker = {
         UNSERIALIZABLE_KEY: True,
-        TYPE_KEY: f"{type(obj).__module__}.{type(obj).__name__}",
+        TYPE_KEY: type_str,
     }
 
     detail = _unserializable_detail(obj)
     if detail is not None:
         marker[REPR_KEY] = detail
+
+    # Emit telemetry - deduplicated per type to avoid high cardinality
+    # Only emit if we can actually record the type (preserves dedup + bounded memory)
+    # Wrapped in try/except so telemetry issues never break serialization
+    if type_str not in _emitted_marker_types:
+        if len(_emitted_marker_types) < _EMITTED_MARKER_TYPES_MAX:
+            _emitted_marker_types.add(type_str)
+            try:
+                telemetry.emit(
+                    "snakepit.serialization.unserializable_marker",
+                    {"first_seen": 1},  # First occurrence of this type in this process
+                    {"type": type_str},
+                )
+            except Exception:
+                # Telemetry is best-effort, never allowed to break serialization
+                pass
+        # Once cap is reached, silently skip new types to bound telemetry cardinality
 
     return marker
 
@@ -144,10 +264,35 @@ class GracefulJSONEncoder(json.JSONEncoder):
 
     def default(self, obj):
         # Try common conversion methods in order of preference
-        for method in ('model_dump', 'to_dict', '_asdict', 'tolist'):
+        for method in ('model_dump', 'to_dict', '_asdict'):
             if hasattr(obj, method):
                 try:
                     return getattr(obj, method)()
+                except Exception:
+                    pass
+
+        # tolist() with size guard - prevents explosive sparse→dense expansion
+        # Pre-check known types BEFORE calling tolist() to prevent allocation blowup
+        if hasattr(obj, 'tolist'):
+            if not _pre_check_tolist_size(obj):
+                # Known type that would exceed threshold - skip tolist entirely
+                pass
+            else:
+                try:
+                    result = obj.tolist()
+                    if isinstance(result, list):
+                        # Post-check for unknown types where we couldn't pre-check
+                        element_count = _count_list_elements(result, _TOLIST_MAX_ELEMENTS)
+                        if element_count > _TOLIST_MAX_ELEMENTS:
+                            # Too large - fall through to marker
+                            pass
+                        else:
+                            return result
+                    else:
+                        return result
+                except MemoryError:
+                    # Allocation failed - fall through to marker
+                    pass
                 except Exception:
                     pass
 
@@ -170,10 +315,35 @@ def _orjson_default(obj):
     Uses the centralized policy-aware marker builder.
     """
     # Try common conversion methods in order of preference
-    for method in ('model_dump', 'to_dict', '_asdict', 'tolist'):
+    for method in ('model_dump', 'to_dict', '_asdict'):
         if hasattr(obj, method):
             try:
                 return getattr(obj, method)()
+            except Exception:
+                pass
+
+    # tolist() with size guard - prevents explosive sparse→dense expansion
+    # Pre-check known types BEFORE calling tolist() to prevent allocation blowup
+    if hasattr(obj, 'tolist'):
+        if not _pre_check_tolist_size(obj):
+            # Known type that would exceed threshold - skip tolist entirely
+            pass
+        else:
+            try:
+                result = obj.tolist()
+                if isinstance(result, list):
+                    # Post-check for unknown types where we couldn't pre-check
+                    element_count = _count_list_elements(result, _TOLIST_MAX_ELEMENTS)
+                    if element_count > _TOLIST_MAX_ELEMENTS:
+                        # Too large - fall through to marker
+                        pass
+                    else:
+                        return result
+                else:
+                    return result
+            except MemoryError:
+                # Allocation failed - fall through to marker
+                pass
             except Exception:
                 pass
 

@@ -348,3 +348,237 @@ class TestUnknownModeDefaultsToSafe:
 
             marker = serialization._unserializable_marker(CustomObject())
             assert serialization.REPR_KEY not in marker
+
+
+class TestEnvVarParsingRobustness:
+    """Test that bad env var values don't crash the module."""
+
+    def test_invalid_maxlen_defaults_gracefully(self):
+        """Non-integer MAXLEN should not crash module import."""
+        with patch.dict(os.environ, {"SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN": "not_a_number"}):
+            from snakepit_bridge import serialization
+            import importlib
+            # This should NOT raise - must handle gracefully
+            importlib.reload(serialization)
+            # Should fall back to default
+            assert serialization._MAXLEN == 500
+
+    def test_empty_maxlen_defaults_gracefully(self):
+        """Empty MAXLEN should not crash module import."""
+        with patch.dict(os.environ, {"SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN": ""}):
+            from snakepit_bridge import serialization
+            import importlib
+            importlib.reload(serialization)
+            assert serialization._MAXLEN == 500
+
+    def test_whitespace_maxlen_handled(self):
+        """MAXLEN with whitespace should be handled."""
+        with patch.dict(os.environ, {"SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN": "  200  "}):
+            from snakepit_bridge import serialization
+            import importlib
+            importlib.reload(serialization)
+            assert serialization._MAXLEN == 200
+
+    def test_negative_maxlen_clamped(self):
+        """Negative MAXLEN should be clamped to 0."""
+        with patch.dict(os.environ, {"SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN": "-100"}):
+            from snakepit_bridge import serialization
+            import importlib
+            importlib.reload(serialization)
+            assert serialization._MAXLEN == 0
+
+
+class TestMarkerTelemetry:
+    """Test telemetry emission for marker creation."""
+
+    def test_telemetry_emitted_on_marker_creation(self):
+        """Marker creation should emit telemetry event."""
+        from snakepit_bridge import serialization
+        from snakepit_bridge import telemetry
+
+        # Clear deduplication set for clean test
+        serialization._emitted_marker_types.clear()
+
+        # Track emitted events
+        emitted_events = []
+
+        class MockBackend:
+            def emit(self, event, measurements, metadata, correlation_id):
+                emitted_events.append({
+                    "event": event,
+                    "measurements": measurements,
+                    "metadata": metadata,
+                })
+
+        # Install mock backend
+        original_backend = telemetry.get_backend()
+        telemetry.set_backend(MockBackend())
+
+        try:
+            class CustomObject:
+                pass
+
+            serialization._unserializable_marker(CustomObject())
+
+            # Should have emitted one event
+            assert len(emitted_events) == 1
+            assert emitted_events[0]["event"] == "snakepit.serialization.unserializable_marker"
+            assert emitted_events[0]["measurements"]["first_seen"] == 1
+            assert "CustomObject" in emitted_events[0]["metadata"]["type"]
+        finally:
+            telemetry.set_backend(original_backend)
+
+    def test_telemetry_includes_type_not_repr(self):
+        """Telemetry should include type info but never repr."""
+        from snakepit_bridge import serialization
+        from snakepit_bridge import telemetry
+
+        # Clear deduplication set for clean test
+        serialization._emitted_marker_types.clear()
+
+        emitted_events = []
+
+        class MockBackend:
+            def emit(self, event, measurements, metadata, correlation_id):
+                emitted_events.append(metadata)
+
+        original_backend = telemetry.get_backend()
+        telemetry.set_backend(MockBackend())
+
+        try:
+            class SecretObject:
+                def __repr__(self):
+                    return "SecretObject(api_key='sk-supersecret123')"
+
+            serialization._unserializable_marker(SecretObject())
+
+            # Metadata should have type but NOT repr
+            assert len(emitted_events) == 1
+            assert "type" in emitted_events[0]
+            assert "repr" not in emitted_events[0]
+            # Verify no secrets leaked
+            assert "sk-supersecret" not in str(emitted_events[0])
+        finally:
+            telemetry.set_backend(original_backend)
+
+    def test_telemetry_disabled_no_error(self):
+        """When telemetry backend is None, marker creation should not fail."""
+        from snakepit_bridge import serialization
+        from snakepit_bridge import telemetry
+
+        # Clear deduplication set for clean test
+        serialization._emitted_marker_types.clear()
+
+        # Ensure no backend
+        original_backend = telemetry.get_backend()
+        telemetry.set_backend(None)
+
+        try:
+            class CustomObject:
+                pass
+
+            # Should not raise
+            marker = serialization._unserializable_marker(CustomObject())
+            assert marker[serialization.UNSERIALIZABLE_KEY] is True
+        finally:
+            telemetry.set_backend(original_backend)
+
+    def test_telemetry_deduplicated_per_type(self):
+        """Telemetry is deduplicated per type to avoid high cardinality."""
+        from snakepit_bridge import serialization
+        from snakepit_bridge import telemetry
+
+        # Clear deduplication set for clean test
+        serialization._emitted_marker_types.clear()
+
+        emitted_events = []
+
+        class MockBackend:
+            def emit(self, event, measurements, metadata, correlation_id):
+                emitted_events.append(metadata)
+
+        original_backend = telemetry.get_backend()
+        telemetry.set_backend(MockBackend())
+
+        try:
+            class RepeatedObject:
+                pass
+
+            # Create multiple markers for same type
+            serialization._unserializable_marker(RepeatedObject())
+            serialization._unserializable_marker(RepeatedObject())
+            serialization._unserializable_marker(RepeatedObject())
+
+            # Should only emit ONCE despite multiple markers
+            assert len(emitted_events) == 1
+            assert "RepeatedObject" in emitted_events[0]["type"]
+        finally:
+            telemetry.set_backend(original_backend)
+
+    def test_telemetry_error_does_not_break_serialization(self):
+        """Telemetry errors should never break marker creation."""
+        from snakepit_bridge import serialization
+        from snakepit_bridge import telemetry
+
+        # Clear deduplication set for clean test
+        serialization._emitted_marker_types.clear()
+
+        class BrokenBackend:
+            def emit(self, event, measurements, metadata, correlation_id):
+                raise RuntimeError("Telemetry backend is broken!")
+
+        original_backend = telemetry.get_backend()
+        telemetry.set_backend(BrokenBackend())
+
+        try:
+            class CustomObject:
+                pass
+
+            # Should NOT raise despite broken telemetry
+            marker = serialization._unserializable_marker(CustomObject())
+            assert marker[serialization.UNSERIALIZABLE_KEY] is True
+        finally:
+            telemetry.set_backend(original_backend)
+
+    def test_telemetry_dedup_set_capped(self):
+        """Deduplication set is capped to prevent unbounded memory AND telemetry cardinality."""
+        from snakepit_bridge import serialization
+        from snakepit_bridge import telemetry
+
+        # Clear deduplication set
+        serialization._emitted_marker_types.clear()
+
+        emitted_events = []
+
+        class MockBackend:
+            def emit(self, event, measurements, metadata, correlation_id):
+                emitted_events.append(metadata)
+
+        original_backend = telemetry.get_backend()
+        telemetry.set_backend(MockBackend())
+
+        # Save original cap and set a small one for testing
+        original_cap = serialization._EMITTED_MARKER_TYPES_MAX
+        serialization._EMITTED_MARKER_TYPES_MAX = 3
+
+        try:
+            # Create 5 different types, but cap is 3
+            for i in range(5):
+                # Create a unique class each time
+                cls = type(f"DynamicClass{i}", (), {})
+                serialization._unserializable_marker(cls())
+
+            # Should have emitted only 3 events (cap applies to both set AND telemetry)
+            assert len(emitted_events) == 3
+
+            # Set should also be capped at 3
+            assert len(serialization._emitted_marker_types) == 3
+
+            # Verify the first 3 types were recorded
+            recorded_types = {t for t in serialization._emitted_marker_types}
+            assert any("DynamicClass0" in t for t in recorded_types)
+            assert any("DynamicClass1" in t for t in recorded_types)
+            assert any("DynamicClass2" in t for t in recorded_types)
+        finally:
+            telemetry.set_backend(original_backend)
+            serialization._EMITTED_MARKER_TYPES_MAX = original_cap

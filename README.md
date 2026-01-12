@@ -50,7 +50,7 @@ For higher-level Python integration with compile-time type generation, use [Snak
 
 ```elixir
 def deps do
-  [{:snakebridge, "~> 0.8.2"}]
+  [{:snakebridge, "~> 0.9.0"}]
 end
 
 def project do
@@ -648,6 +648,80 @@ with telemetry.span("data_processing", {"stage": "preprocessing"}):
 config :snakepit, :opentelemetry, %{enabled: true}
 ```
 
+## Graceful Serialization
+
+Snakepit gracefully handles Python objects that cannot be serialized to JSON. Instead of
+failing, non-serializable objects are replaced with informative markers containing type
+information.
+
+### How It Works
+
+When Python returns data containing non-JSON-serializable objects:
+
+1. **Conversion attempted first**: Objects with common conversion methods (`model_dump`,
+   `to_dict`, `_asdict`, `tolist`, `isoformat`) are automatically converted
+2. **Marker fallback**: Truly non-serializable objects become marker maps with type info
+
+```elixir
+# Returns with some fields as markers
+{:ok, result} = Snakepit.execute("get_complex_data", %{})
+
+# Check for markers in the response
+if Snakepit.Serialization.unserializable?(result["response"]) do
+  {:ok, info} = Snakepit.Serialization.unserializable_info(result["response"])
+  Logger.warning("Got unserializable object: #{info.type}")
+end
+```
+
+### Marker Format
+
+Unserializable markers are maps with the structure:
+
+```elixir
+%{
+  "__ffi_unserializable__" => true,
+  "__type__" => "module.ClassName"
+}
+```
+
+By default, markers only include type information (safe for production). The `__repr__`
+field is optionally included when explicitly enabled.
+
+### Configuration
+
+Control marker detail level via environment variables (set before starting workers):
+
+```elixir
+# In config/runtime.exs or application startup
+System.put_env("SNAKEPIT_UNSERIALIZABLE_DETAIL", "repr_redacted_truncated")
+System.put_env("SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN", "200")
+```
+
+Available detail modes:
+- `none` (default) - Only type, no repr (safe for production)
+- `type` - Placeholder string with type name
+- `repr_truncated` - Include truncated repr (may leak secrets)
+- `repr_redacted_truncated` - Truncated repr with common secrets redacted
+
+### Size Guards
+
+Large array conversions are guarded to prevent payload bloat:
+
+```bash
+# Limit list expansion (default: 1,000,000 elements)
+export SNAKEPIT_TOLIST_MAX_ELEMENTS=100000
+```
+
+Size is checked **before** calling `tolist()` for known types:
+- **numpy.ndarray**: Precise detection via `isinstance()`
+- **scipy sparse / pandas**: Best-effort heuristics
+
+For unknown types, `tolist()` is called but the result size is checked before transmission.
+When a result exceeds the threshold, it falls back to a marker instead of sending
+potentially gigabytes of data.
+
+See `Snakepit.Serialization` module and `guides/graceful-serialization.md` for full details.
+
 ## Process Management
 
 ### Automatic Cleanup
@@ -745,6 +819,7 @@ mix run examples/hardware_detection.exs
 | [Hardware Detection](guides/hardware-detection.md) | ML accelerator detection |
 | [Fault Tolerance](guides/fault-tolerance.md) | Circuit breaker, retry, health |
 | [Streaming](guides/streaming.md) | gRPC streaming operations |
+| [Graceful Serialization](guides/graceful-serialization.md) | Handling non-JSON-serializable objects |
 | [Python Adapters](guides/python-adapters.md) | Writing Python adapters |
 | [Observability](guides/observability.md) | Telemetry and logging |
 | [Production](guides/production.md) | Deployment and troubleshooting |

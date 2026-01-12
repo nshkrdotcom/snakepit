@@ -30,7 +30,7 @@ defmodule Snakepit.Serialization do
   ## Environment Variables
 
   The following environment variables control marker detail level. These are
-  set on the Python worker processes, typically via pool configuration:
+  set on the Python worker processes:
 
   - `SNAKEPIT_UNSERIALIZABLE_DETAIL` - Controls what information is included:
     - `none` (default) - Only type, no repr (safe for production)
@@ -39,6 +39,22 @@ defmodule Snakepit.Serialization do
     - `repr_redacted_truncated` - Truncated repr with common secrets redacted
 
   - `SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN` - Maximum repr length (default: 500, max: 2000)
+
+  ## Configuring Worker Environment
+
+  Python workers inherit environment from the BEAM VM. Set these before
+  starting Snakepit:
+
+      # In your application startup or config/runtime.exs
+      System.put_env("SNAKEPIT_UNSERIALIZABLE_DETAIL", "repr_redacted_truncated")
+      System.put_env("SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN", "200")
+
+  Or via shell before starting the application:
+
+      SNAKEPIT_UNSERIALIZABLE_DETAIL=repr_redacted_truncated mix run ...
+
+  For per-pool configuration, use the `:env` option in pool config (if supported
+  by your adapter).
 
   ## Operational Guidance
 

@@ -319,3 +319,194 @@ class TestRealWorldScenarios:
         assert "FakeResponse" in parsed["response"][TYPE_KEY]
         # Note: By default, repr is NOT included (safe mode)
         # Use SNAKEPIT_UNSERIALIZABLE_DETAIL=repr_truncated to include repr
+
+
+class TestTolistSizeGuard:
+    """Test size guard for tolist() conversion."""
+
+    def test_small_tolist_converted(self):
+        """Small tolist() results are converted normally."""
+        class SmallArray:
+            def tolist(self):
+                return [1, 2, 3, 4, 5]
+
+        obj = SmallArray()
+        result = json.dumps({"arr": obj}, cls=GracefulJSONEncoder)
+        parsed = json.loads(result)
+
+        assert parsed["arr"] == [1, 2, 3, 4, 5]
+
+    def test_huge_tolist_falls_back_to_marker(self):
+        """tolist() results exceeding threshold fall back to marker.
+
+        Note: We use a lowered threshold instead of actually allocating huge data
+        to avoid CI memory issues and slow tests.
+        """
+        with patch.dict(os.environ, {"SNAKEPIT_TOLIST_MAX_ELEMENTS": "100"}):
+            from snakepit_bridge import serialization
+            import importlib
+            importlib.reload(serialization)
+
+            class OverThresholdArray:
+                """Array that would exceed the lowered threshold."""
+                def tolist(self):
+                    return list(range(150))  # 150 > 100 threshold
+
+                def __repr__(self):
+                    return "<OverThresholdArray size=150>"
+
+            obj = OverThresholdArray()
+            result = json.dumps({"arr": obj}, cls=serialization.GracefulJSONEncoder)
+            parsed = json.loads(result)
+
+            # Should have fallen back to marker instead of large list
+            assert parsed["arr"][serialization.UNSERIALIZABLE_KEY] is True
+            assert "OverThresholdArray" in parsed["arr"][serialization.TYPE_KEY]
+
+    def test_tolist_size_threshold_configurable(self):
+        """Tolist size threshold can be configured via env var."""
+        with patch.dict(os.environ, {"SNAKEPIT_TOLIST_MAX_ELEMENTS": "100"}):
+            from snakepit_bridge import serialization
+            import importlib
+            importlib.reload(serialization)
+
+            class MediumArray:
+                def tolist(self):
+                    return list(range(200))  # 200 elements > 100 threshold
+
+            obj = MediumArray()
+            result = json.dumps({"arr": obj}, cls=serialization.GracefulJSONEncoder)
+            parsed = json.loads(result)
+
+            # Should fall back to marker because 200 > 100
+            assert parsed["arr"][serialization.UNSERIALIZABLE_KEY] is True
+
+    def test_tolist_at_threshold_converted(self):
+        """tolist() at exactly the threshold is converted."""
+        with patch.dict(os.environ, {"SNAKEPIT_TOLIST_MAX_ELEMENTS": "100"}):
+            from snakepit_bridge import serialization
+            import importlib
+            importlib.reload(serialization)
+
+            class ExactArray:
+                def tolist(self):
+                    return list(range(100))  # Exactly 100 elements
+
+            obj = ExactArray()
+            result = json.dumps({"arr": obj}, cls=serialization.GracefulJSONEncoder)
+            parsed = json.loads(result)
+
+            # Should be converted (at threshold, not over)
+            assert parsed["arr"] == list(range(100))
+
+    def test_tolist_exception_falls_through(self):
+        """If tolist() raises, fallback to marker."""
+        class BrokenArray:
+            def tolist(self):
+                raise RuntimeError("Cannot convert")
+
+        obj = BrokenArray()
+        result = json.dumps({"arr": obj}, cls=GracefulJSONEncoder)
+        parsed = json.loads(result)
+
+        # Should fall back to marker
+        assert parsed["arr"][UNSERIALIZABLE_KEY] is True
+
+    def test_numpy_pre_check_blocks_huge_array(self):
+        """Pre-check blocks numpy arrays before tolist() allocation using isinstance."""
+        import numpy as np
+
+        with patch.dict(os.environ, {"SNAKEPIT_TOLIST_MAX_ELEMENTS": "100"}):
+            from snakepit_bridge import serialization
+            import importlib
+            importlib.reload(serialization)
+
+            # Create actual numpy array that exceeds threshold
+            arr = np.zeros(200)  # 200 > 100 threshold
+
+            result = json.dumps({"arr": arr}, cls=serialization.GracefulJSONEncoder)
+            parsed = json.loads(result)
+
+            # Should fall back to marker (numpy array detected via isinstance)
+            assert parsed["arr"][serialization.UNSERIALIZABLE_KEY] is True
+            assert "ndarray" in parsed["arr"][serialization.TYPE_KEY]
+
+    def test_numpy_pre_check_prevents_tolist_call(self):
+        """Pre-check prevents tolist() from being called for oversized numpy arrays.
+
+        This is the critical invariant: we avoid the allocation work entirely.
+        Uses a numpy subclass to track tolist() calls since np.ndarray can't be monkeypatched.
+        """
+        import numpy as np
+
+        with patch.dict(os.environ, {"SNAKEPIT_TOLIST_MAX_ELEMENTS": "100"}):
+            from snakepit_bridge import serialization
+            import importlib
+            importlib.reload(serialization)
+
+            # Create a numpy subclass that tracks tolist() calls
+            class TrackedArray(np.ndarray):
+                tolist_called = False
+
+                def tolist(self):
+                    TrackedArray.tolist_called = True
+                    return super().tolist()
+
+            # Create array via view to get our subclass
+            TrackedArray.tolist_called = False
+            arr = np.zeros(200).view(TrackedArray)  # 200 > 100 threshold
+
+            # Verify it's detected as numpy via isinstance
+            assert isinstance(arr, np.ndarray)
+
+            result = json.dumps({"arr": arr}, cls=serialization.GracefulJSONEncoder)
+            parsed = json.loads(result)
+
+            # Should fall back to marker
+            assert parsed["arr"][serialization.UNSERIALIZABLE_KEY] is True
+
+            # Critical: tolist() should NOT have been called
+            assert not TrackedArray.tolist_called, "tolist() was called but should have been blocked by pre-check"
+
+    def test_numpy_pre_check_allows_small_array(self):
+        """Pre-check allows numpy arrays within threshold."""
+        import numpy as np
+
+        with patch.dict(os.environ, {"SNAKEPIT_TOLIST_MAX_ELEMENTS": "100"}):
+            from snakepit_bridge import serialization
+            import importlib
+            importlib.reload(serialization)
+
+            # Create actual numpy array within threshold
+            arr = np.array([1, 2, 3, 4, 5])  # 5 < 100 threshold
+
+            result = json.dumps({"arr": arr}, cls=serialization.GracefulJSONEncoder)
+            parsed = json.loads(result)
+
+            # Should convert normally via tolist()
+            assert parsed["arr"] == [1, 2, 3, 4, 5]
+
+    def test_sparse_like_pre_check_uses_int_cast(self):
+        """Pre-check for sparse matrices uses int() cast to prevent overflow."""
+        with patch.dict(os.environ, {"SNAKEPIT_TOLIST_MAX_ELEMENTS": "100"}):
+            from snakepit_bridge import serialization
+            import importlib
+            importlib.reload(serialization)
+
+            class SparseLikeMatrix:
+                """Mimics scipy sparse matrix with nnz and shape."""
+                def __init__(self, shape):
+                    self.nnz = 5  # Few non-zeros
+                    self.shape = shape  # But large dense shape
+
+                def tolist(self):
+                    # Would return huge list if called
+                    raise RuntimeError("Should not be called!")
+
+            # Shape product = 20 * 20 = 400 > 100 threshold
+            obj = SparseLikeMatrix((20, 20))
+            result = json.dumps({"arr": obj}, cls=serialization.GracefulJSONEncoder)
+            parsed = json.loads(result)
+
+            # Should fall back to marker WITHOUT calling tolist()
+            assert parsed["arr"][serialization.UNSERIALIZABLE_KEY] is True

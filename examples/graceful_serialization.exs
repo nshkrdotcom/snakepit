@@ -101,17 +101,26 @@ defmodule GracefulSerializationDemo do
 
   defp demo_custom_class do
     IO.puts("--- Demo 3: Custom classes without conversion methods ---")
-    IO.puts("Non-convertible objects get an informative marker with type info")
+    IO.puts("Non-convertible objects get a marker with type info")
+    IO.puts("(By default, __repr__ is NOT included for security)")
 
     case Snakepit.execute("serialization_demo", %{demo_type: "custom"}) do
       {:ok, result} ->
         custom = result["custom_class_demo"]
         obj = custom["custom_object"]
 
-        IO.puts("  custom_object:")
-        IO.puts("    __ffi_unserializable__: #{obj["__ffi_unserializable__"]}")
-        IO.puts("    __type__: #{obj["__type__"]}")
-        IO.puts("    __repr__: #{obj["__repr__"]}")
+        # Use the helper functions to safely inspect markers
+        if Snakepit.Serialization.unserializable?(obj) do
+          {:ok, info} = Snakepit.Serialization.unserializable_info(obj)
+          IO.puts("  custom_object:")
+          IO.puts("    marker detected: true")
+          IO.puts("    type: #{info.type}")
+
+          IO.puts(
+            "    repr: #{info.repr || "(not included - set SNAKEPIT_UNSERIALIZABLE_DETAIL to enable)"}"
+          )
+        end
+
         IO.puts("  preserved_string: #{custom["preserved_string"]}")
 
         nested = custom["nested"]
@@ -173,7 +182,8 @@ defmodule GracefulSerializationDemo do
   end
 
   defp describe_item(%{"__ffi_unserializable__" => true} = item) do
-    "#{item["__repr__"]} (unserializable marker)"
+    type = item["__type__"] || "unknown"
+    "<marker: #{type}>"
   end
 
   defp describe_item(%{"code" => _, "message" => _} = item) do

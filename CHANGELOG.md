@@ -21,8 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `SNAKEPIT_UNSERIALIZABLE_REPR_MAXLEN` - maximum repr length (default 500, max 2000)
 - **Secret redaction** in `repr_redacted_truncated` mode - redacts common patterns (API keys, bearer tokens, passwords) from repr output.
 - `GracefulJSONEncoder` class and `_orjson_default` function in `serialization.py` for both stdlib json and orjson paths.
+- **Tolist size guard** (`SNAKEPIT_TOLIST_MAX_ELEMENTS` env var, default 1M) to prevent explosive sparse→dense array conversions:
+  - Pre-checks numpy arrays via `isinstance()` before calling `tolist()` to avoid allocation
+  - Best-effort heuristics for scipy sparse matrices and pandas DataFrames
+  - Post-checks unknown types after `tolist()` with fallback to marker if oversized
+- **Telemetry for marker creation** - Emits `[:snakepit, :serialization, :unserializable_marker]` events with type metadata (never repr). Deduplicated per-type-per-process with a 10K type cap to bound cardinality.
 - `serialization_demo` tool in the showcase adapter demonstrating datetime, custom class, and convertible object handling.
 - `graceful_serialization.exs` example showing the feature in action.
+- `guides/graceful-serialization.md` comprehensive guide covering configuration, helpers, telemetry, and best practices.
 - Unit tests for graceful serialization (Python: 24 tests, Elixir: 14 tests) plus policy behavior tests.
 
 ## [0.10.1] - 2026-01-11
