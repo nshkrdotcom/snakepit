@@ -126,6 +126,21 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   @doc """
+  Updates process-group metadata for a worker after startup.
+
+  This is used to resolve startup races where the external OS process may not
+  be the process-group leader at the moment it is spawned, but becomes one
+  shortly thereafter (e.g. via `setsid()` in Python or delayed OS bookkeeping).
+
+  The update is only applied if the currently stored `process_pid` matches the
+  provided `process_pid`, to avoid corrupting a restarted worker entry.
+  """
+  def update_process_group(worker_id, process_pid, pgid)
+      when is_binary(worker_id) and is_integer(process_pid) and is_integer(pgid) do
+    GenServer.call(__MODULE__, {:update_process_group, worker_id, process_pid, pgid}, 5_000)
+  end
+
+  @doc """
   Gets workers with specific fingerprints.
   """
   def get_workers_by_fingerprint(fingerprint) do
@@ -398,6 +413,30 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
     # Reply :ok to unblock the caller - worker is now fully registered
     {:reply, :ok, state}
+  end
+
+  @impl true
+  def handle_call({:update_process_group, worker_id, process_pid, pgid}, _from, state) do
+    case :ets.lookup(state.table, worker_id) do
+      [{^worker_id, info}] when is_map(info) ->
+        if Map.get(info, :process_pid) == process_pid do
+          updated =
+            info
+            |> Map.put(:pgid, pgid)
+            |> Map.put(:process_group?, true)
+
+          :ets.insert(state.table, {worker_id, updated})
+          :dets.insert(state.dets_table, {worker_id, updated})
+          :dets.sync(state.dets_table)
+
+          {:reply, :ok, state}
+        else
+          {:reply, {:error, :pid_mismatch}, state}
+        end
+
+      [] ->
+        {:reply, {:error, :not_found}, state}
+    end
   end
 
   @impl true

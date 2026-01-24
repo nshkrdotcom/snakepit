@@ -31,7 +31,7 @@ Add `snakepit` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:snakepit, "~> 0.11.0"}
+    {:snakepit, "~> 0.12.0"}
   ]
 end
 ```
@@ -50,7 +50,7 @@ For higher-level Python integration with compile-time type generation, use [Snak
 
 ```elixir
 def deps do
-  [{:snakebridge, "~> 0.14.0"}]
+  [{:snakebridge, "~> 0.15.0"}]
 end
 
 def project do

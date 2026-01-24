@@ -3,6 +3,8 @@ defmodule Snakepit.PythonRuntime do
   Resolve and manage the Python runtime used by Snakepit.
   """
 
+  import Bitwise
+
   @default_config %{
     strategy: :system,
     managed: false,
@@ -44,6 +46,9 @@ defmodule Snakepit.PythonRuntime do
       {:ok, path} ->
         {:ok, path, %{source: :override}}
 
+      {:error, reason} ->
+        {:error, reason}
+
       :none ->
         case package_env_python(config) do
           {:ok, path} ->
@@ -64,10 +69,8 @@ defmodule Snakepit.PythonRuntime do
   end
 
   def runtime_identity do
-    case :persistent_term.get(@identity_key, nil) do
-      nil -> compute_and_cache_identity()
-      identity -> identity
-    end
+    cached = :persistent_term.get(@identity_key, nil)
+    refresh_identity_if_needed(cached)
   end
 
   def runtime_metadata do
@@ -222,7 +225,7 @@ defmodule Snakepit.PythonRuntime do
   defp override_python do
     case Application.get_env(:snakepit, :python_executable) || System.get_env("SNAKEPIT_PYTHON") do
       nil -> :none
-      path -> {:ok, path}
+      path -> resolve_override_executable(path)
     end
   end
 
@@ -232,7 +235,7 @@ defmodule Snakepit.PythonRuntime do
         :none
 
       env_dir ->
-        case Enum.find(venv_python_paths(env_dir), &File.exists?/1) do
+        case Enum.find(venv_python_paths(env_dir), &executable_file?/1) do
           nil -> :none
           path -> {:ok, path}
         end
@@ -276,7 +279,8 @@ defmodule Snakepit.PythonRuntime do
     ]
 
     Enum.find_value(candidates, fn path ->
-      path && File.exists?(Path.expand(path)) && Path.expand(path)
+      expanded = path && Path.expand(path)
+      expanded && executable_file?(expanded) && expanded
     end)
   end
 
@@ -319,19 +323,26 @@ defmodule Snakepit.PythonRuntime do
   end
 
   defp build_identity(path) do
-    version = python_version(path)
-    platform = system_platform()
-    hash = binary_hash(path)
+    with {:ok, version} <- python_version(path) do
+      platform = system_platform()
+      hash = binary_hash(path)
 
-    {:ok, %{path: path, version: version, platform: platform, hash: hash}}
+      {:ok, %{path: path, version: version, platform: platform, hash: hash}}
+    end
   end
 
   defp python_version(path) do
-    case System.cmd(path, ["-c", "import sys; print(sys.version.split()[0])"],
-           stderr_to_stdout: true
-         ) do
-      {output, 0} -> String.trim(output)
-      _ -> "unknown"
+    args = ["-c", "import sys; print(sys.version.split()[0])"]
+
+    case safe_cmd(path, args, stderr_to_stdout: true) do
+      {:ok, {output, 0}} ->
+        {:ok, String.trim(output)}
+
+      {:ok, {output, status}} ->
+        {:error, {:python_failed, status, String.trim(output)}}
+
+      {:error, reason} ->
+        {:error, {:python_spawn_failed, reason}}
     end
   end
 
@@ -348,6 +359,78 @@ defmodule Snakepit.PythonRuntime do
 
       _ ->
         "unknown"
+    end
+  end
+
+  defp refresh_identity_if_needed(nil), do: compute_and_cache_identity()
+
+  defp refresh_identity_if_needed({:ok, %{path: cached_path}} = cached) do
+    case resolve_executable() do
+      {:ok, path, _meta} when path == cached_path ->
+        cached
+
+      {:ok, _path, _meta} ->
+        compute_and_cache_identity()
+
+      {:error, reason} ->
+        identity = {:error, reason}
+        :persistent_term.put(@identity_key, identity)
+        identity
+    end
+  end
+
+  defp refresh_identity_if_needed({:error, _reason} = cached) do
+    case resolve_executable() do
+      {:ok, _path, _meta} -> compute_and_cache_identity()
+      {:error, _reason} -> cached
+    end
+  end
+
+  defp refresh_identity_if_needed(other), do: other
+
+  defp resolve_override_executable(path) when is_binary(path) do
+    resolved =
+      if path_has_separator?(path) do
+        candidate = Path.expand(path, project_root())
+        if executable_file?(candidate), do: {:ok, candidate}, else: :error
+      else
+        case System.find_executable(path) do
+          nil -> :error
+          found -> if executable_file?(found), do: {:ok, found}, else: :error
+        end
+      end
+
+    case resolved do
+      {:ok, python} -> {:ok, python}
+      :error -> {:error, {:invalid_python_executable, path}}
+    end
+  end
+
+  defp path_has_separator?(path) do
+    String.contains?(path, "/") or String.contains?(path, "\\")
+  end
+
+  defp executable_file?(path) when is_binary(path) do
+    case File.stat(path) do
+      {:ok, %File.Stat{type: :regular, mode: mode}} ->
+        if match?({:win32, _}, :os.type()) do
+          true
+        else
+          (mode &&& 0o111) != 0
+        end
+
+      _ ->
+        false
+    end
+  end
+
+  defp safe_cmd(cmd, args, opts) do
+    try do
+      {:ok, System.cmd(cmd, args, opts)}
+    rescue
+      error -> {:error, error}
+    catch
+      :exit, reason -> {:error, reason}
     end
   end
 end

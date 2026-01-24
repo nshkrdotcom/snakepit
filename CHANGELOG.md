@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-01-25
+
+### Added
+
+- **Post-readiness process group resolution** - Workers re-check process group membership after Python signals readiness, handling cases where `os.setsid()` is called after initial spawn. Uses exponential backoff (up to 250ms) to accommodate delayed OS-level bookkeeping.
+- `ProcessRegistry.update_process_group/3` to update `:pgid` and `:process_group?` metadata after worker startup, with PID mismatch protection to prevent corrupting restarted worker entries.
+- `ready_workers` tracking in pool state to distinguish workers that have completed the gRPC handshake from those merely spawned.
+- `init_failed` flag on pool state to mark pools that failed to start any workers.
+- Global `await_ready_waiters` list for coordinating callers waiting on all pools.
+- Python executable validation for `:python_executable` and `SNAKEPIT_PYTHON` overrides, checking both existence and execute permissions before use.
+- **`Snakepit.Pool.await_init_complete/2`** - waits for asynchronous pool initialization to complete, separate from `await_ready/2` which returns as soon as each pool has at least one ready worker. Useful for tests and scripts that need to wait for all workers to be spawned before proceeding.
+- **Pool initialization telemetry events**:
+  - `[:snakepit, :pool, :init_started]` - emitted when pool initialization begins, with `total_workers` measurement.
+  - `[:snakepit, :pool, :init_complete]` - emitted when initialization finishes, with `duration_ms`, `total_workers`, and `pool_workers` metadata.
+  - `[:snakepit, :pool, :worker_ready]` - emitted when a worker completes the gRPC handshake, with `worker_count`, `pool_name`, and `worker_id` metadata.
+
+### Changed
+
+- **Pool readiness semantics** - `await_ready/2` now waits for at least one worker per pool to complete the gRPC handshake, not just for workers to be spawned. Pools report ready only when `ready_workers` is non-empty.
+- Worker availability now requires both capacity headroom AND ready status. Workers are no longer marked available until they signal readiness.
+- `Snakepit.execute/3` returns `{:error, :pool_not_initialized}` immediately for pools with `init_failed: true` instead of queueing requests that would eventually timeout.
+- `PythonRuntime.python_version/1` returns `{:ok, version}` or `{:error, reason}` tuples instead of raw strings or `"unknown"`.
+- `PythonRuntime.build_identity/1` propagates errors from version detection instead of silently returning partial identity maps.
+- `PythonRuntime.runtime_identity/0` now refreshes the cached identity when the resolved Python path changes, supporting dynamic reconfiguration.
+- Waiter reply logic refactored to stagger replies (2ms apart) to avoid thundering herd on pool initialization.
+- `State.ensure_worker_available/2`, `State.increment_load/2`, and `State.decrement_load/2` now gate availability on worker readiness.
+- `EventHandler.remove_worker_from_pool/4` cleans up `ready_workers` set when removing workers.
+
+### Fixed
+
+- **Startup race for process group detection** - Previously, if Python called `os.setsid()` after Snakepit captured the initial process group ID, the worker would remain in PID-only kill mode, leaving orphaned grandchildren after termination. The bootstrap phase now retries process group resolution after readiness.
+- **Pool readiness gating** - Early calls to `Snakepit.execute/3` no longer hit workers with half-closed gRPC streams. Workers must complete the handshake before receiving work.
+- **Broken pool signaling** - Pools that fail to start any workers are now flagged immediately. `await_ready/2` returns `{:error, %Snakepit.Error{}}` promptly instead of blocking until timeout.
+- **Python runtime override robustness** - Invalid `:python_executable` or `SNAKEPIT_PYTHON` paths now return `{:error, {:invalid_python_executable, path}}` instead of crashing the VM on first use. `runtime_env/0` returns an empty list for invalid configurations instead of raising.
+- **Legacy `pool_config` now preserves all user overrides** - Previously, only `startup_batch_size`, `startup_batch_delay_ms`, and `max_workers` were extracted from legacy `pool_config` maps, silently dropping other fields like `adapter_env` and `adapter_args`. The config is now fully merged before applying defaults.
+
 ## [0.11.1] - 2026-01-23
 
 ### Changed
@@ -1588,41 +1624,45 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
-[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.10.0...HEAD
-[0.10.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.10.0
-[0.9.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.9.1
-[0.9.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.9.0
-[0.8.5]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.5
-[0.8.4]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.4
-[0.8.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.3
-[0.8.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.2
-[0.8.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.1
-[0.8.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.8.0
-[0.7.7]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.7
-[0.7.6]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.6
-[0.7.5]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.5
-[0.7.4]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.4
-[0.7.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.3
-[0.7.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.2
-[0.7.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.1
-[0.7.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.7.0
-[0.6.11]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.11
-[0.6.10]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.10
-[0.6.9]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.9
-[0.6.8]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.8
-[0.6.7]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.6.7
-[0.5.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.5.1
-[0.5.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.5.0
-[0.4.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.3
-[0.4.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.2
-[0.4.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.1
-[0.4.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.4.0
-[0.3.3]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.3
-[0.3.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.2
-[0.3.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.1
-[0.3.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.3.0
-[0.2.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.2.1
-[0.2.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.2.0
-[0.1.2]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.1.2
-[0.1.1]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.1.1
+[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.11.1...v0.12.0
+[0.11.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.11.0...v0.11.1
+[0.11.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.10.1...v0.11.0
+[0.10.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.10.0...v0.10.1
+[0.10.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.9.1...v0.10.0
+[0.9.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.9...v0.9.0
+[0.8.9]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.8...v0.8.9
+[0.8.8]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.7...v0.8.8
+[0.8.7]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.6...v0.8.7
+[0.8.6]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.5...v0.8.6
+[0.8.5]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.4...v0.8.5
+[0.8.4]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.3...v0.8.4
+[0.8.3]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.2...v0.8.3
+[0.8.2]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.1...v0.8.2
+[0.8.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.7.7...v0.8.0
+[0.7.7]: https://github.com/nshkrdotcom/snakepit/compare/v0.7.6...v0.7.7
+[0.7.6]: https://github.com/nshkrdotcom/snakepit/compare/v0.7.5...v0.7.6
+[0.7.5]: https://github.com/nshkrdotcom/snakepit/compare/v0.7.4...v0.7.5
+[0.7.4]: https://github.com/nshkrdotcom/snakepit/compare/v0.7.3...v0.7.4
+[0.7.3]: https://github.com/nshkrdotcom/snakepit/compare/v0.7.2...v0.7.3
+[0.7.2]: https://github.com/nshkrdotcom/snakepit/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.5.1...v0.6.0
+[0.5.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.4.3...v0.5.0
+[0.4.3]: https://github.com/nshkrdotcom/snakepit/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/nshkrdotcom/snakepit/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.3.3...v0.4.0
+[0.3.3]: https://github.com/nshkrdotcom/snakepit/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/nshkrdotcom/snakepit/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/nshkrdotcom/snakepit/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/nshkrdotcom/snakepit/releases/tag/v0.1.0

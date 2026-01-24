@@ -32,6 +32,7 @@ defmodule Snakepit.Test.MockGRPCWorker do
     adapter = Keyword.fetch!(opts, :adapter)
     worker_id = Keyword.fetch!(opts, :id)
     port = Keyword.get(opts, :port, adapter.get_port())
+    pool_name = Keyword.get(opts, :pool_name, Snakepit.Pool)
 
     # Store test PID for sending messages
     Process.put(:test_pid, Keyword.get(opts, :test_pid, self()))
@@ -42,6 +43,7 @@ defmodule Snakepit.Test.MockGRPCWorker do
       id: worker_id,
       adapter: adapter,
       port: port,
+      pool_name: pool_name,
       connection: nil,
       session_id: session_id,
       stats: %{requests: 0, errors: 0}
@@ -67,6 +69,8 @@ defmodule Snakepit.Test.MockGRPCWorker do
           nil,
           "mock_grpc_worker"
         )
+
+        :ok = maybe_notify_pool_ready(pool_name, worker_id)
 
         {:ok, %{state | connection: connection}}
 
@@ -144,5 +148,31 @@ defmodule Snakepit.Test.MockGRPCWorker do
 
   defp normalize_execute_opts(timeout) when is_integer(timeout) or timeout == :infinity do
     {timeout, []}
+  end
+
+  defp maybe_notify_pool_ready(pool_name, worker_id) do
+    pool_pid =
+      cond do
+        is_pid(pool_name) -> pool_name
+        true -> Process.whereis(pool_name)
+      end
+
+    case pool_pid do
+      pid when is_pid(pid) ->
+        if Process.alive?(pid) do
+          case Process.info(pid, :registered_name) do
+            {:registered_name, []} -> :ok
+            {:registered_name, nil} -> :ok
+            _ -> GenServer.cast(pid, {:worker_ready, worker_id})
+          end
+        else
+          :ok
+        end
+
+      _ ->
+        :ok
+    end
+  catch
+    :exit, _reason -> :ok
   end
 end

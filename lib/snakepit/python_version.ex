@@ -16,6 +16,7 @@ defmodule Snakepit.PythonVersion do
       {:ok, path, _meta} -> detect(path)
       {:error, :not_found} -> {:error, :python_not_found}
       {:error, :managed_missing} -> {:error, :python_not_found}
+      {:error, reason} -> {:error, reason}
     end
   end
 

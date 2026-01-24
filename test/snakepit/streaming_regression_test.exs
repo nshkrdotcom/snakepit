@@ -25,7 +25,10 @@ defmodule Snakepit.StreamingRegressionTest do
 
   setup_all do
     # Store original config for cleanup
-    original_pooling = Application.get_env(:snakepit, :pooling_enabled, false)
+    original_pooling = Application.get_env(:snakepit, :pooling_enabled)
+    original_pools = Application.get_env(:snakepit, :pools)
+    original_pool_config = Application.get_env(:snakepit, :pool_config)
+    original_adapter = Application.get_env(:snakepit, :adapter_module)
 
     # Enable pooling and restart the application
     Application.put_env(:snakepit, :pooling_enabled, true)
@@ -33,16 +36,32 @@ defmodule Snakepit.StreamingRegressionTest do
     {:ok, _} = Application.ensure_all_started(:snakepit)
 
     :ok = Snakepit.Pool.await_ready()
+    :ok = Snakepit.Pool.await_init_complete(Snakepit.Pool, 30_000)
+
+    assert_eventually(
+      fn ->
+        stats = Snakepit.Pool.get_stats()
+        stats.available == stats.workers
+      end,
+      timeout: 30_000,
+      interval: 100
+    )
 
     on_exit(fn ->
       # Restore original configuration
       Application.stop(:snakepit)
-      Application.put_env(:snakepit, :pooling_enabled, original_pooling)
+      restore_env(:pooling_enabled, original_pooling)
+      restore_env(:pools, original_pools)
+      restore_env(:pool_config, original_pool_config)
+      restore_env(:adapter_module, original_adapter)
       {:ok, _} = Application.ensure_all_started(:snakepit)
     end)
 
     :ok
   end
+
+  defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
+  defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
 
   test "execute_stream streams python chunks in order" do
     parent = self()

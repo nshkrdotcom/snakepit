@@ -9,6 +9,8 @@ defmodule Snakepit.Pool.State do
     :size,
     :workers,
     :available,
+    :ready_workers,
+    :init_failed,
     :worker_loads,
     :worker_capacities,
     :capacity_strategy,
@@ -49,6 +51,8 @@ defmodule Snakepit.Pool.State do
       size: size,
       workers: [],
       available: MapSet.new(),
+      ready_workers: MapSet.new(),
+      init_failed: false,
       worker_loads: %{},
       worker_capacities: %{},
       capacity_strategy: resolve_capacity_strategy(pool_config),
@@ -93,11 +97,12 @@ defmodule Snakepit.Pool.State do
   def ensure_worker_available(pool_state, worker_id) do
     load = worker_load(pool_state, worker_id)
     capacity = effective_capacity(pool_state, worker_id)
+    ready? = ready_worker?(pool_state, worker_id)
 
-    if load < capacity do
+    if load < capacity and ready? do
       %{pool_state | available: MapSet.put(pool_state.available, worker_id)}
     else
-      pool_state
+      %{pool_state | available: MapSet.delete(pool_state.available, worker_id)}
     end
   end
 
@@ -105,11 +110,12 @@ defmodule Snakepit.Pool.State do
     pool_state = ensure_worker_capacity(pool_state, worker_id)
     new_load = worker_load(pool_state, worker_id) + 1
     capacity = effective_capacity(pool_state, worker_id)
+    ready? = ready_worker?(pool_state, worker_id)
 
     new_loads = Map.put(pool_state.worker_loads, worker_id, new_load)
 
     new_available =
-      if new_load < capacity do
+      if new_load < capacity and ready? do
         MapSet.put(pool_state.available, worker_id)
       else
         MapSet.delete(pool_state.available, worker_id)
@@ -127,6 +133,7 @@ defmodule Snakepit.Pool.State do
     current_load = worker_load(pool_state, worker_id)
     new_load = max(current_load - 1, 0)
     capacity = effective_capacity(pool_state, worker_id)
+    ready? = ready_worker?(pool_state, worker_id)
 
     new_loads =
       if new_load > 0 do
@@ -136,10 +143,10 @@ defmodule Snakepit.Pool.State do
       end
 
     new_available =
-      if new_load < capacity and Enum.member?(pool_state.workers, worker_id) do
+      if new_load < capacity and ready? do
         MapSet.put(pool_state.available, worker_id)
       else
-        pool_state.available
+        MapSet.delete(pool_state.available, worker_id)
       end
 
     %{
@@ -196,5 +203,10 @@ defmodule Snakepit.Pool.State do
       end
 
     max(capacity, 1)
+  end
+
+  defp ready_worker?(pool_state, worker_id) do
+    ready_workers = Map.get(pool_state, :ready_workers) || MapSet.new()
+    MapSet.member?(ready_workers, worker_id) and Enum.member?(pool_state.workers, worker_id)
   end
 end

@@ -88,12 +88,15 @@ defmodule Snakepit.Telemetry do
   def pool_events do
     [
       [:snakepit, :pool, :initialized],
+      [:snakepit, :pool, :init_started],
+      [:snakepit, :pool, :init_complete],
       [:snakepit, :pool, :status],
       [:snakepit, :pool, :queue, :enqueued],
       [:snakepit, :pool, :queue, :dequeued],
       [:snakepit, :pool, :queue, :timeout],
       [:snakepit, :pool, :worker, :spawn_started],
       [:snakepit, :pool, :worker, :spawned],
+      [:snakepit, :pool, :worker_ready],
       [:snakepit, :pool, :worker, :spawn_failed],
       [:snakepit, :pool, :worker, :terminated],
       [:snakepit, :pool, :worker, :restarted],

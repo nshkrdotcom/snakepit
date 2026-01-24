@@ -29,6 +29,7 @@ defmodule Snakepit.Pool.AffinityStrictTest do
       size: 2,
       workers: ["worker_a", "worker_b"],
       available: MapSet.new(),
+      ready_workers: MapSet.new(["worker_a", "worker_b"]),
       worker_loads: %{},
       worker_capacities: %{},
       capacity_strategy: :pool,

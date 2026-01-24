@@ -384,13 +384,17 @@ defmodule Snakepit.Config do
     legacy_pool =
       case legacy_pool_config do
         %{} = pool_config when map_size(pool_config) > 0 ->
-          Map.merge(base_pool, %{
-            startup_batch_size:
-              Map.get(pool_config, :startup_batch_size, Defaults.config_default_batch_size()),
-            startup_batch_delay_ms:
-              Map.get(pool_config, :startup_batch_delay_ms, Defaults.config_default_batch_delay()),
-            max_workers: Map.get(pool_config, :max_workers, 1000)
-          })
+          base_pool
+          |> Map.merge(pool_config)
+          |> Map.put(
+            :startup_batch_size,
+            Map.get(pool_config, :startup_batch_size, Defaults.config_default_batch_size())
+          )
+          |> Map.put(
+            :startup_batch_delay_ms,
+            Map.get(pool_config, :startup_batch_delay_ms, Defaults.config_default_batch_delay())
+          )
+          |> Map.put(:max_workers, Map.get(pool_config, :max_workers, 1000))
 
         _ ->
           base_pool

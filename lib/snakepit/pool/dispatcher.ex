@@ -28,7 +28,11 @@ defmodule Snakepit.Pool.Dispatcher do
   end
 
   defp check_pool_initialized(pool_state) do
-    if pool_state.initialized, do: :ok, else: {:error, :pool_not_initialized}
+    cond do
+      Map.get(pool_state, :init_failed, false) -> {:error, :pool_not_initialized}
+      pool_state.initialized -> :ok
+      true -> {:error, :pool_not_initialized}
+    end
   end
 
   defp handle_execute_in_pool(pool_name, pool_state, command, args, opts, from, state, context) do

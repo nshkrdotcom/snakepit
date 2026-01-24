@@ -54,4 +54,38 @@ defmodule Snakepit.PythonRuntimeTest do
 
     assert {:ok, ^python_path, %{source: :override}} = PythonRuntime.resolve_executable()
   end
+
+  test "invalid python_executable override returns error and does not crash runtime_env" do
+    missing_path =
+      Path.join(System.tmp_dir!(), "snakepit_missing_python_#{System.unique_integer()}")
+
+    Application.put_env(:snakepit, :python, %{managed: false, strategy: :system})
+    Application.put_env(:snakepit, :python_executable, missing_path)
+
+    assert {:error, {:invalid_python_executable, ^missing_path}} =
+             PythonRuntime.resolve_executable()
+
+    assert PythonRuntime.runtime_env() == []
+  end
+
+  test "runtime_identity refreshes when python_executable override changes" do
+    root = Path.join(System.tmp_dir!(), "snakepit_python_identity_#{System.unique_integer()}")
+    File.mkdir_p!(root)
+
+    python_a = Path.join(root, "python_a")
+    python_b = Path.join(root, "python_b")
+
+    File.write!(python_a, "#!/usr/bin/env bash\necho 3.12.3\n")
+    File.chmod!(python_a, 0o755)
+    File.write!(python_b, "#!/usr/bin/env bash\necho 3.12.4\n")
+    File.chmod!(python_b, 0o755)
+
+    Application.put_env(:snakepit, :python, %{managed: false, strategy: :system})
+    Application.put_env(:snakepit, :python_executable, python_a)
+
+    assert {:ok, %{path: ^python_a}} = PythonRuntime.runtime_identity()
+
+    Application.put_env(:snakepit, :python_executable, python_b)
+    assert {:ok, %{path: ^python_b}} = PythonRuntime.runtime_identity()
+  end
 end

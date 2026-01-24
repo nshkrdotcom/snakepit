@@ -12,6 +12,8 @@ defmodule Snakepit.Pool.Initializer do
   def run(state) do
     total_workers = Enum.reduce(state.pools, 0, fn {_name, pool}, acc -> acc + pool.size end)
 
+    emit_init_started_telemetry(total_workers)
+
     SLog.info(
       @log_category,
       "🚀 Starting concurrent initialization of #{total_workers} workers across #{map_size(state.pools)} pool(s)..."
@@ -63,6 +65,14 @@ defmodule Snakepit.Pool.Initializer do
     }
   end
 
+  defp emit_init_started_telemetry(total_workers) do
+    :telemetry.execute(
+      [:snakepit, :pool, :init_started],
+      %{total_workers: total_workers, count: 1},
+      %{}
+    )
+  end
+
   # Helper to perform blocking pool initialization in a separate process
   # pool_genserver_name is the registered name of the Pool GenServer (captured before spawn)
   defp do_pool_initialization(pools_data, _baseline_resources, pool_genserver_name) do
@@ -96,18 +106,19 @@ defmodule Snakepit.Pool.Initializer do
         if Enum.empty?(workers) do
           # Pool failed to start any workers
           SLog.error(@log_category, "❌ Pool #{pool_name} failed to start any workers!")
-          pool_state
+          %{pool_state | init_failed: pool_state.size > 0}
         else
           worker_capacities = State.build_worker_capacities(pool_state, workers)
-          available = MapSet.new(workers)
 
           %{
             pool_state
             | workers: workers,
-              available: available,
+              available: MapSet.new(),
+              ready_workers: MapSet.new(),
               worker_capacities: worker_capacities,
               worker_loads: %{},
-              initialized: true
+              initialized: false,
+              init_failed: false
           }
         end
 

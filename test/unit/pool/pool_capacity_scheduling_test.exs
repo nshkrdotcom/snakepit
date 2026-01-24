@@ -29,6 +29,7 @@ defmodule Snakepit.Pool.CapacitySchedulingTest do
       size: 1,
       workers: ["worker_a"],
       available: MapSet.new(["worker_a"]),
+      ready_workers: MapSet.new(["worker_a"]),
       worker_loads: %{},
       worker_capacities: %{"worker_a" => 2},
       capacity_strategy: :pool,
@@ -85,6 +86,7 @@ defmodule Snakepit.Pool.CapacitySchedulingTest do
       state.pools.capacity_pool
       | workers: ["worker_a", "worker_b"],
         available: MapSet.new(["worker_a", "worker_b"]),
+        ready_workers: MapSet.new(["worker_a", "worker_b"]),
         worker_loads: %{"worker_a" => 1},
         worker_capacities: %{"worker_a" => 2, "worker_b" => 1}
     }
@@ -107,6 +109,7 @@ defmodule Snakepit.Pool.CapacitySchedulingTest do
       state.pools.capacity_pool
       | workers: ["worker_a", "worker_b"],
         available: MapSet.new(["worker_b"]),
+        ready_workers: MapSet.new(["worker_a", "worker_b"]),
         worker_loads: %{"worker_a" => 2},
         worker_capacities: %{"worker_a" => 2, "worker_b" => 1}
     }

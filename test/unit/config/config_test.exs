@@ -222,6 +222,32 @@ defmodule Snakepit.ConfigTest do
   end
 
   describe "get_pool_configs/0" do
+    test "legacy pool_config preserves adapter_env/adapter_args overrides" do
+      prev_pools = Application.get_env(:snakepit, :pools)
+      prev_pool_config = Application.get_env(:snakepit, :pool_config)
+      prev_pool_size = Application.get_env(:snakepit, :pool_size)
+
+      on_exit(fn ->
+        restore_env(:pools, prev_pools)
+        restore_env(:pool_config, prev_pool_config)
+        restore_env(:pool_size, prev_pool_size)
+      end)
+
+      Application.delete_env(:snakepit, :pools)
+      Application.put_env(:snakepit, :pool_size, 5)
+
+      Application.put_env(:snakepit, :pool_config, %{
+        pool_size: 1,
+        adapter_env: %{"FOO" => "bar"},
+        adapter_args: ["--adapter", "custom.Adapter"]
+      })
+
+      assert {:ok, [pool_config]} = Config.get_pool_configs()
+      assert pool_config.pool_size == 1
+      assert pool_config.adapter_env == %{"FOO" => "bar"}
+      assert pool_config.adapter_args == ["--adapter", "custom.Adapter"]
+    end
+
     test "fails fast on invalid worker profile" do
       Application.put_env(:snakepit, :pools, [
         %{name: :broken, worker_profile: :unknown}
@@ -235,6 +261,14 @@ defmodule Snakepit.ConfigTest do
                {:error, {:invalid_profile, :unknown, _}} -> true
                _ -> false
              end)
+    end
+  end
+
+  defp restore_env(key, value) do
+    if is_nil(value) do
+      Application.delete_env(:snakepit, key)
+    else
+      Application.put_env(:snakepit, key, value)
     end
   end
 end

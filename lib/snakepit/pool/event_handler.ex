@@ -130,6 +130,7 @@ defmodule Snakepit.Pool.EventHandler do
   defp remove_worker_from_pool(state, pool_name, pool_state, worker_id) do
     new_workers = List.delete(pool_state.workers, worker_id)
     new_available = MapSet.delete(pool_state.available, worker_id)
+    new_ready_workers = MapSet.delete(pool_state.ready_workers, worker_id)
     new_loads = Map.delete(pool_state.worker_loads, worker_id)
     new_capacities = Map.delete(pool_state.worker_capacities, worker_id)
 
@@ -137,6 +138,7 @@ defmodule Snakepit.Pool.EventHandler do
       pool_state
       | workers: new_workers,
         available: new_available,
+        ready_workers: new_ready_workers,
         worker_loads: new_loads,
         worker_capacities: new_capacities
     }

@@ -42,8 +42,12 @@ defmodule Snakepit.Pool do
     # Set to true while async initialization is in progress
     init_start_time: nil,
     # Timestamp for measuring initialization duration
-    reconcile_ref: nil
+    reconcile_ref: nil,
     # Periodic pool reconciliation timer reference
+    await_ready_waiters: [],
+    # Waiters for global await_ready/2 calls
+    init_complete_waiters: []
+    # Waiters for await_init_complete/2 calls
   ]
 
   # Client API
@@ -285,6 +289,22 @@ defmodule Snakepit.Pool do
     )
   end
 
+  defp emit_init_complete_telemetry(pool_worker_counts, total_workers, elapsed_ms) do
+    :telemetry.execute(
+      [:snakepit, :pool, :init_complete],
+      %{duration_ms: elapsed_ms, total_workers: total_workers, count: 1},
+      %{pool_workers: pool_worker_counts}
+    )
+  end
+
+  defp emit_worker_ready_telemetry(pool_name, worker_id, pool_state) do
+    :telemetry.execute(
+      [:snakepit, :pool, :worker_ready],
+      %{worker_count: length(pool_state.workers), count: 1},
+      %{pool_name: pool_name, worker_id: worker_id}
+    )
+  end
+
   @doc """
   Gets pool statistics.
   """
@@ -320,10 +340,11 @@ defmodule Snakepit.Pool do
   end
 
   @doc """
-  Waits for the pool to be fully initialized.
+  Waits for the pool to be ready for service.
 
-  Returns `:ok` when all workers are ready, or `{:error, %Snakepit.Error{}}` if
-  the pool doesn't initialize within the given timeout.
+  Returns `:ok` when each pool has at least one ready worker, or
+  `{:error, %Snakepit.Error{}}` if any pool fails to start workers or the
+  timeout is exceeded.
   """
   @spec await_ready(atom() | pid(), timeout() | nil) :: :ok | {:error, Error.t()}
   def await_ready(pool \\ __MODULE__, timeout \\ nil)
@@ -332,6 +353,30 @@ defmodule Snakepit.Pool do
 
   def await_ready(pool, timeout) do
     GenServer.call(pool, :await_ready, timeout)
+  catch
+    :exit, {:timeout, _} ->
+      {:error,
+       Error.timeout_error("Pool initialization timed out", %{
+         pool: pool,
+         timeout_ms: timeout
+       })}
+  end
+
+  @doc """
+  Waits for asynchronous pool initialization to complete.
+
+  Returns `:ok` when the pool has finished its initialization phase, or
+  `{:error, %Snakepit.Error{}}` if any pool fails to start workers or the
+  timeout is exceeded.
+  """
+  @spec await_init_complete(atom() | pid(), timeout() | nil) :: :ok | {:error, Error.t()}
+  def await_init_complete(pool \\ __MODULE__, timeout \\ nil)
+
+  def await_init_complete(pool, nil),
+    do: await_init_complete(pool, Defaults.pool_await_ready_timeout())
+
+  def await_init_complete(pool, timeout) do
+    GenServer.call(pool, :await_init_complete, timeout)
   catch
     :exit, {:timeout, _} ->
       {:error,
@@ -410,6 +455,14 @@ defmodule Snakepit.Pool do
     baseline_resources = Initializer.capture_resource_metrics()
     resource_delta = Initializer.calculate_resource_delta(baseline_resources, peak_resources)
 
+    pool_worker_counts =
+      Enum.into(updated_pools, %{}, fn {name, pool} -> {name, length(pool.workers)} end)
+
+    total_workers =
+      Enum.reduce(pool_worker_counts, 0, fn {_name, count}, acc -> acc + count end)
+
+    emit_init_complete_telemetry(pool_worker_counts, total_workers, elapsed)
+
     SLog.info(@log_category, "✅ All pools initialized in #{elapsed}ms")
     SLog.info(@log_category, "📊 Resource usage delta: #{inspect(resource_delta)}")
 
@@ -430,27 +483,7 @@ defmodule Snakepit.Pool do
       Enum.any?(updated_pools, fn {_name, pool} -> not Enum.empty?(pool.workers) end)
 
     if any_workers_started? do
-      # CRITICAL: Get waiters from state.pools (GenServer state), NOT from updated_pools
-      # (which was returned from the spawned init process and doesn't have waiters)
-      all_waiters =
-        Enum.flat_map(state.pools, fn {_name, pool} ->
-          pool.initialization_waiters
-        end)
-
-      # PERFORMANCE FIX: Stagger replies to waiters from ALL pools
-      all_waiters
-      |> Enum.with_index()
-      |> Enum.each(fn {from, index} ->
-        # Stagger each reply by 2ms to spread the load
-        Process.send_after(self(), {:reply_to_waiter, from}, index * 2)
-      end)
-
-      # Merge updated_pools (workers, capacities, initialized status) with cleared waiters
-      merged_pools =
-        Enum.map(updated_pools, fn {name, updated_pool} ->
-          {name, %{updated_pool | initialization_waiters: []}}
-        end)
-        |> Enum.into(%{})
+      merged_pools = merge_initialized_pools(state.pools, updated_pools)
 
       reconcile_ref = schedule_reconcile(Defaults.pool_reconcile_interval_ms())
 
@@ -462,14 +495,17 @@ defmodule Snakepit.Pool do
           reconcile_ref: reconcile_ref
       }
 
-      {:noreply, new_state}
+      {:noreply, maybe_reply_waiters(new_state)}
     else
       SLog.error(
         @log_category,
         "❌ All configured pools failed to start workers (#{Enum.map_join(failed_pool_names, ", ", &to_string/1)})."
       )
 
-      {:stop, :no_workers_started, state}
+      error = await_ready_error(failed_pool_names)
+      reply_waiters_now(state.init_complete_waiters, {:error, error})
+
+      {:stop, :no_workers_started, %{state | init_complete_waiters: []}}
     end
   end
 
@@ -526,8 +562,14 @@ defmodule Snakepit.Pool do
     EventHandler.handle_down(state, pid, reason)
   end
 
-  def handle_info({:reply_to_waiter, from}, state) do
+  def handle_info({:reply_to_waiter, from, reply}, state) do
     # PERFORMANCE FIX: Staggered reply to avoid thundering herd
+    GenServer.reply(from, reply)
+    {:noreply, state}
+  end
+
+  def handle_info({:reply_to_waiter, from}, state) do
+    # Backward-compat for older scheduled replies
     GenServer.reply(from, :ok)
     {:noreply, state}
   end
@@ -748,11 +790,32 @@ defmodule Snakepit.Pool do
 
   @impl true
   def handle_call(:await_ready, from, state) do
-    if all_pools_initialized?(state.pools) do
-      {:reply, :ok, state}
-    else
-      updated_pools = add_waiter_to_uninitialized_pools(state.pools, from)
-      {:noreply, %{state | pools: updated_pools}}
+    failed_pools = failed_pool_names(state.pools)
+
+    cond do
+      failed_pools != [] ->
+        {:reply, {:error, await_ready_error(failed_pools)}, state}
+
+      all_pools_initialized?(state.pools) ->
+        {:reply, :ok, state}
+
+      true ->
+        {:noreply, %{state | await_ready_waiters: [from | state.await_ready_waiters]}}
+    end
+  end
+
+  def handle_call(:await_init_complete, from, state) do
+    failed_pools = failed_pool_names(state.pools)
+
+    cond do
+      state.initializing == false and failed_pools == [] ->
+        {:reply, :ok, state}
+
+      state.initializing == false ->
+        {:reply, {:error, await_ready_error(failed_pools)}, state}
+
+      true ->
+        {:noreply, %{state | init_complete_waiters: [from | state.init_complete_waiters]}}
     end
   end
 
@@ -762,22 +825,34 @@ defmodule Snakepit.Pool do
         {:reply, {:error, :pool_not_found}, state}
 
       pool_state ->
-        if pool_state.initialized do
-          {:reply, :ok, state}
-        else
-          # Add waiter to this pool
-          updated_pool = %{
-            pool_state
-            | initialization_waiters: [from | pool_state.initialization_waiters]
-          }
+        cond do
+          Map.get(pool_state, :init_failed, false) ->
+            {:reply, {:error, await_ready_error([pool_name])}, state}
 
-          updated_pools = Map.put(state.pools, pool_name, updated_pool)
-          {:noreply, %{state | pools: updated_pools}}
+          pool_ready?(pool_state) ->
+            {:reply, :ok, state}
+
+          true ->
+            # Add waiter to this pool
+            updated_pool = %{
+              pool_state
+              | initialization_waiters: [from | pool_state.initialization_waiters]
+            }
+
+            updated_pools = Map.put(state.pools, pool_name, updated_pool)
+            {:noreply, %{state | pools: updated_pools}}
         end
     end
   end
 
   def handle_call({:worker_ready, worker_id}, _from, state) do
+    case mark_worker_ready(state, worker_id) do
+      {:ok, new_state} -> {:reply, :ok, new_state}
+      {:error, reason, new_state} -> {:reply, {:error, reason}, new_state}
+    end
+  end
+
+  defp mark_worker_ready(state, worker_id) do
     SLog.info(@log_category, "Worker #{worker_id} reported ready. Processing queued work.")
 
     # Find which pool this worker belongs to by worker_id prefix
@@ -790,7 +865,7 @@ defmodule Snakepit.Pool do
           "Worker #{worker_id} reported ready but pool #{pool_name} not found!"
         )
 
-        {:reply, {:error, :pool_not_found}, state}
+        {:error, :pool_not_found, state}
 
       pool_state ->
         # Ensure worker is in workers list
@@ -801,11 +876,18 @@ defmodule Snakepit.Pool do
             [worker_id | pool_state.workers]
           end
 
+        ready_workers = Map.get(pool_state, :ready_workers) || MapSet.new()
+
         updated_pool_state =
           pool_state
+          |> Map.put(:ready_workers, MapSet.put(ready_workers, worker_id))
           |> Map.put(:workers, new_workers)
           |> State.ensure_worker_capacity(worker_id)
           |> State.ensure_worker_available(worker_id)
+          |> Map.put(:initialized, true)
+          |> Map.put(:init_failed, false)
+
+        emit_worker_ready_telemetry(pool_name, worker_id, updated_pool_state)
 
         # CRITICAL FIX: Immediately drive the queue by treating this as a checkin
         GenServer.cast(self(), {:checkin_worker, pool_name, worker_id, :skip_decrement})
@@ -813,23 +895,178 @@ defmodule Snakepit.Pool do
         CrashBarrier.maybe_emit_restart(pool_name, worker_id)
 
         updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-        {:reply, :ok, %{state | pools: updated_pools}}
+        {:ok, maybe_reply_waiters(%{state | pools: updated_pools})}
     end
   end
 
   defp all_pools_initialized?(pools) do
-    Enum.all?(pools, fn {_name, pool} -> pool.initialized end)
+    Enum.all?(pools, fn {_name, pool} -> pool_ready?(pool) end)
   end
 
-  defp add_waiter_to_uninitialized_pools(pools, from) do
-    Enum.map(pools, fn {name, pool} ->
-      if pool.initialized do
-        {name, pool}
-      else
-        {name, %{pool | initialization_waiters: [from | pool.initialization_waiters]}}
-      end
+  defp pool_ready?(pool_state) do
+    ready_workers = Map.get(pool_state, :ready_workers) || MapSet.new()
+    MapSet.size(ready_workers) > 0
+  end
+
+  defp failed_pool_names(pools) do
+    pools
+    |> Enum.filter(fn {_name, pool} -> Map.get(pool, :init_failed, false) end)
+    |> Enum.map(&elem(&1, 0))
+  end
+
+  defp await_ready_error([pool_name]) do
+    Error.pool_error("Pool failed to start workers", %{pool: pool_name})
+  end
+
+  defp await_ready_error(pool_names) do
+    Error.pool_error("Pools failed to start workers", %{pools: pool_names})
+  end
+
+  defp merge_initialized_pools(current_pools, updated_pools) do
+    Enum.reduce(updated_pools, current_pools, fn {name, updated_pool}, acc ->
+      current_pool = Map.get(acc, name, updated_pool)
+      Map.put(acc, name, merge_pool_state(current_pool, updated_pool))
     end)
-    |> Enum.into(%{})
+  end
+
+  defp merge_pool_state(current_pool, updated_pool) do
+    workers = Enum.uniq(updated_pool.workers ++ current_pool.workers)
+    ready_workers = Map.get(current_pool, :ready_workers) || MapSet.new()
+    ready_workers = MapSet.intersection(ready_workers, MapSet.new(workers))
+
+    capacity_seed =
+      Map.merge(current_pool.worker_capacities, updated_pool.worker_capacities)
+
+    worker_capacities =
+      State.build_worker_capacities(%{current_pool | worker_capacities: capacity_seed}, workers)
+
+    available = MapSet.intersection(current_pool.available, ready_workers)
+
+    initialized =
+      current_pool.initialized || not Enum.empty?(workers)
+
+    init_failed = Map.get(updated_pool, :init_failed, false)
+
+    %{
+      current_pool
+      | size: updated_pool.size,
+        pool_config: updated_pool.pool_config,
+        worker_module: updated_pool.worker_module,
+        adapter_module: updated_pool.adapter_module,
+        capacity_strategy: updated_pool.capacity_strategy,
+        startup_timeout: updated_pool.startup_timeout,
+        queue_timeout: updated_pool.queue_timeout,
+        max_queue_size: updated_pool.max_queue_size,
+        workers: workers,
+        worker_capacities: worker_capacities,
+        available: available,
+        ready_workers: ready_workers,
+        initialized: initialized,
+        init_failed: init_failed
+    }
+  end
+
+  defp maybe_reply_waiters(state) do
+    state
+    |> maybe_reply_pool_waiters()
+    |> maybe_reply_global_waiters()
+    |> maybe_reply_init_complete_waiters()
+  end
+
+  defp maybe_reply_pool_waiters(state) do
+    {pools, waiters} =
+      Enum.map_reduce(state.pools, [], fn {name, pool}, acc ->
+        cond do
+          Map.get(pool, :init_failed, false) and pool.initialization_waiters != [] ->
+            error = await_ready_error([name])
+
+            waiters_with_reply =
+              Enum.map(pool.initialization_waiters, fn waiter ->
+                {:reply, waiter, {:error, error}}
+              end)
+
+            {{name, %{pool | initialization_waiters: []}}, acc ++ waiters_with_reply}
+
+          pool_ready?(pool) and pool.initialization_waiters != [] ->
+            {{name, %{pool | initialization_waiters: []}}, acc ++ pool.initialization_waiters}
+
+          true ->
+            {{name, pool}, acc}
+        end
+      end)
+
+    schedule_waiter_replies(waiters)
+    %{state | pools: Enum.into(pools, %{})}
+  end
+
+  defp maybe_reply_global_waiters(state) do
+    if state.await_ready_waiters != [] do
+      failed_pools = failed_pool_names(state.pools)
+
+      cond do
+        failed_pools != [] ->
+          schedule_waiter_replies(
+            state.await_ready_waiters,
+            {:error, await_ready_error(failed_pools)}
+          )
+
+          %{state | await_ready_waiters: []}
+
+        all_pools_initialized?(state.pools) ->
+          schedule_waiter_replies(state.await_ready_waiters)
+          %{state | await_ready_waiters: []}
+
+        true ->
+          state
+      end
+    else
+      state
+    end
+  end
+
+  defp maybe_reply_init_complete_waiters(%{init_complete_waiters: []} = state), do: state
+
+  defp maybe_reply_init_complete_waiters(%{initializing: true} = state), do: state
+
+  defp maybe_reply_init_complete_waiters(state) do
+    failed_pools = failed_pool_names(state.pools)
+
+    reply =
+      if failed_pools == [] do
+        :ok
+      else
+        {:error, await_ready_error(failed_pools)}
+      end
+
+    schedule_waiter_replies(state.init_complete_waiters, reply)
+    %{state | init_complete_waiters: []}
+  end
+
+  defp schedule_waiter_replies([]), do: :ok
+
+  defp schedule_waiter_replies(waiters, reply \\ :ok) do
+    waiters
+    |> Enum.map(fn
+      {:reply, from, custom_reply} -> {from, custom_reply}
+      from -> {from, reply}
+    end)
+    |> Enum.with_index()
+    |> Enum.each(fn {{from, reply_value}, index} ->
+      Process.send_after(self(), {:reply_to_waiter, from, reply_value}, index * 2)
+    end)
+  end
+
+  defp reply_waiters_now([], _reply), do: :ok
+
+  defp reply_waiters_now(waiters, reply) do
+    waiters
+    |> Enum.map(fn
+      {:reply, from, custom_reply} -> {from, custom_reply}
+      from -> {from, reply}
+    end)
+    |> Enum.each(fn {from, reply_value} ->
+      GenServer.reply(from, reply_value)
+    end)
   end
 
   defp schedule_reconcile(interval_ms) when is_integer(interval_ms) and interval_ms > 0 do
@@ -955,6 +1192,13 @@ defmodule Snakepit.Pool do
     GenServer.cast(__MODULE__, {:checkin_worker, pool_name, worker_id})
   end
 
+  def handle_cast({:worker_ready, worker_id}, state) do
+    case mark_worker_ready(state, worker_id) do
+      {:ok, new_state} -> {:noreply, new_state}
+      {:error, _reason, new_state} -> {:noreply, new_state}
+    end
+  end
+
   # checkin_worker - WITH pool_name parameter
   @impl true
   def handle_cast({:checkin_worker, pool_name, worker_id, :skip_decrement}, state)
@@ -982,6 +1226,7 @@ defmodule Snakepit.Pool do
       Pool #{pool_name} shutdown state:
         Initialized: #{pool_state.initialized}
         Workers: #{length(pool_state.workers)}
+        Ready: #{MapSet.size(pool_state.ready_workers)}
         Available: #{MapSet.size(pool_state.available)}
         Busy: #{busy_worker_count(pool_state)}
         Queued: #{:queue.len(pool_state.request_queue)}

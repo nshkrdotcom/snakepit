@@ -79,6 +79,15 @@ defmodule Snakepit.Pool.PoolSizeIsolationTest do
         interval: 50
       )
 
+      assert_eventually(
+        fn ->
+          length(Snakepit.Pool.list_workers(Snakepit.Pool, :small_pool)) == 1 and
+            length(Snakepit.Pool.list_workers(Snakepit.Pool, :large_pool)) == 3
+        end,
+        timeout: 30_000,
+        interval: 50
+      )
+
       # Check that each pool has the correct size
       small_pool_workers = Snakepit.Pool.list_workers(Snakepit.Pool, :small_pool)
       large_pool_workers = Snakepit.Pool.list_workers(Snakepit.Pool, :large_pool)
@@ -169,6 +178,16 @@ defmodule Snakepit.Pool.PoolSizeIsolationTest do
         interval: 50
       )
 
+      assert_eventually(
+        fn ->
+          length(Snakepit.Pool.list_workers(Snakepit.Pool, :pool_a)) == 2 and
+            length(Snakepit.Pool.list_workers(Snakepit.Pool, :pool_b)) == 3 and
+            length(Snakepit.Pool.list_workers()) == 5
+        end,
+        timeout: 30_000,
+        interval: 50
+      )
+
       workers_a = Snakepit.Pool.list_workers(Snakepit.Pool, :pool_a)
       workers_b = Snakepit.Pool.list_workers(Snakepit.Pool, :pool_b)
       all_workers = Snakepit.Pool.list_workers()
@@ -220,6 +239,45 @@ defmodule Snakepit.Pool.PoolSizeIsolationTest do
       healthy_workers = Snakepit.Pool.list_workers(Snakepit.Pool, :healthy)
       assert is_list(healthy_workers)
       assert length(healthy_workers) == 2
+    end
+  end
+
+  describe "initialization barriers" do
+    test "await_init_complete waits for full initialization after await_ready" do
+      Application.put_env(:snakepit, :pools, [
+        %{
+          name: :default,
+          worker_profile: :process,
+          pool_size: 2,
+          adapter_module: Snakepit.TestAdapters.MockGRPCAdapter,
+          startup_batch_size: 1,
+          startup_batch_delay_ms: 1_000
+        }
+      ])
+
+      Application.put_env(:snakepit, :pooling_enabled, true)
+
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+
+      assert_eventually(
+        fn -> Snakepit.Pool.await_ready() == :ok end,
+        timeout: 30_000,
+        interval: 50
+      )
+
+      task = Task.async(fn -> Snakepit.Pool.await_init_complete() end)
+
+      assert Task.yield(task, 200) == nil
+
+      assert :ok = Task.await(task, 30_000)
+
+      assert_eventually(
+        fn ->
+          length(Snakepit.Pool.list_workers(Snakepit.Pool, :default)) == 2
+        end,
+        timeout: 30_000,
+        interval: 50
+      )
     end
   end
 end

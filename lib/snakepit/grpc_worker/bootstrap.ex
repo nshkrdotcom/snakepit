@@ -73,6 +73,7 @@ defmodule Snakepit.GRPCWorker.Bootstrap do
              state.ready_file,
              Defaults.grpc_server_ready_timeout()
            ),
+         state <- maybe_update_process_group_after_ready(state),
          {:ok, connection} <-
            wrap_grpc_connection_result(state.adapter.init_grpc_connection(actual_port)),
          pool_pid <- resolve_pool_pid(state.pool_name),
@@ -111,6 +112,71 @@ defmodule Snakepit.GRPCWorker.Bootstrap do
       {:error, reason} ->
         SLog.error(@log_category, "Failed to start gRPC server: #{inspect(reason)}")
         {:stop, {:grpc_server_failed, reason}, state}
+    end
+  end
+
+  defp maybe_update_process_group_after_ready(%{process_group?: true} = state), do: state
+
+  defp maybe_update_process_group_after_ready(%{process_pid: process_pid} = state)
+       when is_integer(process_pid) do
+    if process_group_spawn_enabled?() do
+      case resolve_process_group_with_retry(process_pid, 250) do
+        {:ok, pgid} when pgid == process_pid ->
+          case ProcessRegistry.update_process_group(state.id, process_pid, pgid) do
+            :ok ->
+              %{state | pgid: pgid, process_group?: true}
+
+            {:error, _reason} ->
+              # Registry update failure is non-fatal; worker still tracks state locally.
+              %{state | pgid: pgid, process_group?: true}
+          end
+
+        _ ->
+          # If we still can't prove pgid == pid after readiness, keep safety rails
+          # and kill by PID only. This can leave multiprocessing grandchildren alive.
+          SLog.warning(
+            @log_category,
+            "Process group requested but not observed after readiness; group kill disabled for worker #{state.id}",
+            process_pid: process_pid
+          )
+
+          state
+      end
+    else
+      state
+    end
+  end
+
+  defp maybe_update_process_group_after_ready(state), do: state
+
+  defp process_group_spawn_enabled? do
+    Application.get_env(:snakepit, :process_group_kill, true) and
+      Snakepit.ProcessKiller.process_group_supported?()
+  end
+
+  defp resolve_process_group_with_retry(process_pid, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    resolve_process_group_with_retry_loop(process_pid, deadline, 1)
+  end
+
+  defp resolve_process_group_with_retry_loop(process_pid, deadline, backoff_ms) do
+    case Snakepit.ProcessKiller.get_process_group_id(process_pid) do
+      {:ok, pgid} when pgid == process_pid ->
+        {:ok, pgid}
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          {:error, :timeout}
+        else
+          delay = min(backoff_ms, 50)
+
+          receive do
+          after
+            delay -> :ok
+          end
+
+          resolve_process_group_with_retry_loop(process_pid, deadline, backoff_ms * 2)
+        end
     end
   end
 

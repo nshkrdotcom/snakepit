@@ -7,16 +7,15 @@ defmodule Snakepit.TestHelpers do
 
   alias Snakepit.Test.MockGRPCWorker
 
-  @base_test_port 52_000
-  @port_range 1000
+  @reserved_ports_table :snakepit_test_ports
+  @max_port_attempts 50
 
   @doc """
   Allocate a unique port for gRPC testing.
   """
   def allocate_test_port do
-    # Use test PID to ensure unique ports
-    test_id = :erlang.phash2(self())
-    @base_test_port + rem(test_id, @port_range)
+    table = ensure_reserved_ports_table()
+    reserve_available_port(@max_port_attempts, table)
   end
 
   @doc """
@@ -131,6 +130,46 @@ defmodule Snakepit.TestHelpers do
 
         poll_until_true(assertion_fn, deadline, interval)
       end
+    end
+  end
+
+  defp ensure_reserved_ports_table do
+    case :ets.whereis(@reserved_ports_table) do
+      :undefined ->
+        try do
+          :ets.new(@reserved_ports_table, [
+            :set,
+            :public,
+            :named_table,
+            {:read_concurrency, true}
+          ])
+        rescue
+          ArgumentError -> :ets.whereis(@reserved_ports_table)
+        end
+
+      table ->
+        table
+    end
+  end
+
+  defp reserve_available_port(0, _table) do
+    raise "Failed to allocate a unique test port after #{@max_port_attempts} attempts"
+  end
+
+  defp reserve_available_port(attempts, table) do
+    case :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true]) do
+      {:ok, socket} ->
+        {:ok, {_addr, port}} = :inet.sockname(socket)
+        :ok = :gen_tcp.close(socket)
+
+        if :ets.insert_new(table, {port, true}) do
+          port
+        else
+          reserve_available_port(attempts - 1, table)
+        end
+
+      {:error, _reason} ->
+        reserve_available_port(attempts - 1, table)
     end
   end
 end

@@ -166,3 +166,34 @@ defmodule Snakepit.TestAdapters.EphemeralPortGRPCAdapter do
 
   def uses_grpc?, do: true
 end
+
+defmodule Snakepit.TestAdapters.ProcessGroupGRPCAdapter do
+  @moduledoc false
+
+  @behaviour Snakepit.Adapter
+
+  @impl true
+  def executable_path do
+    System.find_executable("python3") ||
+      System.find_executable("python") ||
+      raise "python executable not found (required for process group tests)"
+  end
+
+  @impl true
+  def script_path do
+    Path.join([__DIR__, "mock_grpc_server_process_group.py"])
+  end
+
+  @impl true
+  def script_args, do: []
+
+  # gRPC adapter functions used by GRPCWorker during startup
+  def get_port, do: Snakepit.TestHelpers.allocate_test_port()
+
+  def init_grpc_connection(_port) do
+    # No real gRPC server is running in this test adapter.
+    {:ok, %{channel: nil}}
+  end
+
+  def uses_grpc?, do: true
+end

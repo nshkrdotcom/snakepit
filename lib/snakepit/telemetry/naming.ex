@@ -18,12 +18,15 @@ defmodule Snakepit.Telemetry.Naming do
   # Layer 1: Infrastructure Events (Elixir-originated)
   @pool_events [
     :initialized,
+    :init_started,
+    :init_complete,
     :status,
     :queue_enqueued,
     :queue_dequeued,
     :queue_timeout,
     :worker_spawn_started,
     :worker_spawned,
+    :worker_ready,
     :worker_spawn_failed,
     :worker_terminated,
     :worker_restarted
@@ -289,12 +292,15 @@ defmodule Snakepit.Telemetry.Naming do
   Build a pool event name.
   """
   def pool_event(:initialized), do: [:snakepit, :pool, :initialized]
+  def pool_event(:init_started), do: [:snakepit, :pool, :init_started]
+  def pool_event(:init_complete), do: [:snakepit, :pool, :init_complete]
   def pool_event(:status), do: [:snakepit, :pool, :status]
   def pool_event(:queue_enqueued), do: [:snakepit, :pool, :queue, :enqueued]
   def pool_event(:queue_dequeued), do: [:snakepit, :pool, :queue, :dequeued]
   def pool_event(:queue_timeout), do: [:snakepit, :pool, :queue, :timeout]
   def pool_event(:worker_spawn_started), do: [:snakepit, :pool, :worker, :spawn_started]
   def pool_event(:worker_spawned), do: [:snakepit, :pool, :worker, :spawned]
+  def pool_event(:worker_ready), do: [:snakepit, :pool, :worker_ready]
   def pool_event(:worker_spawn_failed), do: [:snakepit, :pool, :worker, :spawn_failed]
   def pool_event(:worker_terminated), do: [:snakepit, :pool, :worker, :terminated]
   def pool_event(:worker_restarted), do: [:snakepit, :pool, :worker, :restarted]
