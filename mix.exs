@@ -1,7 +1,7 @@
 defmodule Snakepit.MixProject do
   use Mix.Project
 
-  @version "0.11.0"
+  @version "0.11.1"
   @source_url "https://github.com/nshkrdotcom/snakepit"
 
   def project do
@@ -67,7 +67,7 @@ defmodule Snakepit.MixProject do
       {:stream_data, "~> 1.0", only: [:test]},
       {:supertester, "~> 0.5.1", only: :test},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.34", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end

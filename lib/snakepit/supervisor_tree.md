@@ -14,8 +14,9 @@ flowchart TD
     A --> C["Snakepit.Bridge.ToolRegistry\n(GenServer)"]
     A --> C1["Snakepit.Pool.Registry\n(Registry)"]
     A --> C2["Snakepit.Pool.ProcessRegistry\n(GenServer + ETS/DETS)"]
-    A --> C3["Task.Supervisor\n(Snakepit.TaskSupervisor)"]
-    A --> C4["Snakepit.Pool.ApplicationCleanup\n(GenServer)\nfirst to stop"]
+    A --> C3["Snakepit.ETSOwner\n(GenServer)"]
+    A --> C4["Task.Supervisor\n(Snakepit.TaskSupervisor)"]
+    A --> C5["Snakepit.Pool.ApplicationCleanup\n(GenServer)\nfirst to stop"]
 
     subgraph "Pooling Enabled (:pooling_enabled == true)"
         direction TB
@@ -44,5 +45,7 @@ flowchart TD
   (`Snakepit.GRPCWorker` et al.) under a `:one_for_one` strategy.
 - `Snakepit.Pool.ProcessRegistry` tracks external OS PIDs and run IDs to ensure
   cleanup routines know which processes belong to the current BEAM instance.
+- `Snakepit.ETSOwner` owns shared ETS tables (taint registry, zero-copy handles)
+  to avoid short-lived processes becoming table owners.
 - `Snakepit.Pool.ApplicationCleanup` is listed as a base child so it is always
   available to reap external processes during shutdown.

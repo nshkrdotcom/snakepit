@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-01-23
+
+### Fixed
+- ETS table ownership for taint registry and zero-copy handles is now supervised to avoid short-lived processes becoming table owners.
+
 ## [0.11.0] - 2026-01-11
 
 ### Added

@@ -95,6 +95,8 @@ defmodule Snakepit.Application do
       Snakepit.Pool.Registry,
       # Process registry for PID tracking (always available for cleanup)
       Snakepit.Pool.ProcessRegistry,
+      # ETS owner for shared tables used across the system
+      Snakepit.ETSOwner,
       # Task supervisor for async pool operations
       {Task.Supervisor, name: Snakepit.TaskSupervisor},
       # Application cleanup for hard process termination guarantees
