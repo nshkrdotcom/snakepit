@@ -25,7 +25,7 @@ defmodule Snakepit.Pool.WorkerFlowIntegrationTest do
       heartbeat: %{enabled: false}
     }
 
-    {:ok, _starter_pid} =
+    {:ok, _worker_pid} =
       WorkerSupervisor.start_worker(
         worker_id,
         MockGRPCWorker,

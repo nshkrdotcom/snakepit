@@ -68,58 +68,63 @@ defmodule Snakepit.WorkerProfile.Thread do
     threads_per_worker = Map.get(config, :threads_per_worker, 10)
 
     # Ensure capacity tracking table exists
-    ensure_capacity_table()
+    with :ok <- ensure_capacity_table() do
+      # Build adapter args and env for threaded mode
+      adapter_args = build_adapter_args(config)
+      adapter_env = build_adapter_env(config)
 
-    # Build adapter args and env for threaded mode
-    adapter_args = build_adapter_args(config)
-    adapter_env = build_adapter_env(config)
+      SLog.info(
+        @log_category,
+        "Starting threaded worker #{worker_id} with #{threads_per_worker} threads"
+      )
 
-    SLog.info(
-      @log_category,
-      "Starting threaded worker #{worker_id} with #{threads_per_worker} threads"
-    )
+      SLog.debug(@log_category, "Thread worker adapter_args: #{Redaction.describe(adapter_args)}")
 
-    SLog.debug(@log_category, "Thread worker adapter_args: #{Redaction.describe(adapter_args)}")
+      # Create enhanced worker config with thread profile settings
+      worker_config =
+        config
+        |> Map.put(:adapter_args, adapter_args)
+        |> Map.put(:adapter_env, adapter_env)
 
-    # Create enhanced worker config with thread profile settings
-    worker_config =
-      config
-      |> Map.put(:adapter_args, adapter_args)
-      |> Map.put(:adapter_env, adapter_env)
+      # Start the worker via WorkerSupervisor with full config
+      case WorkerSupervisor.start_worker(
+             worker_id,
+             worker_module,
+             adapter_module,
+             pool_name,
+             worker_config
+           ) do
+        {:ok, pid} ->
+          :ok = CapacityStore.track_worker(pid, threads_per_worker)
 
-    # Start the worker via WorkerSupervisor with full config
-    case WorkerSupervisor.start_worker(
-           worker_id,
-           worker_module,
-           adapter_module,
-           pool_name,
-           worker_config
-         ) do
-      {:ok, pid} ->
-        :ok = CapacityStore.track_worker(pid, threads_per_worker)
+          SLog.info(
+            @log_category,
+            "Thread profile started worker #{worker_id}: #{inspect(pid)} with capacity #{threads_per_worker}"
+          )
 
-        SLog.info(
-          @log_category,
-          "Thread profile started worker #{worker_id}: #{inspect(pid)} with capacity #{threads_per_worker}"
-        )
+          {:ok, pid}
 
-        {:ok, pid}
+        error ->
+          SLog.error(
+            @log_category,
+            "Failed to start threaded worker #{worker_id}: #{inspect(error)}"
+          )
 
-      error ->
-        SLog.error(
-          @log_category,
-          "Failed to start threaded worker #{worker_id}: #{inspect(error)}"
-        )
-
-        error
+          error
+      end
     end
   end
 
   @impl true
   def stop_worker(worker_pid) when is_pid(worker_pid) do
     # Remove from capacity table
-    ensure_capacity_table()
-    :ok = CapacityStore.untrack_worker(worker_pid)
+    case ensure_capacity_table() do
+      :ok ->
+        :ok = CapacityStore.untrack_worker(worker_pid)
+
+      {:error, _reason} ->
+        :ok
+    end
 
     case PoolRegistry.get_worker_id_by_pid(worker_pid) do
       {:ok, worker_id} ->
@@ -162,6 +167,9 @@ defmodule Snakepit.WorkerProfile.Thread do
 
       {:error, :at_capacity} ->
         {:error, :worker_at_capacity}
+
+      {:error, :capacity_store_unavailable} ->
+        {:error, :capacity_store_unavailable}
     end
   end
 
@@ -178,8 +186,10 @@ defmodule Snakepit.WorkerProfile.Thread do
 
   @impl true
   def get_capacity(worker_pid) when is_pid(worker_pid) do
-    ensure_capacity_table()
-    CapacityStore.get_capacity(worker_pid)
+    case ensure_capacity_table() do
+      :ok -> CapacityStore.get_capacity(worker_pid)
+      {:error, _reason} -> 1
+    end
   end
 
   def get_capacity(worker_id) when is_atom(worker_id) do
@@ -196,8 +206,10 @@ defmodule Snakepit.WorkerProfile.Thread do
 
   @impl true
   def get_load(worker_pid) when is_pid(worker_pid) do
-    ensure_capacity_table()
-    CapacityStore.get_load(worker_pid)
+    case ensure_capacity_table() do
+      :ok -> CapacityStore.get_load(worker_pid)
+      {:error, _reason} -> 0
+    end
   end
 
   def get_load(worker_id) when is_atom(worker_id) do
@@ -291,8 +303,8 @@ defmodule Snakepit.WorkerProfile.Thread do
         :ok
 
       {:error, reason} ->
-        SLog.warning(@log_category, "Capacity store failed to start: #{inspect(reason)}")
-        :ok
+        SLog.error(@log_category, "Capacity store unavailable: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
@@ -375,38 +387,48 @@ defmodule Snakepit.WorkerProfile.Thread do
   end
 
   defp check_and_increment_load(worker_pid) do
-    ensure_capacity_table()
+    case ensure_capacity_table() do
+      :ok ->
+        case CapacityStore.check_and_increment_load(worker_pid) do
+          {:ok, capacity, new_load} ->
+            if new_load == capacity do
+              :telemetry.execute(
+                [:snakepit, :pool, :capacity_reached],
+                %{capacity: capacity, load: new_load},
+                %{worker_pid: worker_pid, profile: :thread}
+              )
+            end
 
-    case CapacityStore.check_and_increment_load(worker_pid) do
-      {:ok, capacity, new_load} ->
-        if new_load == capacity do
-          :telemetry.execute(
-            [:snakepit, :pool, :capacity_reached],
-            %{capacity: capacity, load: new_load},
-            %{worker_pid: worker_pid, profile: :thread}
-          )
+            :ok
+
+          {:at_capacity, capacity, load} ->
+            :telemetry.execute(
+              [:snakepit, :pool, :capacity_reached],
+              %{capacity: capacity, load: load},
+              %{worker_pid: worker_pid, profile: :thread, rejected: true}
+            )
+
+            {:error, :at_capacity}
+
+          {:error, :unknown_worker} ->
+            SLog.warning(
+              @log_category,
+              "Worker #{inspect(worker_pid)} not found in capacity store"
+            )
+
+            :ok
         end
 
-        :ok
-
-      {:at_capacity, capacity, load} ->
-        :telemetry.execute(
-          [:snakepit, :pool, :capacity_reached],
-          %{capacity: capacity, load: load},
-          %{worker_pid: worker_pid, profile: :thread, rejected: true}
-        )
-
-        {:error, :at_capacity}
-
-      {:error, :unknown_worker} ->
-        SLog.warning(@log_category, "Worker #{inspect(worker_pid)} not found in capacity store")
-        :ok
+      {:error, _reason} ->
+        {:error, :capacity_store_unavailable}
     end
   end
 
   defp decrement_load(worker_pid) do
-    ensure_capacity_table()
-    CapacityStore.decrement_load(worker_pid)
+    case ensure_capacity_table() do
+      :ok -> CapacityStore.decrement_load(worker_pid)
+      {:error, _reason} -> :ok
+    end
   end
 
   defp get_worker_module(worker_pid) do

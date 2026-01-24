@@ -1222,7 +1222,10 @@ defmodule Snakepit.Pool do
          Config.thread_profile?(pool_state.pool_config) do
       case Snakepit.Pool.Registry.get_worker_pid(worker_id) do
         {:ok, pid} ->
-          _ = CapacityStore.decrement_load(pid)
+          case CapacityStore.ensure_started() do
+            {:ok, _pid} -> _ = CapacityStore.decrement_load(pid)
+            {:error, _reason} -> :ok
+          end
 
         {:error, _} ->
           :ok
@@ -1235,13 +1238,17 @@ defmodule Snakepit.Pool do
   end
 
   defp track_capacity_increment(worker_id) do
-    _ = CapacityStore.ensure_started()
+    case CapacityStore.ensure_started() do
+      {:ok, _pid} ->
+        with {:ok, pid} <- Snakepit.Pool.Registry.get_worker_pid(worker_id),
+             result <- CapacityStore.check_and_increment_load(pid) do
+          handle_capacity_increment_result(result, pid)
+        else
+          {:error, _} -> :ok
+        end
 
-    with {:ok, pid} <- Snakepit.Pool.Registry.get_worker_pid(worker_id),
-         result <- CapacityStore.check_and_increment_load(pid) do
-      handle_capacity_increment_result(result, pid)
-    else
-      {:error, _} -> :ok
+      {:error, _reason} ->
+        :ok
     end
   end
 

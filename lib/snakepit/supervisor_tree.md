@@ -16,7 +16,7 @@ flowchart TD
     A --> C2["Snakepit.Pool.ProcessRegistry\n(GenServer + ETS/DETS)"]
     A --> C3["Snakepit.ETSOwner\n(GenServer)"]
     A --> C4["Task.Supervisor\n(Snakepit.TaskSupervisor)"]
-    A --> C5["Snakepit.Pool.ApplicationCleanup\n(GenServer)\nfirst to stop"]
+    A --> C5["Snakepit.Pool.ApplicationCleanup\n(GenServer)\nstops after pool children"]
 
     subgraph "Pooling Enabled (:pooling_enabled == true)"
         direction TB
@@ -45,7 +45,21 @@ flowchart TD
   (`Snakepit.GRPCWorker` et al.) under a `:one_for_one` strategy.
 - `Snakepit.Pool.ProcessRegistry` tracks external OS PIDs and run IDs to ensure
   cleanup routines know which processes belong to the current BEAM instance.
-- `Snakepit.ETSOwner` owns shared ETS tables (taint registry, zero-copy handles)
-  to avoid short-lived processes becoming table owners.
+- `Snakepit.ETSOwner` owns shared ETS tables to ensure table persistence
+  across the application lifecycle:
+  - `:snakepit_worker_taints` - Used by the crash barrier to track tainted workers
+  - `:snakepit_zero_copy_handles` - Used by DLPack/Arrow zero-copy transfers
+
+  **Why centralized ownership matters**: ETS tables are destroyed when their
+  owning process exits. If a short-lived process (e.g., a Task spawned during
+  pool initialization) creates a table, that table disappears when the Task
+  completes. By delegating table creation to ETSOwner, tables persist for the
+  full application lifetime regardless of which process first triggers their
+  creation.
+
+  ETSOwner is a "base child" (always started) because the taint registry and
+  zero-copy systems must be available even when pooling is disabled (e.g., in
+  test environments that use the components independently).
 - `Snakepit.Pool.ApplicationCleanup` is listed as a base child so it is always
-  available to reap external processes during shutdown.
+  available to reap external processes during shutdown and runs after pool
+  children terminate.

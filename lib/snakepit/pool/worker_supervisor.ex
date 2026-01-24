@@ -14,6 +14,8 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Pool.Worker.StarterRegistry
   @log_category :pool
+  @worker_pid_lookup_timeout_ms 1000
+  @worker_pid_lookup_interval_ms 20
 
   @doc """
   Starts the worker supervisor.
@@ -38,7 +40,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   ## Examples
 
       iex> Snakepit.Pool.WorkerSupervisor.start_worker("worker_123")
-      {:ok, #PID<0.123.0>}
+      {:ok, #PID<0.123.0>} # GRPCWorker PID
   """
   def start_worker(
         worker_id,
@@ -58,20 +60,10 @@ defmodule Snakepit.Pool.WorkerSupervisor do
 
     case DynamicSupervisor.start_child(__MODULE__, child_spec) do
       {:ok, starter_pid} ->
-        SLog.info(
-          @log_category,
-          "Started worker starter for #{worker_id} with PID #{inspect(starter_pid)}"
-        )
-
-        {:ok, starter_pid}
+        handle_started_worker(worker_id, starter_pid, :started)
 
       {:error, {:already_started, starter_pid}} ->
-        SLog.debug(
-          @log_category,
-          "Worker starter for #{worker_id} already running with PID #{inspect(starter_pid)}"
-        )
-
-        {:ok, starter_pid}
+        handle_started_worker(worker_id, starter_pid, :already_started)
 
       {:error, reason} = error ->
         SLog.error(
@@ -313,5 +305,104 @@ defmodule Snakepit.Pool.WorkerSupervisor do
 
   defp should_probe_port?(requested_port) do
     requested_port not in [nil, 0]
+  end
+
+  defp handle_started_worker(worker_id, starter_pid, status) do
+    case resolve_worker_pid(worker_id, starter_pid) do
+      {:ok, worker_pid} ->
+        log_worker_start(worker_id, starter_pid, worker_pid, status)
+        {:ok, worker_pid}
+
+      {:error, reason} ->
+        SLog.error(
+          @log_category,
+          "Started worker starter for #{worker_id} (PID #{inspect(starter_pid)}), " <>
+            "but failed to resolve worker PID: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  defp log_worker_start(worker_id, starter_pid, worker_pid, :started) do
+    SLog.info(
+      @log_category,
+      "Started worker #{worker_id} with starter PID #{inspect(starter_pid)} and worker PID #{inspect(worker_pid)}"
+    )
+  end
+
+  defp log_worker_start(worker_id, starter_pid, worker_pid, :already_started) do
+    SLog.debug(
+      @log_category,
+      "Worker starter for #{worker_id} already running (starter PID #{inspect(starter_pid)}, worker PID #{inspect(worker_pid)})"
+    )
+  end
+
+  defp resolve_worker_pid(worker_id, starter_pid) do
+    case worker_pid_from_starter(starter_pid, worker_id) do
+      {:ok, worker_pid} ->
+        {:ok, worker_pid}
+
+      {:error, _reason} ->
+        wait_for_worker_pid(worker_id, starter_pid, @worker_pid_lookup_timeout_ms)
+    end
+  end
+
+  defp wait_for_worker_pid(worker_id, starter_pid, timeout_ms) when timeout_ms > 0 do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    wait_for_worker_pid_loop(worker_id, starter_pid, deadline)
+  end
+
+  defp wait_for_worker_pid(worker_id, starter_pid, _timeout_ms) do
+    case worker_pid_from_starter(starter_pid, worker_id) do
+      {:ok, worker_pid} -> {:ok, worker_pid}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp wait_for_worker_pid_loop(worker_id, starter_pid, deadline) do
+    case worker_pid_from_starter(starter_pid, worker_id) do
+      {:ok, worker_pid} ->
+        {:ok, worker_pid}
+
+      {:error, _reason} ->
+        case PoolRegistry.get_worker_pid(worker_id) do
+          {:ok, worker_pid} ->
+            {:ok, worker_pid}
+
+          {:error, :not_found} ->
+            if System.monotonic_time(:millisecond) >= deadline do
+              {:error, :worker_pid_unavailable}
+            else
+              receive do
+              after
+                @worker_pid_lookup_interval_ms -> :ok
+              end
+
+              wait_for_worker_pid_loop(worker_id, starter_pid, deadline)
+            end
+        end
+    end
+  end
+
+  defp worker_pid_from_starter(starter_pid, worker_id) when is_pid(starter_pid) do
+    case Supervisor.which_children(starter_pid) do
+      [{^worker_id, worker_pid, :worker, _}] when is_pid(worker_pid) ->
+        {:ok, worker_pid}
+
+      [{^worker_id, :restarting, :worker, _}] ->
+        {:error, :worker_restarting}
+
+      [{^worker_id, :undefined, :worker, _}] ->
+        {:error, :worker_not_ready}
+
+      children when is_list(children) ->
+        case Enum.find(children, fn {_, pid, type, _} -> type == :worker and is_pid(pid) end) do
+          {_id, pid, :worker, _} when is_pid(pid) -> {:ok, pid}
+          _ -> {:error, :worker_not_ready}
+        end
+    end
+  catch
+    :exit, _ -> {:error, :starter_down}
   end
 end

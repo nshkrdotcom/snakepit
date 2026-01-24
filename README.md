@@ -50,7 +50,7 @@ For higher-level Python integration with compile-time type generation, use [Snak
 
 ```elixir
 def deps do
-  [{:snakebridge, "~> 0.9.0"}]
+  [{:snakebridge, "~> 0.14.0"}]
 end
 
 def project do
@@ -723,6 +723,23 @@ potentially gigabytes of data.
 See `Snakepit.Serialization` module and `guides/graceful-serialization.md` for full details.
 
 ## Process Management
+
+### ETS Table Ownership
+
+Snakepit uses ETS tables for high-performance shared state (worker taint tracking,
+zero-copy handles). These tables are owned by `Snakepit.ETSOwner`, a dedicated GenServer
+that ensures tables persist for the application lifetime.
+
+This design prevents a common pitfall: if a short-lived process creates an ETS table,
+the table is destroyed when that process exits. ETSOwner solves this by centralizing
+table ownership in a long-lived supervisor child.
+
+Managed tables:
+- `:snakepit_worker_taints` - Crash barrier taint tracking
+- `:snakepit_zero_copy_handles` - DLPack/Arrow handle registry
+
+See `Snakepit.ETSOwner` module documentation and `lib/snakepit/supervisor_tree.md`
+for details.
 
 ### Automatic Cleanup
 

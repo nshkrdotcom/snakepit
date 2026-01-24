@@ -16,4 +16,22 @@ defmodule Snakepit.ETSOwnerTest do
     zero_copy_table = :ets.whereis(:snakepit_zero_copy_handles)
     assert :ets.info(zero_copy_table, :owner) == owner
   end
+
+  test "ensures known tables and rejects unknown ones" do
+    assert Snakepit.ETSOwner.ensure_table(:snakepit_worker_taints) == :snakepit_worker_taints
+
+    assert_raise ArgumentError, fn ->
+      Snakepit.ETSOwner.ensure_table(:unknown_table)
+    end
+  end
+
+  test "concurrent ensure_table calls are safe" do
+    tasks =
+      Enum.map(1..20, fn _ ->
+        Task.async(fn -> Snakepit.ETSOwner.ensure_table(:snakepit_zero_copy_handles) end)
+      end)
+
+    results = Task.await_many(tasks)
+    assert Enum.all?(results, &(&1 == :snakepit_zero_copy_handles))
+  end
 end

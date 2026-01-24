@@ -119,6 +119,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
   @impl true
   def init(_opts) do
+    Process.flag(:trap_exit, true)
     {:ok, %{streams: %{}}}
   end
 
@@ -289,17 +290,57 @@ defmodule Snakepit.Telemetry.GrpcStream do
   end
 
   @impl true
-  def handle_info({ref, :stream_completed}, state) when is_reference(ref) do
-    # Task completed successfully
-    Process.demonitor(ref, [:flush])
-    {:noreply, state}
+  def handle_info({ref, result}, state) when is_reference(ref) do
+    case pop_stream_by_ref(state, ref) do
+      {:ok, worker_id, new_state} ->
+        Process.demonitor(ref, [:flush])
+
+        SLog.debug(
+          @log_category,
+          "Telemetry stream task completed for worker #{worker_id}: #{inspect(result)}",
+          worker_id: worker_id
+        )
+
+        {:noreply, new_state}
+
+      :error ->
+        {:noreply, state}
+    end
   end
 
   @impl true
-  def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
-    # Task crashed or was killed
-    SLog.debug(@log_category, "Telemetry stream consumer task terminated: #{inspect(reason)}")
-    {:noreply, state}
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    case pop_stream_by_ref(state, ref) do
+      {:ok, worker_id, new_state} ->
+        log_task_exit(worker_id, reason)
+        {:noreply, new_state}
+
+      :error ->
+        case pop_stream_by_pid(state, pid) do
+          {:ok, worker_id, new_state} ->
+            log_task_exit(worker_id, reason)
+            {:noreply, new_state}
+
+          :error ->
+            {:noreply, state}
+        end
+    end
+  end
+
+  @impl true
+  def handle_info({:EXIT, pid, reason}, state) do
+    case pop_stream_by_pid(state, pid) do
+      {:ok, worker_id, new_state} ->
+        log_task_exit(worker_id, reason)
+        {:noreply, new_state}
+
+      :error ->
+        if shutdown_exit?(reason) do
+          {:stop, reason, state}
+        else
+          {:noreply, state}
+        end
+    end
   end
 
   @impl true
@@ -356,7 +397,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
         # Start async task to consume events
         task =
-          Task.Supervisor.async_nolink(
+          Task.Supervisor.async(
             Snakepit.TaskSupervisor,
             fn -> consume_stream(stream, worker_ctx) end
           )
@@ -503,4 +544,40 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
   defp blank_to_nil(""), do: nil
   defp blank_to_nil(value), do: value
+
+  defp pop_stream_by_ref(state, ref) do
+    case Enum.find(state.streams, fn {_worker_id, info} ->
+           info.task && info.task.ref == ref
+         end) do
+      {worker_id, _info} ->
+        {:ok, worker_id, update_in(state, [:streams], &Map.delete(&1, worker_id))}
+
+      nil ->
+        :error
+    end
+  end
+
+  defp pop_stream_by_pid(state, pid) when is_pid(pid) do
+    case Enum.find(state.streams, fn {_worker_id, info} ->
+           info.task && info.task.pid == pid
+         end) do
+      {worker_id, _info} ->
+        {:ok, worker_id, update_in(state, [:streams], &Map.delete(&1, worker_id))}
+
+      nil ->
+        :error
+    end
+  end
+
+  defp pop_stream_by_pid(_state, _pid), do: :error
+
+  defp log_task_exit(worker_id, reason) do
+    SLog.debug(@log_category, "Telemetry stream consumer task exited: #{inspect(reason)}",
+      worker_id: worker_id
+    )
+  end
+
+  defp shutdown_exit?(reason) when reason == :shutdown, do: true
+  defp shutdown_exit?({:shutdown, _}), do: true
+  defp shutdown_exit?(_), do: false
 end

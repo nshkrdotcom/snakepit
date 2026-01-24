@@ -363,4 +363,21 @@ config :snakepit,
   }
 ```
 
+### ETS Table Errors
+
+If you see errors about missing ETS tables (`:snakepit_worker_taints` or
+`:snakepit_zero_copy_handles`), ensure the Snakepit application is started:
+
+```elixir
+# Correct: Start the application first
+{:ok, _} = Application.ensure_all_started(:snakepit)
+
+# Then use Snakepit functions
+{:ok, result} = Snakepit.execute("ping", %{})
+```
+
+The `Snakepit.ETSOwner` GenServer owns these tables and must be running before
+any taint registry or zero-copy operations. This happens automatically when
+Snakepit starts.
+
 See [Production Guide](production.md) for comprehensive troubleshooting.

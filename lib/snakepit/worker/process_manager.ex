@@ -173,77 +173,133 @@ defmodule Snakepit.Worker.ProcessManager do
         {:error, {:ready_file, reason}}
 
       :not_ready ->
-        remaining = max(deadline - System.monotonic_time(:millisecond), 0)
-
-        if remaining == 0 do
+        if Snakepit.Shutdown.in_progress?() do
           cleanup_ready_file(ready_file)
           log_startup_output(output_buffer)
-
-          SLog.error(
-            @log_category,
-            "Timeout waiting for Python gRPC server to start after #{timeout}ms"
-          )
-
-          {:error, :timeout}
+          SLog.debug(@log_category, "Shutdown in progress while waiting for gRPC server")
+          {:error, :shutdown}
         else
-          receive do
-            {^port, {:data, data}} ->
-              output = to_string(data)
-              output_buffer = append_startup_output(output_buffer, output)
+          remaining = max(deadline - System.monotonic_time(:millisecond), 0)
 
-              if String.trim(output) != "" do
+          if remaining == 0 do
+            cleanup_ready_file(ready_file)
+            log_startup_output(output_buffer)
+
+            SLog.error(
+              @log_category,
+              "Timeout waiting for Python gRPC server to start after #{timeout}ms"
+            )
+
+            {:error, :timeout}
+          else
+            receive do
+              {^port, {:data, data}} ->
+                output = to_string(data)
+                output_buffer = append_startup_output(output_buffer, output)
+
+                if String.trim(output) != "" do
+                  SLog.debug(
+                    @log_category,
+                    "Python server output during startup: #{String.trim(output)}"
+                  )
+                end
+
+                wait_for_server_ready_loop(port, ready_file, deadline, timeout, output_buffer)
+
+              {^port, {:exit_status, status}} ->
+                cleanup_ready_file(ready_file)
+
+                case status do
+                  0 ->
+                    SLog.debug(
+                      @log_category,
+                      "Python gRPC server process exited with status 0 during startup (shutdown)"
+                    )
+
+                    {:error, :shutdown}
+
+                  143 ->
+                    SLog.debug(
+                      @log_category,
+                      "Python gRPC server process exited with status 143 during startup (shutdown)"
+                    )
+
+                    {:error, :shutdown}
+
+                  _ ->
+                    log_startup_output(output_buffer)
+
+                    SLog.error(
+                      @log_category,
+                      "Python gRPC server process exited with status #{status} during startup"
+                    )
+
+                    {:error, {:exit_status, status}}
+                end
+
+              {:DOWN, _ref, :port, ^port, reason} ->
+                cleanup_ready_file(ready_file)
+                log_startup_output(output_buffer)
+
+                SLog.error(
+                  @log_category,
+                  "Python gRPC server port died during startup: #{inspect(reason)}"
+                )
+
+                {:error, {:port_died, reason}}
+
+              {:EXIT, from, :shutdown} ->
+                cleanup_ready_file(ready_file)
+                log_startup_output(output_buffer)
+
                 SLog.debug(
                   @log_category,
-                  "Python server output during startup: #{String.trim(output)}"
+                  "Received shutdown exit while waiting for gRPC server",
+                  from: inspect(from),
+                  reason: :shutdown,
+                  port: inspect(port)
                 )
-              end
 
-              wait_for_server_ready_loop(port, ready_file, deadline, timeout, output_buffer)
+                {:error, :shutdown}
 
-            {^port, {:exit_status, status}} ->
-              cleanup_ready_file(ready_file)
+              {:EXIT, from, {:shutdown, _} = reason} ->
+                cleanup_ready_file(ready_file)
+                log_startup_output(output_buffer)
 
-              case status do
-                0 ->
-                  SLog.debug(
-                    @log_category,
-                    "Python gRPC server process exited with status 0 during startup (shutdown)"
-                  )
+                SLog.debug(
+                  @log_category,
+                  "Received shutdown exit while waiting for gRPC server",
+                  from: inspect(from),
+                  reason: reason,
+                  port: inspect(port)
+                )
 
-                  {:error, :shutdown}
+                {:error, :shutdown}
 
-                143 ->
-                  SLog.debug(
-                    @log_category,
-                    "Python gRPC server process exited with status 143 during startup (shutdown)"
-                  )
+              {:EXIT, _from, :normal} ->
+                wait_for_server_ready_loop(port, ready_file, deadline, timeout, output_buffer)
 
-                  {:error, :shutdown}
-
-                _ ->
+              {:EXIT, from, reason} ->
+                if Snakepit.Shutdown.in_progress?() do
+                  cleanup_ready_file(ready_file)
                   log_startup_output(output_buffer)
 
-                  SLog.error(
+                  SLog.debug(
                     @log_category,
-                    "Python gRPC server process exited with status #{status} during startup"
+                    "Shutdown in progress while waiting for gRPC server",
+                    from: inspect(from),
+                    reason: reason,
+                    port: inspect(port)
                   )
 
-                  {:error, {:exit_status, status}}
-              end
-
-            {:DOWN, _ref, :port, ^port, reason} ->
-              cleanup_ready_file(ready_file)
-              log_startup_output(output_buffer)
-
-              SLog.error(
-                @log_category,
-                "Python gRPC server port died during startup: #{inspect(reason)}"
-              )
-
-              {:error, {:port_died, reason}}
-          after
-            min(remaining, 50) ->
-              wait_for_server_ready_loop(port, ready_file, deadline, timeout, output_buffer)
+                  {:error, :shutdown}
+                else
+                  wait_for_server_ready_loop(port, ready_file, deadline, timeout, output_buffer)
+                end
+            after
+              min(remaining, 50) ->
+                wait_for_server_ready_loop(port, ready_file, deadline, timeout, output_buffer)
+            end
           end
         end
     end

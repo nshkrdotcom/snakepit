@@ -16,11 +16,7 @@ defmodule Snakepit.WorkerProfile.Thread.CapacityStore do
   def ensure_started do
     case Process.whereis(__MODULE__) do
       nil ->
-        case start_link([]) do
-          {:ok, pid} -> {:ok, pid}
-          {:error, {:already_started, pid}} -> {:ok, pid}
-          other -> other
-        end
+        {:error, :not_started}
 
       pid ->
         {:ok, pid}

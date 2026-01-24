@@ -65,7 +65,7 @@ defmodule Snakepit.GRPC.HeartbeatFailfastTest do
       end
     }
 
-    {:ok, _starter} =
+    {:ok, _worker_pid} =
       WorkerSupervisor.start_worker(
         worker_id,
         Snakepit.GRPCWorker,
@@ -135,7 +135,7 @@ defmodule Snakepit.GRPC.HeartbeatFailfastTest do
       end
     }
 
-    {:ok, _starter} =
+    {:ok, _worker_pid} =
       WorkerSupervisor.start_worker(
         worker_id,
         Snakepit.GRPCWorker,

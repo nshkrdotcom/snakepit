@@ -10,7 +10,6 @@ defmodule Snakepit.ZeroCopy do
   alias Snakepit.ZeroCopyRef
 
   @table :snakepit_zero_copy_handles
-  @table_opts [:named_table, :set, :public, {:read_concurrency, true}]
   @log_category :bridge
 
   @default_config %{
@@ -177,6 +176,6 @@ defmodule Snakepit.ZeroCopy do
   defp normalize_ref(_), do: %ZeroCopyRef{kind: :dlpack, ref: make_ref()}
 
   defp ensure_table do
-    Snakepit.ETSOwner.ensure_table(@table, @table_opts)
+    Snakepit.ETSOwner.ensure_table(@table)
   end
 end

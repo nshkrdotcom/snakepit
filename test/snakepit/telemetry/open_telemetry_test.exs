@@ -53,7 +53,7 @@ defmodule Snakepit.Telemetry.OpenTelemetryTest do
 
     worker_id = "default_worker_otel_#{System.unique_integer([:positive])}"
 
-    {:ok, starter_pid} =
+    {:ok, worker_pid} =
       WorkerSupervisor.start_worker(
         worker_id,
         Snakepit.GRPCWorker,
@@ -62,7 +62,7 @@ defmodule Snakepit.Telemetry.OpenTelemetryTest do
         %{heartbeat: %{enabled: false}}
       )
 
-    assert is_pid(starter_pid)
+    assert is_pid(worker_pid)
 
     assert_eventually(
       fn -> match?({:ok, _}, PoolRegistry.get_worker_pid(worker_id)) end,

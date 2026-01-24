@@ -1,10 +1,10 @@
 defmodule ThreadCapacityStoreTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Snakepit.WorkerProfile.Thread.CapacityStore
 
   setup do
-    {:ok, _pid} = CapacityStore.ensure_started()
+    start_supervised!(CapacityStore)
     :ok
   end
 

@@ -4,7 +4,6 @@ defmodule Snakepit.Worker.TaintRegistry do
   """
 
   @table :snakepit_worker_taints
-  @table_opts [:named_table, :set, :public, {:read_concurrency, true}]
 
   def taint_worker(worker_id, opts) when is_binary(worker_id) do
     ensure_table()
@@ -94,6 +93,6 @@ defmodule Snakepit.Worker.TaintRegistry do
   end
 
   defp ensure_table do
-    Snakepit.ETSOwner.ensure_table(@table, @table_opts)
+    Snakepit.ETSOwner.ensure_table(@table)
   end
 end

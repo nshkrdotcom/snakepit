@@ -111,26 +111,22 @@ defmodule Snakepit.GRPC.Listener do
       published?: false
     }
 
-    parent = self()
-
-    Task.start_link(fn ->
-      send(parent, {:listener_started, start_listener(state)})
-    end)
-
-    {:ok, state}
+    {:ok, state, {:continue, :start_listener}}
   end
 
   @impl true
-  def handle_info({:listener_started, {:ok, %{pid: pid} = info}}, state) do
-    Process.link(pid)
-    publish_listener(info, state.endpoint_module)
+  def handle_continue(:start_listener, state) do
+    case start_listener(state) do
+      {:ok, %{pid: pid} = info} ->
+        Process.link(pid)
+        publish_listener(info, state.endpoint_module)
 
-    manage_server? = Map.get(info, :manage_server?, state.manage_server?)
-    {:noreply, %{state | server_pid: pid, manage_server?: manage_server?, published?: true}}
-  end
+        manage_server? = Map.get(info, :manage_server?, state.manage_server?)
+        {:noreply, %{state | server_pid: pid, manage_server?: manage_server?, published?: true}}
 
-  def handle_info({:listener_started, {:error, reason}}, state) do
-    {:stop, reason, state}
+      {:error, reason} ->
+        {:stop, reason, state}
+    end
   end
 
   @impl true

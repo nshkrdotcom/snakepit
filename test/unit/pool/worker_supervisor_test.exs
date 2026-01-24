@@ -58,11 +58,11 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
       assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 5_000)
       {_starter_pid, worker_pid} = start_mock_worker(worker_id)
 
-      {:ok, new_starter_pid} = WorkerSupervisor.restart_worker(worker_id)
-      assert is_pid(new_starter_pid)
+      {:ok, new_worker_pid} = WorkerSupervisor.restart_worker(worker_id)
+      assert is_pid(new_worker_pid)
 
       assert_eventually(fn ->
-        match?({:ok, ^new_starter_pid}, StarterRegistry.get_starter_pid(worker_id))
+        match?({:ok, _}, StarterRegistry.get_starter_pid(worker_id))
       end)
 
       assert_eventually(fn ->
@@ -108,10 +108,11 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
         end
 
       try do
-        {:ok, new_starter_pid} = Task.await(restart_task, 5_000)
+        {:ok, new_worker_pid} = Task.await(restart_task, 5_000)
+        assert is_pid(new_worker_pid)
 
         assert_eventually(fn ->
-          match?({:ok, ^new_starter_pid}, StarterRegistry.get_starter_pid(worker_id))
+          match?({:ok, _}, StarterRegistry.get_starter_pid(worker_id))
         end)
 
         assert_eventually(fn ->
@@ -183,7 +184,7 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
       heartbeat: %{enabled: false}
     }
 
-    {:ok, starter_pid} =
+    {:ok, worker_pid} =
       WorkerSupervisor.start_worker(
         worker_id,
         Snakepit.GRPCWorker,
@@ -192,7 +193,7 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
         worker_config
       )
 
-    assert is_pid(starter_pid)
+    assert is_pid(worker_pid)
 
     assert_eventually(
       fn -> match?({:ok, _}, PoolRegistry.get_worker_pid(worker_id)) end,
@@ -200,9 +201,17 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
       interval: 50
     )
 
-    {:ok, worker_pid} = PoolRegistry.get_worker_pid(worker_id)
+    assert_eventually(
+      fn -> match?({:ok, ^worker_id}, PoolRegistry.get_worker_id_by_pid(worker_pid)) end,
+      timeout: 5_000,
+      interval: 50
+    )
 
-    {starter_pid, worker_pid}
+    {:ok, registry_pid} = PoolRegistry.get_worker_pid(worker_id)
+    assert registry_pid == worker_pid
+    {:ok, starter_pid} = StarterRegistry.get_starter_pid(worker_id)
+
+    {starter_pid, registry_pid}
   end
 
   defp assert_worker_shutdown(worker_id, worker_pid) do

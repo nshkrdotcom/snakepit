@@ -53,7 +53,7 @@ defmodule Snakepit.GRPCWorkerTelemetryTest do
 
       assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 5_000)
 
-      {:ok, starter_pid} =
+      {:ok, worker_pid} =
         WorkerSupervisor.start_worker(
           worker_id,
           Snakepit.GRPCWorker,
@@ -62,7 +62,7 @@ defmodule Snakepit.GRPCWorkerTelemetryTest do
           worker_config
         )
 
-      assert is_pid(starter_pid)
+      assert is_pid(worker_pid)
 
       assert_eventually(
         fn -> match?({:ok, _}, PoolRegistry.get_worker_pid(worker_id)) end,

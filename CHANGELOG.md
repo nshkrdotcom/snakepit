@@ -9,8 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.11.1] - 2026-01-23
 
+### Changed
+- `ETSOwner.ensure_table/2` is now `ensure_table/1` - table options are centralized in ETSOwner as the single source of truth for known tables.
+- `ETSOwner` raises `ArgumentError` for unknown table names, preventing accidental table creation outside the managed set.
+- `ETSOwner` raises a clear error when called before the Snakepit application is started.
+- **`WorkerSupervisor.start_worker/5` now returns the GRPCWorker PID** instead of the starter PID. The function waits up to 1 second for the worker to register, making the return value immediately usable for operations.
+- `CapacityStore.ensure_started/0` no longer auto-starts the GenServer; returns `{:error, :not_started}` if the process isn't running. This prevents unsupervised process spawning during shutdown.
+- `GRPC.Listener` init now uses `handle_continue` instead of spawning a `Task` for listener startup, simplifying the initialization flow.
+
 ### Fixed
 - ETS table ownership for taint registry and zero-copy handles is now supervised to avoid short-lived processes becoming table owners.
+- Race condition in `ETSOwner.create_table/2` now properly re-raises if the table still doesn't exist after catching `ArgumentError` (distinguishes real errors from concurrent creation).
+- **Shutdown race in `ProcessManager.wait_for_server_ready/3`** - Now detects `{:EXIT, _, :shutdown}` messages and checks the shutdown flag to exit early instead of timing out during application shutdown.
+- **Telemetry stream task lifecycle** - `GrpcStream` now traps exits and properly cleans up stream state when tasks complete or crash, preventing orphaned entries in the streams map.
+- **Thread profile resilience during shutdown** - `Thread.start_worker/5`, `stop_worker/1`, `acquire_slot/1`, `get_capacity/1`, and `get_load/1` now handle `CapacityStore` being unavailable gracefully instead of crashing.
+- **Pool capacity tracking** - `track_capacity_increment/1` and `track_capacity_decrement/1` now check if `CapacityStore` is available before attempting operations, preventing crashes during shutdown.
 
 ## [0.11.0] - 2026-01-11
 
