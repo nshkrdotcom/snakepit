@@ -162,14 +162,31 @@ defmodule Snakepit.TestHelpers do
         {:ok, {_addr, port}} = :inet.sockname(socket)
         :ok = :gen_tcp.close(socket)
 
-        if :ets.insert_new(table, {port, true}) do
-          port
-        else
-          reserve_available_port(attempts - 1, table)
+        case reserve_port_in_table(table, port) do
+          :ok ->
+            port
+
+          :retry ->
+            reserve_available_port(attempts - 1, ensure_reserved_ports_table())
         end
 
       {:error, _reason} ->
         reserve_available_port(attempts - 1, table)
     end
+  end
+
+  defp reserve_port_in_table(table, port) do
+    if :ets.insert_new(table, {port, true}) do
+      :ok
+    else
+      :retry
+    end
+  rescue
+    ArgumentError ->
+      if :ets.insert_new(ensure_reserved_ports_table(), {port, true}) do
+        :ok
+      else
+        :retry
+      end
   end
 end

@@ -52,6 +52,24 @@ defmodule Snakepit.Pool.WorkerSupervisorTest do
     end
   end
 
+  describe "start_worker/5" do
+    test "returns an error instead of exiting when supervisor is not running" do
+      Application.stop(:snakepit)
+      assert Process.whereis(WorkerSupervisor) == nil
+
+      result =
+        WorkerSupervisor.start_worker(
+          unique_worker_id(),
+          Snakepit.GRPCWorker,
+          MockGRPCAdapter,
+          Snakepit.Pool,
+          %{heartbeat: %{enabled: false}}
+        )
+
+      assert {:error, :supervisor_not_running} = result
+    end
+  end
+
   describe "restart_worker/1" do
     test "terminates the existing worker and starts a fresh one" do
       worker_id = unique_worker_id()

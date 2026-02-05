@@ -58,6 +58,37 @@ defmodule Snakepit.HeartbeatMonitorTest do
     send(worker_pid, :halt)
   end
 
+  test "notify_pong(self(), timestamp) stays compatible when ping_fun runs in async task" do
+    worker_pid = spawn_worker()
+    ping_count = :counters.new(1, [:atomics])
+
+    {:ok, monitor} =
+      HeartbeatMonitor.start_link(
+        worker_pid: worker_pid,
+        worker_id: "worker-self-pong",
+        ping_interval_ms: 20,
+        timeout_ms: 60,
+        max_missed_heartbeats: 1,
+        ping_fun: fn timestamp ->
+          :counters.add(ping_count, 1, 1)
+          HeartbeatMonitor.notify_pong(self(), timestamp)
+          :ok
+        end
+      )
+
+    assert_eventually(
+      fn ->
+        :counters.get(ping_count, 1) >= 2 and Process.alive?(monitor) and
+          Process.alive?(worker_pid)
+      end,
+      timeout: 300,
+      interval: 20
+    )
+
+    :ok = GenServer.stop(monitor)
+    send(worker_pid, :halt)
+  end
+
   test "terminates worker after exceeding missed heartbeat threshold" do
     worker_pid = spawn_worker()
     Process.monitor(worker_pid)

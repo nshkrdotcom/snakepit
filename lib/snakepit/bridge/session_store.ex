@@ -306,6 +306,16 @@ defmodule Snakepit.Bridge.SessionStore do
           error ->
             SLog.error(@log_category, "Error updating session #{session_id}: #{inspect(error)}")
             {:reply, {:error, {:update_failed, error}}, state}
+        catch
+          kind, reason ->
+            SLog.error(
+              @log_category,
+              "Non-exception failure updating session #{session_id}",
+              kind: kind,
+              reason: reason
+            )
+
+            {:reply, {:error, {:update_failed, {kind, reason}}}, state}
         end
 
       [] ->

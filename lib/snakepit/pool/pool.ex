@@ -42,6 +42,14 @@ defmodule Snakepit.Pool do
     # Set to true while async initialization is in progress
     init_start_time: nil,
     # Timestamp for measuring initialization duration
+    init_task_ref: nil,
+    # Monitor ref for async pool initialization task
+    init_task_pid: nil,
+    # PID for async pool initialization task (for shutdown cancellation)
+    init_resource_baseline: nil,
+    # Baseline resource snapshot captured at init start
+    async_task_refs: MapSet.new(),
+    # Task refs started via Task.Supervisor.async_nolink for fire-and-forget work
     reconcile_ref: nil,
     # Periodic pool reconciliation timer reference
     await_ready_waiters: [],
@@ -445,14 +453,15 @@ defmodule Snakepit.Pool do
     Initializer.run(state)
   end
 
-  # Handle completion of async pool initialization
+  # Handle completion of async pool initialization task
   @impl true
-  def handle_info({:pool_init_complete, updated_pools}, state) do
+  def handle_info({ref, {:pool_init_complete, updated_pools}}, %{init_task_ref: ref} = state) do
+    Process.demonitor(ref, [:flush])
     elapsed = System.monotonic_time(:millisecond) - (state.init_start_time || 0)
 
     # DIAGNOSTIC: Capture peak system resource usage after startup
     peak_resources = Initializer.capture_resource_metrics()
-    baseline_resources = Initializer.capture_resource_metrics()
+    baseline_resources = state.init_resource_baseline || peak_resources
     resource_delta = Initializer.calculate_resource_delta(baseline_resources, peak_resources)
 
     pool_worker_counts =
@@ -492,6 +501,9 @@ defmodule Snakepit.Pool do
         | pools: merged_pools,
           initializing: false,
           init_start_time: nil,
+          init_task_ref: nil,
+          init_task_pid: nil,
+          init_resource_baseline: nil,
           reconcile_ref: reconcile_ref
       }
 
@@ -505,46 +517,57 @@ defmodule Snakepit.Pool do
       error = await_ready_error(failed_pool_names)
       reply_waiters_now(state.init_complete_waiters, {:error, error})
 
-      {:stop, :no_workers_started, %{state | init_complete_waiters: []}}
+      {:stop, :no_workers_started,
+       %{
+         state
+         | init_complete_waiters: [],
+           init_task_ref: nil,
+           init_task_pid: nil,
+           init_resource_baseline: nil
+       }}
     end
   end
 
-  # Handle EXIT from the init process during async initialization
-  # This occurs when the GenServer is shutting down while initialization is in progress
+  # Handle async initialization task failures during startup.
   @impl true
-  def handle_info({:EXIT, _pid, reason}, %{initializing: true} = state) do
+  def handle_info(
+        {:DOWN, ref, :process, _pid, reason},
+        %{initializing: true, init_task_ref: ref} = state
+      ) do
     case reason do
       :normal ->
         # Init process completed normally but we haven't received the result yet
         # This shouldn't happen in normal operation
-        {:noreply, state}
+        {:noreply, %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
 
       :shutdown ->
         # Clean shutdown - supervisor is terminating
         SLog.info(@log_category, "Pool initialization interrupted by shutdown")
-        {:stop, :shutdown, state}
+
+        {:stop, :shutdown,
+         %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
 
       {:shutdown, _} ->
         # Clean shutdown with reason
         SLog.info(@log_category, "Pool initialization interrupted by shutdown")
-        {:stop, :shutdown, state}
+
+        {:stop, :shutdown,
+         %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
 
       :killed ->
         # Init process was killed (e.g., supervisor timeout)
         SLog.warning(@log_category, "Pool initialization process killed")
-        {:stop, :killed, state}
+
+        {:stop, :killed,
+         %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
 
       other ->
         # Init process crashed
         SLog.error(@log_category, "Pool initialization failed: #{inspect(other)}")
-        {:stop, {:init_failed, other}, state}
-    end
-  end
 
-  # Handle EXIT from other linked processes (workers, etc.) - passthrough
-  def handle_info({:EXIT, _pid, _reason}, state) do
-    # Let the default behavior handle this
-    {:noreply, state}
+        {:stop, {:init_failed, other},
+         %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
+    end
   end
 
   # queue_timeout - WITH pool_name
@@ -558,8 +581,21 @@ defmodule Snakepit.Pool do
   end
 
   # Worker death - find which pool it belongs to
-  def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
-    EventHandler.handle_down(state, pid, reason)
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    cond do
+      ref == state.init_task_ref ->
+        {:noreply, %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
+
+      MapSet.member?(state.async_task_refs, ref) ->
+        {:noreply, %{state | async_task_refs: MapSet.delete(state.async_task_refs, ref)}}
+
+      true ->
+        EventHandler.handle_down(state, pid, reason)
+    end
+  end
+
+  def handle_info({:track_async_task_ref, ref}, state) when is_reference(ref) do
+    {:noreply, %{state | async_task_refs: MapSet.put(state.async_task_refs, ref)}}
   end
 
   def handle_info({:reply_to_waiter, from, reply}, state) do
@@ -585,7 +621,8 @@ defmodule Snakepit.Pool do
   # These are used for fire-and-forget operations (like replying to callers or
   # kicking off worker respawns), so we can safely ignore the completion message.
   def handle_info({ref, _result}, state) when is_reference(ref) do
-    {:noreply, state}
+    Process.demonitor(ref, [:flush])
+    {:noreply, %{state | async_task_refs: MapSet.delete(state.async_task_refs, ref)}}
   end
 
   def handle_info(msg, state) do
@@ -1219,6 +1256,7 @@ defmodule Snakepit.Pool do
   @impl true
   def terminate(reason, state) do
     SLog.info(@log_category, "🛑 Pool manager terminating with reason: #{inspect(reason)}.")
+    maybe_stop_init_task(state)
 
     # Log state of pools during shutdown (debug level)
     Enum.each(state.pools, fn {pool_name, pool_state} ->
@@ -1244,6 +1282,19 @@ defmodule Snakepit.Pool do
     # Supervision tree will handle worker shutdown via WorkerSupervisor
     :ok
   end
+
+  defp maybe_stop_init_task(%{init_task_ref: ref, init_task_pid: pid})
+       when is_reference(ref) and is_pid(pid) do
+    Process.demonitor(ref, [:flush])
+
+    if Process.alive?(pid) do
+      Process.exit(pid, :shutdown)
+    end
+
+    :ok
+  end
+
+  defp maybe_stop_init_task(_state), do: :ok
 
   # REMOVE the wait_for_ports_to_exit/2 helper functions.
 
@@ -1782,15 +1833,19 @@ defmodule Snakepit.Pool do
   defp async_with_context(fun) when is_function(fun, 0) do
     ctx = :otel_ctx.get_current()
 
-    Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
-      token = :otel_ctx.attach(ctx)
+    task =
+      Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+        token = :otel_ctx.attach(ctx)
 
-      try do
-        fun.()
-      after
-        :otel_ctx.detach(token)
-      end
-    end)
+        try do
+          fun.()
+        after
+          :otel_ctx.detach(token)
+        end
+      end)
+
+    send(self(), {:track_async_task_ref, task.ref})
+    task
   end
 
   @doc false

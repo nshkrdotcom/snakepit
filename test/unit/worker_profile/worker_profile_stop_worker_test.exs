@@ -63,6 +63,22 @@ defmodule Snakepit.WorkerProfileStopWorkerTest do
     :ok = GenServer.stop(worker_pid)
   end
 
+  test "process profile start_worker/1 returns error when WorkerSupervisor is unavailable" do
+    Application.stop(:snakepit)
+    assert Process.whereis(WorkerSupervisor) == nil
+
+    result =
+      ProcessProfile.start_worker(%{
+        worker_id: unique_worker_id(),
+        worker_module: Snakepit.GRPCWorker,
+        adapter_module: MockGRPCAdapter,
+        pool_name: Snakepit.Pool,
+        heartbeat: %{enabled: false}
+      })
+
+    assert {:error, :supervisor_not_running} = result
+  end
+
   defp start_mock_worker(worker_id) do
     worker_config = %{
       test_pid: self(),

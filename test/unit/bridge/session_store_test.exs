@@ -86,4 +86,21 @@ defmodule SessionStoreTest do
 
     assert {:ok, _} = SessionStore.create_session(server_name, "s2", ttl: 0)
   end
+
+  test "contains throw and exit failures from update callbacks" do
+    session_id = "update_fail_#{System.unique_integer([:positive])}"
+    {:ok, _session} = SessionStore.create_session(session_id)
+
+    assert {:error, {:update_failed, {:throw, :thrown_failure}}} =
+             SessionStore.update_session(session_id, fn _session ->
+               throw(:thrown_failure)
+             end)
+
+    assert {:error, {:update_failed, {:exit, :exit_failure}}} =
+             SessionStore.update_session(session_id, fn _session ->
+               exit(:exit_failure)
+             end)
+
+    assert {:ok, _} = SessionStore.get_session(session_id)
+  end
 end

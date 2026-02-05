@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-02-05
+
+### Added
+
+- New runtime-configurable defaults and config normalization for:
+  - `process_registry_dets_flush_interval_ms`
+  - `grpc_stream_open_timeout_ms`
+  - `grpc_stream_control_timeout_ms`
+  - `lifecycle_check_max_concurrency`
+  - `lifecycle_worker_action_timeout_ms`
+
+### Changed
+
+- **ProcessRegistry DETS persistence is now batched** - sync operations are deferred behind a short flush interval instead of running directly inside GenServer callbacks.
+- **Manual orphan cleanup is now asynchronous** - `manual_orphan_cleanup` requests are queued and executed in supervised tasks, with callers replied to when cleanup completes.
+- **Pool initialization startup path now uses supervised async tasks** - initialization is launched with `Task.Supervisor.async_nolink/2` and tracked by task ref, reducing EXIT-link coupling.
+- **Lifecycle checks now run off the GenServer callback path** with bounded per-worker concurrency and action timeouts.
+
+### Fixed
+
+- **Telemetry stream callback blocking risks** - gRPC stream open and control operations now execute asynchronously with explicit operation timeouts, eliminating blocking network calls from cast handlers.
+- **Heartbeat ping callback blocking risks** - heartbeat ping RPC execution now runs in supervised tasks with bounded timeout handling and cleanup.
+- **Heartbeat pong routing under async ping execution** - `notify_pong(self(), timestamp)` remains backward-compatible when `ping_fun` executes in a task by routing self-targeted pongs back to the owning monitor process.
+- **SessionStore callback containment** - `update_session` now safely catches `throw` and `exit` in addition to rescued exceptions.
+- **Dynamic atom creation from telemetry config keys** - OpenTelemetry and metrics config normalization no longer creates atoms from arbitrary strings at runtime.
+- **Async task monitor hygiene in Pool** - tracked async task refs are demonitor/flushed and no longer misrouted through worker `:DOWN` handling.
+- **Worker supervisor shutdown race handling** - `WorkerSupervisor` APIs now return structured errors when the supervisor is unavailable instead of raising `:noproc` exits during shutdown/startup races.
+- **Pool initialization shutdown cleanup** - in-flight async initialization tasks are now explicitly cancelled when `Snakepit.Pool` terminates, preventing startup work from continuing into shutdown.
+- **Initialization resource delta telemetry** - startup resource deltas now compare against the baseline captured at initialization start (instead of sampling baseline and peak at completion).
+- **Port reservation race in tests** - test helper table reservation now tolerates ETS owner races during concurrent full-suite execution.
+
 ## [0.12.0] - 2026-01-25
 
 ### Added
@@ -1624,7 +1655,8 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
-[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.10.1...v0.11.0

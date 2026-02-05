@@ -376,6 +376,8 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
       enabled: false,
       tracer_id: :snakepit_grpc_worker,
       skip_runtime?: false,
+      force?: false,
+      debug_pid: nil,
       exporters: %{
         otlp: %{
           enabled: false,
@@ -393,7 +395,7 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
     config =
       :snakepit
       |> Application.get_env(:opentelemetry, %{})
-      |> to_map()
+      |> to_map(defaults)
       |> deep_merge(defaults)
       |> Map.update!(:enabled, &truthy?/1)
 
@@ -409,27 +411,46 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
     end
   end
 
-  defp to_map(value) when is_map(value) do
+  defp to_map(value, template)
+
+  defp to_map(value, template) when is_map(value) and is_map(template) do
     value
-    |> Enum.map(fn {k, v} -> {normalize_key(k), to_map(v)} end)
+    |> Enum.map(fn {k, v} ->
+      normalized_key = normalize_key(k, template)
+      nested_template = Map.get(template, normalized_key, %{})
+      {normalized_key, to_map(v, nested_template)}
+    end)
     |> Enum.into(%{})
   end
 
-  defp to_map(list) when is_list(list) do
+  defp to_map(value, _template) when is_map(value), do: value
+
+  defp to_map(list, template) when is_list(list) do
     if Keyword.keyword?(list) do
       list
-      |> Enum.map(fn {k, v} -> {normalize_key(k), to_map(v)} end)
+      |> Enum.map(fn {k, v} ->
+        normalized_key = normalize_key(k, template)
+        nested_template = Map.get(template, normalized_key, %{})
+        {normalized_key, to_map(v, nested_template)}
+      end)
       |> Enum.into(%{})
     else
-      Enum.map(list, &to_map/1)
+      Enum.map(list, &to_map(&1, %{}))
     end
   end
 
-  defp to_map(other), do: other
+  defp to_map(other, _template), do: other
 
-  defp normalize_key(key) when is_atom(key), do: key
-  defp normalize_key(key) when is_binary(key), do: String.to_atom(key)
-  defp normalize_key(other), do: other
+  defp normalize_key(key, _template) when is_atom(key), do: key
+
+  defp normalize_key(key, template) when is_binary(key) do
+    Enum.find(Map.keys(template), key, fn
+      atom_key when is_atom(atom_key) -> Atom.to_string(atom_key) == key
+      _ -> false
+    end)
+  end
+
+  defp normalize_key(other, _template), do: other
 
   defp deep_merge(map, defaults) when is_map(map) and is_map(defaults) do
     Map.merge(defaults, map, fn _key, default_val, user_val ->

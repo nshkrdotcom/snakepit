@@ -13,6 +13,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
   """
 
   use GenServer
+  alias Snakepit.Config
   alias Snakepit.Logger, as: SLog
 
   alias GRPC.Channel
@@ -120,159 +121,54 @@ defmodule Snakepit.Telemetry.GrpcStream do
   @impl true
   def init(_opts) do
     Process.flag(:trap_exit, true)
-    {:ok, %{streams: %{}}}
+    {:ok, %{streams: %{}, ops: %{}}}
   end
 
   @impl true
   def handle_cast({:register_worker, channel, worker_ctx}, state) do
-    case initiate_stream(channel, worker_ctx) do
-      {:ok, stream_info} ->
-        new_state = put_in(state, [:streams, worker_ctx.worker_id], stream_info)
+    worker_id = worker_ctx.worker_id
 
-        SLog.info(
-          @log_category,
-          "Telemetry stream registered for worker #{worker_ctx.worker_id}",
-          worker_id: worker_ctx.worker_id,
-          pool_name: worker_ctx.pool_name
-        )
+    new_state =
+      state
+      |> drop_worker(worker_id)
+      |> put_in([:streams, worker_id], %{
+        stream: nil,
+        task: nil,
+        worker_ctx: worker_ctx,
+        started_at: System.monotonic_time(),
+        connecting?: true,
+        pending_controls: [],
+        control_ref: nil
+      })
+      |> start_register_op(worker_id, channel, worker_ctx)
 
-        {:noreply, new_state}
-
-      {:error, reason} ->
-        SLog.warning(
-          @log_category,
-          "Failed to register telemetry stream for worker #{worker_ctx.worker_id}: #{inspect(reason)}",
-          worker_id: worker_ctx.worker_id,
-          reason: reason
-        )
-
-        {:noreply, state}
-    end
+    {:noreply, new_state}
   end
 
   @impl true
   def handle_cast({:unregister_worker, worker_id}, state) do
-    case Map.get(state.streams, worker_id) do
-      nil ->
-        {:noreply, state}
-
-      stream_info ->
-        # Cancel the consumer task
-        if stream_info.task && Process.alive?(stream_info.task.pid) do
-          Task.shutdown(stream_info.task, :brutal_kill)
-        end
-
-        new_state = update_in(state, [:streams], &Map.delete(&1, worker_id))
-
-        SLog.debug(@log_category, "Telemetry stream unregistered for worker #{worker_id}",
-          worker_id: worker_id
-        )
-
-        {:noreply, new_state}
-    end
+    {:noreply, drop_worker(state, worker_id)}
   end
 
   @impl true
   def handle_cast({:update_sampling, worker_id, rate, patterns}, state) do
-    case Map.get(state.streams, worker_id) do
-      nil ->
-        SLog.debug(@log_category, "Cannot update sampling for unknown worker #{worker_id}")
-        {:noreply, state}
-
-      %{stream: stream} ->
-        control_msg = Control.sampling(rate, patterns)
-
-        new_state =
-          case send_control_request(stream, control_msg) do
-            {:ok, updated_stream} ->
-              SLog.debug(@log_category, "Updated sampling for worker #{worker_id} to #{rate}",
-                worker_id: worker_id,
-                rate: rate,
-                patterns: patterns
-              )
-
-              put_in(state, [:streams, worker_id, :stream], updated_stream)
-
-            {:error, reason} ->
-              SLog.warning(
-                @log_category,
-                "Failed to update sampling for worker #{worker_id}: #{inspect(reason)}",
-                worker_id: worker_id,
-                reason: reason
-              )
-
-              state
-          end
-
-        {:noreply, new_state}
-    end
+    control_msg = Control.sampling(rate, patterns)
+    metadata = %{action: :sampling, rate: rate, patterns: patterns}
+    {:noreply, enqueue_control_message(state, worker_id, control_msg, metadata)}
   end
 
   @impl true
   def handle_cast({:toggle, worker_id, enabled}, state) do
-    case Map.get(state.streams, worker_id) do
-      nil ->
-        {:noreply, state}
-
-      %{stream: stream} ->
-        control_msg = Control.toggle(enabled)
-
-        new_state =
-          case send_control_request(stream, control_msg) do
-            {:ok, updated_stream} ->
-              SLog.debug(@log_category, "Toggled telemetry for worker #{worker_id} to #{enabled}",
-                worker_id: worker_id,
-                enabled: enabled
-              )
-
-              put_in(state, [:streams, worker_id, :stream], updated_stream)
-
-            {:error, reason} ->
-              SLog.warning(
-                @log_category,
-                "Failed to toggle telemetry for worker #{worker_id}: #{inspect(reason)}",
-                worker_id: worker_id,
-                reason: reason
-              )
-
-              state
-          end
-
-        {:noreply, new_state}
-    end
+    control_msg = Control.toggle(enabled)
+    metadata = %{action: :toggle, enabled: enabled}
+    {:noreply, enqueue_control_message(state, worker_id, control_msg, metadata)}
   end
 
   @impl true
   def handle_cast({:update_filter, worker_id, opts}, state) do
-    case Map.get(state.streams, worker_id) do
-      nil ->
-        {:noreply, state}
-
-      %{stream: stream} ->
-        control_msg = Control.filter(opts)
-
-        new_state =
-          case send_control_request(stream, control_msg) do
-            {:ok, updated_stream} ->
-              SLog.debug(@log_category, "Updated filters for worker #{worker_id}",
-                worker_id: worker_id
-              )
-
-              put_in(state, [:streams, worker_id, :stream], updated_stream)
-
-            {:error, reason} ->
-              SLog.warning(
-                @log_category,
-                "Failed to update filters for worker #{worker_id}: #{inspect(reason)}",
-                worker_id: worker_id,
-                reason: reason
-              )
-
-              state
-          end
-
-        {:noreply, new_state}
-    end
+    control_msg = Control.filter(opts)
+    metadata = %{action: :filter}
+    {:noreply, enqueue_control_message(state, worker_id, control_msg, metadata)}
   end
 
   @impl true
@@ -291,39 +187,69 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
   @impl true
   def handle_info({ref, result}, state) when is_reference(ref) do
-    case pop_stream_by_ref(state, ref) do
-      {:ok, worker_id, new_state} ->
+    case pop_op(state, ref) do
+      {:ok, op, state_without_op} ->
         Process.demonitor(ref, [:flush])
-
-        SLog.debug(
-          @log_category,
-          "Telemetry stream task completed for worker #{worker_id}: #{inspect(result)}",
-          worker_id: worker_id
-        )
-
-        {:noreply, new_state}
+        {:noreply, handle_stream_op_result(op, result, state_without_op)}
 
       :error ->
-        {:noreply, state}
-    end
-  end
-
-  @impl true
-  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
-    case pop_stream_by_ref(state, ref) do
-      {:ok, worker_id, new_state} ->
-        log_task_exit(worker_id, reason)
-        {:noreply, new_state}
-
-      :error ->
-        case pop_stream_by_pid(state, pid) do
+        case pop_stream_by_ref(state, ref) do
           {:ok, worker_id, new_state} ->
-            log_task_exit(worker_id, reason)
+            Process.demonitor(ref, [:flush])
+
+            SLog.debug(
+              @log_category,
+              "Telemetry stream task completed for worker #{worker_id}: #{inspect(result)}",
+              worker_id: worker_id
+            )
+
             {:noreply, new_state}
 
           :error ->
             {:noreply, state}
         end
+    end
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    case pop_op(state, ref) do
+      {:ok, op, state_without_op} ->
+        {:noreply, handle_stream_op_down(op, reason, state_without_op)}
+
+      :error ->
+        case pop_stream_by_ref(state, ref) do
+          {:ok, worker_id, new_state} ->
+            log_task_exit(worker_id, reason)
+            {:noreply, new_state}
+
+          :error ->
+            case pop_stream_by_pid(state, pid) do
+              {:ok, worker_id, new_state} ->
+                log_task_exit(worker_id, reason)
+                {:noreply, new_state}
+
+              :error ->
+                {:noreply, state}
+            end
+        end
+    end
+  end
+
+  @impl true
+  def handle_info({:stream_op_timeout, ref}, state) when is_reference(ref) do
+    case pop_op(state, ref) do
+      {:ok, op, state_without_op} ->
+        Process.demonitor(ref, [:flush])
+
+        if is_pid(op.task_pid) and Process.alive?(op.task_pid) do
+          Process.exit(op.task_pid, :kill)
+        end
+
+        {:noreply, handle_stream_op_timeout(op, state_without_op)}
+
+      :error ->
+        {:noreply, state}
     end
   end
 
@@ -378,6 +304,312 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
   ## Private Helpers
 
+  defp drop_worker(state, worker_id) do
+    state =
+      Enum.reduce(state.ops, state, fn
+        {ref, %{worker_id: ^worker_id}}, acc ->
+          case pop_op(acc, ref) do
+            {:ok, op, acc_without_op} ->
+              Process.demonitor(ref, [:flush])
+
+              if is_pid(op.task_pid) and Process.alive?(op.task_pid) do
+                Process.exit(op.task_pid, :kill)
+              end
+
+              acc_without_op
+
+            :error ->
+              acc
+          end
+
+        _, acc ->
+          acc
+      end)
+
+    case Map.get(state.streams, worker_id) do
+      nil ->
+        state
+
+      stream_info ->
+        if stream_info.task && Process.alive?(stream_info.task.pid) do
+          Task.shutdown(stream_info.task, :brutal_kill)
+        end
+
+        if stream_info.task do
+          Process.demonitor(stream_info.task.ref, [:flush])
+        end
+
+        update_in(state, [:streams], &Map.delete(&1, worker_id))
+    end
+  end
+
+  defp start_register_op(state, worker_id, channel, worker_ctx) do
+    task =
+      Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+        initiate_stream(channel, worker_ctx)
+      end)
+
+    op = %{
+      kind: :register,
+      worker_id: worker_id,
+      task_pid: task.pid,
+      timer_ref:
+        Process.send_after(
+          self(),
+          {:stream_op_timeout, task.ref},
+          Config.grpc_stream_open_timeout_ms()
+        )
+    }
+
+    put_in(state, [:ops, task.ref], op)
+  end
+
+  defp enqueue_control_message(state, worker_id, control_msg, metadata) do
+    case Map.get(state.streams, worker_id) do
+      nil ->
+        SLog.debug(
+          @log_category,
+          "Cannot send telemetry control message for unknown worker #{worker_id}",
+          worker_id: worker_id
+        )
+
+        state
+
+      stream_info ->
+        updated =
+          Map.update(stream_info, :pending_controls, [{control_msg, metadata}], fn pending ->
+            pending ++ [{control_msg, metadata}]
+          end)
+
+        state
+        |> put_in([:streams, worker_id], updated)
+        |> start_next_control_op(worker_id)
+    end
+  end
+
+  defp start_next_control_op(state, worker_id) do
+    case get_in(state, [:streams, worker_id]) do
+      %{stream: nil} ->
+        state
+
+      %{control_ref: ref} when is_reference(ref) ->
+        state
+
+      %{pending_controls: []} ->
+        state
+
+      %{stream: stream, pending_controls: [{control_msg, metadata} | rest]} = stream_info ->
+        task =
+          Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+            send_control_request(stream, control_msg)
+          end)
+
+        op = %{
+          kind: :control,
+          worker_id: worker_id,
+          metadata: metadata,
+          task_pid: task.pid,
+          timer_ref:
+            Process.send_after(
+              self(),
+              {:stream_op_timeout, task.ref},
+              Config.grpc_stream_control_timeout_ms()
+            )
+        }
+
+        state
+        |> put_in([:streams, worker_id], %{
+          stream_info
+          | pending_controls: rest,
+            control_ref: task.ref
+        })
+        |> put_in([:ops, task.ref], op)
+    end
+  end
+
+  defp pop_op(state, ref) do
+    case Map.pop(state.ops, ref) do
+      {nil, _ops} ->
+        :error
+
+      {op, ops} ->
+        if op.timer_ref do
+          Process.cancel_timer(op.timer_ref)
+        end
+
+        {:ok, op, %{state | ops: ops}}
+    end
+  end
+
+  defp handle_stream_op_result(%{kind: :register, worker_id: worker_id}, {:ok, stream}, state) do
+    case Map.get(state.streams, worker_id) do
+      nil ->
+        state
+
+      %{worker_ctx: worker_ctx} = stream_info ->
+        task =
+          Task.Supervisor.async(
+            Snakepit.TaskSupervisor,
+            fn -> consume_stream(stream, worker_ctx) end
+          )
+
+        new_state =
+          put_in(state, [:streams, worker_id], %{
+            stream_info
+            | stream: stream,
+              task: task,
+              connecting?: false,
+              started_at: System.monotonic_time()
+          })
+
+        SLog.info(
+          @log_category,
+          "Telemetry stream registered for worker #{worker_id}",
+          worker_id: worker_id,
+          pool_name: worker_ctx.pool_name
+        )
+
+        start_next_control_op(new_state, worker_id)
+    end
+  end
+
+  defp handle_stream_op_result(%{kind: :register, worker_id: worker_id}, {:error, reason}, state) do
+    SLog.warning(
+      @log_category,
+      "Failed to register telemetry stream for worker #{worker_id}: #{inspect(reason)}",
+      worker_id: worker_id,
+      reason: reason
+    )
+
+    update_in(state, [:streams], &Map.delete(&1, worker_id))
+  end
+
+  defp handle_stream_op_result(
+         %{kind: :control, worker_id: worker_id, metadata: metadata},
+         result,
+         state
+       ) do
+    case Map.get(state.streams, worker_id) do
+      nil ->
+        state
+
+      stream_info ->
+        next_state =
+          case result do
+            {:ok, updated_stream} ->
+              log_control_success(worker_id, metadata)
+              put_in(state, [:streams, worker_id, :stream], updated_stream)
+
+            {:error, reason} ->
+              log_control_failure(worker_id, metadata, reason)
+              state
+          end
+
+        next_state
+        |> put_in([:streams, worker_id], %{stream_info | control_ref: nil})
+        |> start_next_control_op(worker_id)
+    end
+  end
+
+  defp handle_stream_op_down(%{kind: :register, worker_id: worker_id}, reason, state) do
+    if reason not in [:normal, :shutdown] do
+      SLog.warning(
+        @log_category,
+        "Telemetry stream registration task exited for worker #{worker_id}",
+        worker_id: worker_id,
+        reason: reason
+      )
+
+      update_in(state, [:streams], &Map.delete(&1, worker_id))
+    else
+      state
+    end
+  end
+
+  defp handle_stream_op_down(%{kind: :control, worker_id: worker_id}, reason, state) do
+    if reason not in [:normal, :shutdown] do
+      SLog.warning(
+        @log_category,
+        "Telemetry control task exited for worker #{worker_id}",
+        worker_id: worker_id,
+        reason: reason
+      )
+    end
+
+    case Map.get(state.streams, worker_id) do
+      nil ->
+        state
+
+      stream_info ->
+        state
+        |> put_in([:streams, worker_id], %{stream_info | control_ref: nil})
+        |> start_next_control_op(worker_id)
+    end
+  end
+
+  defp handle_stream_op_timeout(%{kind: :register, worker_id: worker_id}, state) do
+    SLog.warning(
+      @log_category,
+      "Timed out opening telemetry stream for worker #{worker_id}",
+      worker_id: worker_id
+    )
+
+    update_in(state, [:streams], &Map.delete(&1, worker_id))
+  end
+
+  defp handle_stream_op_timeout(
+         %{kind: :control, worker_id: worker_id, metadata: metadata},
+         state
+       ) do
+    SLog.warning(
+      @log_category,
+      "Timed out sending telemetry control message for worker #{worker_id}",
+      worker_id: worker_id,
+      action: metadata.action
+    )
+
+    case Map.get(state.streams, worker_id) do
+      nil ->
+        state
+
+      stream_info ->
+        state
+        |> put_in([:streams, worker_id], %{stream_info | control_ref: nil})
+        |> start_next_control_op(worker_id)
+    end
+  end
+
+  defp log_control_success(worker_id, %{action: :sampling, rate: rate, patterns: patterns}) do
+    SLog.debug(@log_category, "Updated sampling for worker #{worker_id} to #{rate}",
+      worker_id: worker_id,
+      rate: rate,
+      patterns: patterns
+    )
+  end
+
+  defp log_control_success(worker_id, %{action: :toggle, enabled: enabled}) do
+    SLog.debug(@log_category, "Toggled telemetry for worker #{worker_id} to #{enabled}",
+      worker_id: worker_id,
+      enabled: enabled
+    )
+  end
+
+  defp log_control_success(worker_id, %{action: :filter}) do
+    SLog.debug(@log_category, "Updated filters for worker #{worker_id}", worker_id: worker_id)
+  end
+
+  defp log_control_success(_worker_id, _metadata), do: :ok
+
+  defp log_control_failure(worker_id, metadata, reason) do
+    SLog.warning(
+      @log_category,
+      "Failed to send telemetry control message for worker #{worker_id}: #{inspect(reason)}",
+      worker_id: worker_id,
+      reason: reason,
+      action: Map.get(metadata, :action)
+    )
+  end
+
   defp send_control_request(stream, control_msg) do
     {:ok, GRPC.Stub.send_request(stream, control_msg)}
   rescue
@@ -388,27 +620,12 @@ defmodule Snakepit.Telemetry.GrpcStream do
       {:error, reason}
   end
 
-  defp initiate_stream(channel, worker_ctx) do
-    # Use longer timeout for stream operations
+  defp initiate_stream(channel, _worker_ctx) do
     case channel |> open_telemetry_stream() |> normalize_stream_response() do
       {:ok, stream} ->
         # Send initial toggle message to enable telemetry
         stream = GRPC.Stub.send_request(stream, Control.toggle(true))
-
-        # Start async task to consume events
-        task =
-          Task.Supervisor.async(
-            Snakepit.TaskSupervisor,
-            fn -> consume_stream(stream, worker_ctx) end
-          )
-
-        {:ok,
-         %{
-           stream: stream,
-           task: task,
-           worker_ctx: worker_ctx,
-           started_at: System.monotonic_time()
-         }}
+        {:ok, stream}
 
       {:error, reason} ->
         {:error, reason}
@@ -416,7 +633,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
   end
 
   defp open_telemetry_stream(channel) do
-    BridgeService.Stub.stream_telemetry(channel, timeout: :infinity)
+    BridgeService.Stub.stream_telemetry(channel, timeout: Config.grpc_stream_open_timeout_ms())
   rescue
     exception ->
       {:error, {:invalid_channel, exception}}

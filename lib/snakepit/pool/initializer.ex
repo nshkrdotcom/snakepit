@@ -6,6 +6,7 @@ defmodule Snakepit.Pool.Initializer do
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.State
   alias Snakepit.Pool.WorkerSupervisor
+  alias Snakepit.Shutdown
 
   @log_category :pool
 
@@ -25,22 +26,31 @@ defmodule Snakepit.Pool.Initializer do
     baseline_resources = capture_resource_metrics()
     SLog.info(@log_category, "📊 Baseline resources: #{inspect(baseline_resources)}")
 
-    # OTP FIX: Spawn a linked process to do blocking initialization
-    # This keeps the GenServer responsive to shutdown signals during batch startup
-    # The linked process will be killed automatically when the GenServer terminates
-    parent = self()
+    # Run blocking initialization in a supervised task so Pool callbacks stay responsive
+    # while still providing explicit task refs and crash attribution.
     pools_data = state.pools
     # CRITICAL: Capture the Pool GenServer's name BEFORE spawning, so workers
     # get the correct pool reference (not the ephemeral init process's pid)
     pool_genserver_name = get_pool_genserver_name()
 
-    spawn_link(fn ->
-      updated_pools = do_pool_initialization(pools_data, baseline_resources, pool_genserver_name)
-      send(parent, {:pool_init_complete, updated_pools})
-    end)
+    task =
+      Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+        updated_pools =
+          do_pool_initialization(pools_data, baseline_resources, pool_genserver_name)
+
+        {:pool_init_complete, updated_pools}
+      end)
 
     # Return immediately - GenServer is now responsive to shutdown signals
-    {:noreply, %{state | initializing: true, init_start_time: start_time}}
+    {:noreply,
+     %{
+       state
+       | initializing: true,
+         init_start_time: start_time,
+         init_task_ref: task.ref,
+         init_task_pid: task.pid,
+         init_resource_baseline: baseline_resources
+     }}
   end
 
   def capture_resource_metrics do
@@ -330,10 +340,11 @@ defmodule Snakepit.Pool.Initializer do
 
   # Check if the WorkerSupervisor is alive - prevents crashes during shutdown
   defp supervisor_alive? do
-    case Process.whereis(Snakepit.Pool.WorkerSupervisor) do
-      nil -> false
-      pid -> Process.alive?(pid)
-    end
+    not Shutdown.in_progress?() and
+      case Process.whereis(Snakepit.Pool.WorkerSupervisor) do
+        nil -> false
+        pid -> Process.alive?(pid)
+      end
   end
 
   defp start_worker_with_profile(
@@ -344,17 +355,19 @@ defmodule Snakepit.Pool.Initializer do
          pool_config,
          pool_genserver_name
        ) do
-    profile_module = Config.get_profile_module(pool_config)
+    safe_start_worker(fn ->
+      profile_module = Config.get_profile_module(pool_config)
 
-    worker_config =
-      pool_config
-      |> Map.put(:worker_id, worker_id)
-      |> Map.put(:worker_module, worker_module)
-      |> Map.put(:adapter_module, adapter_module)
-      |> Map.put(:pool_name, pool_genserver_name)
-      |> Map.put(:pool_identifier, pool_name)
+      worker_config =
+        pool_config
+        |> Map.put(:worker_id, worker_id)
+        |> Map.put(:worker_module, worker_module)
+        |> Map.put(:adapter_module, adapter_module)
+        |> Map.put(:pool_name, pool_genserver_name)
+        |> Map.put(:pool_identifier, pool_name)
 
-    profile_module.start_worker(worker_config)
+      profile_module.start_worker(worker_config)
+    end)
   end
 
   defp start_worker_legacy(
@@ -364,13 +377,15 @@ defmodule Snakepit.Pool.Initializer do
          adapter_module,
          pool_genserver_name
        ) do
-    WorkerSupervisor.start_worker(
-      worker_id,
-      worker_module,
-      adapter_module,
-      pool_genserver_name,
-      %{pool_identifier: pool_name}
-    )
+    safe_start_worker(fn ->
+      WorkerSupervisor.start_worker(
+        worker_id,
+        worker_module,
+        adapter_module,
+        pool_genserver_name,
+        %{pool_identifier: pool_name}
+      )
+    end)
   end
 
   defp handle_worker_start_result_with_log(result, worker_id, i, actual_count) do
@@ -390,6 +405,28 @@ defmodule Snakepit.Pool.Initializer do
   defp handle_worker_start_result({:exit, reason}) do
     SLog.error(@log_category, "Worker startup task failed: #{inspect(reason)}")
     nil
+  end
+
+  defp safe_start_worker(start_fun) when is_function(start_fun, 0) do
+    case start_fun.() do
+      {:ok, pid} when is_pid(pid) ->
+        {:ok, pid}
+
+      {:error, _reason} = error ->
+        error
+
+      other ->
+        {:error, {:invalid_start_result, other}}
+    end
+  rescue
+    exception ->
+      {:error, {:worker_start_exception, exception}}
+  catch
+    :exit, reason ->
+      {:error, {:worker_start_exit, reason}}
+
+    kind, reason ->
+      {:error, {:worker_start_catch, {kind, reason}}}
   end
 
   defp maybe_delay_between_batches(batch_num, actual_count, batch_config) do

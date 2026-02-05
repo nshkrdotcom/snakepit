@@ -17,6 +17,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
   alias Snakepit.Logger, as: SLog
 
   @table_name :snakepit_pool_process_registry
+  @dets_table_name :snakepit_process_registry_dets_internal
   @log_category :pool
   # Extra startup cleanup passes to handle stop/start overlap in a single BEAM.
   @post_start_cleanup_attempts 3
@@ -30,7 +31,13 @@ defmodule Snakepit.Pool.ProcessRegistry do
     :instance_name,
     :allow_missing_instance,
     :instance_token,
-    :allow_missing_token
+    :allow_missing_token,
+    dets_dirty: false,
+    dets_flush_ref: nil,
+    cleanup_task_ref: nil,
+    cleanup_task_kind: nil,
+    cleanup_queue: [],
+    manual_cleanup_waiters: []
   ]
 
   # Client API
@@ -331,54 +338,64 @@ defmodule Snakepit.Pool.ProcessRegistry do
        instance_name: instance_name,
        allow_missing_instance: allow_missing_instance,
        instance_token: instance_token,
-       allow_missing_token: allow_missing_token
+       allow_missing_token: allow_missing_token,
+       dets_dirty: false,
+       dets_flush_ref: nil,
+       cleanup_task_ref: nil,
+       cleanup_task_kind: nil,
+       cleanup_queue: [],
+       manual_cleanup_waiters: []
      }}
   end
 
   @impl true
   def handle_cast({:unregister, worker_id}, state) do
-    case :ets.lookup(state.table, worker_id) do
-      [{^worker_id, %{process_pid: process_pid} = info}] ->
-        if process_alive?(process_pid) do
-          updated = mark_terminating(info)
-          :ets.insert(state.table, {worker_id, updated})
-          :dets.insert(state.dets_table, {worker_id, updated})
-          :dets.sync(state.dets_table)
+    new_state =
+      case :ets.lookup(state.table, worker_id) do
+        [{^worker_id, %{process_pid: process_pid} = info}] ->
+          if process_alive?(process_pid) do
+            updated = mark_terminating(info)
+            :ets.insert(state.table, {worker_id, updated})
+            :dets.insert(state.dets_table, {worker_id, updated})
 
-          schedule_unregister_cleanup(
-            worker_id,
-            process_pid,
-            Defaults.process_registry_unregister_cleanup_attempts()
-          )
+            schedule_unregister_cleanup(
+              worker_id,
+              process_pid,
+              Defaults.process_registry_unregister_cleanup_attempts()
+            )
 
+            SLog.debug(
+              @log_category,
+              "Deferring unregister for #{worker_id}; external process #{process_pid} still alive"
+            )
+
+            mark_dets_dirty(state)
+          else
+            :ets.delete(state.table, worker_id)
+            :dets.delete(state.dets_table, worker_id)
+
+            SLog.info(
+              @log_category,
+              "🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}"
+            )
+
+            mark_dets_dirty(state)
+          end
+
+        [] ->
+          # Also check DETS in case ETS was cleared
+          :dets.delete(state.dets_table, worker_id)
+          # Defensive check: Only log at debug level for unknown workers
+          # This is expected during certain race conditions and shouldn't be a warning
           SLog.debug(
             @log_category,
-            "Deferring unregister for #{worker_id}; external process #{process_pid} still alive"
+            "Attempted to unregister unknown worker #{worker_id} - ignoring (worker may have failed to register)"
           )
-        else
-          :ets.delete(state.table, worker_id)
-          :dets.delete(state.dets_table, worker_id)
-          :dets.sync(state.dets_table)
 
-          SLog.info(
-            @log_category,
-            "🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}"
-          )
-        end
+          mark_dets_dirty(state)
+      end
 
-      [] ->
-        # Also check DETS in case ETS was cleared
-        :dets.delete(state.dets_table, worker_id)
-        :dets.sync(state.dets_table)
-        # Defensive check: Only log at debug level for unknown workers
-        # This is expected during certain race conditions and shouldn't be a warning
-        SLog.debug(
-          @log_category,
-          "Attempted to unregister unknown worker #{worker_id} - ignoring (worker may have failed to register)"
-        )
-    end
-
-    {:noreply, state}
+    {:noreply, new_state}
   end
 
   @impl true
@@ -402,8 +419,6 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # Update both ETS and DETS atomically
     :ets.insert(state.table, {worker_id, worker_info})
     :dets.insert(state.dets_table, {worker_id, worker_info})
-    # Sync immediately for activation too
-    :dets.sync(state.dets_table)
 
     SLog.debug(
       @log_category,
@@ -412,7 +427,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     )
 
     # Reply :ok to unblock the caller - worker is now fully registered
-    {:reply, :ok, state}
+    {:reply, :ok, mark_dets_dirty(state)}
   end
 
   @impl true
@@ -427,9 +442,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
           :ets.insert(state.table, {worker_id, updated})
           :dets.insert(state.dets_table, {worker_id, updated})
-          :dets.sync(state.dets_table)
 
-          {:reply, :ok, state}
+          {:reply, :ok, mark_dets_dirty(state)}
         else
           {:reply, {:error, :pid_mismatch}, state}
         end
@@ -448,17 +462,15 @@ defmodule Snakepit.Pool.ProcessRegistry do
       beam_os_pid: state.beam_os_pid
     }
 
-    # CRITICAL: Persist to DETS immediately and sync
+    # CRITICAL: Persist reservation metadata to DETS before worker spawn path advances.
     :dets.insert(state.dets_table, {worker_id, reservation_info})
-    # Force immediate write to disk
-    :dets.sync(state.dets_table)
 
     SLog.info(
       @log_category,
       "Reserved worker slot #{worker_id} for BEAM run #{state.beam_run_id}"
     )
 
-    {:reply, :ok, state}
+    {:reply, :ok, mark_dets_dirty(state)}
   end
 
   @impl true
@@ -520,25 +532,20 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @impl true
   def handle_call(:cleanup_dead_workers, _from, state) do
-    dead_count = do_cleanup_dead_workers(state)
-    {:reply, dead_count, state}
+    {dead_count, new_state} = do_cleanup_dead_workers(state)
+    {:reply, dead_count, new_state}
   end
 
   @impl true
-  def handle_call(:manual_orphan_cleanup, _from, state) do
+  def handle_call(:manual_orphan_cleanup, from, state) do
     SLog.info(@log_category, "Manual orphan cleanup triggered")
 
-    cleanup_orphaned_processes(
-      state.dets_table,
-      state.beam_run_id,
-      state.beam_os_pid,
-      state.instance_name,
-      state.allow_missing_instance,
-      state.instance_token,
-      state.allow_missing_token
-    )
+    state =
+      state
+      |> enqueue_manual_cleanup()
+      |> then(fn acc -> %{acc | manual_cleanup_waiters: [from | acc.manual_cleanup_waiters]} end)
 
-    {:reply, :ok, state}
+    {:noreply, state}
   end
 
   @impl true
@@ -575,7 +582,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @impl true
   def handle_info(:cleanup_dead_workers, state) do
-    dead_count = do_cleanup_dead_workers(state)
+    {dead_count, new_state} = do_cleanup_dead_workers(state)
 
     if dead_count > 0 do
       SLog.info(@log_category, "Cleaned up #{dead_count} dead worker entries")
@@ -584,39 +591,50 @@ defmodule Snakepit.Pool.ProcessRegistry do
     # Schedule next cleanup
     schedule_cleanup()
 
-    {:noreply, state}
+    {:noreply, new_state}
+  end
+
+  @impl true
+  def handle_info(:flush_dets, state) do
+    {:noreply, flush_dets(state)}
   end
 
   @impl true
   def handle_info({:unregister_retry, worker_id, process_pid, attempts_left}, state) do
-    case :ets.lookup(state.table, worker_id) do
-      [{^worker_id, %{process_pid: ^process_pid}}] ->
-        handle_unregister_retry_match(state, worker_id, process_pid, attempts_left)
+    new_state =
+      case :ets.lookup(state.table, worker_id) do
+        [{^worker_id, %{process_pid: ^process_pid}}] ->
+          handle_unregister_retry_match(state, worker_id, process_pid, attempts_left)
 
-      _ ->
-        :ok
-    end
+        _ ->
+          state
+      end
 
-    {:noreply, state}
+    {:noreply, new_state}
   end
 
   @impl true
   def handle_info({:post_start_orphan_cleanup, attempts_left}, state) do
-    cleanup_orphaned_processes(
-      state.dets_table,
-      state.beam_run_id,
-      state.beam_os_pid,
-      state.instance_name,
-      state.allow_missing_instance,
-      state.instance_token,
-      state.allow_missing_token
-    )
+    {:noreply, enqueue_cleanup_task(state, {:post_start, attempts_left})}
+  end
 
-    if attempts_left > 1 do
-      schedule_post_start_cleanup(attempts_left - 1)
+  @impl true
+  def handle_info({ref, {:cleanup_complete, kind}}, %{cleanup_task_ref: ref} = state) do
+    Process.demonitor(ref, [:flush])
+    completed_state = complete_cleanup_task(state, kind)
+    {:noreply, maybe_start_next_cleanup(completed_state)}
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{cleanup_task_ref: ref} = state) do
+    kind = state.cleanup_task_kind
+
+    if reason not in [:normal, :shutdown] do
+      SLog.warning(@log_category, "Orphan cleanup task exited unexpectedly", reason: reason)
     end
 
-    {:noreply, state}
+    completed_state = complete_cleanup_task(state, kind)
+    {:noreply, maybe_start_next_cleanup(completed_state)}
   end
 
   @impl true
@@ -629,25 +647,33 @@ defmodule Snakepit.Pool.ProcessRegistry do
     cond do
       process_alive?(process_pid) and attempts_left > 1 ->
         schedule_unregister_cleanup(worker_id, process_pid, attempts_left - 1)
+        state
 
       process_alive?(process_pid) ->
-        :ok
+        state
 
       true ->
         :ets.delete(state.table, worker_id)
         :dets.delete(state.dets_table, worker_id)
-        :dets.sync(state.dets_table)
 
         SLog.info(
           @log_category,
           "🚮 Unregistered worker #{worker_id} with external process PID #{process_pid}"
         )
+
+        mark_dets_dirty(state)
     end
   end
 
   @impl true
   def terminate(reason, state) do
     SLog.info(@log_category, "Snakepit Pool Process Registry terminating: #{inspect(reason)}")
+
+    if state.dets_flush_ref do
+      Process.cancel_timer(state.dets_flush_ref)
+    end
+
+    state = flush_dets(%{state | dets_flush_ref: nil})
 
     # Log current state before closing
     all_entries = safe_dets_entries(state.dets_table)
@@ -691,6 +717,107 @@ defmodule Snakepit.Pool.ProcessRegistry do
       {:unregister_retry, worker_id, process_pid, attempts_left},
       Defaults.process_registry_unregister_cleanup_delay()
     )
+  end
+
+  defp mark_dets_dirty(%{dets_dirty: true} = state), do: state
+
+  defp mark_dets_dirty(state) do
+    flush_ref =
+      Process.send_after(
+        self(),
+        :flush_dets,
+        Config.process_registry_dets_flush_interval_ms()
+      )
+
+    %{state | dets_dirty: true, dets_flush_ref: flush_ref}
+  end
+
+  defp flush_dets(%{dets_dirty: false} = state), do: %{state | dets_flush_ref: nil}
+
+  defp flush_dets(%{dets_table: nil} = state) do
+    %{state | dets_dirty: false, dets_flush_ref: nil}
+  end
+
+  defp flush_dets(state) do
+    :dets.sync(state.dets_table)
+    %{state | dets_dirty: false, dets_flush_ref: nil}
+  end
+
+  defp enqueue_cleanup_task(%{cleanup_task_ref: nil} = state, kind),
+    do: start_cleanup_task(state, kind)
+
+  defp enqueue_cleanup_task(state, kind) do
+    %{state | cleanup_queue: state.cleanup_queue ++ [kind]}
+  end
+
+  defp enqueue_manual_cleanup(%{cleanup_task_kind: :manual} = state), do: state
+
+  defp enqueue_manual_cleanup(%{cleanup_queue: queue} = state) do
+    if Enum.any?(queue, &(&1 == :manual)) do
+      state
+    else
+      enqueue_cleanup_task(state, :manual)
+    end
+  end
+
+  defp maybe_start_next_cleanup(%{cleanup_task_ref: nil, cleanup_queue: [next | rest]} = state) do
+    start_cleanup_task(%{state | cleanup_queue: rest}, next)
+  end
+
+  defp maybe_start_next_cleanup(state), do: state
+
+  defp complete_cleanup_task(state, kind) do
+    state =
+      case kind do
+        :manual ->
+          Enum.each(state.manual_cleanup_waiters, fn from ->
+            GenServer.reply(from, :ok)
+          end)
+
+          %{state | manual_cleanup_waiters: []}
+
+        {:post_start, attempts_left} when attempts_left > 1 ->
+          schedule_post_start_cleanup(attempts_left - 1)
+          state
+
+        _ ->
+          state
+      end
+
+    %{state | cleanup_task_ref: nil, cleanup_task_kind: nil}
+  end
+
+  defp start_cleanup_task(state, kind) do
+    task =
+      Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+        cleanup_orphaned_processes(
+          state.dets_table,
+          state.beam_run_id,
+          state.beam_os_pid,
+          state.instance_name,
+          state.allow_missing_instance,
+          state.instance_token,
+          state.allow_missing_token
+        )
+
+        {:cleanup_complete, kind}
+      end)
+
+    %{state | cleanup_task_ref: task.ref, cleanup_task_kind: kind}
+  rescue
+    _ ->
+      # Best effort fallback when TaskSupervisor is not available.
+      cleanup_orphaned_processes(
+        state.dets_table,
+        state.beam_run_id,
+        state.beam_os_pid,
+        state.instance_name,
+        state.allow_missing_instance,
+        state.instance_token,
+        state.allow_missing_token
+      )
+
+      complete_cleanup_task(state, kind)
   end
 
   defp cleanup_orphaned_processes(
@@ -1447,11 +1574,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     end
   end
 
-  defp build_dets_table_name do
-    :crypto.strong_rand_bytes(8)
-    |> Base.encode32(case: :lower)
-    |> then(&:"snakepit_process_registry_dets_#{&1}")
-  end
+  defp build_dets_table_name, do: @dets_table_name
 
   # Helper function for cleanup that operates on the table
   defp do_cleanup_dead_workers(state) do
@@ -1461,13 +1584,12 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
     {count, dirty} =
       Enum.reduce(dead_workers, {0, false}, fn {worker_id, %{process_pid: process_pid} = info},
-                                               {acc, dirty?} ->
+                                               {acc, _dirty?} ->
         if process_alive?(process_pid) do
           updated = mark_terminating(info)
           :ets.insert(state.table, {worker_id, updated})
           :dets.insert(state.dets_table, {worker_id, updated})
-          :dets.sync(state.dets_table)
-          {acc, dirty?}
+          {acc, true}
         else
           :ets.delete(state.table, worker_id)
           :dets.delete(state.dets_table, worker_id)
@@ -1482,10 +1604,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
       end)
 
     if dirty do
-      :dets.sync(state.dets_table)
+      {count, mark_dets_dirty(state)}
+    else
+      {count, state}
     end
-
-    count
   end
 
   defp mark_terminating(info) do

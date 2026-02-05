@@ -59,6 +59,8 @@ defmodule Snakepit.Defaults do
         # Lifecycle manager settings
         lifecycle_check_interval: 60_000,
         lifecycle_health_check_interval: 300_000,
+        lifecycle_check_max_concurrency: 8,
+        lifecycle_worker_action_timeout_ms: 2_000,
 
         # Session store settings
         session_cleanup_interval: 60_000,
@@ -71,11 +73,14 @@ defmodule Snakepit.Defaults do
         process_registry_cleanup_interval: 30_000,
         process_registry_unregister_cleanup_delay: 500,
         process_registry_unregister_cleanup_attempts: 10,
+        process_registry_dets_flush_interval_ms: 25,
 
         # gRPC settings
         grpc_num_acceptors: 20,
         grpc_max_connections: 1000,
         grpc_socket_backlog: 512,
+        grpc_stream_open_timeout_ms: 5_000,
+        grpc_stream_control_timeout_ms: 2_000,
 
         # Heartbeat settings
         heartbeat_ping_interval_ms: 2_000,
@@ -818,6 +823,28 @@ defmodule Snakepit.Defaults do
     Application.get_env(:snakepit, :lifecycle_health_check_interval, 300_000)
   end
 
+  @doc """
+  Maximum concurrent workers evaluated during each lifecycle check cycle.
+  Used in `Snakepit.Worker.LifecycleManager`.
+
+  Default: 8
+  """
+  @spec lifecycle_check_max_concurrency() :: pos_integer()
+  def lifecycle_check_max_concurrency do
+    Application.get_env(:snakepit, :lifecycle_check_max_concurrency, 8)
+  end
+
+  @doc """
+  Timeout (ms) per worker action during lifecycle check tasks.
+  Used in `Snakepit.Worker.LifecycleManager`.
+
+  Default: 2_000 ms
+  """
+  @spec lifecycle_worker_action_timeout_ms() :: pos_integer()
+  def lifecycle_worker_action_timeout_ms do
+    Application.get_env(:snakepit, :lifecycle_worker_action_timeout_ms, 2_000)
+  end
+
   # ============================================================================
   # Session Store
   # ============================================================================
@@ -917,6 +944,16 @@ defmodule Snakepit.Defaults do
     Application.get_env(:snakepit, :process_registry_unregister_cleanup_attempts, 10)
   end
 
+  @doc """
+  Interval (ms) for batching DETS fsync operations in `Snakepit.Pool.ProcessRegistry`.
+
+  Default: 25 ms
+  """
+  @spec process_registry_dets_flush_interval_ms() :: pos_integer()
+  def process_registry_dets_flush_interval_ms do
+    Application.get_env(:snakepit, :process_registry_dets_flush_interval_ms, 25)
+  end
+
   # ============================================================================
   # gRPC Server Configuration
   # ============================================================================
@@ -952,6 +989,28 @@ defmodule Snakepit.Defaults do
   @spec grpc_socket_backlog() :: pos_integer()
   def grpc_socket_backlog do
     Application.get_env(:snakepit, :grpc_socket_backlog, 512)
+  end
+
+  @doc """
+  Timeout for opening telemetry streams to Python workers.
+  Used in `Snakepit.Telemetry.GrpcStream`.
+
+  Default: 5_000 ms
+  """
+  @spec grpc_stream_open_timeout_ms() :: pos_integer()
+  def grpc_stream_open_timeout_ms do
+    Application.get_env(:snakepit, :grpc_stream_open_timeout_ms, 5_000)
+  end
+
+  @doc """
+  Timeout for sending telemetry control messages to Python workers.
+  Used in `Snakepit.Telemetry.GrpcStream`.
+
+  Default: 2_000 ms
+  """
+  @spec grpc_stream_control_timeout_ms() :: pos_integer()
+  def grpc_stream_control_timeout_ms do
+    Application.get_env(:snakepit, :grpc_stream_control_timeout_ms, 2_000)
   end
 
   # ============================================================================

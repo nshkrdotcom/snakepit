@@ -157,7 +157,7 @@ defmodule Snakepit.TelemetryMetrics do
   defp load_config do
     base_config =
       Application.get_env(:snakepit, :telemetry_metrics, %{})
-      |> to_map()
+      |> to_map(@default_config)
 
     Map.merge(@default_config, base_config, fn
       _key, default_value, user_value when is_map(default_value) and is_map(user_value) ->
@@ -168,14 +168,44 @@ defmodule Snakepit.TelemetryMetrics do
     end)
   end
 
-  defp to_map(value) when is_map(value), do: value
+  defp to_map(value, template)
 
-  defp to_map(value) when is_list(value) do
-    Enum.into(value, %{}, fn
-      {key, val} when is_atom(key) -> {key, to_map(val)}
-      {key, val} -> {String.to_atom(to_string(key)), to_map(val)}
+  defp to_map(value, template) when is_map(value) and is_map(template) do
+    value
+    |> Enum.map(fn {key, val} ->
+      normalized_key = normalize_key(key, template)
+      nested_template = Map.get(template, normalized_key, %{})
+      {normalized_key, to_map(val, nested_template)}
     end)
+    |> Enum.into(%{})
   end
 
-  defp to_map(other), do: other
+  defp to_map(value, _template) when is_map(value), do: value
+
+  defp to_map(value, template) when is_list(value) do
+    if Keyword.keyword?(value) do
+      value
+      |> Enum.map(fn {key, val} ->
+        normalized_key = normalize_key(key, template)
+        nested_template = Map.get(template, normalized_key, %{})
+        {normalized_key, to_map(val, nested_template)}
+      end)
+      |> Enum.into(%{})
+    else
+      Enum.map(value, &to_map(&1, %{}))
+    end
+  end
+
+  defp to_map(other, _template), do: other
+
+  defp normalize_key(key, _template) when is_atom(key), do: key
+
+  defp normalize_key(key, template) do
+    key_str = to_string(key)
+
+    Enum.find(Map.keys(template), key, fn
+      atom_key when is_atom(atom_key) -> Atom.to_string(atom_key) == key_str
+      _ -> false
+    end)
+  end
 end

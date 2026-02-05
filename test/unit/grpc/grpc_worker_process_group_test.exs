@@ -57,8 +57,8 @@ defmodule Snakepit.GRPCWorkerProcessGroupTest do
         end
       end)
 
-      {worker_id, worker, child_pid_file} =
-        start_worker_until_process_group_disabled!(pool_pid, sleep_path, max_attempts: 25)
+      {worker_id, worker, child_pid_file, initial_process_group?} =
+        start_test_worker!(pool_pid, sleep_path)
 
       on_exit(fn ->
         # Best-effort cleanup if a failure happens mid-test.
@@ -90,6 +90,21 @@ defmodule Snakepit.GRPCWorkerProcessGroupTest do
         timeout: 10_000,
         interval: 25
       )
+
+      # On some runs process groups are already resolved before the first metadata read.
+      # When they are not, we still require the transition to happen after readiness.
+      if initial_process_group? == false do
+        assert_eventually(
+          fn ->
+            match?(
+              {:ok, %{process_group?: true}},
+              ProcessRegistry.get_worker_info(worker_id)
+            )
+          end,
+          timeout: 10_000,
+          interval: 25
+        )
+      end
 
       assert_eventually(
         fn -> is_integer(read_child_pid(child_pid_file)) end,
@@ -150,53 +165,58 @@ defmodule Snakepit.GRPCWorkerProcessGroupTest do
     end
   end
 
-  defp start_worker_until_process_group_disabled!(pool_pid, sleep_path, opts) do
-    max_attempts = Keyword.get(opts, :max_attempts, 10)
+  defp start_test_worker!(pool_pid, sleep_path) do
+    worker_id = "process_group_worker_#{System.unique_integer([:positive])}"
 
-    Enum.reduce_while(1..max_attempts, nil, fn _attempt, _acc ->
-      worker_id = "process_group_worker_#{System.unique_integer([:positive])}"
+    child_pid_file =
+      Path.join(System.tmp_dir!(), "snakepit_child_pid_#{System.unique_integer([:positive])}")
 
-      child_pid_file =
-        Path.join(System.tmp_dir!(), "snakepit_child_pid_#{System.unique_integer([:positive])}")
+    {:ok, worker} =
+      GRPCWorker.start_link(
+        id: worker_id,
+        adapter: ProcessGroupGRPCAdapter,
+        pool_name: pool_pid,
+        elixir_address: "localhost:0",
+        worker_config: %{
+          heartbeat: %{enabled: false},
+          adapter_env: [
+            {"SNAKEPIT_CHILD_PID_FILE", child_pid_file},
+            # Give the test a window to read the initial registry entry before
+            # the worker reaches readiness.
+            {"SNAKEPIT_TEST_DELAY_READY_MS", "750"},
+            # Avoid Python-side setsid happening before the initial pgid capture.
+            {"SNAKEPIT_TEST_DELAY_SETSID_MS", "200"},
+            {"SNAKEPIT_TEST_SLEEP_PATH", sleep_path}
+          ]
+        }
+      )
 
-      {:ok, worker} =
-        GRPCWorker.start_link(
-          id: worker_id,
-          adapter: ProcessGroupGRPCAdapter,
-          pool_name: pool_pid,
-          elixir_address: "localhost:0",
-          worker_config: %{
-            heartbeat: %{enabled: false},
-            adapter_env: [
-              {"SNAKEPIT_CHILD_PID_FILE", child_pid_file},
-              # Give the test a window to read the *initial* registry entry before
-              # the worker reaches readiness.
-              {"SNAKEPIT_TEST_DELAY_READY_MS", "750"},
-              # Avoid the Python-side setsid happening before Snakepit captures pgid.
-              {"SNAKEPIT_TEST_DELAY_SETSID_MS", "200"},
-              {"SNAKEPIT_TEST_SLEEP_PATH", sleep_path}
-            ]
-          }
-        )
+    initial_process_group? = await_initial_process_group_flag!(worker_id)
 
-      case ProcessRegistry.get_worker_info(worker_id) do
-        {:ok, %{process_group?: false}} ->
-          {:halt, {worker_id, worker, child_pid_file}}
+    {worker_id, worker, child_pid_file, initial_process_group?}
+  end
 
-        _ ->
-          _ = GenServer.stop(worker)
-          File.rm(child_pid_file)
-          {:cont, nil}
-      end
-    end)
-    |> case do
-      {worker_id, worker, child_pid_file} ->
-        {worker_id, worker, child_pid_file}
+  defp await_initial_process_group_flag!(worker_id, timeout_ms \\ 2_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    await_initial_process_group_flag_loop(worker_id, deadline)
+  end
+
+  defp await_initial_process_group_flag_loop(worker_id, deadline) do
+    case ProcessRegistry.get_worker_info(worker_id) do
+      {:ok, %{process_group?: flag}} when is_boolean(flag) ->
+        flag
 
       _ ->
-        flunk(
-          "failed to start a worker with initial process_group?: false after #{max_attempts} attempts"
-        )
+        if System.monotonic_time(:millisecond) >= deadline do
+          flunk("timed out waiting for initial process_group? metadata for #{worker_id}")
+        else
+          receive do
+          after
+            25 -> :ok
+          end
+
+          await_initial_process_group_flag_loop(worker_id, deadline)
+        end
     end
   end
 end

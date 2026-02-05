@@ -173,6 +173,7 @@ defmodule Snakepit.Config.StartupFailFastTest do
       _ = Application.ensure_all_started(:snakepit)
 
       assert_received {:env_doctor_called, _}
+      stop_snakepit_and_wait()
     end)
   end
 

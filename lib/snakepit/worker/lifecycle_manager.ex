@@ -53,6 +53,7 @@ defmodule Snakepit.Worker.LifecycleManager do
   """
 
   use GenServer
+  alias Snakepit.Config
   alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Worker.LifecycleConfig
@@ -63,7 +64,8 @@ defmodule Snakepit.Worker.LifecycleManager do
     :workers,
     :check_ref,
     :health_ref,
-    :memory_recycle_counts
+    :memory_recycle_counts,
+    :lifecycle_task_ref
   ]
 
   # Client API
@@ -134,7 +136,8 @@ defmodule Snakepit.Worker.LifecycleManager do
       workers: %{},
       check_ref: check_ref,
       health_ref: health_ref,
-      memory_recycle_counts: %{}
+      memory_recycle_counts: %{},
+      lifecycle_task_ref: nil
     }
 
     SLog.info(@log_category, "Worker LifecycleManager started")
@@ -281,34 +284,36 @@ defmodule Snakepit.Worker.LifecycleManager do
   end
 
   @impl true
+  def handle_info(:lifecycle_check, %{lifecycle_task_ref: ref} = state) when is_reference(ref) do
+    SLog.debug(@log_category, "Lifecycle check tick skipped; previous cycle still in progress")
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info(:lifecycle_check, state) do
     now = System.monotonic_time(:second)
 
-    # Check all workers for recycling conditions
-    {recycled_workers, memory_recycle_counts} =
-      Enum.reduce(state.workers, {[], state.memory_recycle_counts}, fn
-        {worker_id, worker_state}, {acc, memory_counts} ->
-          case recycle_decision(worker_state, now) do
-            {:recycle, reason, extra_metadata} ->
-              log_recycle_reason(worker_id, reason, extra_metadata)
-              emit_recycle_telemetry(worker_state, reason, extra_metadata)
-              do_recycle_worker(worker_state)
-
-              new_counts = maybe_track_memory_recycle(memory_counts, worker_state.pool, reason)
-              {[worker_id | acc], new_counts}
-
-            :keep ->
-              {acc, memory_counts}
-          end
+    task =
+      Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+        recycled_workers = run_lifecycle_checks(state.workers, now)
+        {:lifecycle_check_complete, recycled_workers}
       end)
 
-    # Remove recycled workers from tracking
+    {:noreply, %{state | lifecycle_task_ref: task.ref}}
+  end
+
+  @impl true
+  def handle_info(
+        {ref, {:lifecycle_check_complete, recycled_workers}},
+        %{lifecycle_task_ref: ref} = state
+      ) do
+    Process.demonitor(ref, [:flush])
+
     new_workers =
-      Enum.reduce(recycled_workers, state.workers, fn worker_id, workers ->
+      Enum.reduce(recycled_workers, state.workers, fn {worker_id, _pool_name, _reason}, workers ->
         Map.delete(workers, worker_id)
       end)
 
-    # Schedule next check
     check_ref = schedule_lifecycle_check()
 
     {:noreply,
@@ -316,8 +321,26 @@ defmodule Snakepit.Worker.LifecycleManager do
        state
        | workers: new_workers,
          check_ref: check_ref,
-         memory_recycle_counts: memory_recycle_counts
+         lifecycle_task_ref: nil
      }}
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{lifecycle_task_ref: ref} = state) do
+    if reason == :normal do
+      # Result message may still be in flight; wait for `{ref, result}` before clearing task state.
+      {:noreply, state}
+    else
+      SLog.warning(@log_category, "Lifecycle check task exited unexpectedly", reason: reason)
+      check_ref = schedule_lifecycle_check()
+      {:noreply, %{state | check_ref: check_ref, lifecycle_task_ref: nil}}
+    end
+  end
+
+  @impl true
+  def handle_info({:memory_recycle_detected, pool_name}, state) do
+    new_counts = Map.update(state.memory_recycle_counts, pool_name, 1, &(&1 + 1))
+    {:noreply, %{state | memory_recycle_counts: new_counts}}
   end
 
   @impl true
@@ -371,6 +394,48 @@ defmodule Snakepit.Worker.LifecycleManager do
 
   defp schedule_health_check do
     Process.send_after(self(), :health_check, Defaults.lifecycle_health_check_interval())
+  end
+
+  defp run_lifecycle_checks(workers, now) do
+    max_concurrency = Config.lifecycle_check_max_concurrency()
+    worker_timeout = Config.lifecycle_worker_action_timeout_ms()
+
+    Task.Supervisor.async_stream_nolink(
+      Snakepit.TaskSupervisor,
+      workers,
+      fn {worker_id, worker_state} ->
+        case recycle_decision(worker_state, now) do
+          {:recycle, reason, extra_metadata} ->
+            log_recycle_reason(worker_id, reason, extra_metadata)
+            emit_recycle_telemetry(worker_state, reason, extra_metadata)
+
+            if reason == :memory_threshold do
+              send(__MODULE__, {:memory_recycle_detected, worker_state.pool})
+            end
+
+            _ = do_recycle_worker(worker_state)
+            {:recycled, worker_id, worker_state.pool, reason}
+
+          :keep ->
+            :keep
+        end
+      end,
+      timeout: worker_timeout,
+      max_concurrency: max_concurrency,
+      on_timeout: :kill_task,
+      ordered: false
+    )
+    |> Enum.reduce([], fn
+      {:ok, {:recycled, worker_id, pool_name, reason}}, worker_ids ->
+        [{worker_id, pool_name, reason} | worker_ids]
+
+      {:ok, :keep}, worker_ids ->
+        worker_ids
+
+      {:exit, reason}, worker_ids ->
+        SLog.warning(@log_category, "Lifecycle check worker task exited", reason: reason)
+        worker_ids
+    end)
   end
 
   defp recycle_decision(worker_state, now) do
@@ -447,13 +512,6 @@ defmodule Snakepit.Worker.LifecycleManager do
 
   defp log_recycle_reason(worker_id, other_reason, _extra) do
     SLog.info(@log_category, "Worker #{worker_id} recycling due to #{inspect(other_reason)}")
-  end
-
-  defp maybe_track_memory_recycle(counts, _pool, reason) when reason != :memory_threshold,
-    do: counts
-
-  defp maybe_track_memory_recycle(counts, pool, :memory_threshold) do
-    Map.update(counts, pool, 1, &(&1 + 1))
   end
 
   defp do_recycle_worker(worker_state) do

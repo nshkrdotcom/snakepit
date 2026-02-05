@@ -678,6 +678,61 @@ defmodule Snakepit.Config do
   end
 
   @doc """
+  Interval (ms) for batching DETS flushes in `Snakepit.Pool.ProcessRegistry`.
+  """
+  @spec process_registry_dets_flush_interval_ms() :: pos_integer()
+  def process_registry_dets_flush_interval_ms do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :process_registry_dets_flush_interval_ms),
+      Defaults.process_registry_dets_flush_interval_ms()
+    )
+  end
+
+  @doc """
+  Timeout for opening telemetry streams to Python workers.
+  """
+  @spec grpc_stream_open_timeout_ms() :: pos_integer()
+  def grpc_stream_open_timeout_ms do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :grpc_stream_open_timeout_ms),
+      Defaults.grpc_stream_open_timeout_ms()
+    )
+  end
+
+  @doc """
+  Timeout for sending telemetry control messages to Python workers.
+  """
+  @spec grpc_stream_control_timeout_ms() :: pos_integer()
+  def grpc_stream_control_timeout_ms do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :grpc_stream_control_timeout_ms),
+      Defaults.grpc_stream_control_timeout_ms()
+    )
+  end
+
+  @doc """
+  Maximum concurrent worker checks during lifecycle scan.
+  """
+  @spec lifecycle_check_max_concurrency() :: pos_integer()
+  def lifecycle_check_max_concurrency do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :lifecycle_check_max_concurrency),
+      Defaults.lifecycle_check_max_concurrency()
+    )
+  end
+
+  @doc """
+  Timeout (ms) per worker action during lifecycle checks.
+  """
+  @spec lifecycle_worker_action_timeout_ms() :: pos_integer()
+  def lifecycle_worker_action_timeout_ms do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :lifecycle_worker_action_timeout_ms),
+      Defaults.lifecycle_worker_action_timeout_ms()
+    )
+  end
+
+  @doc """
   Resolve the instance name used for runtime isolation.
   """
   @spec instance_name() :: String.t() | nil

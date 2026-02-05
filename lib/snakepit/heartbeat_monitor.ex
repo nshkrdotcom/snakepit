@@ -14,6 +14,7 @@ defmodule Snakepit.HeartbeatMonitor do
   @default_timeout 10_000
   @default_max_missed 3
   @log_category :worker
+  @ping_monitor_pid_key :snakepit_heartbeat_monitor_pid
 
   @type start_option ::
           {:worker_pid, pid()}
@@ -33,6 +34,9 @@ defmodule Snakepit.HeartbeatMonitor do
     :ping_fun,
     :ping_timer,
     :timeout_timer,
+    :ping_task_ref,
+    :ping_task_pid,
+    :ping_task_timer,
     :last_ping_timestamp,
     :initial_delay,
     dependent: true,
@@ -50,7 +54,7 @@ defmodule Snakepit.HeartbeatMonitor do
   """
   @spec notify_pong(pid(), integer()) :: :ok
   def notify_pong(monitor_pid, timestamp) when is_pid(monitor_pid) do
-    GenServer.cast(monitor_pid, {:pong, timestamp})
+    GenServer.cast(resolve_notify_target(monitor_pid), {:pong, timestamp})
   end
 
   @impl true
@@ -114,23 +118,12 @@ defmodule Snakepit.HeartbeatMonitor do
   def handle_info(:send_ping, state) do
     timestamp = System.monotonic_time(:millisecond)
 
-    result =
-      try do
-        state.ping_fun.(timestamp)
-      rescue
-        exception ->
-          {:error, {exception, __STACKTRACE__}}
-      catch
-        kind, reason ->
-          {:error, {kind, reason}}
-      end
-
-    case normalize_ping_result(result) do
-      :ok ->
-        stats = Map.update!(state.stats, :pings_sent, &(&1 + 1))
+    case start_ping_task(state, timestamp) do
+      {:ok, ping_state} ->
+        stats = Map.update!(ping_state.stats, :pings_sent, &(&1 + 1))
 
         new_state =
-          %{state | stats: stats, last_ping_timestamp: timestamp}
+          %{ping_state | stats: stats, last_ping_timestamp: timestamp}
           |> schedule_timeout()
 
         emit_event(:ping_sent, new_state, %{})
@@ -139,10 +132,55 @@ defmodule Snakepit.HeartbeatMonitor do
       {:error, reason} ->
         SLog.warning(
           @log_category,
-          "Heartbeat ping failed for #{state.worker_id}: #{inspect(reason)}"
+          "Heartbeat ping task failed to start for #{state.worker_id}: #{inspect(reason)}"
         )
 
         handle_worker_failure(state, :ping_failed)
+    end
+  end
+
+  @impl true
+  def handle_info({ref, ping_result}, %{ping_task_ref: ref} = state) do
+    Process.demonitor(ref, [:flush])
+    cleared_state = clear_ping_task(state)
+
+    case normalize_ping_result(ping_result) do
+      :ok ->
+        {:noreply, cleared_state}
+
+      {:error, reason} ->
+        SLog.warning(
+          @log_category,
+          "Heartbeat ping failed for #{state.worker_id}: #{inspect(reason)}"
+        )
+
+        handle_worker_failure(cleared_state, :ping_failed)
+    end
+  end
+
+  @impl true
+  def handle_info({:ping_task_timeout, ref}, %{ping_task_ref: ref} = state) do
+    if is_pid(state.ping_task_pid) and Process.alive?(state.ping_task_pid) do
+      Process.exit(state.ping_task_pid, :kill)
+    end
+
+    SLog.warning(@log_category, "Heartbeat ping timed out for #{state.worker_id}")
+    handle_worker_failure(clear_ping_task(state), :ping_failed)
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{ping_task_ref: ref} = state) do
+    cleared_state = clear_ping_task(state)
+
+    if reason in [:normal, :shutdown, :killed] do
+      {:noreply, cleared_state}
+    else
+      SLog.warning(
+        @log_category,
+        "Heartbeat ping task exited for #{state.worker_id}: #{inspect(reason)}"
+      )
+
+      handle_worker_failure(cleared_state, :ping_failed)
     end
   end
 
@@ -199,6 +237,12 @@ defmodule Snakepit.HeartbeatMonitor do
   def terminate(reason, state) do
     cancel_timer(state.ping_timer)
     cancel_timer(state.timeout_timer)
+    cancel_timer(state.ping_task_timer)
+
+    if is_pid(state.ping_task_pid) and Process.alive?(state.ping_task_pid) do
+      Process.exit(state.ping_task_pid, :kill)
+    end
+
     emit_event(:monitor_stopped, state, %{reason: reason})
     :ok
   end
@@ -232,7 +276,87 @@ defmodule Snakepit.HeartbeatMonitor do
     :ok
   end
 
+  defp start_ping_task(%{ping_task_ref: ref} = _state, _timestamp) when is_reference(ref) do
+    {:error, :ping_already_in_flight}
+  end
+
+  defp start_ping_task(state, timestamp) do
+    monitor_pid = self()
+
+    task =
+      Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+        # Preserve compatibility for ping_fun callbacks that call
+        # HeartbeatMonitor.notify_pong(self(), timestamp) from the ping process.
+        Process.put(@ping_monitor_pid_key, monitor_pid)
+
+        try do
+          execute_ping(state.ping_fun, timestamp)
+        after
+          Process.delete(@ping_monitor_pid_key)
+        end
+      end)
+
+    timeout_ref =
+      Process.send_after(
+        self(),
+        {:ping_task_timeout, task.ref},
+        ping_task_timeout_ms(state.timeout)
+      )
+
+    {:ok,
+     %{state | ping_task_ref: task.ref, ping_task_pid: task.pid, ping_task_timer: timeout_ref}}
+  rescue
+    error ->
+      {:error, error}
+  end
+
+  defp execute_ping(ping_fun, timestamp) do
+    ping_fun.(timestamp)
+  rescue
+    exception ->
+      {:error, {exception, __STACKTRACE__}}
+  catch
+    kind, reason ->
+      {:error, {kind, reason}}
+  end
+
+  defp clear_ping_task(state) do
+    cancel_timer(state.ping_task_timer)
+
+    %{
+      state
+      | ping_task_ref: nil,
+        ping_task_pid: nil,
+        ping_task_timer: nil
+    }
+  end
+
+  defp ping_task_timeout_ms(timeout_ms) when is_integer(timeout_ms) and timeout_ms > 1 do
+    max(1, timeout_ms - 1)
+  end
+
+  defp ping_task_timeout_ms(_timeout_ms), do: 1
+
+  defp stop_ping_task(state) do
+    if is_pid(state.ping_task_pid) and Process.alive?(state.ping_task_pid) do
+      Process.exit(state.ping_task_pid, :kill)
+    end
+
+    clear_ping_task(state)
+  end
+
+  defp resolve_notify_target(monitor_pid) do
+    case Process.get(@ping_monitor_pid_key) do
+      actual_monitor_pid when is_pid(actual_monitor_pid) and monitor_pid == self() ->
+        actual_monitor_pid
+
+      _ ->
+        monitor_pid
+    end
+  end
+
   defp handle_worker_failure(state, reason) do
+    state = stop_ping_task(state)
     emit_event(:monitor_failure, state, %{failure_reason: reason})
 
     if state.dependent do

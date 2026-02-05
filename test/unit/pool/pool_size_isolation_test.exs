@@ -17,6 +17,7 @@ defmodule Snakepit.Pool.PoolSizeIsolationTest do
   @moduletag :unit
   @moduletag :slow
   @moduletag timeout: 30_000
+  @moduletag capture_log: true
 
   setup do
     # Save original env

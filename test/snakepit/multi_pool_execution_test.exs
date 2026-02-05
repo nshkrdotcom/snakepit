@@ -14,6 +14,7 @@ defmodule Snakepit.MultiPoolExecutionTest do
   @moduletag :multi_pool
   @moduletag :python_integration
   @moduletag timeout: 120_000
+  @moduletag capture_log: true
 
   setup do
     prev_pools = Application.get_env(:snakepit, :pools)

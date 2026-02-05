@@ -58,7 +58,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
       {Snakepit.Pool.Worker.Starter,
        {worker_id, worker_module, adapter_module, pool_name, worker_config}}
 
-    case DynamicSupervisor.start_child(__MODULE__, child_spec) do
+    case safe_start_child(child_spec) do
       {:ok, starter_pid} ->
         handle_started_worker(worker_id, starter_pid, :started)
 
@@ -88,7 +88,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   def stop_worker(worker_id) when is_binary(worker_id) do
     case StarterRegistry.get_starter_pid(worker_id) do
       {:ok, starter_pid} ->
-        DynamicSupervisor.terminate_child(__MODULE__, starter_pid)
+        safe_terminate_child(starter_pid)
 
       {:error, :not_found} ->
         {:error, :worker_not_found}
@@ -99,15 +99,23 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   Lists all supervised workers.
   """
   def list_workers do
-    DynamicSupervisor.which_children(__MODULE__)
-    |> Enum.map(fn {_, pid, _, _} -> pid end)
+    case safe_which_children() do
+      {:ok, children} ->
+        Enum.map(children, fn {_, pid, _, _} -> pid end)
+
+      {:error, _reason} ->
+        []
+    end
   end
 
   @doc """
   Returns the count of active workers.
   """
   def worker_count do
-    DynamicSupervisor.count_children(__MODULE__).active
+    case safe_count_children() do
+      {:ok, %{active: active}} -> active
+      {:error, _reason} -> 0
+    end
   end
 
   @doc """
@@ -133,6 +141,69 @@ defmodule Snakepit.Pool.WorkerSupervisor do
       {:error, :not_found} ->
         # Worker doesn't exist, so we just need to start it
         start_worker(worker_id)
+    end
+  end
+
+  defp safe_start_child(child_spec) do
+    if supervisor_alive?() do
+      DynamicSupervisor.start_child(__MODULE__, child_spec)
+    else
+      {:error, :supervisor_not_running}
+    end
+  catch
+    :exit, {:noproc, _} ->
+      {:error, :supervisor_not_running}
+
+    :exit, reason ->
+      {:error, {:supervisor_call_failed, reason}}
+  end
+
+  defp safe_terminate_child(starter_pid) do
+    if supervisor_alive?() do
+      DynamicSupervisor.terminate_child(__MODULE__, starter_pid)
+    else
+      {:error, :supervisor_not_running}
+    end
+  catch
+    :exit, {:noproc, _} ->
+      {:error, :supervisor_not_running}
+
+    :exit, reason ->
+      {:error, {:supervisor_call_failed, reason}}
+  end
+
+  defp safe_which_children do
+    if supervisor_alive?() do
+      {:ok, DynamicSupervisor.which_children(__MODULE__)}
+    else
+      {:error, :supervisor_not_running}
+    end
+  catch
+    :exit, {:noproc, _} ->
+      {:error, :supervisor_not_running}
+
+    :exit, reason ->
+      {:error, {:supervisor_call_failed, reason}}
+  end
+
+  defp safe_count_children do
+    if supervisor_alive?() do
+      {:ok, DynamicSupervisor.count_children(__MODULE__)}
+    else
+      {:error, :supervisor_not_running}
+    end
+  catch
+    :exit, {:noproc, _} ->
+      {:error, :supervisor_not_running}
+
+    :exit, reason ->
+      {:error, {:supervisor_call_failed, reason}}
+  end
+
+  defp supervisor_alive? do
+    case Process.whereis(__MODULE__) do
+      pid when is_pid(pid) -> Process.alive?(pid)
+      _ -> false
     end
   end
 
