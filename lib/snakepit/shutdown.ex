@@ -110,28 +110,43 @@ defmodule Snakepit.Shutdown do
     end
   end
 
-  defp stop_snakepit(shutdown_timeout, label) do
-    case Process.whereis(Snakepit.Supervisor) do
+  @doc false
+  @spec stop_supervisor(pid() | atom(), keyword()) :: :ok
+  def stop_supervisor(supervisor, opts \\ []) do
+    timeout_ms = Keyword.get(opts, :timeout_ms, 0) || 0
+    label = Keyword.get(opts, :label, "Shutdown")
+    app = Keyword.get(opts, :app, :snakepit)
+    stop_fun = Keyword.get(opts, :stop_fun, &Application.stop/1)
+
+    case resolve_supervisor_pid(supervisor) do
       nil ->
-        Application.stop(:snakepit)
+        invoke_stop_fun(stop_fun, app)
         SLog.info(:shutdown, "#{label} complete (supervisor already terminated).")
 
       supervisor_pid ->
         ref = Process.monitor(supervisor_pid)
-        Application.stop(:snakepit)
+        invoke_stop_fun(stop_fun, app)
 
         receive do
           {:DOWN, ^ref, :process, ^supervisor_pid, _reason} ->
             SLog.info(:shutdown, "#{label} complete (confirmed via :DOWN signal).")
         after
-          shutdown_timeout ->
+          timeout_ms ->
+            Process.demonitor(ref, [:flush])
+
             SLog.warning(
               :shutdown,
-              "#{label} confirmation timeout after #{shutdown_timeout}ms. Proceeding anyway.",
-              shutdown_timeout_ms: shutdown_timeout
+              "#{label} confirmation timeout after #{timeout_ms}ms. Proceeding anyway.",
+              shutdown_timeout_ms: timeout_ms
             )
         end
     end
+
+    :ok
+  end
+
+  defp stop_snakepit(shutdown_timeout, label) do
+    stop_supervisor(Snakepit.Supervisor, timeout_ms: shutdown_timeout, label: label)
   end
 
   defp cleanup(entries, opts) do
@@ -146,14 +161,13 @@ defmodule Snakepit.Shutdown do
   defp run_cleanup_with_timeout(entries, run_id, cleanup_timeout, cleanup_fun) do
     poll_interval_ms = Defaults.cleanup_poll_interval_ms()
     opts = [timeout_ms: cleanup_timeout, poll_interval_ms: poll_interval_ms, run_id: run_id]
-    task_timeout = cleanup_timeout + 1_000
-    task = Task.async(fn -> cleanup_fun.(entries, opts) end)
+    task_timeout = cleanup_timeout + Defaults.shutdown_margin_ms()
 
-    case Task.yield(task, task_timeout) || Task.shutdown(task, :brutal_kill) do
+    case run_with_timeout(fn -> cleanup_fun.(entries, opts) end, task_timeout) do
       {:ok, result} ->
         normalize_cleanup_result(result)
 
-      nil ->
+      :timeout ->
         SLog.warning(
           :shutdown,
           "Cleanup exceeded #{task_timeout}ms. Skipping remaining cleanup.",
@@ -162,7 +176,7 @@ defmodule Snakepit.Shutdown do
 
         :timeout
 
-      {:exit, reason} ->
+      {:error, reason} ->
         SLog.warning(:shutdown, "Cleanup crashed: #{inspect(reason)}", reason: reason)
         {:error, reason}
     end
@@ -193,4 +207,53 @@ defmodule Snakepit.Shutdown do
   @spec shutdown_status?(term()) :: boolean()
   defp shutdown_status?(status) when status in [:stopping, :stopped], do: true
   defp shutdown_status?(_), do: false
+
+  defp run_with_timeout(fun, timeout_ms) when is_function(fun, 0) and is_integer(timeout_ms) do
+    caller = self()
+    result_ref = make_ref()
+
+    {pid, monitor_ref} =
+      spawn_monitor(fn ->
+        result =
+          try do
+            {:ok, fun.()}
+          rescue
+            exception ->
+              {:error, {exception, __STACKTRACE__}}
+          catch
+            kind, reason ->
+              {:error, {kind, reason}}
+          end
+
+        send(caller, {result_ref, result})
+      end)
+
+    receive do
+      {^result_ref, {:ok, result}} ->
+        Process.demonitor(monitor_ref, [:flush])
+        {:ok, result}
+
+      {^result_ref, {:error, reason}} ->
+        Process.demonitor(monitor_ref, [:flush])
+        {:error, reason}
+
+      {:DOWN, ^monitor_ref, :process, ^pid, reason} ->
+        {:error, reason}
+    after
+      timeout_ms ->
+        Process.exit(pid, :kill)
+        Process.demonitor(monitor_ref, [:flush])
+        :timeout
+    end
+  end
+
+  defp resolve_supervisor_pid(pid) when is_pid(pid) do
+    if Process.alive?(pid), do: pid, else: nil
+  end
+
+  defp resolve_supervisor_pid(name) when is_atom(name), do: Process.whereis(name)
+  defp resolve_supervisor_pid(_), do: nil
+
+  defp invoke_stop_fun(stop_fun, app) when is_function(stop_fun, 1), do: stop_fun.(app)
+  defp invoke_stop_fun(stop_fun, _app) when is_function(stop_fun, 0), do: stop_fun.()
 end

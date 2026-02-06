@@ -3,6 +3,7 @@ defmodule Snakepit.Pool.EventHandler do
 
   alias Snakepit.CrashBarrier
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Pool.ClientReply
   alias Snakepit.Pool.Queue
   alias Snakepit.Pool.Registry, as: PoolRegistry
   alias Snakepit.Pool.State
@@ -308,20 +309,15 @@ defmodule Snakepit.Pool.EventHandler do
 
       checkin_worker_id = final_worker_id
 
-      receive do
-        {:DOWN, ^ref, :process, ^client_pid, _reason} ->
-          SLog.warning(
-            @log_category,
-            "Queued client #{inspect(client_pid)} died during execution."
-          )
-
-          context.maybe_checkin_worker.(pool_name, checkin_worker_id)
-      after
-        0 ->
-          Process.demonitor(ref, [:flush])
-          GenServer.reply(queued_from, result)
-          context.maybe_checkin_worker.(pool_name, checkin_worker_id)
-      end
+      ClientReply.reply_and_checkin(
+        pool_name,
+        checkin_worker_id,
+        queued_from,
+        ref,
+        client_pid,
+        result,
+        context.maybe_checkin_worker
+      )
     end)
 
     updated_pool_state = %{

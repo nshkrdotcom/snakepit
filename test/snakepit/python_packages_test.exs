@@ -281,6 +281,21 @@ defmodule Snakepit.PythonPackagesTest do
     end
   end
 
+  describe "Runner.System timeout wrapper" do
+    test "returns controlled error tuple when command execution crashes" do
+      {output, status} =
+        PythonPackages.Runner.System.cmd(
+          "/definitely/missing/snakepit-command",
+          [],
+          timeout: 50,
+          stderr_to_stdout: true
+        )
+
+      assert is_binary(output)
+      assert status == 127
+    end
+  end
+
   describe "editable requirements" do
     test "treats editable installs as always needing reinstall",
          %{python_path: python_path, uv_path: uv_path} do

@@ -1,5 +1,6 @@
 defmodule ToolRegistryTest do
   use ExUnit.Case, async: true
+  alias Snakepit.Bridge.InternalToolSpec
   alias Snakepit.Bridge.ToolRegistry
 
   @table_name :snakepit_tool_registry
@@ -13,6 +14,13 @@ defmodule ToolRegistryTest do
     assert {:ok, tool} = ToolRegistry.get_tool(session_id, "echo")
     assert tool.type == :local
     assert tool.handler == handler
+  end
+
+  test "returns tuple reason when tool is missing" do
+    session_id = "sess_missing_#{System.unique_integer([:positive])}"
+
+    assert {:error, {:tool_not_found, ^session_id, "missing"}} =
+             ToolRegistry.get_tool(session_id, "missing")
   end
 
   test "rejects invalid tool names" do
@@ -79,5 +87,34 @@ defmodule ToolRegistryTest do
 
     assert :ok = ToolRegistry.cleanup_session(session_id)
     assert ToolRegistry.list_tools(session_id) == []
+  end
+
+  test "execute_local_tool returns tuple reasons for type and execution errors" do
+    session_id = "sess_exec_errors_#{System.unique_integer([:positive])}"
+    remote_tool = "remote_only"
+    local_tool = "boom_tool"
+
+    assert :ok = ToolRegistry.register_python_tool(session_id, remote_tool, "worker_a", %{})
+
+    assert {:error, {:tool_not_local, ^remote_tool}} =
+             ToolRegistry.execute_local_tool(session_id, remote_tool, %{})
+
+    assert :ok =
+             ToolRegistry.register_elixir_tool(session_id, local_tool, fn _params ->
+               raise "boom"
+             end)
+
+    assert {:error, {:tool_execution_failed, %RuntimeError{message: "boom"}}} =
+             ToolRegistry.execute_local_tool(session_id, local_tool, %{})
+  end
+
+  test "InternalToolSpec enforces required keys" do
+    assert_raise ArgumentError, fn ->
+      struct!(InternalToolSpec, %{name: "only_name"})
+    end
+
+    assert_raise ArgumentError, fn ->
+      struct!(InternalToolSpec, %{type: :local})
+    end
   end
 end

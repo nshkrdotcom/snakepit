@@ -1200,6 +1200,17 @@ defmodule Snakepit.Defaults do
     Application.get_env(:snakepit, :cleanup_poll_interval_ms, 50)
   end
 
+  @doc """
+  Whether process-group based termination is enabled.
+  Used in cleanup and worker shutdown paths.
+
+  Default: true
+  """
+  @spec process_group_kill_enabled?() :: boolean()
+  def process_group_kill_enabled? do
+    Application.get_env(:snakepit, :process_group_kill, true)
+  end
+
   # ============================================================================
   # Crash Barrier Worker Checkout
   # ============================================================================

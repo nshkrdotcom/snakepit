@@ -147,11 +147,15 @@ defmodule Snakepit.PythonPackages do
       run = fn -> System.cmd(command, args, opts) end
 
       if is_integer(timeout) do
-        task = Task.async(run)
+        case run_with_timeout(run, timeout) do
+          {:ok, result} ->
+            result
 
-        case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
-          {:ok, result} -> result
-          nil -> {"Command timed out after #{timeout}ms", 124}
+          :timeout ->
+            {"Command timed out after #{timeout}ms", 124}
+
+          {:error, reason} ->
+            {"#{format_cmd_error(reason)}", 127}
         end
       else
         run.()
@@ -160,6 +164,55 @@ defmodule Snakepit.PythonPackages do
       error in ErlangError ->
         {"#{Exception.message(error)}", 127}
     end
+
+    defp run_with_timeout(fun, timeout_ms) when is_function(fun, 0) and is_integer(timeout_ms) do
+      caller = self()
+      result_ref = make_ref()
+
+      {pid, monitor_ref} =
+        spawn_monitor(fn ->
+          result =
+            try do
+              {:ok, fun.()}
+            rescue
+              exception ->
+                {:error, {exception, __STACKTRACE__}}
+            catch
+              kind, reason ->
+                {:error, {kind, reason}}
+            end
+
+          send(caller, {result_ref, result})
+        end)
+
+      receive do
+        {^result_ref, {:ok, result}} ->
+          Process.demonitor(monitor_ref, [:flush])
+          {:ok, result}
+
+        {^result_ref, {:error, reason}} ->
+          Process.demonitor(monitor_ref, [:flush])
+          {:error, reason}
+
+        {:DOWN, ^monitor_ref, :process, ^pid, reason} ->
+          {:error, reason}
+      after
+        timeout_ms ->
+          Process.exit(pid, :kill)
+          Process.demonitor(monitor_ref, [:flush])
+          :timeout
+      end
+    end
+
+    defp format_cmd_error({exception, _stacktrace}) when is_exception(exception) do
+      Exception.message(exception)
+    end
+
+    defp format_cmd_error({kind, reason}) do
+      "#{kind}: #{inspect(reason)}"
+    end
+
+    defp format_cmd_error(reason), do: inspect(reason)
   end
 
   defp config do

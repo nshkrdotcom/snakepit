@@ -110,9 +110,16 @@ defmodule Snakepit.Telemetry.GrpcStream do
   Gets the current state of all registered streams.
   """
   def list_streams do
-    case Process.whereis(__MODULE__) do
-      nil -> []
-      pid -> GenServer.call(pid, :list_streams)
+    list_streams(fn -> GenServer.call(__MODULE__, :list_streams) end)
+  end
+
+  @doc false
+  def list_streams(call_fun) when is_function(call_fun, 0) do
+    try do
+      call_fun.()
+    catch
+      :exit, {:noproc, _} -> []
+      :exit, :noproc -> []
     end
   end
 

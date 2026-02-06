@@ -65,7 +65,8 @@ defmodule Snakepit.Worker.LifecycleManager do
     :check_ref,
     :health_ref,
     :memory_recycle_counts,
-    :lifecycle_task_ref
+    :lifecycle_task_ref,
+    recycle_task_refs: %{}
   ]
 
   # Client API
@@ -137,7 +138,8 @@ defmodule Snakepit.Worker.LifecycleManager do
       check_ref: check_ref,
       health_ref: health_ref,
       memory_recycle_counts: %{},
-      lifecycle_task_ref: nil
+      lifecycle_task_ref: nil,
+      recycle_task_refs: %{}
     }
 
     SLog.info(@log_category, "Worker LifecycleManager started")
@@ -153,6 +155,8 @@ defmodule Snakepit.Worker.LifecycleManager do
     max_requests = lifecycle_config.worker_max_requests
     memory_threshold = lifecycle_config.memory_threshold_mb
 
+    monitor_ref = Process.monitor(worker_pid)
+
     worker_state = %{
       pool: pool_name,
       worker_id: worker_id,
@@ -162,11 +166,9 @@ defmodule Snakepit.Worker.LifecycleManager do
       ttl: ttl,
       max_requests: max_requests,
       memory_threshold: memory_threshold,
-      config: lifecycle_config
+      config: lifecycle_config,
+      monitor_ref: monitor_ref
     }
-
-    # Monitor the worker process
-    Process.monitor(worker_pid)
 
     new_workers = Map.put(state.workers, worker_id, worker_state)
 
@@ -180,7 +182,8 @@ defmodule Snakepit.Worker.LifecycleManager do
 
   @impl true
   def handle_cast({:untrack, worker_id}, state) do
-    new_workers = Map.delete(state.workers, worker_id)
+    {worker_state, new_workers} = pop_worker(state.workers, worker_id)
+    maybe_demonitor_worker(worker_state)
     SLog.debug(@log_category, "Untracked worker #{worker_id}")
     {:noreply, %{state | workers: new_workers}}
   end
@@ -224,12 +227,11 @@ defmodule Snakepit.Worker.LifecycleManager do
         # Emit telemetry
         emit_recycle_telemetry(worker_state, reason)
 
-        # Perform recycling
-        do_recycle_worker(worker_state)
+        {removed_worker_state, new_workers} = pop_worker(state.workers, worker_id)
+        maybe_demonitor_worker(removed_worker_state)
+        new_state = %{state | workers: new_workers}
 
-        # Remove from tracking
-        new_workers = Map.delete(state.workers, worker_id)
-        {:noreply, %{state | workers: new_workers}}
+        {:noreply, start_recycle_task(new_state, worker_state)}
     end
   end
 
@@ -246,12 +248,11 @@ defmodule Snakepit.Worker.LifecycleManager do
           # Emit telemetry
           emit_recycle_telemetry(worker_state, :manual)
 
-          # Perform recycling
-          do_recycle_worker(worker_state)
+          {removed_worker_state, new_workers} = pop_worker(state.workers, worker_id)
+          maybe_demonitor_worker(removed_worker_state)
+          new_state = %{state | workers: new_workers}
 
-          # Remove from tracking
-          new_workers = Map.delete(state.workers, worker_id)
-          {:reply, :ok, %{state | workers: new_workers}}
+          {:reply, :ok, start_recycle_task(new_state, worker_state)}
         else
           {:reply, {:error, :pool_mismatch}, state}
         end
@@ -311,7 +312,9 @@ defmodule Snakepit.Worker.LifecycleManager do
 
     new_workers =
       Enum.reduce(recycled_workers, state.workers, fn {worker_id, _pool_name, _reason}, workers ->
-        Map.delete(workers, worker_id)
+        {worker_state, workers} = pop_worker(workers, worker_id)
+        maybe_demonitor_worker(worker_state)
+        workers
       end)
 
     check_ref = schedule_lifecycle_check()
@@ -338,6 +341,54 @@ defmodule Snakepit.Worker.LifecycleManager do
   end
 
   @impl true
+  def handle_info({ref, recycle_result}, state) when is_reference(ref) do
+    case Map.fetch(state.recycle_task_refs, ref) do
+      {:ok, %{worker_id: worker_id}} ->
+        Process.demonitor(ref, [:flush])
+
+        case recycle_result do
+          :ok ->
+            :ok
+
+          {:error, reason} ->
+            SLog.warning(@log_category, "Worker recycle task failed",
+              worker_id: worker_id,
+              reason: reason
+            )
+
+          other ->
+            SLog.debug(@log_category, "Worker recycle task completed",
+              worker_id: worker_id,
+              result: other
+            )
+        end
+
+        {:noreply, drop_recycle_task_ref(state, ref)}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    case Map.fetch(state.recycle_task_refs, ref) do
+      {:ok, %{worker_id: worker_id}} ->
+        if reason not in [:normal, :shutdown] do
+          SLog.warning(@log_category, "Worker recycle task exited unexpectedly",
+            worker_id: worker_id,
+            reason: reason
+          )
+        end
+
+        {:noreply, drop_recycle_task_ref(state, ref)}
+
+      :error ->
+        handle_worker_down_by_pid(state, pid, reason)
+    end
+  end
+
+  @impl true
   def handle_info({:memory_recycle_detected, pool_name}, state) do
     new_counts = Map.update(state.memory_recycle_counts, pool_name, 1, &(&1 + 1))
     {:noreply, %{state | memory_recycle_counts: new_counts}}
@@ -356,8 +407,7 @@ defmodule Snakepit.Worker.LifecycleManager do
     {:noreply, %{state | health_ref: health_ref}}
   end
 
-  @impl true
-  def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
+  defp handle_worker_down_by_pid(state, pid, reason) when is_pid(pid) do
     # Find worker by PID
     case Enum.find(state.workers, fn {_id, worker} -> worker.pid == pid end) do
       nil ->
@@ -381,10 +431,13 @@ defmodule Snakepit.Worker.LifecycleManager do
         emit_recycle_telemetry(worker_state, :worker_died)
 
         # Remove from tracking (supervisor will restart automatically)
-        new_workers = Map.delete(state.workers, worker_id)
+        {removed_worker_state, new_workers} = pop_worker(state.workers, worker_id)
+        maybe_demonitor_worker(removed_worker_state)
         {:noreply, %{state | workers: new_workers}}
     end
   end
+
+  defp handle_worker_down_by_pid(state, _pid, _reason), do: {:noreply, state}
 
   # Private Functions
 
@@ -437,6 +490,46 @@ defmodule Snakepit.Worker.LifecycleManager do
         worker_ids
     end)
   end
+
+  defp start_recycle_task(state, worker_state) do
+    task_ref =
+      try do
+        task =
+          Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+            do_recycle_worker(worker_state)
+          end)
+
+        task.ref
+      rescue
+        _ ->
+          {_pid, ref} =
+            spawn_monitor(fn ->
+              _ = do_recycle_worker(worker_state)
+              :ok
+            end)
+
+          ref
+      end
+
+    task_meta = %{worker_id: worker_state.worker_id}
+    recycle_task_refs = Map.put(state.recycle_task_refs, task_ref, task_meta)
+    %{state | recycle_task_refs: recycle_task_refs}
+  end
+
+  defp drop_recycle_task_ref(state, ref) do
+    %{state | recycle_task_refs: Map.delete(state.recycle_task_refs, ref)}
+  end
+
+  defp pop_worker(workers, worker_id) do
+    Map.pop(workers, worker_id)
+  end
+
+  defp maybe_demonitor_worker(%{monitor_ref: ref}) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    :ok
+  end
+
+  defp maybe_demonitor_worker(_), do: :ok
 
   defp recycle_decision(worker_state, now) do
     cond do

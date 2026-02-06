@@ -37,4 +37,22 @@ defmodule ThreadCapacityStoreTest do
       :ets.insert(CapacityStore.table_name(), {self(), 10, 0})
     end
   end
+
+  test "returns controlled error instead of exiting when store is unavailable" do
+    pid = Process.whereis(CapacityStore)
+    assert is_pid(pid)
+    :ok = GenServer.stop(pid, :normal)
+
+    worker_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    on_exit(fn -> Process.exit(worker_pid, :kill) end)
+
+    assert {:error, :capacity_store_unavailable} =
+             CapacityStore.check_and_increment_load(worker_pid)
+  end
 end

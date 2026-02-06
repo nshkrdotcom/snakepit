@@ -1,6 +1,8 @@
 defmodule Snakepit.ShutdownTest do
   use ExUnit.Case, async: true
 
+  alias Snakepit.Shutdown
+
   defp record(agent, step) do
     Agent.update(agent, &(&1 ++ [step]))
   end
@@ -91,5 +93,39 @@ defmodule Snakepit.ShutdownTest do
     Snakepit.Shutdown.run(opts)
 
     assert Agent.get(agent, & &1) == 2
+  end
+
+  test "cleanup task crashes are normalized and do not crash caller" do
+    {:ok, agent} = Agent.start_link(fn -> [] end)
+
+    opts =
+      base_opts(agent,
+        cleanup_fun: fn _targets, _opts ->
+          record(agent, :cleanup)
+          raise "cleanup failed"
+        end
+      )
+
+    assert :ok = Shutdown.run(opts)
+    assert steps(agent) == [:capture, :stop, :cleanup, :exit]
+  end
+
+  test "stop_supervisor/2 flushes timeout monitor refs" do
+    supervisor_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    assert :ok =
+             Shutdown.stop_supervisor(supervisor_pid,
+               timeout_ms: 10,
+               label: "test-timeout",
+               stop_fun: fn -> :ok end
+             )
+
+    Process.exit(supervisor_pid, :shutdown)
+    refute_receive {:DOWN, _ref, :process, ^supervisor_pid, _reason}, 50
   end
 end

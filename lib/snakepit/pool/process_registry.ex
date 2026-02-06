@@ -32,8 +32,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
     :allow_missing_instance,
     :instance_token,
     :allow_missing_token,
+    :cleanup_task_runner,
     dets_dirty: false,
     dets_flush_ref: nil,
+    cleanup_task_pid: nil,
     cleanup_task_ref: nil,
     cleanup_task_kind: nil,
     cleanup_queue: [],
@@ -220,7 +222,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
   # Server Callbacks
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
     # Generate short 7-character run ID for this BEAM instance
     # This will be embedded in Python CLI commands for reliable tracking
     run_id = Snakepit.RunID.generate()
@@ -241,6 +243,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     allow_missing_instance = not Config.instance_name_configured?()
     allow_missing_token = not Config.instance_token_configured?()
     node_name = sanitize_name(node())
+    cleanup_task_runner = resolve_cleanup_task_runner(opts)
 
     identifier =
       [instance_name, instance_token]
@@ -339,8 +342,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
        allow_missing_instance: allow_missing_instance,
        instance_token: instance_token,
        allow_missing_token: allow_missing_token,
+       cleanup_task_runner: cleanup_task_runner,
        dets_dirty: false,
        dets_flush_ref: nil,
+       cleanup_task_pid: nil,
        cleanup_task_ref: nil,
        cleanup_task_kind: nil,
        cleanup_queue: [],
@@ -673,7 +678,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
       Process.cancel_timer(state.dets_flush_ref)
     end
 
-    state = flush_dets(%{state | dets_flush_ref: nil})
+    state = await_cleanup_task_completion(%{state | dets_flush_ref: nil})
+    state = flush_dets(state)
 
     # Log current state before closing
     all_entries = safe_dets_entries(state.dets_table)
@@ -784,40 +790,80 @@ defmodule Snakepit.Pool.ProcessRegistry do
           state
       end
 
-    %{state | cleanup_task_ref: nil, cleanup_task_kind: nil}
+    %{state | cleanup_task_pid: nil, cleanup_task_ref: nil, cleanup_task_kind: nil}
   end
 
   defp start_cleanup_task(state, kind) do
-    task =
-      Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
-        cleanup_orphaned_processes(
-          state.dets_table,
-          state.beam_run_id,
-          state.beam_os_pid,
-          state.instance_name,
-          state.allow_missing_instance,
-          state.instance_token,
-          state.allow_missing_token
+    try do
+      task =
+        Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+          run_cleanup(state)
+
+          {:cleanup_complete, kind}
+        end)
+
+      %{state | cleanup_task_pid: task.pid, cleanup_task_ref: task.ref, cleanup_task_kind: kind}
+    rescue
+      error ->
+        SLog.warning(
+          @log_category,
+          "Cleanup task startup failed; using monitored fallback",
+          error: error
         )
 
-        {:cleanup_complete, kind}
-      end)
+        {pid, ref} =
+          spawn_monitor(fn ->
+            run_cleanup(state)
+          end)
 
-    %{state | cleanup_task_ref: task.ref, cleanup_task_kind: kind}
-  rescue
-    _ ->
-      # Best effort fallback when TaskSupervisor is not available.
-      cleanup_orphaned_processes(
-        state.dets_table,
-        state.beam_run_id,
-        state.beam_os_pid,
-        state.instance_name,
-        state.allow_missing_instance,
-        state.instance_token,
-        state.allow_missing_token
-      )
+        %{state | cleanup_task_pid: pid, cleanup_task_ref: ref, cleanup_task_kind: kind}
+    catch
+      :exit, reason ->
+        SLog.warning(
+          @log_category,
+          "TaskSupervisor unavailable for cleanup task; using monitored fallback",
+          reason: reason
+        )
 
-      complete_cleanup_task(state, kind)
+        {pid, ref} =
+          spawn_monitor(fn ->
+            run_cleanup(state)
+          end)
+
+        %{state | cleanup_task_pid: pid, cleanup_task_ref: ref, cleanup_task_kind: kind}
+    end
+  end
+
+  defp await_cleanup_task_completion(%{cleanup_task_ref: nil} = state), do: state
+
+  defp await_cleanup_task_completion(state) do
+    timeout_ms = Defaults.cleanup_on_stop_timeout_ms()
+    ref = state.cleanup_task_ref
+    pid = state.cleanup_task_pid
+
+    receive do
+      {^ref, {:cleanup_complete, _kind}} ->
+        Process.demonitor(ref, [:flush])
+        %{state | cleanup_task_pid: nil, cleanup_task_ref: nil, cleanup_task_kind: nil}
+
+      {:DOWN, ^ref, :process, _pid, _reason} ->
+        %{state | cleanup_task_pid: nil, cleanup_task_ref: nil, cleanup_task_kind: nil}
+    after
+      timeout_ms ->
+        SLog.warning(
+          @log_category,
+          "Cleanup task did not finish before shutdown timeout; forcing termination",
+          timeout_ms: timeout_ms
+        )
+
+        Process.demonitor(ref, [:flush])
+
+        if is_pid(pid) and Process.alive?(pid) do
+          Process.exit(pid, :kill)
+        end
+
+        %{state | cleanup_task_pid: nil, cleanup_task_ref: nil, cleanup_task_kind: nil}
+    end
   end
 
   defp cleanup_orphaned_processes(
@@ -894,6 +940,25 @@ defmodule Snakepit.Pool.ProcessRegistry do
       stale_entries,
       entries_to_remove
     )
+  end
+
+  defp run_cleanup(state) do
+    state.cleanup_task_runner.(
+      state.dets_table,
+      state.beam_run_id,
+      state.beam_os_pid,
+      state.instance_name,
+      state.allow_missing_instance,
+      state.instance_token,
+      state.allow_missing_token
+    )
+  end
+
+  defp resolve_cleanup_task_runner(opts) do
+    case Keyword.get(opts, :cleanup_runner) do
+      fun when is_function(fun, 7) -> fun
+      _ -> &cleanup_orphaned_processes/7
+    end
   end
 
   defp find_stale_entries(all_entries, current_beam_run_id, current_beam_os_pid) do

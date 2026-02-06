@@ -683,21 +683,8 @@ defmodule Snakepit.GRPCWorker do
     {:noreply, state}
   end
 
-  # Graceful shutdown timeout for Python process termination.
-  # Must be >= Python's shutdown envelope: server.stop(2s) + wait_for_termination(3s) = 5s
-  # We use 6s as default to provide margin. Configurable via :graceful_shutdown_timeout_ms.
-  @default_graceful_shutdown_timeout 6000
-
-  # Margin added to graceful_shutdown_timeout for supervisor shutdown.
-  # This gives the worker time to complete its terminate/2 callback.
-  @shutdown_margin 2000
-
   defp graceful_shutdown_timeout do
-    Application.get_env(
-      :snakepit,
-      :graceful_shutdown_timeout_ms,
-      @default_graceful_shutdown_timeout
-    )
+    Defaults.graceful_shutdown_timeout_ms()
   end
 
   @doc """
@@ -723,7 +710,7 @@ defmodule Snakepit.GRPCWorker do
       ]
   """
   def supervisor_shutdown_timeout do
-    graceful_shutdown_timeout() + @shutdown_margin
+    graceful_shutdown_timeout() + Defaults.shutdown_margin_ms()
   end
 
   @impl true

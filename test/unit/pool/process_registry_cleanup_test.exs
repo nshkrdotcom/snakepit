@@ -155,8 +155,111 @@ defmodule Snakepit.Pool.ProcessRegistryCleanupTest do
     end)
   end
 
+  test "terminate waits for in-flight cleanup task before closing DETS" do
+    dets = open_temp_dets()
+    gate_ref = make_ref()
+    cleanup_pid = spawn(fn -> wait_for_cleanup_release(gate_ref) end)
+
+    task =
+      Task.async(fn ->
+        cleanup_ref = Process.monitor(cleanup_pid)
+
+        state = %ProcessRegistry{
+          dets_table: dets,
+          cleanup_task_pid: cleanup_pid,
+          cleanup_task_ref: cleanup_ref,
+          cleanup_task_kind: :manual
+        }
+
+        ProcessRegistry.terminate(:shutdown, state)
+      end)
+
+    assert Task.yield(task, 50) == nil
+
+    send(cleanup_pid, {:release_cleanup, gate_ref})
+    assert :ok = Task.await(task, 1_000)
+
+    refute Process.alive?(cleanup_pid)
+  end
+
+  test "terminate timeout path kills cleanup task and flushes monitor" do
+    previous_timeout = Application.get_env(:snakepit, :cleanup_on_stop_timeout_ms)
+    Application.put_env(:snakepit, :cleanup_on_stop_timeout_ms, 40)
+
+    on_exit(fn ->
+      if is_nil(previous_timeout) do
+        Application.delete_env(:snakepit, :cleanup_on_stop_timeout_ms)
+      else
+        Application.put_env(:snakepit, :cleanup_on_stop_timeout_ms, previous_timeout)
+      end
+    end)
+
+    dets = open_temp_dets()
+    cleanup_pid = spawn(fn -> wait_forever_for_cleanup_release() end)
+
+    task =
+      Task.async(fn ->
+        cleanup_ref = Process.monitor(cleanup_pid)
+
+        state = %ProcessRegistry{
+          dets_table: dets,
+          cleanup_task_pid: cleanup_pid,
+          cleanup_task_ref: cleanup_ref,
+          cleanup_task_kind: :manual
+        }
+
+        assert :ok = ProcessRegistry.terminate(:shutdown, state)
+
+        # Timeout path should demonitor with :flush so no late DOWN remains.
+        refute_receive {:DOWN, ^cleanup_ref, :process, ^cleanup_pid, _reason}
+        :ok
+      end)
+
+    assert :ok = Task.await(task, 1_000)
+    refute Process.alive?(cleanup_pid)
+  end
+
   defp safe_close_port(port) when is_port(port) do
     Port.close(port)
+  catch
+    :exit, _ -> :ok
+    :error, _ -> :ok
+  end
+
+  defp open_temp_dets do
+    unique = System.unique_integer([:positive])
+    table_name = :snakepit_process_registry_terminate_test
+    file_path = Path.join(System.tmp_dir!(), "snakepit_process_registry_terminate_#{unique}.dets")
+
+    {:ok, table} =
+      :dets.open_file(table_name, [
+        {:file, to_charlist(file_path)},
+        {:type, :set},
+        {:auto_save, 1_000}
+      ])
+
+    on_exit(fn ->
+      safe_close_dets(table)
+      File.rm(file_path)
+    end)
+
+    table
+  end
+
+  defp wait_for_cleanup_release(gate_ref) do
+    receive do
+      {:release_cleanup, ^gate_ref} -> :ok
+    end
+  end
+
+  defp wait_forever_for_cleanup_release do
+    receive do
+      {:release_cleanup, _ref} -> :ok
+    end
+  end
+
+  defp safe_close_dets(table) do
+    :dets.close(table)
   catch
     :exit, _ -> :ok
     :error, _ -> :ok

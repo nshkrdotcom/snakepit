@@ -144,10 +144,17 @@ defmodule Snakepit do
   """
   @spec cleanup() :: :ok | {:timeout, list()}
   def cleanup do
-    if Process.whereis(Snakepit.Pool.ProcessRegistry) do
-      Snakepit.RuntimeCleanup.cleanup_current_run()
-    else
-      :ok
+    cleanup(&Snakepit.RuntimeCleanup.cleanup_current_run/0)
+  end
+
+  @doc false
+  @spec cleanup((-> :ok | {:timeout, list()})) :: :ok | {:timeout, list()}
+  def cleanup(cleanup_fun) when is_function(cleanup_fun, 0) do
+    try do
+      cleanup_fun.()
+    catch
+      :exit, {:noproc, _} -> :ok
+      :exit, :noproc -> :ok
     end
   end
 
@@ -208,7 +215,7 @@ defmodule Snakepit do
     * `:shutdown_timeout` - Time to wait for supervisor shutdown confirmation (default: 15000ms)
     * `:cleanup_timeout` - Time to wait for worker process cleanup before forcing cleanup (default: 5000ms).
       When greater than zero, cleanup runs even if Snakepit was already started; set to 0 to skip cleanup.
-      Cleanup is bounded; if it exceeds `cleanup_timeout + 1000` ms the script continues.
+      Cleanup is bounded; if it exceeds `cleanup_timeout + shutdown margin` the script continues.
     * `:restart` - Restart Snakepit if already started to apply script config (`:auto` | true | false)
     * `:await_pool` - Wait for pool readiness (default: `pooling_enabled` setting)
     * `:exit_mode` - Exit behavior (`:none` | `:halt` | `:stop` | `:auto`, default: `:none`).
@@ -361,30 +368,10 @@ defmodule Snakepit do
     Shutdown.mark_in_progress()
 
     try do
-      # Monitor the supervisor to wait for actual shutdown signal
-      case Process.whereis(Snakepit.Supervisor) do
-        nil ->
-          Application.stop(:snakepit)
-          # Already shut down
-          SLog.info(:shutdown, "#{label} complete (supervisor already terminated).")
-
-        supervisor_pid ->
-          ref = Process.monitor(supervisor_pid)
-          Application.stop(:snakepit)
-
-          # Wait for :DOWN signal from BEAM - no guessing with sleep
-          receive do
-            {:DOWN, ^ref, :process, ^supervisor_pid, _reason} ->
-              SLog.info(:shutdown, "#{label} complete (confirmed via :DOWN signal).")
-          after
-            shutdown_timeout ->
-              SLog.warning(
-                :shutdown,
-                "#{label} confirmation timeout after #{shutdown_timeout}ms. Proceeding anyway.",
-                shutdown_timeout_ms: shutdown_timeout
-              )
-          end
-      end
+      Shutdown.stop_supervisor(Snakepit.Supervisor,
+        timeout_ms: shutdown_timeout,
+        label: label
+      )
     after
       Shutdown.clear_in_progress()
     end

@@ -24,27 +24,69 @@ defmodule Snakepit.WorkerProfile.Thread.CapacityStore do
   end
 
   def track_worker(worker_pid, capacity) when is_pid(worker_pid) and capacity > 0 do
-    GenServer.call(__MODULE__, {:track_worker, worker_pid, capacity})
+    safe_call(
+      __MODULE__,
+      {:track_worker, worker_pid, capacity},
+      {:error, :capacity_store_unavailable}
+    )
+  end
+
+  def track_worker(store_pid, worker_pid, capacity)
+      when is_pid(store_pid) and is_pid(worker_pid) and capacity > 0 do
+    safe_call(
+      store_pid,
+      {:track_worker, worker_pid, capacity},
+      {:error, :capacity_store_unavailable}
+    )
   end
 
   def untrack_worker(worker_pid) when is_pid(worker_pid) do
-    GenServer.call(__MODULE__, {:untrack_worker, worker_pid})
+    safe_call(__MODULE__, {:untrack_worker, worker_pid}, {:error, :capacity_store_unavailable})
+  end
+
+  def untrack_worker(store_pid, worker_pid) when is_pid(store_pid) and is_pid(worker_pid) do
+    safe_call(store_pid, {:untrack_worker, worker_pid}, {:error, :capacity_store_unavailable})
   end
 
   def check_and_increment_load(worker_pid) when is_pid(worker_pid) do
-    GenServer.call(__MODULE__, {:check_and_increment_load, worker_pid})
+    safe_call(
+      __MODULE__,
+      {:check_and_increment_load, worker_pid},
+      {:error, :capacity_store_unavailable}
+    )
+  end
+
+  def check_and_increment_load(store_pid, worker_pid)
+      when is_pid(store_pid) and is_pid(worker_pid) do
+    safe_call(
+      store_pid,
+      {:check_and_increment_load, worker_pid},
+      {:error, :capacity_store_unavailable}
+    )
   end
 
   def decrement_load(worker_pid) when is_pid(worker_pid) do
-    GenServer.call(__MODULE__, {:decrement_load, worker_pid})
+    safe_call(__MODULE__, {:decrement_load, worker_pid}, 0)
+  end
+
+  def decrement_load(store_pid, worker_pid) when is_pid(store_pid) and is_pid(worker_pid) do
+    safe_call(store_pid, {:decrement_load, worker_pid}, 0)
   end
 
   def get_capacity(worker_pid) when is_pid(worker_pid) do
-    GenServer.call(__MODULE__, {:get_capacity, worker_pid})
+    safe_call(__MODULE__, {:get_capacity, worker_pid}, 1)
+  end
+
+  def get_capacity(store_pid, worker_pid) when is_pid(store_pid) and is_pid(worker_pid) do
+    safe_call(store_pid, {:get_capacity, worker_pid}, 1)
   end
 
   def get_load(worker_pid) when is_pid(worker_pid) do
-    GenServer.call(__MODULE__, {:get_load, worker_pid})
+    safe_call(__MODULE__, {:get_load, worker_pid}, 0)
+  end
+
+  def get_load(store_pid, worker_pid) when is_pid(store_pid) and is_pid(worker_pid) do
+    safe_call(store_pid, {:get_load, worker_pid}, 0)
   end
 
   def table_name, do: @table_name
@@ -135,5 +177,14 @@ defmodule Snakepit.WorkerProfile.Thread.CapacityStore do
       end
 
     {:reply, new_load, state}
+  end
+
+  defp safe_call(server, request, fallback) do
+    GenServer.call(server, request)
+  catch
+    :exit, {:noproc, _} -> fallback
+    :exit, {:shutdown, _} -> fallback
+    :exit, {:normal, _} -> fallback
+    :exit, _ -> fallback
   end
 end

@@ -93,7 +93,7 @@ defmodule Snakepit.HeartbeatMonitor do
     now = System.monotonic_time(:millisecond)
 
     if state.timeout_timer do
-      Process.cancel_timer(state.timeout_timer)
+      cancel_timer(state.timeout_timer)
     end
 
     new_stats =
@@ -182,6 +182,12 @@ defmodule Snakepit.HeartbeatMonitor do
 
       handle_worker_failure(cleared_state, :ping_failed)
     end
+  end
+
+  @impl true
+  def handle_info(:heartbeat_timeout, %{timeout_timer: nil} = state) do
+    # Ignore stale timeout messages that were already cancelled in the pong path.
+    {:noreply, state}
   end
 
   @impl true

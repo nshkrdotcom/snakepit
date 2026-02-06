@@ -58,6 +58,40 @@ defmodule Snakepit.HeartbeatMonitorTest do
     send(worker_pid, :halt)
   end
 
+  test "ignores stale heartbeat timeout messages after pong cancellation" do
+    worker_pid = spawn_worker()
+    test_pid = self()
+
+    {:ok, monitor} =
+      HeartbeatMonitor.start_link(
+        worker_pid: worker_pid,
+        worker_id: "worker-stale-timeout",
+        ping_interval_ms: 20,
+        timeout_ms: 100,
+        max_missed_heartbeats: 3,
+        dependent: false,
+        ping_fun: fn timestamp ->
+          send(test_pid, {:ping, timestamp})
+          :ok
+        end
+      )
+
+    assert_receive {:ping, ts}, 200
+
+    HeartbeatMonitor.notify_pong(monitor, ts)
+    send(monitor, :heartbeat_timeout)
+
+    receive do
+    after
+      30 -> :ok
+    end
+
+    assert :sys.get_state(monitor).missed_heartbeats == 0
+
+    :ok = GenServer.stop(monitor)
+    send(worker_pid, :halt)
+  end
+
   test "notify_pong(self(), timestamp) stays compatible when ping_fun runs in async task" do
     worker_pid = spawn_worker()
     ping_count = :counters.new(1, [:atomics])

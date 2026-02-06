@@ -9,6 +9,7 @@ defmodule Snakepit.RuntimeCleanup do
   """
 
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Defaults
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.ProcessKiller
 
@@ -141,15 +142,15 @@ defmodule Snakepit.RuntimeCleanup do
   end
 
   defp cleanup_on_stop_timeout_ms do
-    Application.get_env(:snakepit, :cleanup_on_stop_timeout_ms, 3_000)
+    Defaults.cleanup_on_stop_timeout_ms()
   end
 
   defp cleanup_poll_interval_ms do
-    Application.get_env(:snakepit, :cleanup_poll_interval_ms, 50)
+    Defaults.cleanup_poll_interval_ms()
   end
 
   defp process_group_kill_enabled? do
-    Application.get_env(:snakepit, :process_group_kill, true)
+    Defaults.process_group_kill_enabled?()
   end
 
   defp log_incomplete_cleanup([]), do: :ok

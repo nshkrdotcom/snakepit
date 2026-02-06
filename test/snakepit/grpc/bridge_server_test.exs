@@ -233,6 +233,23 @@ defmodule Snakepit.GRPC.BridgeServerTest do
       assert message =~ "Invalid parameter payload"
       assert response.result == nil
     end
+
+    test "formats missing tool errors at API boundary", %{session_id: session_id} do
+      ensure_tool_registry_started()
+      {:ok, _session} = SessionStore.create_session(session_id)
+
+      request = %ExecuteElixirToolRequest{
+        session_id: session_id,
+        tool_name: "missing_tool",
+        parameters: %{},
+        metadata: %{}
+      }
+
+      response = BridgeServer.execute_elixir_tool(request, nil)
+
+      assert %ExecuteElixirToolResponse{success: false, error_message: message} = response
+      assert message == "Tool missing_tool not found for session #{session_id}"
+    end
   end
 
   describe "execute_streaming_tool/2" do

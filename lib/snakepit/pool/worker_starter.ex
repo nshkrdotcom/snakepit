@@ -217,20 +217,7 @@ defmodule Snakepit.Pool.Worker.Starter do
 
   defp normalize_identifier(_), do: nil
 
-  # Derive supervisor shutdown timeout from the same config as GRPCWorker.
-  # This ensures consistency: if a user sets :graceful_shutdown_timeout_ms,
-  # both the worker's terminate/2 and the supervisor's shutdown are aligned.
-  @default_graceful_shutdown_timeout 6000
-  @shutdown_margin 2000
-
   defp supervisor_shutdown_timeout do
-    graceful =
-      Application.get_env(
-        :snakepit,
-        :graceful_shutdown_timeout_ms,
-        @default_graceful_shutdown_timeout
-      )
-
-    graceful + @shutdown_margin
+    Defaults.graceful_shutdown_timeout_ms() + Defaults.shutdown_margin_ms()
   end
 end

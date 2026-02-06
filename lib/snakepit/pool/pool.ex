@@ -496,16 +496,15 @@ defmodule Snakepit.Pool do
 
       reconcile_ref = schedule_reconcile(Defaults.pool_reconcile_interval_ms())
 
-      new_state = %{
-        state
-        | pools: merged_pools,
-          initializing: false,
-          init_start_time: nil,
-          init_task_ref: nil,
-          init_task_pid: nil,
-          init_resource_baseline: nil,
-          reconcile_ref: reconcile_ref
-      }
+      new_state =
+        %{
+          state
+          | pools: merged_pools,
+            initializing: false,
+            init_start_time: nil,
+            reconcile_ref: reconcile_ref
+        }
+        |> clear_init_task_state()
 
       {:noreply, maybe_reply_waiters(new_state)}
     else
@@ -518,13 +517,9 @@ defmodule Snakepit.Pool do
       reply_waiters_now(state.init_complete_waiters, {:error, error})
 
       {:stop, :no_workers_started,
-       %{
-         state
-         | init_complete_waiters: [],
-           init_task_ref: nil,
-           init_task_pid: nil,
-           init_resource_baseline: nil
-       }}
+       state
+       |> Map.put(:init_complete_waiters, [])
+       |> clear_init_task_state()}
     end
   end
 
@@ -538,35 +533,31 @@ defmodule Snakepit.Pool do
       :normal ->
         # Init process completed normally but we haven't received the result yet
         # This shouldn't happen in normal operation
-        {:noreply, %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
+        {:noreply, clear_init_task_state(state)}
 
       :shutdown ->
         # Clean shutdown - supervisor is terminating
         SLog.info(@log_category, "Pool initialization interrupted by shutdown")
 
-        {:stop, :shutdown,
-         %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
+        {:stop, :shutdown, clear_init_task_state(state)}
 
       {:shutdown, _} ->
         # Clean shutdown with reason
         SLog.info(@log_category, "Pool initialization interrupted by shutdown")
 
-        {:stop, :shutdown,
-         %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
+        {:stop, :shutdown, clear_init_task_state(state)}
 
       :killed ->
         # Init process was killed (e.g., supervisor timeout)
         SLog.warning(@log_category, "Pool initialization process killed")
 
-        {:stop, :killed,
-         %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
+        {:stop, :killed, clear_init_task_state(state)}
 
       other ->
         # Init process crashed
         SLog.error(@log_category, "Pool initialization failed: #{inspect(other)}")
 
-        {:stop, {:init_failed, other},
-         %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
+        {:stop, {:init_failed, other}, clear_init_task_state(state)}
     end
   end
 
@@ -584,7 +575,7 @@ defmodule Snakepit.Pool do
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     cond do
       ref == state.init_task_ref ->
-        {:noreply, %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}}
+        {:noreply, clear_init_task_state(state)}
 
       MapSet.member?(state.async_task_refs, ref) ->
         {:noreply, %{state | async_task_refs: MapSet.delete(state.async_task_refs, ref)}}
@@ -1296,6 +1287,10 @@ defmodule Snakepit.Pool do
 
   defp maybe_stop_init_task(_state), do: :ok
 
+  defp clear_init_task_state(state) do
+    %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}
+  end
+
   # REMOVE the wait_for_ports_to_exit/2 helper functions.
 
   # Private Functions
@@ -1519,7 +1514,7 @@ defmodule Snakepit.Pool do
       case Snakepit.Pool.Registry.get_worker_pid(worker_id) do
         {:ok, pid} ->
           case CapacityStore.ensure_started() do
-            {:ok, _pid} -> _ = CapacityStore.decrement_load(pid)
+            {:ok, store_pid} -> _ = CapacityStore.decrement_load(store_pid, pid)
             {:error, _reason} -> :ok
           end
 
@@ -1535,9 +1530,9 @@ defmodule Snakepit.Pool do
 
   defp track_capacity_increment(worker_id) do
     case CapacityStore.ensure_started() do
-      {:ok, _pid} ->
+      {:ok, store_pid} ->
         with {:ok, pid} <- Snakepit.Pool.Registry.get_worker_pid(worker_id),
-             result <- CapacityStore.check_and_increment_load(pid) do
+             result <- CapacityStore.check_and_increment_load(store_pid, pid) do
           handle_capacity_increment_result(result, pid)
         else
           {:error, _} -> :ok

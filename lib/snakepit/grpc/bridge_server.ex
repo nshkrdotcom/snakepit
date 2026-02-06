@@ -517,10 +517,10 @@ defmodule Snakepit.GRPC.BridgeServer do
           status: :not_found,
           message: "Session not found: #{request.session_id}"
 
-      {:error, message} when is_binary(message) ->
+      {:error, {:tool_not_found, _session_id, _tool_name} = reason} ->
         raise GRPC.RPCError,
           status: :not_found,
-          message: message
+          message: format_error(reason)
 
       {:error, {:streaming_not_supported, _} = reason} ->
         raise_streaming_rpc_error(request, reason)
@@ -740,6 +740,15 @@ defmodule Snakepit.GRPC.BridgeServer do
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(reason) when is_atom(reason), do: to_string(reason)
   defp format_error({:error, reason}), do: format_error(reason)
+
+  defp format_error({:tool_not_found, session_id, tool_name}),
+    do: "Tool #{tool_name} not found for session #{session_id}"
+
+  defp format_error({:tool_not_local, tool_name}), do: "Tool #{tool_name} is not a local tool"
+
+  defp format_error({:tool_execution_failed, reason}),
+    do: "Tool execution failed: #{inspect(reason)}"
+
   defp format_error({:unknown_type, type}), do: "Unknown type: #{inspect(type)}"
   defp format_error({:invalid_constraints, reason}), do: "Invalid constraints: #{reason}"
 

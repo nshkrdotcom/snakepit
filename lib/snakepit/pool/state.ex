@@ -168,7 +168,7 @@ defmodule Snakepit.Pool.State do
 
   defp resolve_capacity_strategy(pool_config) do
     Map.get(pool_config, :capacity_strategy) ||
-      Application.get_env(:snakepit, :capacity_strategy, :pool)
+      Application.get_env(:snakepit, :capacity_strategy, Defaults.default_capacity_strategy())
   end
 
   defp worker_load(pool_state, worker_id) do

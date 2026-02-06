@@ -4,6 +4,7 @@ defmodule Snakepit.Bridge.InternalToolSpec do
   Separate from the protobuf ToolSpec to avoid conflicts.
   """
 
+  @enforce_keys [:name, :type]
   defstruct name: nil,
             # :local or :remote
             type: nil,
@@ -87,7 +88,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
   def get_tool(session_id, tool_name) do
     case :ets.lookup(@table_name, {session_id, tool_name}) do
       [{_key, tool_spec}] -> {:ok, tool_spec}
-      [] -> {:error, "Tool #{tool_name} not found for session #{session_id}"}
+      [] -> {:error, {:tool_not_found, session_id, tool_name}}
     end
   end
 
@@ -119,11 +120,11 @@ defmodule Snakepit.Bridge.ToolRegistry do
         result = apply(tool.handler, [params])
         {:ok, result}
       rescue
-        e -> {:error, "Tool execution failed: #{inspect(e)}"}
+        e -> {:error, {:tool_execution_failed, e}}
       end
     else
       {:error, _} = error -> error
-      _ -> {:error, "Tool #{tool_name} is not a local tool"}
+      _ -> {:error, {:tool_not_local, tool_name}}
     end
   end
 

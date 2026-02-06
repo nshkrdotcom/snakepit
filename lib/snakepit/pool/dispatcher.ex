@@ -2,6 +2,7 @@ defmodule Snakepit.Pool.Dispatcher do
   @moduledoc false
 
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Pool.ClientReply
   alias Snakepit.Pool.Queue
   alias Snakepit.Pool.Scheduler
 
@@ -248,21 +249,15 @@ defmodule Snakepit.Pool.Dispatcher do
   end
 
   defp handle_client_reply(pool_name, worker_id, from, ref, client_pid, result, context) do
-    receive do
-      {:DOWN, ^ref, :process, ^client_pid, _reason} ->
-        SLog.warning(
-          @log_category,
-          "Client #{inspect(client_pid)} died before receiving reply. " <>
-            "Checking in worker #{inspect(worker_id)}."
-        )
-
-        context.maybe_checkin_worker.(pool_name, worker_id)
-    after
-      0 ->
-        Process.demonitor(ref, [:flush])
-        GenServer.reply(from, result)
-        context.maybe_checkin_worker.(pool_name, worker_id)
-    end
+    ClientReply.reply_and_checkin(
+      pool_name,
+      worker_id,
+      from,
+      ref,
+      client_pid,
+      result,
+      context.maybe_checkin_worker
+    )
   end
 
   def monitor_client_status(ref, client_pid) do

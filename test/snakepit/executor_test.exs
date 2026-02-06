@@ -147,6 +147,18 @@ defmodule Snakepit.ExecutorTest do
 
       assert result == {:error, :timeout}
     end
+
+    test "returns controlled error when task crashes" do
+      result =
+        Executor.execute_with_timeout(
+          fn ->
+            raise "boom"
+          end,
+          timeout_ms: Snakepit.Defaults.executor_batch_timeout()
+        )
+
+      assert match?({:error, {:task_crashed, _}}, result)
+    end
   end
 
   describe "execute_async/2" do

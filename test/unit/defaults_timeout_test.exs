@@ -472,4 +472,51 @@ defmodule Snakepit.DefaultsTimeoutTest do
       end
     end
   end
+
+  describe "graceful shutdown timeout derivation" do
+    test "GRPCWorker supervisor timeout derives from Defaults graceful + margin" do
+      original_graceful = Application.get_env(:snakepit, :graceful_shutdown_timeout_ms)
+      original_margin = Application.get_env(:snakepit, :shutdown_margin_ms)
+
+      try do
+        Application.put_env(:snakepit, :graceful_shutdown_timeout_ms, 7_100)
+        Application.put_env(:snakepit, :shutdown_margin_ms, 333)
+
+        assert Snakepit.GRPCWorker.supervisor_shutdown_timeout() == 7_433
+      after
+        if original_graceful,
+          do: Application.put_env(:snakepit, :graceful_shutdown_timeout_ms, original_graceful),
+          else: Application.delete_env(:snakepit, :graceful_shutdown_timeout_ms)
+
+        if original_margin,
+          do: Application.put_env(:snakepit, :shutdown_margin_ms, original_margin),
+          else: Application.delete_env(:snakepit, :shutdown_margin_ms)
+      end
+    end
+
+    test "Worker.Starter child shutdown uses the same derived timeout budget" do
+      original_graceful = Application.get_env(:snakepit, :graceful_shutdown_timeout_ms)
+      original_margin = Application.get_env(:snakepit, :shutdown_margin_ms)
+
+      try do
+        Application.put_env(:snakepit, :graceful_shutdown_timeout_ms, 6_400)
+        Application.put_env(:snakepit, :shutdown_margin_ms, 600)
+
+        assert {:ok, {_sup_flags, [child_spec]}} =
+                 Snakepit.Pool.Worker.Starter.init(
+                   {"worker_timeout_budget", Snakepit.GRPCWorker, nil, self(), %{}}
+                 )
+
+        assert child_spec.shutdown == 7_000
+      after
+        if original_graceful,
+          do: Application.put_env(:snakepit, :graceful_shutdown_timeout_ms, original_graceful),
+          else: Application.delete_env(:snakepit, :graceful_shutdown_timeout_ms)
+
+        if original_margin,
+          do: Application.put_env(:snakepit, :shutdown_margin_ms, original_margin),
+          else: Application.delete_env(:snakepit, :shutdown_margin_ms)
+      end
+    end
+  end
 end
