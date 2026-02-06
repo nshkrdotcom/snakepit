@@ -96,6 +96,8 @@ defmodule Snakepit.GRPC.Listener do
 
   @impl true
   def init(opts) do
+    Process.flag(:trap_exit, true)
+
     config = Keyword.get(opts, :config) || Config.grpc_listener_config!()
     start_fun = Keyword.get(opts, :start_fun, @default_start_fun)
     adapter_opts = Keyword.get(opts, :adapter_opts, build_adapter_opts(config))
@@ -134,6 +136,18 @@ defmodule Snakepit.GRPC.Listener do
     maybe_stop_endpoint(state)
     maybe_clear_listener_info(state)
     :ok
+  end
+
+  @impl true
+  def handle_info({:EXIT, pid, reason}, %{server_pid: pid} = state) do
+    clear_published_listener_info(state)
+    stop_reason = normalize_listener_exit_reason(reason)
+    {:stop, stop_reason, %{state | server_pid: nil, published?: false}}
+  end
+
+  @impl true
+  def handle_info(_message, state) do
+    {:noreply, state}
   end
 
   defp await_ready_loop(deadline, endpoint_module) do
@@ -373,6 +387,16 @@ defmodule Snakepit.GRPC.Listener do
   end
 
   defp maybe_clear_listener_info(_state), do: :ok
+
+  defp clear_published_listener_info(%{published?: true, endpoint_module: endpoint_module}) do
+    clear_listener_info(endpoint_module)
+  end
+
+  defp clear_published_listener_info(_state), do: :ok
+
+  defp normalize_listener_exit_reason(:shutdown), do: :shutdown
+  defp normalize_listener_exit_reason({:shutdown, _} = reason), do: reason
+  defp normalize_listener_exit_reason(reason), do: {:listener_exit, reason}
 
   defp await_listener_stopped(timeout_ms, endpoint_module)
        when is_integer(timeout_ms) and timeout_ms > 0 do

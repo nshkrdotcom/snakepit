@@ -262,6 +262,29 @@ defmodule Snakepit.ConfigTest do
                _ -> false
              end)
     end
+
+    test "legacy conversion uses shared max_workers default" do
+      prev_pools = Application.get_env(:snakepit, :pools)
+      prev_pool_config = Application.get_env(:snakepit, :pool_config)
+
+      on_exit(fn ->
+        restore_env(:pools, prev_pools)
+        restore_env(:pool_config, prev_pool_config)
+      end)
+
+      Application.delete_env(:snakepit, :pools)
+      Application.put_env(:snakepit, :pool_config, %{startup_batch_delay_ms: 750})
+
+      assert {:ok, [pool]} = Config.get_pool_configs()
+      assert pool.max_workers == Snakepit.Defaults.pool_max_workers()
+    end
+  end
+
+  describe "default parity" do
+    test "process profile startup_batch_size default matches pool startup default" do
+      normalized = Config.normalize_pool_config(%{name: :parity_pool, worker_profile: :process})
+      assert normalized.startup_batch_size == Snakepit.Defaults.pool_startup_batch_size()
+    end
   end
 
   defp restore_env(key, value) do

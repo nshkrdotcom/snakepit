@@ -268,8 +268,8 @@ defmodule Snakepit.Config do
     case profile do
       :process ->
         base_config
-        |> Map.put_new(:startup_batch_size, Defaults.config_default_batch_size())
-        |> Map.put_new(:startup_batch_delay_ms, Defaults.config_default_batch_delay())
+        |> Map.put_new(:startup_batch_size, Defaults.pool_startup_batch_size())
+        |> Map.put_new(:startup_batch_delay_ms, Defaults.pool_startup_batch_delay_ms())
 
       :thread ->
         base_config
@@ -388,13 +388,16 @@ defmodule Snakepit.Config do
           |> Map.merge(pool_config)
           |> Map.put(
             :startup_batch_size,
-            Map.get(pool_config, :startup_batch_size, Defaults.config_default_batch_size())
+            Map.get(pool_config, :startup_batch_size, Defaults.pool_startup_batch_size())
           )
           |> Map.put(
             :startup_batch_delay_ms,
-            Map.get(pool_config, :startup_batch_delay_ms, Defaults.config_default_batch_delay())
+            Map.get(pool_config, :startup_batch_delay_ms, Defaults.pool_startup_batch_delay_ms())
           )
-          |> Map.put(:max_workers, Map.get(pool_config, :max_workers, 1000))
+          |> Map.put(
+            :max_workers,
+            Map.get(pool_config, :max_workers, Defaults.pool_max_workers())
+          )
 
         _ ->
           base_pool
@@ -730,6 +733,82 @@ defmodule Snakepit.Config do
       Application.get_env(:snakepit, :lifecycle_worker_action_timeout_ms),
       Defaults.lifecycle_worker_action_timeout_ms()
     )
+  end
+
+  @doc """
+  Resolve max workers for a pool, preserving legacy `:pool_config` fallback.
+  """
+  @spec pool_max_workers(map()) :: pos_integer()
+  def pool_max_workers(pool_config \\ %{}) when is_map(pool_config) do
+    legacy_pool_config = Application.get_env(:snakepit, :pool_config, %{})
+
+    pool_config
+    |> Map.get(
+      :max_workers,
+      Map.get(legacy_pool_config, :max_workers, Defaults.pool_max_workers())
+    )
+    |> normalize_positive_integer(Defaults.pool_max_workers())
+  end
+
+  @doc """
+  Resolve startup batch size for process-profile worker initialization.
+  """
+  @spec pool_startup_batch_size(map()) :: pos_integer()
+  def pool_startup_batch_size(pool_config \\ %{}) when is_map(pool_config) do
+    legacy_pool_config = Application.get_env(:snakepit, :pool_config, %{})
+
+    pool_config
+    |> Map.get(
+      :startup_batch_size,
+      Map.get(legacy_pool_config, :startup_batch_size, Defaults.pool_startup_batch_size())
+    )
+    |> normalize_positive_integer(Defaults.pool_startup_batch_size())
+  end
+
+  @doc """
+  Resolve startup batch delay (ms) for process-profile worker initialization.
+  """
+  @spec pool_startup_batch_delay_ms(map()) :: non_neg_integer()
+  def pool_startup_batch_delay_ms(pool_config \\ %{}) when is_map(pool_config) do
+    legacy_pool_config = Application.get_env(:snakepit, :pool_config, %{})
+
+    pool_config
+    |> Map.get(
+      :startup_batch_delay_ms,
+      Map.get(legacy_pool_config, :startup_batch_delay_ms, Defaults.pool_startup_batch_delay_ms())
+    )
+    |> normalize_non_negative_integer(Defaults.pool_startup_batch_delay_ms())
+  end
+
+  @doc """
+  Worker restart cleanup polling interval in milliseconds.
+  """
+  @spec worker_supervisor_cleanup_retry_interval_ms() :: pos_integer()
+  def worker_supervisor_cleanup_retry_interval_ms do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :cleanup_retry_interval_ms),
+      Defaults.worker_supervisor_cleanup_retry_interval_ms()
+    )
+  end
+
+  @doc """
+  Worker restart cleanup maximum retry attempts.
+  """
+  @spec worker_supervisor_cleanup_max_retries() :: pos_integer()
+  def worker_supervisor_cleanup_max_retries do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :cleanup_max_retries),
+      Defaults.worker_supervisor_cleanup_max_retries()
+    )
+  end
+
+  @doc """
+  Normalized rogue cleanup configuration for process registry startup cleanup.
+  """
+  @spec rogue_cleanup_config() :: map()
+  def rogue_cleanup_config do
+    Application.get_env(:snakepit, :rogue_cleanup, Defaults.rogue_cleanup_defaults())
+    |> normalize_rogue_cleanup_config()
   end
 
   @doc """
@@ -1086,6 +1165,53 @@ defmodule Snakepit.Config do
       _ -> default
     end
   end
+
+  defp normalize_non_negative_integer(value, default) do
+    case normalize_integer(value) do
+      int when is_integer(int) and int >= 0 -> int
+      _ -> default
+    end
+  end
+
+  defp normalize_rogue_cleanup_config(%{} = config) do
+    normalized = %{
+      enabled: normalize_boolean(fetch_value(config, :enabled), true),
+      scripts:
+        normalize_string_list(fetch_value(config, :scripts), Defaults.rogue_cleanup_scripts()),
+      run_markers:
+        normalize_string_list(
+          fetch_value(config, :run_markers),
+          Defaults.rogue_cleanup_run_markers()
+        )
+    }
+
+    normalized
+  end
+
+  defp normalize_rogue_cleanup_config(config) when is_list(config) do
+    config
+    |> Enum.into(%{}, fn
+      {key, value} -> {key, value}
+      other -> {other, nil}
+    end)
+    |> normalize_rogue_cleanup_config()
+  end
+
+  defp normalize_rogue_cleanup_config(_), do: Defaults.rogue_cleanup_defaults()
+
+  defp normalize_boolean(value, _default) when is_boolean(value), do: value
+  defp normalize_boolean(_value, default), do: default
+
+  defp normalize_string_list(value, default) when is_list(value) do
+    value
+    |> Enum.filter(&is_binary/1)
+    |> case do
+      [] -> default
+      list -> list
+    end
+  end
+
+  defp normalize_string_list(_value, default), do: default
 
   defp format_grpc_listener_error(reason) do
     "Invalid gRPC listener configuration: #{inspect(reason)}"

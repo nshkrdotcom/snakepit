@@ -80,6 +80,41 @@ defmodule Snakepit.GRPC.ListenerTest do
     GenServer.stop(pid)
   end
 
+  test "linked listener exit clears published listener info" do
+    previous = Process.flag(:trap_exit, true)
+
+    on_exit(fn ->
+      Process.flag(:trap_exit, previous)
+    end)
+
+    start_fun = fn _endpoint, _port, _opts ->
+      pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      {:ok, pid, 45_678}
+    end
+
+    config = %{
+      mode: :internal,
+      host: "127.0.0.1",
+      bind_host: "127.0.0.1"
+    }
+
+    {:ok, listener_pid} = start_link_with_config(config, start_fun)
+    assert {:ok, info} = Listener.await_ready(500)
+    server_pid = info.pid
+
+    listener_ref = Process.monitor(listener_pid)
+    Process.exit(server_pid, :killed)
+
+    assert_receive {:DOWN, ^listener_ref, :process, ^listener_pid, _reason}, 1_000
+    assert Listener.listener_info() == nil
+  end
+
   defp start_link_with_config(config, start_fun) do
     Listener.start_link(config: config, start_fun: start_fun, name: nil)
   end

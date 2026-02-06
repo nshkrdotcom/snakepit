@@ -138,7 +138,7 @@ rpc_timeout = total_timeout - worker_call_margin_ms - pool_reply_margin_ms
 - Pool margin: -200ms
 - **RPC timeout: 58,800ms**
 
-This ensures inner timeouts expire *before* outer GenServer.call timeouts, producing structured `{:error, %Snakepit.Error{}}` returns instead of unhandled exits.
+This ensures inner timeouts expire *before* outer GenServer.call timeouts, reducing timeout-related exits and returning normal error tuples (structured `Snakepit.Error` where available, atom reasons on legacy pool paths).
 
 ### Deadline Propagation
 

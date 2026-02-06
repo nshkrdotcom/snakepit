@@ -9,6 +9,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   """
 
   use DynamicSupervisor
+  alias Snakepit.Config
   alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.Registry, as: PoolRegistry
@@ -208,11 +209,11 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   end
 
   defp cleanup_retry_interval_ms do
-    Application.get_env(:snakepit, :cleanup_retry_interval_ms, 50)
+    Config.worker_supervisor_cleanup_retry_interval_ms()
   end
 
   defp cleanup_max_retries do
-    Application.get_env(:snakepit, :cleanup_max_retries, 20)
+    Config.worker_supervisor_cleanup_max_retries()
   end
 
   # Wait for external resources to be released after worker termination.

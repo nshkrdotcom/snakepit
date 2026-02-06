@@ -274,14 +274,20 @@ case Snakepit.execute("unknown_command", %{}) do
   {:ok, result} ->
     IO.puts("Success: #{inspect(result)}")
 
-  {:error, %Snakepit.Error{category: :worker_error, message: message}} ->
+  {:error, %Snakepit.Error{category: :worker, message: message}} ->
     IO.puts("Worker error: #{message}")
 
   {:error, %Snakepit.Error{category: :timeout}} ->
     IO.puts("Request timed out")
 
-  {:error, error} ->
-    IO.puts("Error: #{inspect(error)}")
+  {:error, :queue_timeout} ->
+    IO.puts("Request timed out while waiting in queue")
+
+  {:error, :pool_saturated} ->
+    IO.puts("Pool is saturated; retry later")
+
+  {:error, reason} ->
+    IO.puts("Error: #{inspect(reason)}")
 end
 ```
 

@@ -1275,9 +1275,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
          instance_token,
          allow_missing_token
        ) do
-    cleanup_config =
-      Application.get_env(:snakepit, :rogue_cleanup, enabled: true)
-      |> normalize_cleanup_config()
+    cleanup_config = Config.rogue_cleanup_config()
 
     if cleanup_config[:enabled] == false do
       SLog.info(
@@ -1460,25 +1458,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
     end)
   end
 
-  defp normalize_cleanup_config(%{} = config) do
-    config
-    |> Map.put_new(:enabled, true)
-    |> Map.put_new(:scripts, default_cleanup_scripts())
-    |> Map.put_new(:run_markers, default_run_markers())
-  end
-
-  defp normalize_cleanup_config(config) when is_list(config),
-    do: Enum.into(config, %{}) |> normalize_cleanup_config()
-
-  defp normalize_cleanup_config(_),
-    do: %{
-      enabled: true,
-      scripts: default_cleanup_scripts(),
-      run_markers: default_run_markers()
-    }
-
-  defp default_cleanup_scripts, do: ["grpc_server.py", "grpc_server_threaded.py"]
-  defp default_run_markers, do: ["--snakepit-run-id", "--run-id"]
+  defp default_cleanup_scripts, do: Defaults.rogue_cleanup_scripts()
+  defp default_run_markers, do: Defaults.rogue_cleanup_run_markers()
 
   defp load_current_run_processes(dets_table, ets_table, beam_run_id) do
     # Load only processes from current BEAM run into ETS

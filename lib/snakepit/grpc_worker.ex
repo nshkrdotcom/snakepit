@@ -74,7 +74,10 @@ defmodule Snakepit.GRPCWorker do
           stats: map(),
           session_id: String.t(),
           worker_config: map(),
-          shutting_down: boolean()
+          shutting_down: boolean(),
+          rpc_request_queue: :queue.queue(map()),
+          pending_rpc_calls: map(),
+          pending_rpc_monitors: map()
         }
   @log_category :grpc
 
@@ -310,43 +313,12 @@ defmodule Snakepit.GRPCWorker do
     handle_call({:execute, command, args, timeout, []}, from, state)
   end
 
-  def handle_call({:execute, command, args, timeout, opts}, _from, state) do
+  def handle_call({:execute, command, args, timeout, opts}, from, state) do
     args_with_corr = Instrumentation.ensure_correlation(args)
 
-    case Instrumentation.instrument_execute(
-           :execute,
-           state,
-           command,
-           args_with_corr,
-           timeout,
-           fn instrumented_args ->
-             state.adapter.grpc_execute(
-               state.connection,
-               state.session_id,
-               command,
-               instrumented_args,
-               timeout,
-               opts
-             )
-           end
-         ) do
-      {:ok, result} ->
-        new_state = update_stats(state, :success)
-        {:reply, {:ok, result}, new_state}
-
-      {:error, reason} ->
-        new_state = update_stats(state, :error)
-        {:reply, {:error, reason}, new_state}
-
-      other ->
-        SLog.error(
-          @log_category,
-          "Unexpected gRPC execute result: #{inspect(other)}"
-        )
-
-        new_state = update_stats(state, :error)
-        {:reply, {:error, other}, new_state}
-    end
+    enqueue_async_rpc_call(from, state, fn ->
+      execute_call_result(state, command, args_with_corr, timeout, opts)
+    end)
   end
 
   @impl true
@@ -354,7 +326,7 @@ defmodule Snakepit.GRPCWorker do
     handle_call({:execute_stream, command, args, callback_fn, timeout, []}, from, state)
   end
 
-  def handle_call({:execute_stream, command, args, callback_fn, timeout, opts}, _from, state) do
+  def handle_call({:execute_stream, command, args, callback_fn, timeout, opts}, from, state) do
     SLog.debug(
       @log_category,
       "[GRPCWorker] execute_stream #{command} with args #{Redaction.describe(args)}"
@@ -362,37 +334,9 @@ defmodule Snakepit.GRPCWorker do
 
     args_with_corr = Instrumentation.ensure_correlation(args)
 
-    result =
-      state.adapter.grpc_execute_stream(
-        state.connection,
-        state.session_id,
-        command,
-        args_with_corr,
-        callback_fn,
-        timeout,
-        opts
-      )
-
-    SLog.debug(@log_category, "[GRPCWorker] execute_stream result: #{Redaction.describe(result)}")
-
-    new_state =
-      case result do
-        :ok ->
-          update_stats(state, :success)
-
-        {:error, _reason} ->
-          update_stats(state, :error)
-
-        other ->
-          SLog.error(
-            @log_category,
-            "Unexpected gRPC execute_stream result: #{inspect(other)}"
-          )
-
-          update_stats(state, :error)
-      end
-
-    {:reply, result, new_state}
+    enqueue_async_rpc_call(from, state, fn ->
+      execute_stream_call_result(state, command, args_with_corr, callback_fn, timeout, opts)
+    end)
   end
 
   @impl true
@@ -415,46 +359,15 @@ defmodule Snakepit.GRPCWorker do
     handle_call({:execute_session, session_id, command, args, timeout, []}, from, state)
   end
 
-  def handle_call({:execute_session, session_id, command, args, timeout, opts}, _from, state) do
+  def handle_call({:execute_session, session_id, command, args, timeout, opts}, from, state) do
     session_args =
       args
       |> Map.put(:session_id, session_id)
       |> Instrumentation.ensure_correlation()
 
-    case Instrumentation.instrument_execute(
-           :execute_session,
-           state,
-           command,
-           session_args,
-           timeout,
-           fn instrumented_args ->
-             state.adapter.grpc_execute(
-               state.connection,
-               state.session_id,
-               command,
-               instrumented_args,
-               timeout,
-               opts
-             )
-           end
-         ) do
-      {:ok, result} ->
-        new_state = update_stats(state, :success)
-        {:reply, {:ok, result}, new_state}
-
-      {:error, reason} ->
-        new_state = update_stats(state, :error)
-        {:reply, {:error, reason}, new_state}
-
-      other ->
-        SLog.error(
-          @log_category,
-          "Unexpected gRPC execute_session result: #{inspect(other)}"
-        )
-
-        new_state = update_stats(state, :error)
-        {:reply, {:error, other}, new_state}
-    end
+    enqueue_async_rpc_call(from, state, fn ->
+      execute_session_call_result(state, session_args, command, timeout, opts)
+    end)
   end
 
   @impl true
@@ -490,6 +403,103 @@ defmodule Snakepit.GRPCWorker do
 
   def handle_call(:get_memory_usage, _from, state) do
     {:reply, {:ok, current_process_memory_bytes()}, state}
+  end
+
+  @impl true
+  def handle_info({:grpc_async_rpc_result, token, {:ok, {reply, stat_result}}}, state) do
+    case pop_pending_rpc_call(state, token) do
+      {:ok, pending_call, new_state} ->
+        Process.demonitor(pending_call.monitor_ref, [:flush])
+        GenServer.reply(pending_call.from, reply)
+        {:noreply, new_state |> update_stats(stat_result) |> maybe_start_next_rpc_call()}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:grpc_async_rpc_result, token, {:exception, error, stacktrace}}, state) do
+    case pop_pending_rpc_call(state, token) do
+      {:ok, pending_call, new_state} ->
+        Process.demonitor(pending_call.monitor_ref, [:flush])
+
+        SLog.error(
+          @log_category,
+          "Async gRPC request failed with exception: #{Exception.message(error)}",
+          stacktrace: stacktrace
+        )
+
+        reply =
+          {:error,
+           Error.worker_error("Async gRPC request failed", %{
+             worker_id: state.id,
+             exception: Exception.message(error)
+           })}
+
+        GenServer.reply(pending_call.from, reply)
+        {:noreply, new_state |> update_stats(:error) |> maybe_start_next_rpc_call()}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:grpc_async_rpc_result, token, {:caught, kind, reason, stacktrace}}, state) do
+    case pop_pending_rpc_call(state, token) do
+      {:ok, pending_call, new_state} ->
+        Process.demonitor(pending_call.monitor_ref, [:flush])
+
+        SLog.error(
+          @log_category,
+          "Async gRPC request failed with #{inspect(kind)}: #{inspect(reason)}",
+          stacktrace: stacktrace
+        )
+
+        reply =
+          {:error,
+           Error.worker_error("Async gRPC request failed", %{
+             worker_id: state.id,
+             kind: kind,
+             reason: reason
+           })}
+
+        GenServer.reply(pending_call.from, reply)
+        {:noreply, new_state |> update_stats(:error) |> maybe_start_next_rpc_call()}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:DOWN, monitor_ref, :process, _pid, :normal}, state) do
+    if pending_rpc_monitor?(state, monitor_ref) do
+      # Completion message may still be in flight from async callback worker.
+      {:noreply, state}
+    else
+      {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:DOWN, monitor_ref, :process, _pid, reason}, state) do
+    case pop_pending_rpc_by_monitor(state, monitor_ref) do
+      {:ok, pending_call, new_state} ->
+        reply =
+          {:error,
+           Error.worker_error("Async gRPC request process exited", %{
+             worker_id: state.id,
+             reason: reason
+           })}
+
+        GenServer.reply(pending_call.from, reply)
+        {:noreply, new_state |> update_stats(:error) |> maybe_start_next_rpc_call()}
+
+      :error ->
+        {:noreply, state}
+    end
   end
 
   @impl true
@@ -1023,6 +1033,231 @@ defmodule Snakepit.GRPCWorker do
       {:ok, info_response} ->
         {:ok, info_response}
     end
+  end
+
+  defp execute_call_result(state, command, args_with_corr, timeout, opts) do
+    case Instrumentation.instrument_execute(
+           :execute,
+           state,
+           command,
+           args_with_corr,
+           timeout,
+           fn instrumented_args ->
+             state.adapter.grpc_execute(
+               state.connection,
+               state.session_id,
+               command,
+               instrumented_args,
+               timeout,
+               opts
+             )
+           end
+         ) do
+      {:ok, result} ->
+        {{:ok, result}, :success}
+
+      {:error, reason} ->
+        {{:error, reason}, :error}
+
+      other ->
+        SLog.error(
+          @log_category,
+          "Unexpected gRPC execute result: #{inspect(other)}"
+        )
+
+        {{:error, other}, :error}
+    end
+  end
+
+  defp execute_stream_call_result(state, command, args_with_corr, callback_fn, timeout, opts) do
+    result =
+      state.adapter.grpc_execute_stream(
+        state.connection,
+        state.session_id,
+        command,
+        args_with_corr,
+        callback_fn,
+        timeout,
+        opts
+      )
+
+    SLog.debug(@log_category, "[GRPCWorker] execute_stream result: #{Redaction.describe(result)}")
+
+    case result do
+      :ok ->
+        {:ok, :success}
+
+      {:error, _reason} = error ->
+        {error, :error}
+
+      other ->
+        SLog.error(
+          @log_category,
+          "Unexpected gRPC execute_stream result: #{inspect(other)}"
+        )
+
+        {other, :error}
+    end
+  end
+
+  defp execute_session_call_result(state, session_args, command, timeout, opts) do
+    case Instrumentation.instrument_execute(
+           :execute_session,
+           state,
+           command,
+           session_args,
+           timeout,
+           fn instrumented_args ->
+             state.adapter.grpc_execute(
+               state.connection,
+               state.session_id,
+               command,
+               instrumented_args,
+               timeout,
+               opts
+             )
+           end
+         ) do
+      {:ok, result} ->
+        {{:ok, result}, :success}
+
+      {:error, reason} ->
+        {{:error, reason}, :error}
+
+      other ->
+        SLog.error(
+          @log_category,
+          "Unexpected gRPC execute_session result: #{inspect(other)}"
+        )
+
+        {{:error, other}, :error}
+    end
+  end
+
+  defp enqueue_async_rpc_call(from, state, callback_fun) when is_function(callback_fun, 0) do
+    request = %{
+      from: from,
+      callback_fun: callback_fun,
+      otel_ctx: :otel_ctx.get_current()
+    }
+
+    queue =
+      state
+      |> Map.get(:rpc_request_queue, :queue.new())
+      |> then(&:queue.in(request, &1))
+
+    state =
+      state
+      |> Map.put(:rpc_request_queue, queue)
+      |> maybe_start_next_rpc_call()
+
+    {:noreply, state}
+  end
+
+  defp maybe_start_next_rpc_call(state) do
+    if map_size(Map.get(state, :pending_rpc_calls, %{})) > 0 do
+      state
+    else
+      queue = Map.get(state, :rpc_request_queue, :queue.new())
+
+      case :queue.out(queue) do
+        {{:value, request}, rest_queue} ->
+          state
+          |> Map.put(:rpc_request_queue, rest_queue)
+          |> start_async_rpc_call(request)
+
+        {:empty, _queue} ->
+          state
+      end
+    end
+  end
+
+  defp start_async_rpc_call(state, %{from: from, callback_fun: callback_fun, otel_ctx: otel_ctx}) do
+    call_token = make_ref()
+    parent = self()
+
+    {task_pid, monitor_ref} =
+      spawn_monitor(fn ->
+        ctx_token = :otel_ctx.attach(otel_ctx)
+
+        result =
+          try do
+            {:ok, callback_fun.()}
+          rescue
+            exception ->
+              {:exception, exception, __STACKTRACE__}
+          catch
+            kind, reason ->
+              {:caught, kind, reason, __STACKTRACE__}
+          after
+            :otel_ctx.detach(ctx_token)
+          end
+
+        send(parent, {:grpc_async_rpc_result, call_token, result})
+      end)
+
+    pending_call = %{from: from, monitor_ref: monitor_ref, task_pid: task_pid}
+
+    put_pending_rpc_call(state, call_token, pending_call)
+  end
+
+  defp put_pending_rpc_call(state, token, pending_call) do
+    pending_calls = Map.put(Map.get(state, :pending_rpc_calls, %{}), token, pending_call)
+
+    pending_monitors =
+      Map.put(
+        Map.get(state, :pending_rpc_monitors, %{}),
+        pending_call.monitor_ref,
+        token
+      )
+
+    state
+    |> Map.put(:pending_rpc_calls, pending_calls)
+    |> Map.put(:pending_rpc_monitors, pending_monitors)
+  end
+
+  defp pop_pending_rpc_call(state, token) do
+    case Map.pop(Map.get(state, :pending_rpc_calls, %{}), token) do
+      {nil, _pending_calls} ->
+        :error
+
+      {pending_call, pending_calls} ->
+        pending_monitors =
+          Map.delete(Map.get(state, :pending_rpc_monitors, %{}), pending_call.monitor_ref)
+
+        new_state =
+          state
+          |> Map.put(:pending_rpc_calls, pending_calls)
+          |> Map.put(:pending_rpc_monitors, pending_monitors)
+
+        {:ok, pending_call, new_state}
+    end
+  end
+
+  defp pop_pending_rpc_by_monitor(state, monitor_ref) do
+    case Map.pop(Map.get(state, :pending_rpc_monitors, %{}), monitor_ref) do
+      {nil, _pending_monitors} ->
+        :error
+
+      {token, pending_monitors} ->
+        case Map.pop(Map.get(state, :pending_rpc_calls, %{}), token) do
+          {nil, _pending_calls} ->
+            _new_state = Map.put(state, :pending_rpc_monitors, pending_monitors)
+            :error
+
+          {pending_call, pending_calls} ->
+            new_state =
+              state
+              |> Map.put(:pending_rpc_calls, pending_calls)
+              |> Map.put(:pending_rpc_monitors, pending_monitors)
+
+            {:ok, pending_call, new_state}
+        end
+    end
+  end
+
+  defp pending_rpc_monitor?(state, monitor_ref) do
+    Map.has_key?(Map.get(state, :pending_rpc_monitors, %{}), monitor_ref)
   end
 
   defp update_stats(state, result) do

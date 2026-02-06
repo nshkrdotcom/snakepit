@@ -531,9 +531,9 @@ defmodule Snakepit.Pool do
       ) do
     case reason do
       :normal ->
-        # Init process completed normally but we haven't received the result yet
-        # This shouldn't happen in normal operation
-        {:noreply, clear_init_task_state(state)}
+        # Result message may still be in flight; wait for `{ref, {:pool_init_complete, ...}}`
+        # before clearing init task tracking.
+        {:noreply, state}
 
       :shutdown ->
         # Clean shutdown - supervisor is terminating
@@ -577,16 +577,15 @@ defmodule Snakepit.Pool do
       ref == state.init_task_ref ->
         {:noreply, clear_init_task_state(state)}
 
-      MapSet.member?(state.async_task_refs, ref) ->
-        {:noreply, %{state | async_task_refs: MapSet.delete(state.async_task_refs, ref)}}
-
       true ->
         EventHandler.handle_down(state, pid, reason)
     end
   end
 
-  def handle_info({:track_async_task_ref, ref}, state) when is_reference(ref) do
-    {:noreply, %{state | async_task_refs: MapSet.put(state.async_task_refs, ref)}}
+  def handle_info({:track_async_task_ref, _ref}, state) do
+    # Backward compatibility: older async helpers may still send this message.
+    # We no longer track task refs asynchronously to avoid late-track races.
+    {:noreply, state}
   end
 
   def handle_info({:reply_to_waiter, from, reply}, state) do
@@ -608,12 +607,10 @@ defmodule Snakepit.Pool do
   end
 
   @doc false
-  # Handles completion messages from tasks started via Task.Supervisor.async_nolink.
-  # These are used for fire-and-forget operations (like replying to callers or
-  # kicking off worker respawns), so we can safely ignore the completion message.
+  # Backward compatibility: ignore legacy completion messages from fire-and-forget tasks.
   def handle_info({ref, _result}, state) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
-    {:noreply, %{state | async_task_refs: MapSet.delete(state.async_task_refs, ref)}}
+    {:noreply, state}
   end
 
   def handle_info(msg, state) do
@@ -633,117 +630,23 @@ defmodule Snakepit.Pool do
   end
 
   def handle_call({:checkout_worker, session_id}, _from, state) do
-    # Backward compat: use default pool
-    pool_name = state.default_pool
-
-    case Map.get(state.pools, pool_name) do
-      nil ->
-        {:reply, {:error, :pool_not_found}, state}
-
-      pool_state ->
-        # Pass affinity_cache from top-level state
-        case checkout_worker(pool_state, session_id, state.affinity_cache, []) do
-          {:ok, worker_id, new_pool_state} ->
-            updated_pools = Map.put(state.pools, pool_name, new_pool_state)
-            {:reply, {:ok, worker_id}, %{state | pools: updated_pools}}
-
-          {:error, :no_workers} ->
-            {:reply, {:error, :no_workers_available}, state}
-
-          {:error, {:affinity_busy, _preferred_worker_id}} ->
-            {:reply, {:error, :worker_busy}, state}
-
-          {:error, :worker_busy} ->
-            {:reply, {:error, :worker_busy}, state}
-
-          {:error, :session_worker_unavailable} ->
-            {:reply, {:error, :session_worker_unavailable}, state}
-        end
-    end
+    handle_checkout_worker_call(state, state.default_pool, session_id, [])
   end
 
   def handle_call({:checkout_worker, session_id, opts}, _from, state)
       when is_list(opts) or is_map(opts) do
-    # Backward compat: use default pool unless a valid pool_name is provided in opts
     pool_name = resolve_pool_name_opt(opts, state.default_pool)
-
-    case Map.get(state.pools, pool_name) do
-      nil ->
-        {:reply, {:error, :pool_not_found}, state}
-
-      pool_state ->
-        case checkout_worker(pool_state, session_id, state.affinity_cache, opts) do
-          {:ok, worker_id, new_pool_state} ->
-            updated_pools = Map.put(state.pools, pool_name, new_pool_state)
-            {:reply, {:ok, worker_id}, %{state | pools: updated_pools}}
-
-          {:error, :no_workers} ->
-            {:reply, {:error, :no_workers_available}, state}
-
-          {:error, {:affinity_busy, _preferred_worker_id}} ->
-            {:reply, {:error, :worker_busy}, state}
-
-          {:error, :worker_busy} ->
-            {:reply, {:error, :worker_busy}, state}
-
-          {:error, :session_worker_unavailable} ->
-            {:reply, {:error, :session_worker_unavailable}, state}
-        end
-    end
+    handle_checkout_worker_call(state, pool_name, session_id, opts)
   end
 
   def handle_call({:checkout_worker, pool_name, session_id}, _from, state)
       when is_atom(pool_name) do
-    case Map.get(state.pools, pool_name) do
-      nil ->
-        {:reply, {:error, :pool_not_found}, state}
-
-      pool_state ->
-        case checkout_worker(pool_state, session_id, state.affinity_cache, []) do
-          {:ok, worker_id, new_pool_state} ->
-            updated_pools = Map.put(state.pools, pool_name, new_pool_state)
-            {:reply, {:ok, worker_id}, %{state | pools: updated_pools}}
-
-          {:error, :no_workers} ->
-            {:reply, {:error, :no_workers_available}, state}
-
-          {:error, {:affinity_busy, _preferred_worker_id}} ->
-            {:reply, {:error, :worker_busy}, state}
-
-          {:error, :worker_busy} ->
-            {:reply, {:error, :worker_busy}, state}
-
-          {:error, :session_worker_unavailable} ->
-            {:reply, {:error, :session_worker_unavailable}, state}
-        end
-    end
+    handle_checkout_worker_call(state, pool_name, session_id, [])
   end
 
   def handle_call({:checkout_worker, pool_name, session_id, opts}, _from, state)
       when is_atom(pool_name) do
-    case Map.get(state.pools, pool_name) do
-      nil ->
-        {:reply, {:error, :pool_not_found}, state}
-
-      pool_state ->
-        case checkout_worker(pool_state, session_id, state.affinity_cache, opts) do
-          {:ok, worker_id, new_pool_state} ->
-            updated_pools = Map.put(state.pools, pool_name, new_pool_state)
-            {:reply, {:ok, worker_id}, %{state | pools: updated_pools}}
-
-          {:error, :no_workers} ->
-            {:reply, {:error, :no_workers_available}, state}
-
-          {:error, {:affinity_busy, _preferred_worker_id}} ->
-            {:reply, {:error, :worker_busy}, state}
-
-          {:error, :worker_busy} ->
-            {:reply, {:error, :worker_busy}, state}
-
-          {:error, :session_worker_unavailable} ->
-            {:reply, {:error, :session_worker_unavailable}, state}
-        end
-    end
+    handle_checkout_worker_call(state, pool_name, session_id, opts)
   end
 
   def handle_call(:get_stats, _from, state) do
@@ -1178,12 +1081,7 @@ defmodule Snakepit.Pool do
   end
 
   defp desired_worker_count(pool_state) do
-    legacy_pool_config = Application.get_env(:snakepit, :pool_config, %{})
-
-    max_workers =
-      Map.get(pool_state.pool_config, :max_workers) ||
-        Map.get(legacy_pool_config, :max_workers, Defaults.pool_max_workers())
-
+    max_workers = Config.pool_max_workers(pool_state.pool_config)
     min(pool_state.size, max_workers)
   end
 
@@ -1623,8 +1521,17 @@ defmodule Snakepit.Pool do
   defp store_session_affinity(session_id, worker_id) do
     # Store the worker affinity in a supervised task for better error logging
     async_with_context(fn ->
-      :ok = SessionStore.store_worker_session(session_id, worker_id)
-      SLog.debug(@log_category, "Stored session affinity: #{session_id} -> #{worker_id}")
+      case SessionStore.store_worker_session(session_id, worker_id) do
+        :ok ->
+          SLog.debug(@log_category, "Stored session affinity: #{session_id} -> #{worker_id}")
+
+        {:error, reason} ->
+          SLog.warning(
+            @log_category,
+            "Failed to store session affinity #{session_id} -> #{worker_id}: #{inspect(reason)}"
+          )
+      end
+
       :ok
     end)
   end
@@ -1828,20 +1735,68 @@ defmodule Snakepit.Pool do
   defp async_with_context(fun) when is_function(fun, 0) do
     ctx = :otel_ctx.get_current()
 
-    task =
-      Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
-        token = :otel_ctx.attach(ctx)
+    runner = fn ->
+      token = :otel_ctx.attach(ctx)
 
-        try do
-          fun.()
-        after
-          :otel_ctx.detach(token)
-        end
-      end)
+      try do
+        fun.()
+      after
+        :otel_ctx.detach(token)
+      end
+    end
 
-    send(self(), {:track_async_task_ref, task.ref})
-    task
+    try do
+      _ = Task.Supervisor.start_child(Snakepit.TaskSupervisor, runner)
+      :ok
+    rescue
+      error ->
+        SLog.warning(
+          @log_category,
+          "TaskSupervisor unavailable for pool async task; using Task.start fallback",
+          error: error
+        )
+
+        _ = Task.start(runner)
+        :ok
+    catch
+      :exit, reason ->
+        SLog.warning(
+          @log_category,
+          "TaskSupervisor exited for pool async task; using Task.start fallback",
+          reason: reason
+        )
+
+        _ = Task.start(runner)
+        :ok
+    end
   end
+
+  defp handle_checkout_worker_call(state, pool_name, session_id, opts) do
+    case Map.get(state.pools, pool_name) do
+      nil ->
+        {:reply, {:error, :pool_not_found}, state}
+
+      pool_state ->
+        case checkout_worker(pool_state, session_id, state.affinity_cache, opts) do
+          {:ok, worker_id, new_pool_state} ->
+            updated_pools = Map.put(state.pools, pool_name, new_pool_state)
+            {:reply, {:ok, worker_id}, %{state | pools: updated_pools}}
+
+          {:error, reason} ->
+            {:reply, normalize_checkout_error(reason), state}
+        end
+    end
+  end
+
+  defp normalize_checkout_error(:no_workers), do: {:error, :no_workers_available}
+
+  defp normalize_checkout_error({:affinity_busy, _preferred_worker_id}),
+    do: {:error, :worker_busy}
+
+  defp normalize_checkout_error(:worker_busy), do: {:error, :worker_busy}
+
+  defp normalize_checkout_error(:session_worker_unavailable),
+    do: {:error, :session_worker_unavailable}
 
   @doc false
   def extract_pool_name_from_worker_id(worker_id) do

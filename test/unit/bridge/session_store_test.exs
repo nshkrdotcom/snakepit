@@ -103,4 +103,20 @@ defmodule SessionStoreTest do
 
     assert {:ok, _} = SessionStore.get_session(session_id)
   end
+
+  test "store_worker_session respects max session quota on upsert create path" do
+    server_name = :session_store_upsert_quota_server
+
+    start_supervised!(
+      {SessionStore,
+       name: server_name, table_name: :session_store_upsert_quota_table, max_sessions: 1}
+    )
+
+    assert :ok = SessionStore.store_worker_session(server_name, "upsert_quota_s1", "worker_1")
+
+    assert {:error, :session_quota_exceeded} =
+             SessionStore.store_worker_session(server_name, "upsert_quota_s2", "worker_2")
+
+    assert {:error, :not_found} = SessionStore.get_session(server_name, "upsert_quota_s2")
+  end
 end

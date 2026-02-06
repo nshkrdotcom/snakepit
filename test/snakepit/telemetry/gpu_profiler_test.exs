@@ -87,4 +87,44 @@ defmodule Snakepit.Telemetry.GPUProfilerTest do
       GenServer.stop(pid)
     end
   end
+
+  describe "callback scheduling" do
+    test "sample callback defers slow sampling work to async task" do
+      slow_sampler = fn _device ->
+        Process.sleep(150)
+
+        {:ok,
+         %{
+           memory_used_mb: 10,
+           memory_total_mb: 20,
+           memory_free_mb: 10,
+           gpu_utilization: 5.0,
+           temperature: 40.0,
+           power_watts: 25.0
+         }}
+      end
+
+      state = %{
+        interval_ms: 5_000,
+        enabled: true,
+        sample_count: 0,
+        last_sample_time: nil,
+        timer_ref: nil,
+        devices: [{:cuda, 0}],
+        sampler_fun: slow_sampler,
+        sample_task_ref: nil,
+        sample_task_pid: nil
+      }
+
+      {elapsed_us, {:noreply, new_state}} =
+        :timer.tc(fn ->
+          GPUProfiler.handle_info(:sample, state)
+        end)
+
+      assert elapsed_us < 80_000
+      assert new_state.sample_count == 0
+      assert is_reference(new_state.sample_task_ref)
+      assert is_pid(new_state.sample_task_pid)
+    end
+  end
 end

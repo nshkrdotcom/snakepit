@@ -2,7 +2,6 @@ defmodule Snakepit.Pool.Initializer do
   @moduledoc false
 
   alias Snakepit.Config
-  alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.State
   alias Snakepit.Pool.WorkerSupervisor
@@ -177,11 +176,7 @@ defmodule Snakepit.Pool.Initializer do
   end
 
   defp enforce_max_workers(count, pool_config) do
-    legacy_pool_config = Application.get_env(:snakepit, :pool_config, %{})
-
-    max_workers =
-      Map.get(pool_config, :max_workers) ||
-        Map.get(legacy_pool_config, :max_workers, Defaults.pool_max_workers())
+    max_workers = Config.pool_max_workers(pool_config)
 
     actual_count = min(count, max_workers)
 
@@ -213,19 +208,8 @@ defmodule Snakepit.Pool.Initializer do
   end
 
   defp get_batch_config(pool_config) do
-    legacy_pool_config = Application.get_env(:snakepit, :pool_config, %{})
-
-    batch_size =
-      Map.get(pool_config, :startup_batch_size) ||
-        Map.get(legacy_pool_config, :startup_batch_size, Defaults.pool_startup_batch_size())
-
-    batch_delay =
-      Map.get(pool_config, :startup_batch_delay_ms) ||
-        Map.get(
-          legacy_pool_config,
-          :startup_batch_delay_ms,
-          Defaults.pool_startup_batch_delay_ms()
-        )
+    batch_size = Config.pool_startup_batch_size(pool_config)
+    batch_delay = Config.pool_startup_batch_delay_ms(pool_config)
 
     %{size: batch_size, delay: batch_delay}
   end

@@ -371,7 +371,10 @@ defmodule Snakepit.GRPCWorker.Bootstrap do
         requests: 0,
         errors: 0,
         start_time: System.monotonic_time()
-      }
+      },
+      rpc_request_queue: :queue.new(),
+      pending_rpc_calls: %{},
+      pending_rpc_monitors: %{}
     }
   end
 

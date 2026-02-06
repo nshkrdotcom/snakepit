@@ -213,9 +213,16 @@ defmodule Snakepit.Bridge.SessionStore do
   @doc """
   Stores worker-session affinity mapping.
   """
-  @spec store_worker_session(String.t(), String.t()) :: :ok
+  @spec store_worker_session(String.t(), String.t()) :: :ok | {:error, :session_quota_exceeded}
   def store_worker_session(session_id, worker_id) do
     GenServer.call(__MODULE__, {:upsert_worker_session, session_id, worker_id})
+  end
+
+  @spec store_worker_session(GenServer.server(), String.t(), String.t()) ::
+          :ok | {:error, :session_quota_exceeded}
+  def store_worker_session(server, session_id, worker_id)
+      when is_binary(session_id) and is_binary(worker_id) do
+    GenServer.call(server, {:upsert_worker_session, session_id, worker_id})
   end
 
   ## GenServer Callbacks
@@ -407,12 +414,15 @@ defmodule Snakepit.Bridge.SessionStore do
           Session.new(session_id, opts)
           |> Map.put(:last_worker_id, worker_id)
 
-        case Session.validate(session) do
-          :ok ->
-            ets_record = {session_id, {session.last_accessed, session.ttl, session}}
-            :ets.insert(state.table, ets_record)
-            new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
-            {:reply, :ok, %{state | stats: new_stats}}
+        with :ok <- Session.validate(session),
+             :ok <- check_session_quota(state) do
+          ets_record = {session_id, {session.last_accessed, session.ttl, session}}
+          :ets.insert(state.table, ets_record)
+          new_stats = Map.update(state.stats, :sessions_created, 1, &(&1 + 1))
+          {:reply, :ok, %{state | stats: new_stats}}
+        else
+          {:error, :session_quota_exceeded} ->
+            {:reply, {:error, :session_quota_exceeded}, state}
 
           {:error, reason} ->
             SLog.warning(

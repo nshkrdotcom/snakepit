@@ -797,6 +797,28 @@ defmodule Snakepit.Defaults do
     Application.get_env(:snakepit, :worker_supervisor_max_seconds, 5)
   end
 
+  @doc """
+  Retry interval in milliseconds while polling for worker external resource cleanup.
+  Used in `Snakepit.Pool.WorkerSupervisor`.
+
+  Default: 50 ms
+  """
+  @spec worker_supervisor_cleanup_retry_interval_ms() :: pos_integer()
+  def worker_supervisor_cleanup_retry_interval_ms do
+    Application.get_env(:snakepit, :cleanup_retry_interval_ms, 50)
+  end
+
+  @doc """
+  Maximum retries while waiting for worker external resource cleanup.
+  Used in `Snakepit.Pool.WorkerSupervisor`.
+
+  Default: 20
+  """
+  @spec worker_supervisor_cleanup_max_retries() :: pos_integer()
+  def worker_supervisor_cleanup_max_retries do
+    Application.get_env(:snakepit, :cleanup_max_retries, 20)
+  end
+
   # ============================================================================
   # Lifecycle Manager
   # ============================================================================
@@ -1032,22 +1054,55 @@ defmodule Snakepit.Defaults do
   Default batch size for process profile.
   Used in `Snakepit.Config`.
 
-  Default: 8
+  Default: same as `pool_startup_batch_size/0`
   """
   @spec config_default_batch_size() :: pos_integer()
   def config_default_batch_size do
-    Application.get_env(:snakepit, :config_default_batch_size, 8)
+    Application.get_env(:snakepit, :config_default_batch_size, pool_startup_batch_size())
   end
 
   @doc """
   Default batch delay for process profile.
   Used in `Snakepit.Config`.
 
-  Default: 750 ms
+  Default: same as `pool_startup_batch_delay_ms/0`
   """
   @spec config_default_batch_delay() :: pos_integer()
   def config_default_batch_delay do
-    Application.get_env(:snakepit, :config_default_batch_delay, 750)
+    Application.get_env(:snakepit, :config_default_batch_delay, pool_startup_batch_delay_ms())
+  end
+
+  @doc """
+  Default rogue cleanup configuration.
+  Used in `Snakepit.Pool.ProcessRegistry`.
+  """
+  @spec rogue_cleanup_defaults() :: map()
+  def rogue_cleanup_defaults do
+    %{
+      enabled: true,
+      scripts: rogue_cleanup_scripts(),
+      run_markers: rogue_cleanup_run_markers()
+    }
+  end
+
+  @doc """
+  Default script names considered for rogue cleanup process matching.
+  """
+  @spec rogue_cleanup_scripts() :: [String.t()]
+  def rogue_cleanup_scripts do
+    Application.get_env(
+      :snakepit,
+      :rogue_cleanup_scripts,
+      ["grpc_server.py", "grpc_server_threaded.py"]
+    )
+  end
+
+  @doc """
+  Default command markers used to identify run ids for rogue cleanup.
+  """
+  @spec rogue_cleanup_run_markers() :: [String.t()]
+  def rogue_cleanup_run_markers do
+    Application.get_env(:snakepit, :rogue_cleanup_run_markers, ["--snakepit-run-id", "--run-id"])
   end
 
   @doc """
