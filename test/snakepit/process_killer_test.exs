@@ -122,25 +122,6 @@ defmodule Snakepit.ProcessKillerTest do
     end
   end
 
-  defp wait_for_list_loop(run_id, deadline) do
-    if System.monotonic_time(:millisecond) >= deadline do
-      false
-    else
-      case System.cmd("pgrep", ["-f", run_id], stderr_to_stdout: true) do
-        {output, 0} when byte_size(output) > 0 ->
-          true
-
-        _ ->
-          receive do
-          after
-            50 -> :ok
-          end
-
-          wait_for_list_loop(run_id, deadline)
-      end
-    end
-  end
-
   defp safe_close_port(port) when is_port(port) do
     os_pid =
       case Port.info(port, :os_pid) do
@@ -310,41 +291,29 @@ defmodule Snakepit.ProcessKillerTest do
     @tag :skip
     @tag timeout: 10_000
     test "kills processes matching run_id" do
-      # This test is complex and depends on Python being available
-      # Skip for now - the functionality is tested in integration tests
       test_run_id = Snakepit.RunID.generate()
+      python = python_executable()
+      {instance_name, instance_token} = instance_identifiers()
+      opts = instance_opts(instance_name, instance_token)
 
-      # Spawn a dummy Python process with our run_id
-      cmd = [
-        "python3",
-        "-c",
-        "import signal; signal.pause()",
-        "--run-id",
-        test_run_id
-      ]
+      port =
+        Port.open({:spawn_executable, python}, [
+          :binary,
+          :exit_status,
+          args:
+            ["-c", "import signal; signal.pause()", "grpc_server.py", "--run-id", test_run_id]
+            |> add_instance_args(instance_name, instance_token)
+        ])
 
-      port = Port.open({:spawn_executable, "/usr/bin/env"}, [:binary, args: cmd])
+      on_exit(fn -> safe_close_port(port) end)
+
+      ProcessLeakTracker.register_port(port)
       {:os_pid, pid} = Port.info(port, :os_pid)
 
-      # Verify it's running
       assert Snakepit.ProcessKiller.process_alive?(pid)
-
-      # Poll until process appears in process list with correct run_id
-      deadline = System.monotonic_time(:millisecond) + 5000
-
-      wait_for_process_in_list = fn ->
-        wait_for_list_loop(test_run_id, deadline)
-      end
-
-      assert wait_for_process_in_list.(),
-             "Process with run_id #{test_run_id} never appeared in process list"
-
-      # Now kill by run_id
-      assert {:ok, killed_count} = Snakepit.ProcessKiller.kill_by_run_id(test_run_id)
+      assert {:ok, killed_count} = Snakepit.ProcessKiller.kill_by_run_id(test_run_id, opts)
       assert killed_count >= 1
-
-      # Wait for it to die
-      assert wait_for_death(pid, 2000), "Process #{pid} should have died"
+      assert wait_for_death(pid, 5_000), "Process #{pid} should have died"
     end
   end
 

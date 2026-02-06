@@ -98,6 +98,7 @@ These options apply to all pools or the Snakepit application as a whole.
 | `grpc_listener_reuse_wait_timeout_ms` | `pos_integer()` | `500` | Max wait (ms) for an already-started listener to publish its port before retrying. |
 | `grpc_listener_reuse_retry_delay_ms` | `pos_integer()` | `100` | Delay (ms) between listener reuse retries. |
 | `instance_name` | `String.t()` | `nil` | Instance identifier for isolating runtime state. |
+| `instance_token` | `String.t()` | `nil` | Unique per-running-instance token for strong process cleanup isolation. |
 | `data_dir` | `String.t()` | `priv/data` | Directory for runtime persistence (DETS, cleanup state). |
 | `graceful_shutdown_timeout_ms` | `pos_integer()` | `6000` | Time (ms) to wait for Python to terminate gracefully before SIGKILL. |
 
@@ -140,7 +141,20 @@ config :snakepit,
   }
 ```
 
-Use `instance_name` and `data_dir` to isolate registry state when sharing a deployment directory.
+Use `instance_name`, `instance_token`, and `data_dir` to isolate registry state when sharing a deployment directory.
+
+`instance_name` is for environment-level grouping (for example `prod-us-east-1`).
+`instance_token` must be unique for each concurrently running VM (for example deploy slot, CI job, terminal session).
+Without unique tokens, concurrent instances from the same codebase can treat each other as rogue/orphan processes during cleanup.
+
+Example:
+
+```elixir
+config :snakepit,
+  instance_name: "my-app",
+  instance_token: "job-1234",
+  data_dir: "/var/lib/snakepit"
+```
 
 ### Capacity Strategies
 

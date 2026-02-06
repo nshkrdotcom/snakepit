@@ -27,6 +27,8 @@ Environment:
   SNAKEPIT_AUTO_DEMO_DURATION_MS  Auto-stop duration for bidirectional auto demo (default: 3000)
   SNAKEPIT_SUSTAINED_DURATION_MS  Override sustained load demo duration in ms (default: 15000)
   SNAKEPIT_RUN_TIMEOUT_MS        Per-example timeout in ms (default: 180000, set 0 to disable)
+  SNAKEPIT_INSTANCE_NAME         Optional environment label (shared across related runs)
+  SNAKEPIT_INSTANCE_TOKEN        Per-run isolation token. Auto-generated if unset; set unique values for manual concurrent runs.
   LOADTEST_BASIC_WORKERS          Loadtest worker count for basic demo (default: 10)
   LOADTEST_STRESS_WORKERS         Loadtest worker count for stress demo (default: 10)
   LOADTEST_BURST_WORKERS          Loadtest worker count for burst demo (default: 10)
@@ -60,6 +62,21 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ -z "${SNAKEPIT_INSTANCE_TOKEN:-}" ]]; then
+  timestamp="$(date +%s)"
+  random_suffix="$(printf '%05d%05d' "${RANDOM}" "${RANDOM}")"
+  export SNAKEPIT_INSTANCE_TOKEN="snakepit_examples_${timestamp}_$$_${random_suffix}"
+  echo "Auto-generated SNAKEPIT_INSTANCE_TOKEN=${SNAKEPIT_INSTANCE_TOKEN} (isolates this run from other concurrent run_all invocations)"
+else
+  echo "Using SNAKEPIT_INSTANCE_TOKEN=${SNAKEPIT_INSTANCE_TOKEN} (reusing a token across concurrent runs can cause cross-cleanup)"
+fi
+
+if [[ -n "${SNAKEPIT_INSTANCE_NAME:-}" ]]; then
+  echo "Using SNAKEPIT_INSTANCE_NAME=${SNAKEPIT_INSTANCE_NAME}"
+fi
+
+echo "Isolation scope: instance_name='${SNAKEPIT_INSTANCE_NAME:-<default>}' token='${SNAKEPIT_INSTANCE_TOKEN}'"
 
 run_cmd() {
   local label="$1"

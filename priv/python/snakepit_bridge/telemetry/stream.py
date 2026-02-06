@@ -39,6 +39,7 @@ class TelemetryStream:
         self._queue: asyncio.Queue[Optional[pb.TelemetryEvent]] = asyncio.Queue(
             maxsize=max_buffer
         )
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._dropped_count = 0
         self._allow_patterns: list[str] = []
         self._deny_patterns: list[str] = []
@@ -61,6 +62,8 @@ class TelemetryStream:
         Yields:
             TelemetryEvent: Events to send to Elixir
         """
+
+        self._loop = asyncio.get_running_loop()
 
         async def consume_control() -> None:
             """Background task to consume control messages from Elixir."""
@@ -89,6 +92,8 @@ class TelemetryStream:
                 await control_task
             except asyncio.CancelledError:
                 pass
+
+            self._loop = None
 
     def emit(
         self,
@@ -142,11 +147,26 @@ class TelemetryStream:
         for key, value in (metadata or {}).items():
             event.metadata[key] = str(value)
 
-        # Try to add to queue without blocking
+        loop = self._loop
+
+        if loop is None:
+            # Stream is not active yet; drop instead of blocking worker execution.
+            self._dropped_count += 1
+            return
+
         try:
-            self._queue.put_nowait(event)
-        except asyncio.QueueFull:
-            # Drop event instead of blocking critical worker code
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop is loop:
+            self._enqueue_nowait(event)
+            return
+
+        try:
+            loop.call_soon_threadsafe(self._enqueue_nowait, event)
+        except RuntimeError:
+            # Loop already closed
             self._dropped_count += 1
 
     def _handle_control(self, control: pb.TelemetryControl) -> None:
@@ -177,10 +197,25 @@ class TelemetryStream:
         This pushes a sentinel value (None) to the queue, which signals the
         stream consumer to terminate.
         """
+        loop = self._loop
+
+        if loop is None:
+            return
+
         try:
-            self._queue.put_nowait(None)  # type: ignore[arg-type]
-        except asyncio.QueueFull:
-            pass
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop is loop:
+            self._enqueue_nowait(None)
+            return
+
+        try:
+            loop.call_soon_threadsafe(self._enqueue_nowait, None)
+        except RuntimeError:
+            # Loop already closed
+            return
 
     @property
     def dropped_count(self) -> int:
@@ -202,3 +237,10 @@ class TelemetryStream:
             return True
 
         return any(fnmatch.fnmatch(event_name, pattern) for pattern in self._allow_patterns)
+
+    def _enqueue_nowait(self, event: Optional[pb.TelemetryEvent]) -> None:
+        """Queue an event without blocking. Must run on the stream loop thread."""
+        try:
+            self._queue.put_nowait(event)
+        except asyncio.QueueFull:
+            self._dropped_count += 1

@@ -164,12 +164,26 @@ config :snakepit,
 ```
 
 To isolate process registry state when sharing a deployment directory, set
-an explicit instance name and data directory:
+an explicit instance name, instance token, and data directory:
 
 ```elixir
 config :snakepit,
   instance_name: "my-app-a",
+  instance_token: "node-a-01",
   data_dir: "/var/lib/snakepit"
+```
+
+`instance_name` identifies an environment (for example `prod-us-east-1`).
+`instance_token` identifies one running instance inside that environment.
+When running multiple Snakepit VMs from the same checkout or host at the same
+time, each VM must use a unique `instance_token` so cleanup logic never targets
+another live instance.
+
+Environment variables are also supported:
+
+```bash
+SNAKEPIT_INSTANCE_NAME=my-app SNAKEPIT_INSTANCE_TOKEN=job_1 mix run --no-start script_a.exs
+SNAKEPIT_INSTANCE_NAME=my-app SNAKEPIT_INSTANCE_TOKEN=job_2 mix run --no-start script_b.exs
 ```
 
 ### Runtime Configurable Defaults

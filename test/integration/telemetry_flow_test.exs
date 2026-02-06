@@ -41,43 +41,89 @@ defmodule Snakepit.Integration.TelemetryFlowTest do
   end
 
   @tag :skip
+  @tag :python_integration
   test "worker spawned event is emitted" do
-    # Note: This test is skipped by default because it requires pooling to be enabled
-    # Run with: mix test --include skip test/integration/telemetry_flow_test.exs
+    with_python_pool(fn ->
+      {measurements, metadata} =
+        await_telemetry_event(
+          [:snakepit, :pool, :worker, :spawned],
+          20_000,
+          fn _measurements, metadata ->
+            is_binary(metadata[:worker_id]) and metadata[:mode] == :process
+          end
+        )
 
-    # Wait for worker spawned event
-    assert_receive {:telemetry, [:snakepit, :pool, :worker, :spawned], measurements, metadata},
-                   5_000
+      assert is_integer(measurements.duration)
+      assert measurements.duration >= 0
+      assert is_integer(measurements.system_time)
 
-    # Verify measurements
-    assert is_integer(measurements.duration)
-    assert measurements.duration >= 0
-    assert is_integer(measurements.system_time)
-
-    # Verify metadata
-    assert metadata.node == node()
-    assert is_atom(metadata.pool_name) or is_pid(metadata.pool_name)
-    assert is_binary(metadata.worker_id)
-    assert is_pid(metadata.worker_pid)
-    assert metadata.mode == :process
+      assert metadata.node == node()
+      assert is_atom(metadata.pool_name) or is_pid(metadata.pool_name)
+      assert is_binary(metadata.worker_id)
+      assert is_pid(metadata.worker_pid)
+      assert metadata.mode == :process
+    end)
   end
 
   @tag :skip
+  @tag :python_integration
   test "python telemetry events are received from showcase adapter" do
-    # Note: This test is skipped by default because it requires a running pool
-    # Run with: mix test --include skip test/integration/telemetry_flow_test.exs
+    with_python_pool(fn ->
+      :ok = await_telemetry_stream(10_000)
 
-    # This test would execute the telemetry_demo tool and verify events are received
-    # Requires setup: {:ok, worker} = Snakepit.Pool.checkout()
-    # Then: Snakepit.GRPCWorker.execute(worker, "telemetry_demo", %{operation: "test"})
+      assert {:ok,
+              %{
+                "message" =>
+                  "Telemetry events emitted successfully! Check Elixir :telemetry handlers.",
+                "telemetry_enabled" => true
+              }} =
+               Snakepit.execute(
+                 "telemetry_demo",
+                 %{"operation" => "telemetry_flow_test", "delay_ms" => 10},
+                 timeout: 30_000
+               )
 
-    # For now, this is a placeholder showing the expected flow:
-    # 1. Execute telemetry_demo tool
-    # 2. Receive [:snakepit, :python, :tool, :execution, :start]
-    # 3. Receive [:snakepit, :python, :tool, :result_size]
-    # 4. Receive [:snakepit, :python, :tool, :execution, :stop]
+      {start_measurements, start_metadata} =
+        await_telemetry_event(
+          [:snakepit, :python, :tool, :execution, :start],
+          10_000,
+          fn _measurements, metadata ->
+            metadata[:tool] == "telemetry_demo" and metadata[:operation] == "telemetry_flow_test"
+          end
+        )
 
-    flunk("Test not yet implemented - requires running pool")
+      assert is_integer(start_measurements.system_time)
+      assert start_measurements.system_time > 0
+      assert start_metadata.tool == "telemetry_demo"
+      assert start_metadata.operation == "telemetry_flow_test"
+      assert is_binary(start_metadata.correlation_id)
+      refute start_metadata.correlation_id == ""
+
+      {size_measurements, size_metadata} =
+        await_telemetry_event(
+          [:snakepit, :python, :tool, :result_size],
+          10_000,
+          fn _measurements, metadata -> metadata[:tool] == "telemetry_demo" end
+        )
+
+      bytes = Map.get(size_measurements, :bytes, Map.get(size_measurements, :message_size))
+      assert is_integer(bytes)
+      assert bytes > 0
+      assert size_metadata.tool == "telemetry_demo"
+
+      {stop_measurements, stop_metadata} =
+        await_telemetry_event(
+          [:snakepit, :python, :tool, :execution, :stop],
+          10_000,
+          fn _measurements, metadata ->
+            metadata[:tool] == "telemetry_demo" and metadata[:operation] == "telemetry_flow_test"
+          end
+        )
+
+      assert is_integer(stop_measurements.duration)
+      assert stop_measurements.duration >= 0
+      assert stop_metadata.correlation_id == start_metadata.correlation_id
+    end)
   end
 
   test "telemetry event catalog is complete" do
@@ -161,5 +207,125 @@ defmodule Snakepit.Integration.TelemetryFlowTest do
     # This should work even without active streams
     streams = GrpcStream.list_streams()
     assert is_list(streams)
+  end
+
+  defp with_python_pool(fun) when is_function(fun, 0) do
+    prev_env = capture_env()
+    stop_snakepit_and_wait()
+    configure_python_pool()
+    {:ok, _} = Application.ensure_all_started(:snakepit)
+    assert :ok = Snakepit.Pool.await_ready(Snakepit.Pool, 60_000)
+
+    try do
+      fun.()
+    after
+      stop_snakepit_and_wait()
+      restore_env(prev_env)
+      {:ok, _} = Application.ensure_all_started(:snakepit)
+    end
+  end
+
+  defp await_telemetry_event(event, timeout_ms, matcher_fn)
+       when is_list(event) and is_integer(timeout_ms) and timeout_ms > 0 and
+              is_function(matcher_fn, 2) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    do_await_telemetry_event(event, deadline, matcher_fn)
+  end
+
+  defp do_await_telemetry_event(event, deadline, matcher_fn) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    receive do
+      {:telemetry, ^event, measurements, metadata} ->
+        if matcher_fn.(measurements, metadata) do
+          {measurements, metadata}
+        else
+          do_await_telemetry_event(event, deadline, matcher_fn)
+        end
+
+      {:telemetry, _other_event, _measurements, _metadata} ->
+        do_await_telemetry_event(event, deadline, matcher_fn)
+
+      _other ->
+        do_await_telemetry_event(event, deadline, matcher_fn)
+    after
+      remaining ->
+        flunk("Timed out waiting for telemetry event #{inspect(event)}")
+    end
+  end
+
+  defp await_telemetry_stream(timeout_ms) when is_integer(timeout_ms) and timeout_ms > 0 do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    do_await_telemetry_stream(deadline)
+  end
+
+  defp do_await_telemetry_stream(deadline) do
+    stream_ready? =
+      GrpcStream.list_streams()
+      |> Enum.any?(fn stream ->
+        stream[:task_alive] == true
+      end)
+
+    if stream_ready? do
+      :ok
+    else
+      remaining = deadline - System.monotonic_time(:millisecond)
+
+      if remaining <= 0 do
+        flunk("Timed out waiting for telemetry stream registration")
+      else
+        wait_ms = min(remaining, 100)
+        Process.sleep(wait_ms)
+        do_await_telemetry_stream(deadline)
+      end
+    end
+  end
+
+  defp configure_python_pool do
+    Application.put_env(:snakepit, :pooling_enabled, true)
+    Application.put_env(:snakepit, :pool_config, %{pool_size: 1})
+    Application.put_env(:snakepit, :adapter_module, Snakepit.Adapters.GRPCPython)
+
+    Application.put_env(:snakepit, :pools, [
+      %{
+        name: :default,
+        worker_profile: :process,
+        pool_size: 1,
+        adapter_module: Snakepit.Adapters.GRPCPython
+      }
+    ])
+  end
+
+  defp stop_snakepit_and_wait do
+    sup_pid = Process.whereis(Snakepit.Supervisor)
+    sup_ref = if sup_pid && Process.alive?(sup_pid), do: Process.monitor(sup_pid)
+
+    Application.stop(:snakepit)
+
+    if sup_ref do
+      receive do
+        {:DOWN, ^sup_ref, :process, ^sup_pid, _reason} ->
+          :ok
+      after
+        10_000 ->
+          flunk("Timed out waiting for Snakepit supervisor to terminate")
+      end
+    end
+  end
+
+  defp capture_env do
+    %{
+      pooling_enabled: Application.get_env(:snakepit, :pooling_enabled),
+      pools: Application.get_env(:snakepit, :pools),
+      pool_config: Application.get_env(:snakepit, :pool_config),
+      adapter_module: Application.get_env(:snakepit, :adapter_module)
+    }
+  end
+
+  defp restore_env(env) do
+    Enum.each(env, fn
+      {key, nil} -> Application.delete_env(:snakepit, key)
+      {key, value} -> Application.put_env(:snakepit, key, value)
+    end)
   end
 end

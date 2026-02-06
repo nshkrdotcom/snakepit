@@ -106,6 +106,23 @@ config :snakepit,
 
 For production, increase `pool_size` based on your workload (typically `System.schedulers_online() * 2`).
 
+If you run multiple Snakepit VMs from the same codebase at the same time
+(for example, two terminals running `mix run`), assign a unique
+`instance_token` per VM:
+
+```elixir
+config :snakepit,
+  instance_name: "dev",
+  instance_token: "terminal_a"
+```
+
+or via environment variables:
+
+```bash
+SNAKEPIT_INSTANCE_NAME=dev SNAKEPIT_INSTANCE_TOKEN=terminal_a mix run --no-start ...
+SNAKEPIT_INSTANCE_NAME=dev SNAKEPIT_INSTANCE_TOKEN=terminal_b mix run --no-start ...
+```
+
 ---
 
 ## Quick Start

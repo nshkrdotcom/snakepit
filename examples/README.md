@@ -33,9 +33,22 @@ SNAKEPIT_SUSTAINED_DURATION_MS=10000 ./examples/run_all.sh
 SNAKEPIT_RUN_TIMEOUT_MS=240000 ./examples/run_all.sh
 ```
 
+`./examples/run_all.sh` auto-generates `SNAKEPIT_INSTANCE_TOKEN` when not provided, so concurrent `run_all` invocations from the same checkout do not kill each other's workers. The script prints the active isolation scope (`instance_name` + `instance_token`) at startup.
+
 Options:
 - `--skip-showcase` / `--skip-loadtest` to skip the demo apps
 - `--skip-doctor` to skip the environment check
+
+## Concurrent Runs
+
+For concurrent manual example runs (outside `run_all.sh`), set a unique `SNAKEPIT_INSTANCE_TOKEN` per terminal/session:
+
+```bash
+SNAKEPIT_INSTANCE_TOKEN=examples_a mix run --no-start examples/grpc_basic.exs
+SNAKEPIT_INSTANCE_TOKEN=examples_b mix run --no-start examples/grpc_basic.exs
+```
+
+You can also set `SNAKEPIT_INSTANCE_NAME` to label an environment and keep per-run isolation with different tokens.
 
 ## Examples by Category
 

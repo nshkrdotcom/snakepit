@@ -73,6 +73,26 @@ adapter_args: ["--adapter", "my_adapter.adapter.MyAdapter"]
 
 Each BEAM instance gets a unique run ID on startup, enabling identification of workers belonging to the current process and detection of orphaned workers from crashed instances.
 
+For concurrent Snakepit instances from the same codebase/host, configure both:
+
+- `instance_name` to identify the shared environment.
+- `instance_token` with a unique value per running VM.
+
+This prevents one live instance from classifying another live instance's workers as rogue/orphan during cleanup scans.
+
+```elixir
+config :snakepit,
+  instance_name: "my-app",
+  instance_token: "deploy-slot-a"
+```
+
+For scripts, use environment variables:
+
+```bash
+SNAKEPIT_INSTANCE_NAME=my-app SNAKEPIT_INSTANCE_TOKEN=script_1 mix run --no-start script_a.exs
+SNAKEPIT_INSTANCE_NAME=my-app SNAKEPIT_INSTANCE_TOKEN=script_2 mix run --no-start script_b.exs
+```
+
 ### Automatic Cleanup on Restart
 
 When Snakepit starts, it automatically:
