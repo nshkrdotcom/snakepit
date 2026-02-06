@@ -26,6 +26,7 @@ defmodule Snakepit.Pool.QueueManagementTest do
       size: 1,
       workers: [],
       available: MapSet.new(),
+      ready_workers: MapSet.new(),
       worker_loads: %{},
       worker_capacities: %{},
       capacity_strategy: :pool,
@@ -294,11 +295,14 @@ defmodule Snakepit.Pool.QueueSaturationRuntimeTest do
           {{:ok, {:ok, _}}, id}, acc ->
             Map.update!(acc, :success, &[id | &1])
 
-          {{:ok, {:error, :queue_timeout}}, id}, acc ->
+          {{:ok, {:error, %Snakepit.Error{details: %{reason: :queue_timeout}}}}, id}, acc ->
             Map.update!(acc, :timeouts, &[id | &1])
 
-          {{:ok, {:error, :pool_saturated}}, id}, acc ->
+          {{:ok, {:error, %Snakepit.Error{details: %{reason: :pool_saturated}}}}, id}, acc ->
             Map.update!(acc, :saturated, &[id | &1])
+
+          {{:ok, {:error, reason}}, id}, _acc ->
+            flunk("Request #{id} returned unexpected error: #{inspect(reason)}")
 
           {{:exit, reason}, id}, _acc ->
             flunk("Request #{id} crashed with #{inspect(reason)}")

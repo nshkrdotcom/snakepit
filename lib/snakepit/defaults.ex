@@ -493,6 +493,17 @@ defmodule Snakepit.Defaults do
     Application.get_env(:snakepit, :grpc_worker_health_check_interval, 30_000)
   end
 
+  @doc """
+  Timeout for periodic GRPCWorker health-check RPCs.
+  Used in `Snakepit.GRPCWorker` when issuing `Client.health/3`.
+
+  Default: 5_000 ms (5 seconds)
+  """
+  @spec grpc_worker_health_check_timeout_ms() :: pos_integer()
+  def grpc_worker_health_check_timeout_ms do
+    Application.get_env(:snakepit, :grpc_worker_health_check_timeout_ms, 5_000)
+  end
+
   # ============================================================================
   # Heartbeat
   # ============================================================================

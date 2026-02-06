@@ -4,6 +4,20 @@ defmodule Snakepit.Pool.State do
   alias Snakepit.Config
   alias Snakepit.Defaults
 
+  @enforce_keys [
+    :name,
+    :size,
+    :workers,
+    :available,
+    :ready_workers,
+    :worker_module,
+    :adapter_module,
+    :pool_config,
+    :request_queue,
+    :stats,
+    :initialized,
+    :capacity_strategy
+  ]
   defstruct [
     :name,
     :size,
@@ -158,9 +172,9 @@ defmodule Snakepit.Pool.State do
     Map.get(pool_config, :pool_size, Defaults.default_pool_size())
   end
 
-  defp resolve_pool_size(opts, pool_config, false = _multi_pool_mode?) do
-    # Legacy mode: opts[:size] takes precedence
-    opts[:size] || Map.get(pool_config, :pool_size, Defaults.default_pool_size())
+  defp resolve_pool_size(_opts, pool_config, false = _multi_pool_mode?) do
+    # Legacy mode: follow normalized pool config to preserve deterministic precedence.
+    Map.get(pool_config, :pool_size, Defaults.default_pool_size())
   end
 
   defp resolve_capacity_strategy(pool_config) do

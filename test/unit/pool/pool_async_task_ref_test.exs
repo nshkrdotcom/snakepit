@@ -5,15 +5,23 @@ defmodule Snakepit.Pool.AsyncTaskRefTest do
 
   test "late async task tracking message does not re-introduce completed ref" do
     ref = make_ref()
+    cache = :ets.new(:pool_async_task_ref_test_cache, [:set, :public])
 
-    state = %Pool{async_task_refs: MapSet.new()}
+    on_exit(fn ->
+      case :ets.info(cache) do
+        :undefined -> :ok
+        _ -> :ets.delete(cache)
+      end
+    end)
+
+    state = %Pool{pools: %{}, affinity_cache: cache, default_pool: :default}
 
     assert {:noreply, after_completion} = Pool.handle_info({ref, :ok}, state)
-    assert MapSet.member?(after_completion.async_task_refs, ref) == false
+    assert after_completion == state
 
     assert {:noreply, after_late_track} =
              Pool.handle_info({:track_async_task_ref, ref}, after_completion)
 
-    assert MapSet.member?(after_late_track.async_task_refs, ref) == false
+    assert after_late_track == state
   end
 end

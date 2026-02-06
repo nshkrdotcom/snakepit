@@ -14,12 +14,12 @@ defmodule Snakepit.Pool.RuntimeSupervisor do
     children = [
       Snakepit.GRPC.ClientSupervisor,
       Snakepit.GRPC.Listener,
-      Snakepit.Telemetry.GrpcStream,
       Snakepit.Pool.Worker.StarterRegistry,
       Snakepit.WorkerProfile.Thread.CapacityStore,
       Snakepit.Pool.WorkerSupervisor,
       Snakepit.Worker.LifecycleManager,
-      {Snakepit.Pool, [size: pool_size]}
+      {Snakepit.Pool, [size: pool_size]},
+      Snakepit.Telemetry.GrpcStream
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)

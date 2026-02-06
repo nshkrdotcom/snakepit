@@ -55,12 +55,14 @@ defmodule Snakepit.Worker.LifecycleManager do
   use GenServer
   alias Snakepit.Config
   alias Snakepit.Defaults
+  alias Snakepit.Internal.AsyncFallback
   alias Snakepit.Internal.TimeoutRunner
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Worker.LifecycleConfig
 
   @log_category :worker
 
+  @enforce_keys [:workers, :memory_recycle_counts]
   defstruct [
     :workers,
     :check_ref,
@@ -568,21 +570,7 @@ defmodule Snakepit.Worker.LifecycleManager do
   end
 
   defp start_monitored_fallback_task(fun) when is_function(fun, 0) do
-    parent = self()
-
-    pid =
-      spawn(fn ->
-        receive do
-          {:snakepit_run_task, ref} ->
-            result = fun.()
-            send(parent, {ref, result})
-        end
-      end)
-
-    ref = Process.monitor(pid)
-    send(pid, {:snakepit_run_task, ref})
-
-    {:ok, pid, ref}
+    AsyncFallback.start_monitored(fun)
   end
 
   defp pop_worker(workers, worker_id) do
@@ -771,21 +759,21 @@ defmodule Snakepit.Worker.LifecycleManager do
       error ->
         SLog.warning(
           @log_category,
-          "TaskSupervisor unavailable for health check task; using spawn fallback",
+          "TaskSupervisor unavailable for health check task; using monitored fallback",
           error: error
         )
 
-        _ = spawn(runner)
+        _ = AsyncFallback.start_monitored_fire_and_forget(runner)
         :ok
     catch
       :exit, reason ->
         SLog.warning(
           @log_category,
-          "TaskSupervisor exited during health check task start; using spawn fallback",
+          "TaskSupervisor exited during health check task start; using monitored fallback",
           reason: reason
         )
 
-        _ = spawn(runner)
+        _ = AsyncFallback.start_monitored_fire_and_forget(runner)
         :ok
     end
   end

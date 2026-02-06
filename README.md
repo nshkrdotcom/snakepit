@@ -90,6 +90,9 @@ config :snakepit,
   log_level: :error
 ```
 
+In legacy single-pool mode, if both top-level `:pool_size` and
+`pool_config.pool_size` are configured, the top-level `:pool_size` value wins.
+
 ### Multi-Pool Configuration (v0.6+)
 
 ```elixir
@@ -207,6 +210,7 @@ config :snakepit,
   checkout_timeout: 5_000,               # Worker checkout timeout
   grpc_worker_execute_timeout: 30_000,   # GRPCWorker execute timeout
   grpc_worker_stream_timeout: 300_000,   # GRPCWorker streaming timeout
+  grpc_worker_health_check_timeout_ms: 5_000, # Periodic worker health RPC timeout
   graceful_shutdown_timeout_ms: 6_000,   # Python process shutdown timeout
 
   # Pool sizing
@@ -314,8 +318,8 @@ config :snakepit,
 ```
 
 - `:strict_queue` queues requests for the preferred worker when it is busy.
-- `:strict_fail_fast` returns `{:error, :worker_busy}` when the preferred worker is busy.
-- If the preferred worker is tainted or missing, strict modes return `{:error, :session_worker_unavailable}`.
+- `:strict_fail_fast` returns `{:error, %Snakepit.Error{category: :pool, details: %{reason: :worker_busy}}}` when the preferred worker is busy.
+- If the preferred worker is tainted or missing, strict modes return `{:error, %Snakepit.Error{category: :pool, details: %{reason: :session_worker_unavailable}}}`.
 
 ### Streaming Operations
 

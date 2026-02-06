@@ -583,9 +583,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
               state
           end
 
-        next_state
-        |> put_in([:streams, worker_id], %{stream_info | control_ref: nil})
-        |> start_next_control_op(worker_id)
+        clear_control_ref_and_continue(next_state, worker_id, stream_info)
     end
   end
 
@@ -604,9 +602,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
         state
 
       stream_info ->
-        state
-        |> put_in([:streams, worker_id], %{stream_info | control_ref: nil})
-        |> start_next_control_op(worker_id)
+        clear_control_ref_and_continue(state, worker_id, stream_info)
     end
   end
 
@@ -626,10 +622,14 @@ defmodule Snakepit.Telemetry.GrpcStream do
         state
 
       stream_info ->
-        state
-        |> put_in([:streams, worker_id], %{stream_info | control_ref: nil})
-        |> start_next_control_op(worker_id)
+        clear_control_ref_and_continue(state, worker_id, stream_info)
     end
+  end
+
+  defp clear_control_ref_and_continue(state, worker_id, stream_info) do
+    state
+    |> put_in([:streams, worker_id], %{stream_info | control_ref: nil})
+    |> start_next_control_op(worker_id)
   end
 
   defp log_control_success(worker_id, %{action: :sampling, rate: rate, patterns: patterns}) do

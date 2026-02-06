@@ -19,8 +19,6 @@ defmodule Snakepit.Application do
   alias Snakepit.PythonThreadLimits
   alias Snakepit.Telemetry.OpenTelemetry
 
-  @runtime_env Application.compile_env(:snakepit, :environment, :prod)
-
   @impl true
   def start(_type, _args) do
     configure_logging()
@@ -82,7 +80,7 @@ defmodule Snakepit.Application do
       :startup,
       "Snakepit.Application.start/2",
       pooling_enabled: pooling_enabled,
-      environment: @runtime_env
+      environment: runtime_env()
     )
 
     # Always start SessionStore as it's needed for tests and bridge functionality
@@ -106,15 +104,12 @@ defmodule Snakepit.Application do
 
     pool_children =
       if pooling_enabled do
-        pool_config = Application.get_env(:snakepit, :pool_config, %{})
-        pool_size = Map.get(pool_config, :pool_size, System.schedulers_online() * 2)
-
-        SLog.info(:startup, "Starting Snakepit with pooling enabled", pool_size: pool_size)
+        SLog.info(:startup, "Starting Snakepit with pooling enabled", pooling_enabled: true)
 
         [
           # Dependent pool runtime children are grouped under rest_for_one so listener/client
           # failures restart downstream pool components in order.
-          {Snakepit.Pool.RuntimeSupervisor, [pool_size: pool_size]}
+          {Snakepit.Pool.RuntimeSupervisor, []}
         ]
       else
         SLog.info(:startup, "Starting Snakepit with pooling disabled", pooling_enabled: false)
@@ -161,6 +156,7 @@ defmodule Snakepit.Application do
     )
 
     maybe_cleanup_on_stop()
+    Snakepit.Shutdown.clear_in_progress()
     :ok
   end
 
@@ -284,7 +280,7 @@ defmodule Snakepit.Application do
 
   defp do_ensure_snakepit_requirements do
     # Only auto-install if explicitly enabled or in dev/test environment
-    runtime_env = Application.get_env(:snakepit, :environment, :prod)
+    runtime_env = runtime_env()
 
     auto_install? =
       runtime_env in [:dev, :test] or
@@ -337,5 +333,9 @@ defmodule Snakepit.Application do
     else
       nil
     end
+  end
+
+  defp runtime_env do
+    Application.get_env(:snakepit, :environment, :prod)
   end
 end

@@ -8,6 +8,7 @@ defmodule Snakepit.HeartbeatMonitor do
   """
 
   use GenServer
+  alias Snakepit.Internal.AsyncFallback
   alias Snakepit.Logger, as: SLog
 
   @default_ping_interval 2_000
@@ -16,6 +17,14 @@ defmodule Snakepit.HeartbeatMonitor do
   @log_category :worker
   @ping_monitor_pid_key :snakepit_heartbeat_monitor_pid
 
+  @enforce_keys [
+    :worker_pid,
+    :worker_id,
+    :ping_interval,
+    :timeout,
+    :max_missed_heartbeats,
+    :ping_fun
+  ]
   @type start_option ::
           {:worker_pid, pid()}
           | {:worker_id, String.t()}
@@ -349,21 +358,7 @@ defmodule Snakepit.HeartbeatMonitor do
   end
 
   defp start_monitored_fallback_task(fun) when is_function(fun, 0) do
-    parent = self()
-
-    pid =
-      spawn(fn ->
-        receive do
-          {:snakepit_run_task, ref} ->
-            result = fun.()
-            send(parent, {ref, result})
-        end
-      end)
-
-    ref = Process.monitor(pid)
-    send(pid, {:snakepit_run_task, ref})
-
-    {:ok, pid, ref}
+    AsyncFallback.start_monitored(fun)
   end
 
   defp clear_ping_task(state) do

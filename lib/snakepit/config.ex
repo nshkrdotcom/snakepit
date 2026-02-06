@@ -419,6 +419,7 @@ defmodule Snakepit.Config do
 
   defp convert_legacy_config do
     legacy_pool_config = Application.get_env(:snakepit, :pool_config, %{})
+    resolved_pool_size = resolve_legacy_pool_size(legacy_pool_config)
 
     affinity =
       Map.get(legacy_pool_config, :affinity) ||
@@ -428,7 +429,7 @@ defmodule Snakepit.Config do
     base_pool = %{
       name: :default,
       worker_profile: :process,
-      pool_size: Application.get_env(:snakepit, :pool_size, Defaults.default_pool_size()),
+      pool_size: resolved_pool_size,
       adapter_module: Application.get_env(:snakepit, :adapter_module),
       adapter_args: [],
       adapter_env: [],
@@ -441,7 +442,8 @@ defmodule Snakepit.Config do
       case legacy_pool_config do
         %{} = pool_config when map_size(pool_config) > 0 ->
           base_pool
-          |> Map.merge(pool_config)
+          |> Map.merge(Map.delete(pool_config, :pool_size))
+          |> Map.put(:pool_size, resolved_pool_size)
           |> Map.put(
             :startup_batch_size,
             Map.get(pool_config, :startup_batch_size, Defaults.pool_startup_batch_size())
@@ -466,6 +468,16 @@ defmodule Snakepit.Config do
 
       error ->
         error
+    end
+  end
+
+  defp resolve_legacy_pool_size(legacy_pool_config) do
+    case Application.get_env(:snakepit, :pool_size, :__snakepit_missing__) do
+      size when is_integer(size) and size > 0 ->
+        size
+
+      _ ->
+        Map.get(legacy_pool_config, :pool_size, Defaults.default_pool_size())
     end
   end
 
@@ -799,6 +811,17 @@ defmodule Snakepit.Config do
     normalize_positive_integer(
       Application.get_env(:snakepit, :lifecycle_worker_action_timeout_ms),
       Defaults.lifecycle_worker_action_timeout_ms()
+    )
+  end
+
+  @doc """
+  Timeout (ms) for GRPCWorker periodic health-check RPC calls.
+  """
+  @spec grpc_worker_health_check_timeout_ms() :: pos_integer()
+  def grpc_worker_health_check_timeout_ms do
+    normalize_positive_integer(
+      Application.get_env(:snakepit, :grpc_worker_health_check_timeout_ms),
+      Defaults.grpc_worker_health_check_timeout_ms()
     )
   end
 

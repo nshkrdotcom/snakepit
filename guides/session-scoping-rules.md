@@ -131,9 +131,11 @@ class MyAdapter(BaseAdapter):
 **Affinity Modes** (configurable per pool):
 - `:hint` (default) — Prefer the last worker if available; otherwise fall back to any available worker.
 - `:strict_queue` — If the preferred worker is busy, queue the request until it becomes available. This can increase latency and queue timeouts under load.
-- `:strict_fail_fast` — If the preferred worker is busy, return `{:error, :worker_busy}` immediately.
+- `:strict_fail_fast` — If the preferred worker is busy, return `{:error, %Snakepit.Error{category: :pool, details: %{reason: :worker_busy}}}` immediately.
 
-If the preferred worker is tainted or missing, strict modes return `{:error, :session_worker_unavailable}` so callers can reinitialize state or create a new session.
+If the preferred worker is tainted or missing, strict modes return
+`{:error, %Snakepit.Error{category: :pool, details: %{reason: :session_worker_unavailable}}}`
+so callers can reinitialize state or create a new session.
 
 ### What happens when the owner process dies?
 

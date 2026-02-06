@@ -22,6 +22,12 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
 
   setup do
     Process.flag(:trap_exit, true)
+    Snakepit.Shutdown.clear_in_progress()
+
+    on_exit(fn ->
+      Snakepit.Shutdown.clear_in_progress()
+    end)
+
     ensure_started(Snakepit.Pool.Registry)
     ensure_started(Snakepit.Pool.ProcessRegistry)
     {:ok, pool_pid} = start_supervised(PoolStub)
@@ -130,6 +136,49 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
 
     assert_receive {:heartbeat_monitor_stopped, ^worker_id, _reason}, 1_000
     assert_receive {:DOWN, ^ref, :process, ^monitor_pid, _reason}, 1_000
+  end
+
+  test "stale shutdown marker from dead process does not abort worker startup", %{pool: pool_pid} do
+    parent = self()
+
+    marker_pid =
+      spawn(fn ->
+        Snakepit.Shutdown.mark_in_progress()
+        send(parent, :shutdown_marked)
+      end)
+
+    assert_receive :shutdown_marked, 500
+    marker_ref = Process.monitor(marker_pid)
+    assert_receive {:DOWN, ^marker_ref, :process, ^marker_pid, _reason}, 500
+
+    test_pid = self()
+
+    opts =
+      []
+      |> worker_opts()
+      |> Keyword.merge(
+        worker_config: %{
+          heartbeat: %{
+            enabled: true,
+            ping_interval_ms: 20,
+            timeout_ms: 40,
+            ping_fun: fn timestamp ->
+              Snakepit.HeartbeatMonitor.notify_pong(self(), timestamp)
+              :ok
+            end,
+            test_pid: test_pid
+          }
+        }
+      )
+      |> Keyword.put(:pool_name, pool_pid)
+
+    {:ok, worker} = GRPCWorker.start_link(opts)
+    worker_id = opts[:id]
+
+    assert_receive {:heartbeat_monitor_started, ^worker_id, monitor_pid} when is_pid(monitor_pid),
+                   2_000
+
+    :ok = GenServer.stop(worker)
   end
 
   defp ensure_started(child_spec) do

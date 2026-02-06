@@ -11,8 +11,12 @@ defmodule Snakepit.Pool.InitTaskStateTest do
       end)
 
     task_ref = Process.monitor(task_pid)
+    affinity_cache = :ets.new(:pool_init_task_state_cache, [:set, :private])
 
     state = %Pool{
+      pools: %{},
+      affinity_cache: affinity_cache,
+      default_pool: :default,
       initializing: true,
       init_task_ref: task_ref,
       init_task_pid: task_pid
@@ -33,9 +37,12 @@ defmodule Snakepit.Pool.InitTaskStateTest do
       end)
 
     task_ref = Process.monitor(task_pid)
+    affinity_cache = :ets.new(:pool_init_task_state_cache, [:set, :private])
 
     state = %Pool{
       pools: %{},
+      affinity_cache: affinity_cache,
+      default_pool: :default,
       initializing: true,
       init_task_ref: task_ref,
       init_task_pid: task_pid,

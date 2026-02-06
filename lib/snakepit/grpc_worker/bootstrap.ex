@@ -77,7 +77,6 @@ defmodule Snakepit.GRPCWorker.Bootstrap do
          {:ok, connection} <-
            wrap_grpc_connection_result(state.adapter.init_grpc_connection(actual_port)),
          pool_pid <- resolve_pool_pid(state.pool_name),
-         :ok <- verify_pool_alive(pool_pid, state.id),
          :ok <- notify_pool_ready(pool_pid, state.id) do
       complete_fun.(state, connection, actual_port)
     else
@@ -150,7 +149,7 @@ defmodule Snakepit.GRPCWorker.Bootstrap do
   defp maybe_update_process_group_after_ready(state), do: state
 
   defp process_group_spawn_enabled? do
-    Application.get_env(:snakepit, :process_group_kill, true) and
+    Defaults.process_group_kill_enabled?() and
       Snakepit.ProcessKiller.process_group_supported?()
   end
 
@@ -412,25 +411,12 @@ defmodule Snakepit.GRPCWorker.Bootstrap do
   defp resolve_pool_pid(pool_name) when is_atom(pool_name), do: Process.whereis(pool_name)
   defp resolve_pool_pid(pool_name), do: pool_name
 
-  defp verify_pool_alive(nil, worker_id), do: {:error, {:pool_dead, worker_id}}
-
-  defp verify_pool_alive(pool_pid, worker_id) do
-    if Process.alive?(pool_pid) do
-      :ok
-    else
-      {:error, {:pool_dead, worker_id}}
-    end
-  end
-
   defp wrap_grpc_connection_result({:ok, connection}), do: {:ok, connection}
 
   defp wrap_grpc_connection_result({:error, reason}),
     do: {:error, {:grpc_connection_failed, reason}}
 
-  defp notify_pool_ready(nil, worker_id),
-    do:
-      {:error,
-       {:pool_handshake_failed, Error.pool_error("Pool not found", %{worker_id: worker_id})}}
+  defp notify_pool_ready(nil, worker_id), do: {:error, {:pool_dead, worker_id}}
 
   defp notify_pool_ready(pool_pid, worker_id) when is_pid(pool_pid) do
     GenServer.call(pool_pid, {:worker_ready, worker_id}, Defaults.worker_ready_timeout())

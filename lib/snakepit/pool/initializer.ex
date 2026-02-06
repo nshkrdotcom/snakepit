@@ -244,9 +244,14 @@ defmodule Snakepit.Pool.Initializer do
   end
 
   defp start_single_batch(worker_ctx, batch, batch_num) do
-    # CRITICAL: Check if WorkerSupervisor is still alive before starting a batch
-    # Short-circuit if app is shutting down to prevent cascading errors
-    if supervisor_alive?() do
+    if Shutdown.in_progress?() do
+      SLog.warning(
+        @log_category,
+        "Skipping batch #{batch_num + 1}: shutdown in progress during startup"
+      )
+
+      []
+    else
       %{actual_count: actual_count, startup_timeout: startup_timeout, batch_config: batch_config} =
         worker_ctx
 
@@ -271,64 +276,42 @@ defmodule Snakepit.Pool.Initializer do
 
       maybe_delay_between_batches(batch_num, actual_count, batch_config)
       workers
-    else
-      SLog.warning(
-        @log_category,
-        "Skipping batch #{batch_num + 1}: WorkerSupervisor terminated during startup"
-      )
-
-      []
     end
   end
 
   defp start_worker_in_batch(worker_ctx, i) do
-    # CRITICAL: Check if WorkerSupervisor is still alive before attempting to start
-    # This prevents crashes when app is shutting down during batch initialization
-    if supervisor_alive?() do
-      %{
-        pool_name: pool_name,
-        actual_count: actual_count,
-        worker_module: worker_module,
-        adapter_module: adapter_module,
-        pool_config: pool_config,
-        pool_genserver_name: pool_genserver_name
-      } = worker_ctx
+    %{
+      pool_name: pool_name,
+      actual_count: actual_count,
+      worker_module: worker_module,
+      adapter_module: adapter_module,
+      pool_config: pool_config,
+      pool_genserver_name: pool_genserver_name
+    } = worker_ctx
 
-      worker_id = "#{pool_name}_worker_#{i}_#{:erlang.unique_integer([:positive])}"
+    worker_id = "#{pool_name}_worker_#{i}_#{:erlang.unique_integer([:positive])}"
 
-      result =
-        if Map.has_key?(pool_config, :worker_profile) do
-          start_worker_with_profile(
-            worker_id,
-            pool_name,
-            worker_module,
-            adapter_module,
-            pool_config,
-            pool_genserver_name
-          )
-        else
-          start_worker_legacy(
-            worker_id,
-            pool_name,
-            worker_module,
-            adapter_module,
-            pool_genserver_name
-          )
-        end
-
-      handle_worker_start_result_with_log(result, worker_id, i, actual_count)
-    else
-      {:error, :supervisor_terminated}
-    end
-  end
-
-  # Check if the WorkerSupervisor is alive - prevents crashes during shutdown
-  defp supervisor_alive? do
-    not Shutdown.in_progress?() and
-      case Process.whereis(Snakepit.Pool.WorkerSupervisor) do
-        nil -> false
-        pid -> Process.alive?(pid)
+    result =
+      if Map.has_key?(pool_config, :worker_profile) do
+        start_worker_with_profile(
+          worker_id,
+          pool_name,
+          worker_module,
+          adapter_module,
+          pool_config,
+          pool_genserver_name
+        )
+      else
+        start_worker_legacy(
+          worker_id,
+          pool_name,
+          worker_module,
+          adapter_module,
+          pool_genserver_name
+        )
       end
+
+    handle_worker_start_result_with_log(result, worker_id, i, actual_count)
   end
 
   defp start_worker_with_profile(

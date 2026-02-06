@@ -1,6 +1,7 @@
 defmodule Snakepit.Worker.ProcessManager do
   @moduledoc false
 
+  alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
 
   @log_category :grpc
@@ -141,7 +142,7 @@ defmodule Snakepit.Worker.ProcessManager do
 
   defp use_process_group_kill?(%{process_group?: true, pgid: pgid})
        when is_integer(pgid) do
-    Application.get_env(:snakepit, :process_group_kill, true)
+    Defaults.process_group_kill_enabled?()
   end
 
   defp use_process_group_kill?(_state), do: false

@@ -9,6 +9,12 @@ defmodule Snakepit.Pool.ProcessRegistryCleanupTest do
     :ok
   end
 
+  test "registry process traps exits so terminate callback runs on shutdown" do
+    pid = Process.whereis(ProcessRegistry)
+    assert is_pid(pid)
+    assert {:trap_exit, true} = Process.info(pid, :trap_exit)
+  end
+
   test "manual orphan cleanup removes stale DETS entries but keeps current run" do
     state = :sys.get_state(ProcessRegistry)
     dets = state.dets_table
@@ -165,7 +171,15 @@ defmodule Snakepit.Pool.ProcessRegistryCleanupTest do
         cleanup_ref = Process.monitor(cleanup_pid)
 
         state = %ProcessRegistry{
+          table: :snakepit_pool_process_registry,
           dets_table: dets,
+          beam_run_id: "test_run",
+          beam_os_pid: System.pid() |> String.to_integer(),
+          instance_name: "test",
+          allow_missing_instance: true,
+          instance_token: "test_token",
+          allow_missing_token: true,
+          cleanup_task_runner: fn _, _, _, _, _, _, _ -> :ok end,
           cleanup_task_pid: cleanup_pid,
           cleanup_task_ref: cleanup_ref,
           cleanup_task_kind: :manual
@@ -202,7 +216,15 @@ defmodule Snakepit.Pool.ProcessRegistryCleanupTest do
         cleanup_ref = Process.monitor(cleanup_pid)
 
         state = %ProcessRegistry{
+          table: :snakepit_pool_process_registry,
           dets_table: dets,
+          beam_run_id: "test_run",
+          beam_os_pid: System.pid() |> String.to_integer(),
+          instance_name: "test",
+          allow_missing_instance: true,
+          instance_token: "test_token",
+          allow_missing_token: true,
+          cleanup_task_runner: fn _, _, _, _, _, _, _ -> :ok end,
           cleanup_task_pid: cleanup_pid,
           cleanup_task_ref: cleanup_ref,
           cleanup_task_kind: :manual

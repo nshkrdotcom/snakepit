@@ -386,6 +386,9 @@ config :snakepit,
   }
 ```
 
+In legacy mode, when both top-level `:pool_size` and `pool_config.pool_size`
+are present, the top-level `:pool_size` takes precedence.
+
 ### Multi-Pool Configuration (v0.6+)
 
 For multiple pools with different profiles:
@@ -420,6 +423,7 @@ config :snakepit,
 | `pool_startup_timeout` | `integer()` | `10000` | Worker startup timeout (ms) |
 | `pool_queue_timeout` | `integer()` | `5000` | Request queue timeout (ms) |
 | `pool_max_queue_size` | `integer()` | `1000` | Maximum queued requests |
+| `grpc_worker_health_check_timeout_ms` | `integer()` | `5000` | Periodic worker health-check RPC timeout (ms) |
 
 ### Per-Pool Configuration Options
 
@@ -836,9 +840,9 @@ Snakepit uses structured errors via `Snakepit.Error`. Common error categories:
 | Category | Description |
 |----------|-------------|
 | `:timeout` | Operation timed out |
-| `:worker_error` | Worker execution failed |
+| `:worker` | Worker execution failed |
 | `:validation` | Invalid input or configuration |
-| `:pool_error` | Pool-level error (saturated, not found) |
+| `:pool` | Pool-level error (saturated, strict affinity, not found) |
 
 ```elixir
 case Snakepit.execute("command", %{}) do
@@ -848,8 +852,8 @@ case Snakepit.execute("command", %{}) do
   {:error, %Snakepit.Error{category: :timeout} = error} ->
     Logger.warning("Request timed out: #{error.message}")
 
-  {:error, %Snakepit.Error{category: :worker_error, metadata: meta}} ->
-    Logger.error("Worker failed: #{inspect(meta)}")
+  {:error, %Snakepit.Error{category: :pool, details: %{reason: :pool_saturated}}} ->
+    Logger.error("Pool saturated")
 
   {:error, error} ->
     Logger.error("Unknown error: #{inspect(error)}")

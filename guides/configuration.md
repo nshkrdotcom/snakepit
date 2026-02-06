@@ -39,6 +39,8 @@ config :snakepit,
 ```
 
 This format creates a single pool named `:default` with the specified settings.
+If both top-level `:pool_size` and `pool_config.pool_size` are set, Snakepit
+uses the top-level `:pool_size`.
 
 ### Multi-Pool Configuration (v0.6+)
 
@@ -85,6 +87,7 @@ These options apply to all pools or the Snakepit application as a whole.
 | `pool_max_queue_size` | `pos_integer()` | `1000` | Maximum queued requests before rejecting new ones. |
 | `pool_reconcile_interval_ms` | `non_neg_integer()` | `1000` | Interval (ms) for pool reconciliation to restore worker count (`0` disables). |
 | `pool_reconcile_batch_size` | `pos_integer()` | `2` | Max workers respawned per reconciliation tick (ignored if reconcile disabled). |
+| `grpc_worker_health_check_timeout_ms` | `pos_integer()` | `5000` | Timeout (ms) for periodic worker health-check RPCs. |
 | `worker_starter_max_restarts` | `non_neg_integer()` | `3` | Restart intensity: max restarts for worker starter supervisor. |
 | `worker_starter_max_seconds` | `pos_integer()` | `5` | Restart intensity window (seconds) for worker starter supervisor. |
 | `worker_supervisor_max_restarts` | `non_neg_integer()` | `3` | Restart intensity: max restarts for worker supervisor. |
@@ -212,9 +215,10 @@ config :snakepit,
 
 - `:hint` (default) — Prefer the last worker if available; otherwise fall back.
 - `:strict_queue` — Queue when the preferred worker is busy; guarantees same-worker routing but can increase latency and queue timeouts.
-- `:strict_fail_fast` — Return `{:error, :worker_busy}` when the preferred worker is busy.
+- `:strict_fail_fast` — Return `{:error, %Snakepit.Error{category: :pool, details: %{reason: :worker_busy}}}` when the preferred worker is busy.
 
-If the preferred worker is tainted or missing, strict modes return `{:error, :session_worker_unavailable}`.
+If the preferred worker is tainted or missing, strict modes return
+`{:error, %Snakepit.Error{category: :pool, details: %{reason: :session_worker_unavailable}}}`.
 
 ### Process Profile Options
 

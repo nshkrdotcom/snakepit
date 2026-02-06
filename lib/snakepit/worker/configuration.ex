@@ -3,6 +3,7 @@ defmodule Snakepit.Worker.Configuration do
 
   alias Snakepit.Adapters.GRPCPython
   alias Snakepit.Config
+  alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.ProcessRegistry
 
@@ -159,7 +160,7 @@ defmodule Snakepit.Worker.Configuration do
   end
 
   defp process_group_spawn? do
-    Application.get_env(:snakepit, :process_group_kill, true) and
+    Defaults.process_group_kill_enabled?() and
       Snakepit.ProcessKiller.process_group_supported?()
   end
 
@@ -253,7 +254,7 @@ defmodule Snakepit.Worker.Configuration do
         GRPCPython.executable_path()
 
     process_group_env =
-      if Application.get_env(:snakepit, :process_group_kill, true) and
+      if Defaults.process_group_kill_enabled?() and
            Snakepit.ProcessKiller.process_group_supported?() do
         [{"SNAKEPIT_PROCESS_GROUP", "1"}]
       else

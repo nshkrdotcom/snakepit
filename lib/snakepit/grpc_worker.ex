@@ -31,6 +31,7 @@ defmodule Snakepit.GRPCWorker do
 
   use GenServer
   require Logger
+  alias Snakepit.Config
   alias Snakepit.Defaults
   alias Snakepit.Error
   alias Snakepit.GRPCWorker.Bootstrap
@@ -410,7 +411,7 @@ defmodule Snakepit.GRPCWorker do
     case pop_pending_rpc_call(state, token) do
       {:ok, pending_call, new_state} ->
         Process.demonitor(pending_call.monitor_ref, [:flush])
-        GenServer.reply(pending_call.from, reply)
+        maybe_reply_pending_call(pending_call.from, reply)
         {:noreply, new_state |> update_stats(stat_result) |> maybe_start_next_rpc_call()}
 
       :error ->
@@ -437,7 +438,7 @@ defmodule Snakepit.GRPCWorker do
              exception: Exception.message(error)
            })}
 
-        GenServer.reply(pending_call.from, reply)
+        maybe_reply_pending_call(pending_call.from, reply)
         {:noreply, new_state |> update_stats(:error) |> maybe_start_next_rpc_call()}
 
       :error ->
@@ -465,7 +466,7 @@ defmodule Snakepit.GRPCWorker do
              reason: reason
            })}
 
-        GenServer.reply(pending_call.from, reply)
+        maybe_reply_pending_call(pending_call.from, reply)
         {:noreply, new_state |> update_stats(:error) |> maybe_start_next_rpc_call()}
 
       :error ->
@@ -494,7 +495,7 @@ defmodule Snakepit.GRPCWorker do
              reason: reason
            })}
 
-        GenServer.reply(pending_call.from, reply)
+        maybe_reply_pending_call(pending_call.from, reply)
         {:noreply, new_state |> update_stats(:error) |> maybe_start_next_rpc_call()}
 
       {:error, new_state} ->
@@ -507,18 +508,12 @@ defmodule Snakepit.GRPCWorker do
 
   @impl true
   def handle_info(:health_check, state) do
-    case make_health_check(state) do
-      {:ok, _health} ->
-        # Health check passed, schedule next one
-        health_ref = schedule_health_check()
-        {:noreply, %{state | health_check_ref: health_ref}}
+    health_ref = schedule_health_check()
 
-      {:error, reason} ->
-        SLog.warning(@log_category, "Health check failed: #{reason}")
-        # Could implement reconnection logic here
-        health_ref = schedule_health_check()
-        {:noreply, %{state | health_check_ref: health_ref}}
-    end
+    {:noreply,
+     state
+     |> Map.put(:health_check_ref, health_ref)
+     |> enqueue_periodic_health_check()}
   end
 
   @impl true
@@ -737,6 +732,7 @@ defmodule Snakepit.GRPCWorker do
 
     planned? = shutdown_reason?(reason) or reason == :normal
     Instrumentation.emit_worker_terminated_telemetry(state, reason, planned?)
+    cancel_pending_rpc_calls(state, reason)
     cleanup_heartbeat(state, reason)
     ProcessManager.kill_python_process(state, reason, graceful_shutdown_timeout())
     ProcessManager.cleanup_ready_file(state.ready_file)
@@ -757,6 +753,46 @@ defmodule Snakepit.GRPCWorker do
     GrpcStream.unregister_worker(state.id)
     ProcessRegistry.unregister_worker(state.id)
   end
+
+  defp cancel_pending_rpc_calls(state, reason) do
+    reply =
+      {:error,
+       Error.worker_error("Worker shutting down", %{
+         worker_id: Map.get(state, :id),
+         reason: reason
+       })}
+
+    state
+    |> Map.get(:pending_rpc_calls, %{})
+    |> Enum.each(fn {_token, pending_call} ->
+      maybe_terminate_task_process(Map.get(pending_call, :task_pid))
+      maybe_demonitor_rpc_call(Map.get(pending_call, :monitor_ref))
+      maybe_reply_pending_call(Map.get(pending_call, :from), reply)
+    end)
+
+    state
+    |> Map.get(:rpc_request_queue, :queue.new())
+    |> :queue.to_list()
+    |> Enum.each(fn request ->
+      maybe_reply_pending_call(Map.get(request, :from), reply)
+    end)
+  end
+
+  defp maybe_terminate_task_process(pid) when is_pid(pid) do
+    Process.exit(pid, :kill)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp maybe_terminate_task_process(_), do: :ok
+
+  defp maybe_demonitor_rpc_call(monitor_ref) when is_reference(monitor_ref) do
+    Process.demonitor(monitor_ref, [:flush])
+    :ok
+  end
+
+  defp maybe_demonitor_rpc_call(_), do: :ok
 
   defp cancel_health_check_timer(nil), do: :ok
 
@@ -966,6 +1002,25 @@ defmodule Snakepit.GRPCWorker do
 
   defp maybe_notify_test_pid(_config, _message), do: :ok
 
+  defp enqueue_periodic_health_check(state) do
+    callback_fun = fn ->
+      result = make_health_check(state)
+
+      case result do
+        {:ok, _health} ->
+          :ok
+
+        {:error, reason} ->
+          SLog.warning(@log_category, "Health check failed", reason: reason, worker_id: state.id)
+      end
+
+      {result, :none}
+    end
+
+    {:noreply, queued_state} = enqueue_async_rpc_call(:none, state, callback_fun)
+    queued_state
+  end
+
   defp maybe_stop_heartbeat_monitor(nil), do: :ok
 
   defp maybe_stop_heartbeat_monitor(pid) when is_pid(pid) do
@@ -1019,7 +1074,9 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp make_health_check(state) do
-    case Client.health(state.connection.channel, inspect(self())) do
+    timeout_ms = Config.grpc_worker_health_check_timeout_ms()
+
+    case Client.health(state.connection.channel, inspect(self()), timeout: timeout_ms) do
       {:ok, health_response} ->
         {:ok, health_response}
 
@@ -1036,6 +1093,13 @@ defmodule Snakepit.GRPCWorker do
     case Client.get_info(state.connection.channel) do
       {:ok, info_response} ->
         {:ok, info_response}
+
+      {:error, reason} ->
+        {:error,
+         Error.grpc_error(:info_failed, "Info call failed", %{
+           worker_id: state.id,
+           reason: reason
+         })}
     end
   end
 
@@ -1263,6 +1327,9 @@ defmodule Snakepit.GRPCWorker do
   defp pending_rpc_monitor?(state, monitor_ref) do
     Map.has_key?(Map.get(state, :pending_rpc_monitors, %{}), monitor_ref)
   end
+
+  defp maybe_reply_pending_call(:none, _reply), do: :ok
+  defp maybe_reply_pending_call(from, reply), do: GenServer.reply(from, reply)
 
   defp update_stats(state, result) do
     stats =

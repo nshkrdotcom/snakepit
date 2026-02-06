@@ -93,10 +93,13 @@ defmodule Snakepit.MultiPoolExecutionTest do
       assert {:ok, result} = Snakepit.execute("ping", %{}, pool_name: :default)
       assert is_map(result)
 
-      # Execute on the broken pool should fail with :pool_not_initialized
+      # Execute on the broken pool should return a structured pool error
       # (since all workers failed to start)
-      assert {:error, :pool_not_initialized} =
+      assert {:error, %Snakepit.Error{category: :pool, details: details}} =
                Snakepit.execute("ping", %{}, pool_name: :broken_pool)
+
+      assert details.reason == :pool_not_initialized
+      assert details.pool_name == :broken_pool
     end
 
     test "list_workers for healthy pool works even when broken pool exists" do

@@ -20,8 +20,7 @@ defmodule Snakepit.GRPC.Client do
 
   def ping(channel, message, opts \\ []) do
     if mock_channel?(channel) do
-      # Mock implementation
-      {:ok, %{message: "Pong: #{message}", server_time: DateTime.utc_now()}}
+      mock_ping(channel, message, opts)
     else
       ClientImpl.ping(channel, message, opts)
     end
@@ -98,17 +97,21 @@ defmodule Snakepit.GRPC.Client do
     execute_tool(channel, "default_session", command, args, timeout: timeout)
   end
 
-  def health(channel, client_id) do
-    ping(channel, "health_check_#{client_id}")
+  def health(channel, client_id, opts \\ []) do
+    ping(channel, "health_check_#{client_id}", opts)
   end
 
-  def get_info(_channel) do
-    # Return mock info for now
-    {:ok,
-     %{
-       version: "1.0.0",
-       capabilities: ["tools", "streaming"]
-     }}
+  def get_info(channel) do
+    if mock_channel?(channel) do
+      mock_info(channel)
+    else
+      # Return mock info for now
+      {:ok,
+       %{
+         version: "1.0.0",
+         capabilities: ["tools", "streaming"]
+       }}
+    end
   end
 
   def get_session(channel, session_id, opts \\ []) do
@@ -134,4 +137,30 @@ defmodule Snakepit.GRPC.Client do
   end
 
   defp mock_channel?(_channel), do: true
+
+  defp mock_ping(%{ping_fun: ping_fun}, message, opts) when is_function(ping_fun, 2) do
+    ping_fun.(message, opts)
+  end
+
+  defp mock_ping(%{ping_fun: ping_fun}, message, _opts) when is_function(ping_fun, 1) do
+    ping_fun.(message)
+  end
+
+  defp mock_ping(_channel, message, _opts) do
+    {:ok, %{message: "Pong: #{message}", server_time: DateTime.utc_now()}}
+  end
+
+  defp mock_info(%{get_info_fun: get_info_fun}) when is_function(get_info_fun, 0) do
+    get_info_fun.()
+  end
+
+  defp mock_info(%{get_info_result: result}), do: result
+
+  defp mock_info(_channel) do
+    {:ok,
+     %{
+       version: "1.0.0",
+       capabilities: ["tools", "streaming"]
+     }}
+  end
 end

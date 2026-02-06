@@ -146,11 +146,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   end
 
   defp safe_start_child(child_spec) do
-    if supervisor_alive?() do
-      DynamicSupervisor.start_child(__MODULE__, child_spec)
-    else
-      {:error, :supervisor_not_running}
-    end
+    DynamicSupervisor.start_child(__MODULE__, child_spec)
   catch
     :exit, {:noproc, _} ->
       {:error, :supervisor_not_running}
@@ -160,11 +156,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   end
 
   defp safe_terminate_child(starter_pid) do
-    if supervisor_alive?() do
-      DynamicSupervisor.terminate_child(__MODULE__, starter_pid)
-    else
-      {:error, :supervisor_not_running}
-    end
+    DynamicSupervisor.terminate_child(__MODULE__, starter_pid)
   catch
     :exit, {:noproc, _} ->
       {:error, :supervisor_not_running}
@@ -174,11 +166,7 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   end
 
   defp safe_which_children do
-    if supervisor_alive?() do
-      {:ok, DynamicSupervisor.which_children(__MODULE__)}
-    else
-      {:error, :supervisor_not_running}
-    end
+    {:ok, DynamicSupervisor.which_children(__MODULE__)}
   catch
     :exit, {:noproc, _} ->
       {:error, :supervisor_not_running}
@@ -188,24 +176,13 @@ defmodule Snakepit.Pool.WorkerSupervisor do
   end
 
   defp safe_count_children do
-    if supervisor_alive?() do
-      {:ok, DynamicSupervisor.count_children(__MODULE__)}
-    else
-      {:error, :supervisor_not_running}
-    end
+    {:ok, DynamicSupervisor.count_children(__MODULE__)}
   catch
     :exit, {:noproc, _} ->
       {:error, :supervisor_not_running}
 
     :exit, reason ->
       {:error, {:supervisor_call_failed, reason}}
-  end
-
-  defp supervisor_alive? do
-    case Process.whereis(__MODULE__) do
-      pid when is_pid(pid) -> Process.alive?(pid)
-      _ -> false
-    end
   end
 
   defp cleanup_retry_interval_ms do

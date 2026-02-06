@@ -65,6 +65,14 @@ defmodule Snakepit.Pool.StateConfigResolutionTest do
     assert state.capacity_strategy == :hybrid
   end
 
+  test "legacy mode state ignores opts[:size] and uses normalized pool_config pool_size" do
+    pool_config = %{name: :legacy_pool, pool_size: 2}
+
+    state = State.build_pool_state([size: 99], pool_config, false)
+
+    assert state.size == 2
+  end
+
   defp restore_env(key, nil), do: Application.delete_env(:snakepit, key)
   defp restore_env(key, value), do: Application.put_env(:snakepit, key, value)
 end

@@ -23,6 +23,7 @@ defmodule Snakepit do
   """
 
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Error
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.Shutdown
   alias Snakepit.ScriptExit
@@ -53,6 +54,7 @@ defmodule Snakepit do
   @spec execute(command(), args(), keyword()) :: {:ok, result()} | {:error, Snakepit.Error.t()}
   def execute(command, args, opts \\ []) do
     Snakepit.Pool.execute(command, args, opts)
+    |> Error.normalize_public_result(%{command: command, pool: opts[:pool] || Snakepit.Pool})
   end
 
   @doc """

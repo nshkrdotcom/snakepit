@@ -169,6 +169,90 @@ defmodule Snakepit.Error do
     }
   end
 
+  @doc """
+  Normalizes public API error tuples to `%Snakepit.Error{}`.
+
+  Internal control-flow atoms/tuples remain unchanged internally and are converted
+  only at public boundaries.
+  """
+  @spec normalize_public_result(:ok | {:ok, term()} | {:error, term()}, map()) ::
+          :ok | {:ok, term()} | {:error, t()}
+  def normalize_public_result(result, metadata \\ %{})
+
+  def normalize_public_result(:ok, _metadata), do: :ok
+  def normalize_public_result({:ok, _} = result, _metadata), do: result
+
+  def normalize_public_result({:error, %__MODULE__{} = error}, _metadata) do
+    {:error, error}
+  end
+
+  def normalize_public_result({:error, reason}, metadata) do
+    {:error, normalize_public_error(reason, metadata)}
+  end
+
+  @spec normalize_public_error(term(), map()) :: t()
+  def normalize_public_error(reason, metadata \\ %{})
+
+  def normalize_public_error(reason, metadata) when reason in [:queue_timeout, :worker_timeout] do
+    timeout_error(timeout_message(reason), Map.put(metadata, :reason, reason))
+  end
+
+  def normalize_public_error(:pool_not_found, metadata) do
+    pool_error("Pool not found", Map.put(metadata, :reason, :pool_not_found))
+  end
+
+  def normalize_public_error({:pool_not_found, pool_name}, metadata) do
+    pool_error(
+      "Pool not found",
+      metadata
+      |> Map.put(:reason, :pool_not_found)
+      |> Map.put(:pool_name, pool_name)
+    )
+  end
+
+  def normalize_public_error(reason, metadata)
+      when reason in [
+             :pool_not_initialized,
+             :pool_saturated,
+             :worker_busy,
+             :session_worker_unavailable
+           ] do
+    pool_error(pool_reason_message(reason), Map.put(metadata, :reason, reason))
+  end
+
+  def normalize_public_error(:no_workers_available, metadata) do
+    pool_error("No workers available", Map.put(metadata, :reason, :no_workers_available))
+  end
+
+  def normalize_public_error({:worker_exit, exit_reason}, metadata) do
+    worker_error(
+      "Worker process exited",
+      metadata
+      |> Map.put(:reason, :worker_exit)
+      |> Map.put(:exit_reason, exit_reason)
+    )
+  end
+
+  def normalize_public_error(reason, metadata) when is_atom(reason) do
+    pool_error("Pool request failed", Map.put(metadata, :reason, reason))
+  end
+
+  def normalize_public_error(reason, metadata) when is_tuple(reason) do
+    pool_error("Pool request failed", Map.put(metadata, :reason, reason))
+  end
+
+  def normalize_public_error(reason, metadata) do
+    worker_error("Request failed", Map.put(metadata, :reason, reason))
+  end
+
+  defp timeout_message(:queue_timeout), do: "Request timed out in queue"
+  defp timeout_message(:worker_timeout), do: "Worker execution timed out"
+
+  defp pool_reason_message(:pool_not_initialized), do: "Pool not initialized"
+  defp pool_reason_message(:pool_saturated), do: "Pool is saturated"
+  defp pool_reason_message(:worker_busy), do: "Preferred worker is busy"
+  defp pool_reason_message(:session_worker_unavailable), do: "Session worker unavailable"
+
   defimpl String.Chars do
     def to_string(%Snakepit.Error{} = error) do
       base = "[#{error.category}] #{error.message}"

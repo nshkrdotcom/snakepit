@@ -222,7 +222,7 @@ defmodule Snakepit.ConfigTest do
   end
 
   describe "get_pool_configs/0" do
-    test "legacy pool_config preserves adapter_env/adapter_args overrides" do
+    test "legacy top-level pool_size wins over pool_config.pool_size while preserving pool_config overrides" do
       prev_pools = Application.get_env(:snakepit, :pools)
       prev_pool_config = Application.get_env(:snakepit, :pool_config)
       prev_pool_size = Application.get_env(:snakepit, :pool_size)
@@ -243,9 +243,47 @@ defmodule Snakepit.ConfigTest do
       })
 
       assert {:ok, [pool_config]} = Config.get_pool_configs()
-      assert pool_config.pool_size == 1
+      assert pool_config.pool_size == 5
       assert pool_config.adapter_env == %{"FOO" => "bar"}
       assert pool_config.adapter_args == ["--adapter", "custom.Adapter"]
+    end
+
+    test "legacy config uses top-level pool_size when only top-level is set" do
+      prev_pools = Application.get_env(:snakepit, :pools)
+      prev_pool_config = Application.get_env(:snakepit, :pool_config)
+      prev_pool_size = Application.get_env(:snakepit, :pool_size)
+
+      on_exit(fn ->
+        restore_env(:pools, prev_pools)
+        restore_env(:pool_config, prev_pool_config)
+        restore_env(:pool_size, prev_pool_size)
+      end)
+
+      Application.delete_env(:snakepit, :pools)
+      Application.delete_env(:snakepit, :pool_config)
+      Application.put_env(:snakepit, :pool_size, 7)
+
+      assert {:ok, [pool_config]} = Config.get_pool_configs()
+      assert pool_config.pool_size == 7
+    end
+
+    test "legacy config uses pool_config.pool_size when top-level pool_size is unset" do
+      prev_pools = Application.get_env(:snakepit, :pools)
+      prev_pool_config = Application.get_env(:snakepit, :pool_config)
+      prev_pool_size = Application.get_env(:snakepit, :pool_size)
+
+      on_exit(fn ->
+        restore_env(:pools, prev_pools)
+        restore_env(:pool_config, prev_pool_config)
+        restore_env(:pool_size, prev_pool_size)
+      end)
+
+      Application.delete_env(:snakepit, :pools)
+      Application.delete_env(:snakepit, :pool_size)
+      Application.put_env(:snakepit, :pool_config, %{pool_size: 3})
+
+      assert {:ok, [pool_config]} = Config.get_pool_configs()
+      assert pool_config.pool_size == 3
     end
 
     test "fails fast on invalid worker profile" do

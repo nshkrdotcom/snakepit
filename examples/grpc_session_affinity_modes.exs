@@ -89,8 +89,9 @@ defmodule AffinityModesExample do
       {"strict_queue", {:ok, _}} ->
         IO.puts("Strict queue waits for preferred worker: #{preferred_worker == final_worker}")
 
-      {"strict_fail_fast", {:error, :worker_busy}} ->
-        IO.puts("Strict fail-fast returns :worker_busy while preferred is busy")
+      {"strict_fail_fast",
+       {:error, %Snakepit.Error{category: :pool, details: %{reason: :worker_busy}}}} ->
+        IO.puts("Strict fail-fast returns pool/worker_busy while preferred is busy")
 
       _ ->
         IO.puts("Unexpected result for #{label}: #{inspect(result)}")

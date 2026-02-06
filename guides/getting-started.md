@@ -280,10 +280,10 @@ case Snakepit.execute("unknown_command", %{}) do
   {:error, %Snakepit.Error{category: :timeout}} ->
     IO.puts("Request timed out")
 
-  {:error, :queue_timeout} ->
+  {:error, %Snakepit.Error{category: :timeout, details: %{reason: :queue_timeout}}} ->
     IO.puts("Request timed out while waiting in queue")
 
-  {:error, :pool_saturated} ->
+  {:error, %Snakepit.Error{category: :pool, details: %{reason: :pool_saturated}}} ->
     IO.puts("Pool is saturated; retry later")
 
   {:error, reason} ->

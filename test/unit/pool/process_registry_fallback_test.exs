@@ -3,6 +3,39 @@ defmodule Snakepit.Pool.ProcessRegistryFallbackTest do
 
   alias Snakepit.Pool.ProcessRegistry
 
+  test "startup cleanup is deferred and does not block ProcessRegistry start_link" do
+    on_exit(fn ->
+      Application.ensure_all_started(:snakepit)
+    end)
+
+    Application.stop(:snakepit)
+    gate_ref = make_ref()
+    parent = self()
+
+    cleanup_runner = fn _dets,
+                        _run_id,
+                        _beam_pid,
+                        _instance,
+                        _allow_missing,
+                        _token,
+                        _allow_token ->
+      send(parent, {:startup_cleanup_started, gate_ref, self()})
+
+      receive do
+        {:release_startup_cleanup, ^gate_ref} -> :ok
+      end
+    end
+
+    started_at = System.monotonic_time(:millisecond)
+    assert {:ok, _registry} = start_supervised({ProcessRegistry, cleanup_runner: cleanup_runner})
+    elapsed_ms = System.monotonic_time(:millisecond) - started_at
+    assert elapsed_ms < 500
+    assert_receive {:startup_cleanup_started, ^gate_ref, cleanup_runner_pid}, 1_000
+    assert is_pid(Process.whereis(ProcessRegistry))
+
+    send(cleanup_runner_pid, {:release_startup_cleanup, gate_ref})
+  end
+
   test "manual cleanup fallback does not block callback mailbox when TaskSupervisor is unavailable" do
     on_exit(fn ->
       Application.ensure_all_started(:snakepit)

@@ -16,6 +16,7 @@ defmodule Snakepit.Pool do
   alias Snakepit.CrashBarrier
   alias Snakepit.Defaults
   alias Snakepit.Error
+  alias Snakepit.Internal.AsyncFallback
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Logger.Redaction
   alias Snakepit.Pool.Dispatcher
@@ -31,6 +32,7 @@ defmodule Snakepit.Pool do
   @log_category :pool
 
   # Top-level state structure
+  @enforce_keys [:pools, :affinity_cache, :default_pool]
   defstruct [
     :pools,
     # Map of pool_name => State
@@ -48,8 +50,6 @@ defmodule Snakepit.Pool do
     # PID for async pool initialization task (for shutdown cancellation)
     init_resource_baseline: nil,
     # Baseline resource snapshot captured at init start
-    async_task_refs: MapSet.new(),
-    # Task refs started via Task.Supervisor.async_nolink for fire-and-forget work
     reconcile_ref: nil,
     # Periodic pool reconciliation timer reference
     await_ready_waiters: [],
@@ -73,6 +73,7 @@ defmodule Snakepit.Pool do
   def execute(command, args, opts \\ []) do
     pool = opts[:pool] || __MODULE__
     timeout = opts[:timeout] || Defaults.pool_request_timeout()
+    error_metadata = build_execute_error_metadata(command, pool, opts)
 
     {call_timeout, opts_with_deadline} =
       case timeout do
@@ -86,6 +87,7 @@ defmodule Snakepit.Pool do
 
     try do
       GenServer.call(pool, {:execute, command, args, opts_with_deadline}, call_timeout)
+      |> Error.normalize_public_result(error_metadata)
     catch
       :exit, {:timeout, _} ->
         {:error,
@@ -93,6 +95,38 @@ defmodule Snakepit.Pool do
            timeout_ms: timeout,
            command: command
          })}
+    end
+  end
+
+  defp build_execute_error_metadata(command, pool, opts) do
+    metadata = %{command: command, pool: pool}
+
+    case resolve_execute_pool_name(opts, pool) do
+      nil -> metadata
+      pool_name -> Map.put(metadata, :pool_name, pool_name)
+    end
+  end
+
+  defp resolve_execute_pool_name(opts, pool) do
+    case Keyword.fetch(opts, :pool_name) do
+      {:ok, pool_name} ->
+        pool_name
+
+      :error ->
+        infer_execute_pool_name_from_pool(pool)
+    end
+  end
+
+  defp infer_execute_pool_name_from_pool(pool) do
+    cond do
+      pool == __MODULE__ ->
+        :default
+
+      is_atom(pool) and not module_atom?(pool) ->
+        pool
+
+      true ->
+        nil
     end
   end
 
@@ -224,8 +258,14 @@ defmodule Snakepit.Pool do
             checkin_worker(pool, worker_id)
           end
 
-        emit_stream_telemetry(pool_identifier, worker_id, command, result, start_time)
-        result
+        normalized_result =
+          Error.normalize_public_result(
+            result,
+            %{command: command, pool: pool_identifier, worker_id: worker_id}
+          )
+
+        emit_stream_telemetry(pool_identifier, worker_id, command, normalized_result, start_time)
+        normalized_result
 
       {:error, reason} ->
         SLog.error(
@@ -233,7 +273,10 @@ defmodule Snakepit.Pool do
           "[Pool] Failed to checkout worker for streaming: #{inspect(reason)}"
         )
 
-        {:error, reason}
+        Error.normalize_public_result(
+          {:error, reason},
+          %{command: command, pool: pool_identifier}
+        )
     end
   end
 
@@ -1017,11 +1060,9 @@ defmodule Snakepit.Pool do
   end
 
   defp reconcile_pools(state) do
-    if supervisor_alive?() do
-      Enum.each(state.pools, fn {pool_name, pool_state} ->
-        maybe_spawn_replacements(pool_name, pool_state)
-      end)
-    end
+    Enum.each(state.pools, fn {pool_name, pool_state} ->
+      maybe_spawn_replacements(pool_name, pool_state)
+    end)
 
     state
   end
@@ -1083,14 +1124,6 @@ defmodule Snakepit.Pool do
   defp desired_worker_count(pool_state) do
     max_workers = Config.pool_max_workers(pool_state.pool_config)
     min(pool_state.size, max_workers)
-  end
-
-  @spec supervisor_alive?() :: boolean()
-  defp supervisor_alive? do
-    case Process.whereis(Snakepit.Pool.WorkerSupervisor) do
-      nil -> false
-      pid -> Process.alive?(pid)
-    end
   end
 
   defp dispatcher_context do
@@ -1787,7 +1820,7 @@ defmodule Snakepit.Pool do
           error: error
         )
 
-        _ = spawn_monitor(fn -> runner.() end)
+        _ = AsyncFallback.start_monitored_fire_and_forget(runner)
         :ok
     catch
       :exit, reason ->
@@ -1797,7 +1830,7 @@ defmodule Snakepit.Pool do
           reason: reason
         )
 
-        _ = spawn_monitor(fn -> runner.() end)
+        _ = AsyncFallback.start_monitored_fire_and_forget(runner)
         :ok
     end
   end

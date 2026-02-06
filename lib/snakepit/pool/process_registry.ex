@@ -14,6 +14,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
   use GenServer
   alias Snakepit.Config
   alias Snakepit.Defaults
+  alias Snakepit.Internal.AsyncFallback
   alias Snakepit.Logger, as: SLog
 
   @table_name :snakepit_pool_process_registry
@@ -23,6 +24,17 @@ defmodule Snakepit.Pool.ProcessRegistry do
   @post_start_cleanup_attempts 3
   @post_start_cleanup_delay_ms 500
 
+  @enforce_keys [
+    :table,
+    :dets_table,
+    :beam_run_id,
+    :beam_os_pid,
+    :instance_name,
+    :allow_missing_instance,
+    :instance_token,
+    :allow_missing_token,
+    :cleanup_task_runner
+  ]
   defstruct [
     :table,
     :dets_table,
@@ -223,6 +235,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   @impl true
   def init(opts) do
+    Process.flag(:trap_exit, true)
+
     # Generate short 7-character run ID for this BEAM instance
     # This will be embedded in Python CLI commands for reliable tracking
     run_id = Snakepit.RunID.generate()
@@ -314,23 +328,8 @@ defmodule Snakepit.Pool.ProcessRegistry do
       "Snakepit Pool Process Registry started with BEAM run ID: #{beam_run_id}, BEAM OS PID: #{beam_os_pid}"
     )
 
-    # Perform startup cleanup of orphaned processes FIRST
-    cleanup_orphaned_processes(
-      dets_table,
-      beam_run_id,
-      beam_os_pid,
-      instance_name,
-      allow_missing_instance,
-      instance_token,
-      allow_missing_token
-    )
-
     # Load current run's processes into ETS
     load_current_run_processes(dets_table, table, beam_run_id)
-
-    # Schedule periodic cleanup
-    schedule_cleanup()
-    schedule_post_start_cleanup(@post_start_cleanup_attempts)
 
     {:ok,
      %__MODULE__{
@@ -350,7 +349,25 @@ defmodule Snakepit.Pool.ProcessRegistry do
        cleanup_task_kind: nil,
        cleanup_queue: [],
        manual_cleanup_waiters: []
-     }}
+     }, {:continue, :startup_cleanup}}
+  end
+
+  @impl true
+  def handle_continue(:startup_cleanup, state) do
+    cleanup_orphaned_processes(
+      state.dets_table,
+      state.beam_run_id,
+      state.beam_os_pid,
+      state.instance_name,
+      state.allow_missing_instance,
+      state.instance_token,
+      state.allow_missing_token
+    )
+
+    schedule_cleanup()
+    schedule_post_start_cleanup(@post_start_cleanup_attempts)
+
+    {:noreply, state}
   end
 
   @impl true
@@ -816,10 +833,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
           error: error
         )
 
-        {pid, ref} =
-          spawn_monitor(fn ->
-            run_cleanup(state)
-          end)
+        {pid, ref} = AsyncFallback.start_monitored_fire_and_forget(fn -> run_cleanup(state) end)
 
         %{state | cleanup_task_pid: pid, cleanup_task_ref: ref, cleanup_task_kind: kind}
     catch
@@ -830,10 +844,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
           reason: reason
         )
 
-        {pid, ref} =
-          spawn_monitor(fn ->
-            run_cleanup(state)
-          end)
+        {pid, ref} = AsyncFallback.start_monitored_fire_and_forget(fn -> run_cleanup(state) end)
 
         %{state | cleanup_task_pid: pid, cleanup_task_ref: ref, cleanup_task_kind: kind}
     end

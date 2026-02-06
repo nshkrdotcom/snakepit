@@ -138,7 +138,7 @@ rpc_timeout = total_timeout - worker_call_margin_ms - pool_reply_margin_ms
 - Pool margin: -200ms
 - **RPC timeout: 58,800ms**
 
-This ensures inner timeouts expire *before* outer GenServer.call timeouts, reducing timeout-related exits and returning normal error tuples (structured `Snakepit.Error` where available, atom reasons on legacy pool paths).
+This ensures inner timeouts expire *before* outer GenServer.call timeouts, reducing timeout-related exits and returning structured `Snakepit.Error` tuples at public API boundaries.
 
 ### Deadline Propagation
 
@@ -212,6 +212,7 @@ config :snakepit,
 | `pool_await_ready_timeout` | 15,000ms | Pool | Wait for pool initialization |
 | `grpc_worker_execute_timeout` | Profile-derived | Worker | GenServer.call to GRPCWorker |
 | `grpc_worker_stream_timeout` | 300,000ms | Worker | Streaming GenServer.call |
+| `grpc_worker_health_check_timeout_ms` | 5,000ms | Worker | Periodic health-check gRPC timeout |
 | `grpc_command_timeout` | Profile-derived | Adapter | gRPC call timeout |
 | `grpc_batch_inference_timeout` | 300,000ms | Adapter | Batch inference operations |
 | `grpc_large_dataset_timeout` | 600,000ms | Adapter | Large dataset processing |

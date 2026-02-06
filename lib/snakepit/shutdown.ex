@@ -14,23 +14,28 @@ defmodule Snakepit.Shutdown do
   @telemetry_cleanup [:snakepit, :script, :shutdown, :cleanup]
   @telemetry_exit [:snakepit, :script, :shutdown, :exit]
   @shutdown_flag_key {__MODULE__, :in_progress}
+  @type shutdown_marker :: false | {pid(), reference()} | true
 
   @type cleanup_result :: :ok | :timeout | :skipped | {:error, term()}
 
   @doc false
   @spec in_progress?() :: boolean()
   def in_progress? do
-    :persistent_term.get(@shutdown_flag_key, false) or system_stopping?()
+    shutdown_mark_active?() or system_stopping?()
   end
 
   @doc false
   def mark_in_progress do
-    :persistent_term.put(@shutdown_flag_key, true)
+    marker = {self(), make_ref()}
+    :persistent_term.put(@shutdown_flag_key, marker)
+    spawn_shutdown_marker_watcher(marker)
+    :ok
   end
 
   @doc false
   def clear_in_progress do
     :persistent_term.put(@shutdown_flag_key, false)
+    :ok
   end
 
   @spec run(keyword()) :: :ok
@@ -214,7 +219,7 @@ defmodule Snakepit.Shutdown do
   end
 
   defp resolve_supervisor_pid(pid) when is_pid(pid) do
-    if Process.alive?(pid), do: pid, else: nil
+    pid
   end
 
   defp resolve_supervisor_pid(name) when is_atom(name), do: Process.whereis(name)
@@ -222,4 +227,44 @@ defmodule Snakepit.Shutdown do
 
   defp invoke_stop_fun(stop_fun, app) when is_function(stop_fun, 1), do: stop_fun.(app)
   defp invoke_stop_fun(stop_fun, _app) when is_function(stop_fun, 0), do: stop_fun.()
+
+  defp shutdown_mark_active? do
+    case :persistent_term.get(@shutdown_flag_key, false) do
+      false ->
+        false
+
+      # Backward compatibility for legacy boolean markers.
+      true ->
+        false
+
+      {owner_pid, _token} ->
+        is_pid(owner_pid) and Process.alive?(owner_pid)
+
+      _other ->
+        false
+    end
+  end
+
+  defp spawn_shutdown_marker_watcher({owner_pid, token} = marker) do
+    spawn(fn ->
+      ref = Process.monitor(owner_pid)
+
+      receive do
+        {:DOWN, ^ref, :process, ^owner_pid, _reason} ->
+          maybe_clear_stale_marker(marker)
+      end
+    end)
+
+    token
+  end
+
+  defp maybe_clear_stale_marker(marker) do
+    case :persistent_term.get(@shutdown_flag_key, false) do
+      ^marker ->
+        :persistent_term.put(@shutdown_flag_key, false)
+
+      _ ->
+        :ok
+    end
+  end
 end

@@ -14,9 +14,12 @@ defmodule Snakepit.Pool.ShutdownTaskCleanupTest do
 
     task_pid = task.pid
     ref = Process.monitor(task.pid)
+    affinity_cache = :ets.new(:pool_shutdown_task_cleanup_cache, [:set, :private])
 
     state = %Pool{
       pools: %{},
+      affinity_cache: affinity_cache,
+      default_pool: :default,
       init_task_ref: task.ref,
       init_task_pid: task.pid
     }
