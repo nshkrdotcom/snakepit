@@ -2,11 +2,22 @@ defmodule Snakepit.Telemetry.Handlers.Metrics do
   @moduledoc """
   Telemetry metrics definitions for ML-related events.
 
+  > #### Legacy Optional Module {: .warning}
+  >
+  > `Snakepit` does not call this module internally. It remains available for
+  > compatibility and may be removed in `v0.16.0` or later.
+  >
+  > Prefer host-application metrics definitions and exporter integration.
+
   Provides `telemetry_metrics` compatible metric definitions for
   hardware detection, circuit breaker, GPU profiling, and error events.
   """
 
+  alias Snakepit.Internal.Deprecation
   import Telemetry.Metrics
+
+  @legacy_replacement "Define metrics in the host application around emitted telemetry events"
+  @legacy_remove_after "v0.16.0"
 
   @doc """
   Returns all ML-related telemetry metrics definitions.
@@ -16,6 +27,8 @@ defmodule Snakepit.Telemetry.Handlers.Metrics do
   """
   @spec definitions() :: [Telemetry.Metrics.t()]
   def definitions do
+    mark_legacy_usage()
+
     hardware_metrics() ++
       circuit_breaker_metrics() ++
       gpu_profiler_metrics() ++
@@ -31,6 +44,7 @@ defmodule Snakepit.Telemetry.Handlers.Metrics do
   """
   @spec prometheus_definitions() :: [Telemetry.Metrics.t()]
   def prometheus_definitions do
+    mark_legacy_usage()
     definitions()
   end
 
@@ -246,5 +260,12 @@ defmodule Snakepit.Telemetry.Handlers.Metrics do
         description: "Retry backoff delay in milliseconds"
       )
     ]
+  end
+
+  defp mark_legacy_usage do
+    Deprecation.emit_legacy_module_used(__MODULE__,
+      replacement: @legacy_replacement,
+      remove_after: @legacy_remove_after
+    )
   end
 end

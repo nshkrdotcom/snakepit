@@ -83,7 +83,7 @@ defmodule Snakepit.PoolThroughputTest do
     test "measure request latency" do
       # Warm up
       for _ <- 1..10 do
-        Snakepit.execute("ping", %{}, timeout: 5_000)
+        assert {:ok, _} = Snakepit.execute("ping", %{}, timeout: 5_000)
       end
 
       # Measure latencies
@@ -159,13 +159,22 @@ defmodule Snakepit.PoolThroughputTest do
         for i <- 1..slow_request_count do
           Task.async(fn ->
             start = System.monotonic_time(:millisecond)
-            result = Snakepit.execute("slow_operation", %{delay: delay, id: i}, timeout: 10_000)
+
+            result =
+              Snakepit.execute(
+                "slow_operation",
+                %{"delay" => delay, "id" => i},
+                timeout: 10_000
+              )
+
             wait_time = System.monotonic_time(:millisecond) - start
             {result, wait_time}
           end)
         end
 
       results = Task.await_many(tasks, 20_000)
+      assert Enum.all?(results, fn {result, _wait_time} -> match?({:ok, _}, result) end)
+
       total_time = System.monotonic_time(:millisecond) - start_time
 
       # Analyze wait times

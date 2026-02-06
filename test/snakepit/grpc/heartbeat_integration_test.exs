@@ -4,6 +4,31 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
   alias Snakepit.GRPCWorker
   alias Snakepit.TestAdapters.MockGRPCAdapter
 
+  defmodule UnsupportedHeartbeatAdapter do
+    @moduledoc false
+    @behaviour Snakepit.Adapter
+
+    @impl true
+    def executable_path, do: Snakepit.TestAdapters.MockGRPCAdapter.executable_path()
+
+    @impl true
+    def script_path, do: ""
+
+    @impl true
+    def script_args, do: []
+
+    def get_port, do: Snakepit.TestHelpers.allocate_test_port()
+
+    # Intentionally not a real gRPC channel and no grpc_heartbeat/2,3 callback.
+    def init_grpc_connection(port), do: {:ok, %{channel: make_ref(), port: port}}
+
+    def uses_grpc?, do: true
+
+    def grpc_execute(_conn, _session_id, _command, _args, _timeout, _opts \\ []) do
+      {:ok, %{"status" => "ok"}}
+    end
+  end
+
   defmodule PoolStub do
     use GenServer
 
@@ -177,6 +202,38 @@ defmodule Snakepit.GRPC.HeartbeatIntegrationTest do
 
     assert_receive {:heartbeat_monitor_started, ^worker_id, monitor_pid} when is_pid(monitor_pid),
                    2_000
+
+    :ok = GenServer.stop(worker)
+  end
+
+  test "skips heartbeat monitor when adapter has no heartbeat transport", %{pool: pool_pid} do
+    test_pid = self()
+
+    worker_id = "default_worker_hb_no_transport_#{System.unique_integer([:positive])}"
+
+    opts = [
+      id: worker_id,
+      adapter: UnsupportedHeartbeatAdapter,
+      elixir_address: "localhost:0",
+      pool_name: pool_pid,
+      worker_config: %{
+        heartbeat: %{
+          enabled: true,
+          ping_interval_ms: 20,
+          timeout_ms: 40,
+          max_missed_heartbeats: 1,
+          initial_delay_ms: 0,
+          test_pid: test_pid
+        }
+      }
+    ]
+
+    {:ok, worker} = GRPCWorker.start_link(opts)
+    worker_ref = Process.monitor(worker)
+
+    refute_receive {:heartbeat_monitor_started, ^worker_id, _monitor_pid}, 300
+    refute_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 300
+    assert Process.alive?(worker)
 
     :ok = GenServer.stop(worker)
   end

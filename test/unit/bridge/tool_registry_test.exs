@@ -71,6 +71,24 @@ defmodule ToolRegistryTest do
     assert {:error, {:duplicate_tool, "dup"}} = ToolRegistry.register_tools(session_id, specs)
   end
 
+  test "batch registration keeps prior entries when duplicate is already registered" do
+    session_id = "sess_batch_existing_dup_#{System.unique_integer([:positive])}"
+    assert :ok = ToolRegistry.register_python_tool(session_id, "taken", "worker_existing", %{})
+
+    specs = [
+      %{name: "new_a", description: "", parameters: [], metadata: %{}, worker_id: "worker_a"},
+      %{name: "taken", description: "", parameters: [], metadata: %{}, worker_id: "worker_b"},
+      %{name: "new_b", description: "", parameters: [], metadata: %{}, worker_id: "worker_c"}
+    ]
+
+    assert {:error, {:duplicate_tool, "taken"}} = ToolRegistry.register_tools(session_id, specs)
+
+    assert ["taken"] ==
+             ToolRegistry.list_tools(session_id)
+             |> Enum.map(& &1.name)
+             |> Enum.sort()
+  end
+
   test "rejects direct ETS writes from external processes" do
     assert_raise ArgumentError, fn ->
       :ets.insert(@table_name, {{"rogue_session", "bad_tool"}, %{type: :remote}})

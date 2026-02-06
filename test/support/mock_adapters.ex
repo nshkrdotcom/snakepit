@@ -41,14 +41,26 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
   def get_port, do: Snakepit.TestHelpers.allocate_test_port()
 
   def init_grpc_connection(port) do
-    # Simulate successful connection
-    {:ok, %{channel: make_ref(), port: port}}
+    # Simulate successful connection with explicit mock channel metadata.
+    # This keeps behavior aligned with Snakepit.GRPC.Client's mock-channel contract.
+    {:ok,
+     %{
+       channel: %{
+         mock: true,
+         adapter: __MODULE__,
+         port: port
+       },
+       port: port
+     }}
   end
 
   def grpc_execute(_conn, _session_id, command, args, _timeout, _opts \\ []) do
     # Simulate command execution
     execute_command(command, args)
   end
+
+  def grpc_heartbeat(_connection, _session_id), do: {:ok, %{success: true}}
+  def grpc_heartbeat(_connection, _session_id, _config), do: {:ok, %{success: true}}
 
   defp execute_command("ping", _args) do
     {:ok, %{"status" => "pong", "worker_id" => "test_worker"}}
@@ -63,7 +75,7 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
   end
 
   defp execute_command("slow_operation", args) do
-    delay = args["delay"] || 100
+    delay = Map.get(args, "delay", Map.get(args, :delay, 100))
 
     receive do
     after

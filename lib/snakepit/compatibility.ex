@@ -1,13 +1,26 @@
 defmodule Snakepit.Compatibility do
   @moduledoc """
   Thread-safety compatibility matrix for common Python libraries.
+
+  > #### Legacy Optional Module {: .warning}
+  >
+  > `Snakepit` does not call this module internally. It remains available for
+  > compatibility and may be removed in `v0.16.0` or later.
+  >
+  > Prefer explicit worker-profile and adapter-level thread-safety
+  > configuration in your host application.
   """
+
+  alias Snakepit.Internal.Deprecation
 
   @type thread_safety :: true | false | :conditional
   @type library_info :: %{
           thread_safe: thread_safety(),
           notes: String.t()
         }
+
+  @legacy_replacement "Use worker profile and adapter-level thread-safety settings"
+  @legacy_remove_after "v0.16.0"
 
   @libraries %{
     "numpy" => %{thread_safe: true, notes: "Releases GIL during computation"},
@@ -42,6 +55,8 @@ defmodule Snakepit.Compatibility do
   @spec check(String.t() | atom(), :thread | :process) ::
           {:ok, String.t()} | {:warning, String.t()} | {:error, String.t()}
   def check(library, profile) when profile in [:thread, :process] do
+    mark_legacy_usage()
+
     name = normalize_name(library)
 
     case Map.get(@libraries, name) do
@@ -66,29 +81,43 @@ defmodule Snakepit.Compatibility do
 
   @spec get_library_info(String.t() | atom()) :: library_info() | nil
   def get_library_info(library) do
+    mark_legacy_usage()
+
     name = normalize_name(library)
     Map.get(@libraries, name)
   end
 
   @spec list_all(:thread_safe | :thread_unsafe | :conditional | :all) :: [String.t()]
   def list_all(:thread_safe) do
+    mark_legacy_usage()
     select_names(fn {_name, info} -> info.thread_safe == true end)
   end
 
   def list_all(:thread_unsafe) do
+    mark_legacy_usage()
     select_names(fn {_name, info} -> info.thread_safe == false end)
   end
 
   def list_all(:conditional) do
+    mark_legacy_usage()
     select_names(fn {_name, info} -> info.thread_safe == :conditional end)
   end
 
-  def list_all(:all), do: Map.keys(@libraries)
-  def list_all(_), do: []
+  def list_all(:all) do
+    mark_legacy_usage()
+    Map.keys(@libraries)
+  end
+
+  def list_all(_) do
+    mark_legacy_usage()
+    []
+  end
 
   @spec generate_report([String.t() | atom()], :thread | :process) ::
           {:ok, map()} | {:error, term()}
   def generate_report(libraries, profile) when is_list(libraries) do
+    mark_legacy_usage()
+
     report =
       Enum.reduce(libraries, %{safe: [], unsafe: [], conditional: [], unknown: []}, fn library,
                                                                                        acc ->
@@ -138,5 +167,12 @@ defmodule Snakepit.Compatibility do
     |> Map.update!(:unsafe, &Enum.reverse/1)
     |> Map.update!(:conditional, &Enum.reverse/1)
     |> Map.update!(:unknown, &Enum.reverse/1)
+  end
+
+  defp mark_legacy_usage do
+    Deprecation.emit_legacy_module_used(__MODULE__,
+      replacement: @legacy_replacement,
+      remove_after: @legacy_remove_after
+    )
   end
 end

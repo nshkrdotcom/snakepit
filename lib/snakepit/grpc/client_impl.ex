@@ -160,6 +160,17 @@ defmodule Snakepit.GRPC.ClientImpl do
     end
   end
 
+  # Temporary static info response retained for compatibility with existing
+  # GRPCWorker info-path expectations while the bridge protocol has no
+  # dedicated get-info RPC.
+  def get_info(_channel) do
+    {:ok,
+     %{
+       version: "1.0.0",
+       capabilities: ["tools", "streaming"]
+     }}
+  end
+
   def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     binary_params = Keyword.get(opts, :binary_parameters, %{})
 

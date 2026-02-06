@@ -421,14 +421,22 @@ defmodule Snakepit.Defaults do
     Application.get_env(:snakepit, :pool_startup_batch_delay_ms, 500)
   end
 
-  @spec pool_reconcile_interval_ms() :: non_neg_integer()
-  def pool_reconcile_interval_ms do
-    Application.get_env(:snakepit, :pool_reconcile_interval_ms, 1_000)
-  end
+  @generated_getters [
+    {:pool_reconcile_interval_ms, :pool_reconcile_interval_ms, 1_000,
+     quote(do: non_neg_integer())},
+    {:pool_reconcile_batch_size, :pool_reconcile_batch_size, 2, quote(do: pos_integer())},
+    {:worker_starter_max_restarts, :worker_starter_max_restarts, 3, quote(do: non_neg_integer())},
+    {:worker_starter_max_seconds, :worker_starter_max_seconds, 5, quote(do: pos_integer())},
+    {:worker_supervisor_max_restarts, :worker_supervisor_max_restarts, 3,
+     quote(do: non_neg_integer())},
+    {:worker_supervisor_max_seconds, :worker_supervisor_max_seconds, 5, quote(do: pos_integer())}
+  ]
 
-  @spec pool_reconcile_batch_size() :: pos_integer()
-  def pool_reconcile_batch_size do
-    Application.get_env(:snakepit, :pool_reconcile_batch_size, 2)
+  for {function_name, config_key, default_value, return_type} <- @generated_getters do
+    @spec unquote(function_name)() :: unquote(return_type)
+    def unquote(function_name)() do
+      Application.get_env(:snakepit, unquote(config_key), unquote(default_value))
+    end
   end
 
   # ============================================================================
@@ -786,26 +794,6 @@ defmodule Snakepit.Defaults do
   @spec crash_barrier_backoff_ms() :: [pos_integer()]
   def crash_barrier_backoff_ms do
     Application.get_env(:snakepit, :crash_barrier_backoff_ms, [50, 100, 200])
-  end
-
-  @spec worker_starter_max_restarts() :: non_neg_integer()
-  def worker_starter_max_restarts do
-    Application.get_env(:snakepit, :worker_starter_max_restarts, 3)
-  end
-
-  @spec worker_starter_max_seconds() :: pos_integer()
-  def worker_starter_max_seconds do
-    Application.get_env(:snakepit, :worker_starter_max_seconds, 5)
-  end
-
-  @spec worker_supervisor_max_restarts() :: non_neg_integer()
-  def worker_supervisor_max_restarts do
-    Application.get_env(:snakepit, :worker_supervisor_max_restarts, 3)
-  end
-
-  @spec worker_supervisor_max_seconds() :: pos_integer()
-  def worker_supervisor_max_seconds do
-    Application.get_env(:snakepit, :worker_supervisor_max_seconds, 5)
   end
 
   @doc """

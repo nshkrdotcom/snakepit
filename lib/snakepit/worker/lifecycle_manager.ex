@@ -563,28 +563,11 @@ defmodule Snakepit.Worker.LifecycleManager do
   end
 
   defp start_nolink_task(fun) when is_function(fun, 0) do
-    try do
-      task = Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fun)
-      {:ok, task.pid, task.ref}
-    rescue
-      error ->
-        SLog.warning(@log_category, "TaskSupervisor unavailable; using monitored fallback task",
-          error: error
-        )
-
-        start_monitored_fallback_task(fun)
-    catch
-      :exit, reason ->
-        SLog.warning(@log_category, "TaskSupervisor exited; using monitored fallback task",
-          reason: reason
-        )
-
-        start_monitored_fallback_task(fun)
-    end
-  end
-
-  defp start_monitored_fallback_task(fun) when is_function(fun, 0) do
-    AsyncFallback.start_monitored(fun)
+    AsyncFallback.start_nolink_with_fallback(
+      Snakepit.TaskSupervisor,
+      fun,
+      on_fallback: &log_lifecycle_nolink_fallback/1
+    )
   end
 
   defp pop_worker(workers, worker_id) do
@@ -806,30 +789,39 @@ defmodule Snakepit.Worker.LifecycleManager do
   defp start_health_check_task(worker_id, worker_state, timeout_ms) do
     runner = fn -> run_health_check_with_timeout(worker_id, worker_state, timeout_ms) end
 
-    try do
-      _ = Task.Supervisor.start_child(Snakepit.TaskSupervisor, runner)
-      :ok
-    rescue
-      error ->
-        SLog.warning(
-          @log_category,
-          "TaskSupervisor unavailable for health check task; using monitored fallback",
-          error: error
-        )
+    AsyncFallback.start_child_with_fallback(
+      Snakepit.TaskSupervisor,
+      runner,
+      on_fallback: &log_health_check_start_fallback/1
+    )
+  end
 
-        _ = AsyncFallback.start_monitored_fire_and_forget(runner)
-        :ok
-    catch
-      :exit, reason ->
-        SLog.warning(
-          @log_category,
-          "TaskSupervisor exited during health check task start; using monitored fallback",
-          reason: reason
-        )
+  defp log_lifecycle_nolink_fallback({:rescue, error}) do
+    SLog.warning(@log_category, "TaskSupervisor unavailable; using monitored fallback task",
+      error: error
+    )
+  end
 
-        _ = AsyncFallback.start_monitored_fire_and_forget(runner)
-        :ok
-    end
+  defp log_lifecycle_nolink_fallback({:exit, reason}) do
+    SLog.warning(@log_category, "TaskSupervisor exited; using monitored fallback task",
+      reason: reason
+    )
+  end
+
+  defp log_health_check_start_fallback({:rescue, error}) do
+    SLog.warning(
+      @log_category,
+      "TaskSupervisor unavailable for health check task; using monitored fallback",
+      error: error
+    )
+  end
+
+  defp log_health_check_start_fallback({:exit, reason}) do
+    SLog.warning(
+      @log_category,
+      "TaskSupervisor exited during health check task start; using monitored fallback",
+      reason: reason
+    )
   end
 
   defp run_health_check_with_timeout(worker_id, worker_state, timeout_ms) do

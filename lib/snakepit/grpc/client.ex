@@ -4,11 +4,9 @@ defmodule Snakepit.GRPC.Client do
   Delegates to the real implementation when available.
   """
 
-  require Logger
   alias Snakepit.Defaults
+  alias Snakepit.GRPC.ClientMock
   alias Snakepit.GRPC.ClientImpl
-  # Uncomment when logging is added to this module:
-  # alias Snakepit.Logger, as: SLog
 
   def connect(port) when is_integer(port) do
     connect("localhost:#{port}")
@@ -20,7 +18,7 @@ defmodule Snakepit.GRPC.Client do
 
   def ping(channel, message, opts \\ []) do
     if mock_channel?(channel) do
-      mock_ping(channel, message, opts)
+      ClientMock.ping(channel, message, opts)
     else
       ClientImpl.ping(channel, message, opts)
     end
@@ -28,8 +26,7 @@ defmodule Snakepit.GRPC.Client do
 
   def initialize_session(channel, session_id, config \\ %{}, opts \\ []) do
     if mock_channel?(channel) do
-      # Mock implementation
-      {:ok, %{success: true, available_tools: %{}}}
+      ClientMock.initialize_session(channel, session_id, config, opts)
     else
       ClientImpl.initialize_session(channel, session_id, config, opts)
     end
@@ -37,8 +34,7 @@ defmodule Snakepit.GRPC.Client do
 
   def cleanup_session(channel, session_id, force \\ false, opts \\ []) do
     if mock_channel?(channel) do
-      # Mock implementation
-      {:ok, %{success: true, resources_cleaned: 2}}
+      ClientMock.cleanup_session(channel, session_id, force, opts)
     else
       ClientImpl.cleanup_session(channel, session_id, force, opts)
     end
@@ -46,11 +42,7 @@ defmodule Snakepit.GRPC.Client do
 
   def execute_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     if mock_channel?(channel) do
-      if test_pid = Map.get(channel, :test_pid) do
-        send(test_pid, {:grpc_client_execute_tool, session_id, tool_name, parameters, opts})
-      end
-
-      {:ok, %{success: true, result: %{}, error_message: ""}}
+      ClientMock.execute_tool(channel, session_id, tool_name, parameters, opts)
     else
       ClientImpl.execute_tool(channel, session_id, tool_name, parameters, opts)
     end
@@ -58,27 +50,7 @@ defmodule Snakepit.GRPC.Client do
 
   def execute_streaming_tool(channel, session_id, tool_name, parameters, opts \\ []) do
     if mock_channel?(channel) do
-      if test_pid = Map.get(channel, :test_pid) do
-        send(
-          test_pid,
-          {:grpc_client_execute_streaming_tool, session_id, tool_name, parameters, opts}
-        )
-      end
-
-      # Mock implementation for testing - return a simple stream
-      stream =
-        Stream.iterate(1, &(&1 + 1))
-        |> Stream.take(5)
-        |> Stream.map(fn i ->
-          {:ok,
-           %{
-             chunk_id: "mock-#{i}",
-             data: Jason.encode!(%{"step" => i, "total" => 5}),
-             is_final: i == 5
-           }}
-        end)
-
-      {:ok, stream}
+      ClientMock.execute_streaming_tool(channel, session_id, tool_name, parameters, opts)
     else
       ClientImpl.execute_streaming_tool(
         channel,
@@ -103,21 +75,15 @@ defmodule Snakepit.GRPC.Client do
 
   def get_info(channel) do
     if mock_channel?(channel) do
-      mock_info(channel)
+      ClientMock.get_info(channel)
     else
-      # Return mock info for now
-      {:ok,
-       %{
-         version: "1.0.0",
-         capabilities: ["tools", "streaming"]
-       }}
+      ClientImpl.get_info(channel)
     end
   end
 
   def get_session(channel, session_id, opts \\ []) do
     if mock_channel?(channel) do
-      # Mock implementation
-      {:ok, %{session: %{id: session_id, active: true}}}
+      ClientMock.get_session(channel, session_id, opts)
     else
       ClientImpl.get_session(channel, session_id, opts)
     end
@@ -125,8 +91,7 @@ defmodule Snakepit.GRPC.Client do
 
   def heartbeat(channel, session_id, opts \\ []) do
     if mock_channel?(channel) do
-      # Mock implementation
-      {:ok, %{success: true}}
+      ClientMock.heartbeat(channel, session_id, opts)
     else
       ClientImpl.heartbeat(channel, session_id, opts)
     end
@@ -136,31 +101,5 @@ defmodule Snakepit.GRPC.Client do
     Map.get(channel, :mock, false)
   end
 
-  defp mock_channel?(_channel), do: true
-
-  defp mock_ping(%{ping_fun: ping_fun}, message, opts) when is_function(ping_fun, 2) do
-    ping_fun.(message, opts)
-  end
-
-  defp mock_ping(%{ping_fun: ping_fun}, message, _opts) when is_function(ping_fun, 1) do
-    ping_fun.(message)
-  end
-
-  defp mock_ping(_channel, message, _opts) do
-    {:ok, %{message: "Pong: #{message}", server_time: DateTime.utc_now()}}
-  end
-
-  defp mock_info(%{get_info_fun: get_info_fun}) when is_function(get_info_fun, 0) do
-    get_info_fun.()
-  end
-
-  defp mock_info(%{get_info_result: result}), do: result
-
-  defp mock_info(_channel) do
-    {:ok,
-     %{
-       version: "1.0.0",
-       capabilities: ["tools", "streaming"]
-     }}
-  end
+  defp mock_channel?(_channel), do: false
 end

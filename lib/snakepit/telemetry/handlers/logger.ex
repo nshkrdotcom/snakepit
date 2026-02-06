@@ -2,21 +2,33 @@ defmodule Snakepit.Telemetry.Handlers.Logger do
   @moduledoc """
   Telemetry handler that logs ML-related events.
 
+  > #### Legacy Optional Module {: .warning}
+  >
+  > `Snakepit` does not call this module internally. It remains available for
+  > compatibility and may be removed in `v0.16.0` or later.
+  >
+  > Prefer host-application telemetry handlers tailored to deployment needs.
+
   Provides structured logging for hardware detection, circuit breaker
   state changes, GPU profiling, and error events.
   """
 
+  alias Snakepit.Internal.Deprecation
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Telemetry.Events
 
   @handler_id "snakepit-ml-logger"
   @log_category :telemetry
+  @legacy_replacement "Use host-application :telemetry handlers and logging pipeline"
+  @legacy_remove_after "v0.16.0"
 
   @doc """
   Attaches the logger handler to all ML events.
   """
   @spec attach() :: :ok
   def attach do
+    mark_legacy_usage()
+
     # Detach first to allow re-attachment
     detach()
 
@@ -37,6 +49,7 @@ defmodule Snakepit.Telemetry.Handlers.Logger do
   """
   @spec detach() :: :ok
   def detach do
+    mark_legacy_usage()
     :telemetry.detach(@handler_id)
     :ok
   rescue
@@ -209,5 +222,12 @@ defmodule Snakepit.Telemetry.Handlers.Logger do
 
   defp log_level do
     Application.get_env(:snakepit, :telemetry_log_level, :debug)
+  end
+
+  defp mark_legacy_usage do
+    Deprecation.emit_legacy_module_used(__MODULE__,
+      replacement: @legacy_replacement,
+      remove_after: @legacy_remove_after
+    )
   end
 end

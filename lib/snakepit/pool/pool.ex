@@ -1228,8 +1228,6 @@ defmodule Snakepit.Pool do
     %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}
   end
 
-  # REMOVE the wait_for_ports_to_exit/2 helper functions.
-
   # Private Functions
   defp resolve_pool_configs do
     case Config.get_pool_configs() do
@@ -1809,30 +1807,27 @@ defmodule Snakepit.Pool do
       end
     end
 
-    try do
-      _ = Task.Supervisor.start_child(Snakepit.TaskSupervisor, runner)
-      :ok
-    rescue
-      error ->
-        SLog.warning(
-          @log_category,
-          "TaskSupervisor unavailable for pool async task; using monitored fallback",
-          error: error
-        )
+    AsyncFallback.start_child_with_fallback(
+      Snakepit.TaskSupervisor,
+      runner,
+      on_fallback: &log_pool_async_fallback/1
+    )
+  end
 
-        _ = AsyncFallback.start_monitored_fire_and_forget(runner)
-        :ok
-    catch
-      :exit, reason ->
-        SLog.warning(
-          @log_category,
-          "TaskSupervisor exited for pool async task; using monitored fallback",
-          reason: reason
-        )
+  defp log_pool_async_fallback({:rescue, error}) do
+    SLog.warning(
+      @log_category,
+      "TaskSupervisor unavailable for pool async task; using monitored fallback",
+      error: error
+    )
+  end
 
-        _ = AsyncFallback.start_monitored_fire_and_forget(runner)
-        :ok
-    end
+  defp log_pool_async_fallback({:exit, reason}) do
+    SLog.warning(
+      @log_category,
+      "TaskSupervisor exited for pool async task; using monitored fallback",
+      reason: reason
+    )
   end
 
   defp handle_checkout_worker_call(state, pool_name, session_id, opts) do

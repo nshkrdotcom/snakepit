@@ -830,6 +830,14 @@ defmodule Snakepit.GRPCWorker do
       state.connection == nil ->
         %{state | heartbeat_config: config}
 
+      not heartbeat_transport_available?(state, config) ->
+        SLog.debug(
+          @log_category,
+          "Skipping heartbeat monitor for #{state.id}: no heartbeat transport available"
+        )
+
+        %{state | heartbeat_config: config, heartbeat_monitor: nil}
+
       true ->
         monitor_opts = [
           {:worker_pid, self()},
@@ -864,6 +872,15 @@ defmodule Snakepit.GRPCWorker do
             %{state | heartbeat_monitor: nil, heartbeat_config: config}
         end
     end
+  end
+
+  defp heartbeat_transport_available?(state, config) do
+    channel = state.connection && Map.get(state.connection, :channel)
+
+    is_function(config[:ping_fun], 1) or
+      function_exported?(state.adapter, :grpc_heartbeat, 3) or
+      function_exported?(state.adapter, :grpc_heartbeat, 2) or
+      heartbeat_channel_available?(channel)
   end
 
   defp heartbeat_monitor_running?(pid) when is_pid(pid) do
@@ -902,11 +919,8 @@ defmodule Snakepit.GRPCWorker do
     end
   end
 
-  defp heartbeat_channel_available?(channel) when is_map(channel), do: true
-  defp heartbeat_channel_available?(channel) when is_struct(channel), do: true
-  defp heartbeat_channel_available?(channel) when is_reference(channel), do: true
-  defp heartbeat_channel_available?(channel) when is_pid(channel), do: true
-  defp heartbeat_channel_available?(channel) when is_binary(channel), do: byte_size(channel) > 0
+  defp heartbeat_channel_available?(%{mock: true}), do: true
+  defp heartbeat_channel_available?(%GRPC.Channel{}), do: true
   defp heartbeat_channel_available?(_), do: false
 
   defp maybe_initialize_session(connection, session_id) do
@@ -1111,37 +1125,7 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp execute_call_result(state, command, args_with_corr, timeout, opts) do
-    case Instrumentation.instrument_execute(
-           :execute,
-           state,
-           command,
-           args_with_corr,
-           timeout,
-           fn instrumented_args ->
-             state.adapter.grpc_execute(
-               state.connection,
-               state.session_id,
-               command,
-               instrumented_args,
-               timeout,
-               opts
-             )
-           end
-         ) do
-      {:ok, result} ->
-        {{:ok, result}, :success}
-
-      {:error, reason} ->
-        {{:error, reason}, :error}
-
-      other ->
-        SLog.error(
-          @log_category,
-          "Unexpected gRPC execute result: #{inspect(other)}"
-        )
-
-        {{:error, other}, :error}
-    end
+    execute_instrumented_call_result(:execute, state, command, args_with_corr, timeout, opts)
   end
 
   defp execute_stream_call_result(state, command, args_with_corr, callback_fn, timeout, opts) do
@@ -1176,11 +1160,23 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp execute_session_call_result(state, session_args, command, timeout, opts) do
+    execute_instrumented_call_result(
+      :execute_session,
+      state,
+      command,
+      session_args,
+      timeout,
+      opts
+    )
+  end
+
+  defp execute_instrumented_call_result(operation, state, command, args, timeout, opts)
+       when operation in [:execute, :execute_session] do
     case Instrumentation.instrument_execute(
-           :execute_session,
+           operation,
            state,
            command,
-           session_args,
+           args,
            timeout,
            fn instrumented_args ->
              state.adapter.grpc_execute(
@@ -1202,7 +1198,7 @@ defmodule Snakepit.GRPCWorker do
       other ->
         SLog.error(
           @log_category,
-          "Unexpected gRPC execute_session result: #{inspect(other)}"
+          "Unexpected gRPC #{operation} result: #{inspect(other)}"
         )
 
         {{:error, other}, :error}
@@ -1278,30 +1274,29 @@ defmodule Snakepit.GRPCWorker do
   end
 
   defp start_nolink_rpc_task(fun) when is_function(fun, 0) do
-    try do
-      task = Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fun)
-      {task.pid, task.ref}
-    rescue
-      error ->
-        SLog.warning(
-          @log_category,
-          "TaskSupervisor unavailable for async RPC task; using fallback",
-          error: error
-        )
+    {:ok, pid, ref} =
+      AsyncFallback.start_nolink_with_fallback(
+        Snakepit.TaskSupervisor,
+        fun,
+        fallback_mode: :fire_and_forget,
+        on_fallback: &log_async_rpc_fallback/1
+      )
 
-        start_monitored_rpc_fallback(fun)
-    catch
-      :exit, reason ->
-        SLog.warning(@log_category, "TaskSupervisor exited for async RPC task; using fallback",
-          reason: reason
-        )
-
-        start_monitored_rpc_fallback(fun)
-    end
+    {pid, ref}
   end
 
-  defp start_monitored_rpc_fallback(fun) when is_function(fun, 0) do
-    AsyncFallback.start_monitored_fire_and_forget(fun)
+  defp log_async_rpc_fallback({:rescue, error}) do
+    SLog.warning(
+      @log_category,
+      "TaskSupervisor unavailable for async RPC task; using fallback",
+      error: error
+    )
+  end
+
+  defp log_async_rpc_fallback({:exit, reason}) do
+    SLog.warning(@log_category, "TaskSupervisor exited for async RPC task; using fallback",
+      reason: reason
+    )
   end
 
   defp put_pending_rpc_call(state, token, pending_call) do

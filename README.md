@@ -456,6 +456,11 @@ Snakepit.Executor.execute_with_retry(
 
 ### Health Monitoring
 
+`Snakepit.HealthMonitor` is now a legacy optional compatibility module.
+For new integrations, prefer worker lifecycle telemetry and host-application
+health policy logic. The module remains supported and emits
+`[:snakepit, :deprecated, :module_used]` once per VM when used.
+
 ```elixir
 {:ok, hm} = Snakepit.HealthMonitor.start_link(
   pool: :default,
@@ -468,6 +473,12 @@ Snakepit.HealthMonitor.stats(hm)     # => %{total_crashes: 2, ...}
 ```
 
 ### Executor Helpers
+
+`Snakepit.Executor` is now a legacy optional compatibility module.
+For new integrations, prefer explicit composition of
+`Snakepit.RetryPolicy`, `Snakepit.CircuitBreaker`, and timeout helpers.
+The module remains supported and emits
+`[:snakepit, :deprecated, :module_used]` once per VM when used.
 
 ```elixir
 # With timeout
@@ -644,6 +655,12 @@ end, nil)
 :telemetry.attach("python-call", [:snakepit, :grpc_worker, :execute, :stop], fn
   _event, %{duration_ms: ms}, %{command: cmd}, _config ->
     Logger.info("#{cmd} completed in #{ms}ms")
+end, nil)
+
+# Optional legacy-module usage tracking (emitted once per module per VM)
+:telemetry.attach("legacy-module-usage", [:snakepit, :deprecated, :module_used], fn
+  _event, _measurements, %{module: module, remove_after: remove_after}, _config ->
+    Logger.warning("Legacy Snakepit module used: #{inspect(module)} (remove after #{remove_after})")
 end, nil)
 ```
 

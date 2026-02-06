@@ -76,6 +76,15 @@ Metadata includes: `run_id`, `exit_mode`, `stop_mode`, `owned?`, `status`, `clea
 `cleanup_result` may be `:skipped` when cleanup is disabled (`cleanup_timeout: 0`).
 See `docs/20251229/documentation-overhaul/01-core-api.md#telemetry-contract-090` for details.
 
+### Deprecation Lifecycle Events ([:snakepit, :deprecated, :*])
+
+```elixir
+[:snakepit, :deprecated, :module_used]  # Legacy optional module used
+```
+
+`module_used` is emitted once per legacy module per VM and includes metadata:
+`module`, `replacement`, `remove_after`, and `status`.
+
 ## Attaching Handlers
 
 Use `:telemetry.attach/4` or `:telemetry.attach_many/4`:
@@ -104,6 +113,22 @@ defmodule MyApp.Application do
     # ... start children
   end
 end
+```
+
+Example deprecation usage tracking:
+
+```elixir
+:telemetry.attach(
+  "snakepit-legacy-module-usage",
+  [:snakepit, :deprecated, :module_used],
+  fn _event, _measurements, metadata, _config ->
+    Logger.warning(
+      "Legacy Snakepit module used: #{inspect(metadata.module)} " <>
+        "(remove after #{metadata.remove_after})"
+    )
+  end,
+  nil
+)
 ```
 
 ## Exporter Strategy (Planning)

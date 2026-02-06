@@ -2,6 +2,14 @@ defmodule Snakepit.Telemetry.GPUProfiler do
   @moduledoc """
   GPU memory and utilization profiler.
 
+  > #### Legacy Optional Module {: .warning}
+  >
+  > `Snakepit` does not call this module internally. It remains available for
+  > compatibility and may be removed in `v0.16.0` or later.
+  >
+  > Prefer host-managed GPU sampling and direct `:telemetry` emission for new
+  > integrations.
+
   Periodically samples GPU metrics and emits telemetry events.
   Supports NVIDIA CUDA GPUs via nvidia-smi.
   """
@@ -11,9 +19,12 @@ defmodule Snakepit.Telemetry.GPUProfiler do
   require Logger
 
   alias Snakepit.Hardware
+  alias Snakepit.Internal.Deprecation
 
   @default_interval_ms 5_000
   @min_interval_ms 100
+  @legacy_replacement "Use host-managed GPU samplers and emit telemetry directly"
+  @legacy_remove_after "v0.16.0"
 
   @type state :: %{
           interval_ms: pos_integer(),
@@ -41,6 +52,7 @@ defmodule Snakepit.Telemetry.GPUProfiler do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
+    mark_legacy_usage()
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
   end
@@ -50,6 +62,7 @@ defmodule Snakepit.Telemetry.GPUProfiler do
   """
   @spec sample_now(GenServer.server()) :: :ok | {:error, :no_gpu}
   def sample_now(server \\ __MODULE__) do
+    mark_legacy_usage()
     GenServer.call(server, :sample_now)
   end
 
@@ -58,6 +71,7 @@ defmodule Snakepit.Telemetry.GPUProfiler do
   """
   @spec get_stats(GenServer.server()) :: map()
   def get_stats(server \\ __MODULE__) do
+    mark_legacy_usage()
     GenServer.call(server, :get_stats)
   end
 
@@ -66,6 +80,7 @@ defmodule Snakepit.Telemetry.GPUProfiler do
   """
   @spec enable(GenServer.server()) :: :ok
   def enable(server \\ __MODULE__) do
+    mark_legacy_usage()
     GenServer.call(server, :enable)
   end
 
@@ -74,6 +89,7 @@ defmodule Snakepit.Telemetry.GPUProfiler do
   """
   @spec disable(GenServer.server()) :: :ok
   def disable(server \\ __MODULE__) do
+    mark_legacy_usage()
     GenServer.call(server, :disable)
   end
 
@@ -82,6 +98,7 @@ defmodule Snakepit.Telemetry.GPUProfiler do
   """
   @spec set_interval(GenServer.server(), pos_integer()) :: :ok | {:error, :invalid_interval}
   def set_interval(server \\ __MODULE__, interval_ms) do
+    mark_legacy_usage()
     GenServer.call(server, {:set_interval, interval_ms})
   end
 
@@ -408,5 +425,12 @@ defmodule Snakepit.Telemetry.GPUProfiler do
         %{device: device}
       )
     end
+  end
+
+  defp mark_legacy_usage do
+    Deprecation.emit_legacy_module_used(__MODULE__,
+      replacement: @legacy_replacement,
+      remove_after: @legacy_remove_after
+    )
   end
 end

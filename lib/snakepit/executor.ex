@@ -2,6 +2,14 @@ defmodule Snakepit.Executor do
   @moduledoc """
   Execution helpers with retry, circuit breaker, and timeout support.
 
+  > #### Legacy Optional Module {: .warning}
+  >
+  > `Snakepit` does not call this module internally. It remains available for
+  > compatibility and may be removed in `v0.16.0` or later.
+  >
+  > Prefer explicit use of `Snakepit.RetryPolicy`, `Snakepit.CircuitBreaker`,
+  > and the internal `TimeoutRunner` module in new code.
+
   Provides various execution strategies for running operations
   with fault tolerance.
 
@@ -27,13 +35,18 @@ defmodule Snakepit.Executor do
   """
 
   alias Snakepit.{CircuitBreaker, Defaults, RetryPolicy}
+  alias Snakepit.Internal.Deprecation
   alias Snakepit.Internal.TimeoutRunner
+
+  @legacy_replacement "Use RetryPolicy/CircuitBreaker/TimeoutRunner directly in host code"
+  @legacy_remove_after "v0.16.0"
 
   @doc """
   Executes a function directly.
   """
   @spec execute((-> any()), keyword()) :: any()
   def execute(fun, _opts \\ []) when is_function(fun, 0) do
+    mark_legacy_usage()
     fun.()
   end
 
@@ -49,6 +62,7 @@ defmodule Snakepit.Executor do
   """
   @spec execute_with_retry((-> any()), keyword()) :: any()
   def execute_with_retry(fun, opts \\ []) when is_function(fun, 0) do
+    mark_legacy_usage()
     policy = RetryPolicy.new(opts)
     do_retry(fun, policy, 1)
   end
@@ -84,6 +98,7 @@ defmodule Snakepit.Executor do
   @spec execute_with_circuit_breaker(GenServer.server(), (-> any()), keyword()) :: any()
   def execute_with_circuit_breaker(circuit_breaker, fun, _opts \\ [])
       when is_function(fun, 0) do
+    mark_legacy_usage()
     CircuitBreaker.call(circuit_breaker, fun)
   end
 
@@ -98,6 +113,7 @@ defmodule Snakepit.Executor do
   """
   @spec execute_with_timeout((-> any()), keyword()) :: any()
   def execute_with_timeout(fun, opts) when is_function(fun, 0) do
+    mark_legacy_usage()
     timeout_ms = Keyword.fetch!(opts, :timeout_ms)
 
     case run_with_timeout(fun, timeout_ms) do
@@ -119,6 +135,7 @@ defmodule Snakepit.Executor do
   """
   @spec execute_async((-> any()), keyword()) :: Task.t()
   def execute_async(fun, _opts \\ []) when is_function(fun, 0) do
+    mark_legacy_usage()
     Task.async(fun)
   end
 
@@ -134,6 +151,7 @@ defmodule Snakepit.Executor do
   """
   @spec execute_batch([(-> any())], keyword()) :: [any()]
   def execute_batch(functions, opts \\ []) when is_list(functions) do
+    mark_legacy_usage()
     timeout_ms = Keyword.get(opts, :timeout_ms, Defaults.executor_batch_timeout())
     max_concurrency = Keyword.get(opts, :max_concurrency, length(functions))
 
@@ -156,6 +174,8 @@ defmodule Snakepit.Executor do
   """
   @spec execute_with_protection(GenServer.server(), (-> any()), keyword()) :: any()
   def execute_with_protection(circuit_breaker, fun, opts \\ []) do
+    mark_legacy_usage()
+
     execute_with_retry(
       fn -> execute_with_circuit_breaker(circuit_breaker, fun) end,
       opts
@@ -190,5 +210,12 @@ defmodule Snakepit.Executor do
 
   defp run_with_timeout(fun, timeout_ms) when is_function(fun, 0) and is_integer(timeout_ms) do
     TimeoutRunner.run(fun, timeout_ms)
+  end
+
+  defp mark_legacy_usage do
+    Deprecation.emit_legacy_module_used(__MODULE__,
+      replacement: @legacy_replacement,
+      remove_after: @legacy_remove_after
+    )
   end
 end

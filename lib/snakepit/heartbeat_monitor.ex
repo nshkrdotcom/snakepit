@@ -333,32 +333,27 @@ defmodule Snakepit.HeartbeatMonitor do
   end
 
   defp start_nolink_task(fun) when is_function(fun, 0) do
-    try do
-      task = Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fun)
-      {:ok, task.pid, task.ref}
-    rescue
-      error ->
-        SLog.warning(
-          @log_category,
-          "TaskSupervisor unavailable for heartbeat task; using monitored fallback",
-          error: error
-        )
-
-        start_monitored_fallback_task(fun)
-    catch
-      :exit, reason ->
-        SLog.warning(
-          @log_category,
-          "TaskSupervisor exited during heartbeat task start; using monitored fallback",
-          reason: reason
-        )
-
-        start_monitored_fallback_task(fun)
-    end
+    AsyncFallback.start_nolink_with_fallback(
+      Snakepit.TaskSupervisor,
+      fun,
+      on_fallback: &log_heartbeat_fallback/1
+    )
   end
 
-  defp start_monitored_fallback_task(fun) when is_function(fun, 0) do
-    AsyncFallback.start_monitored(fun)
+  defp log_heartbeat_fallback({:rescue, error}) do
+    SLog.warning(
+      @log_category,
+      "TaskSupervisor unavailable for heartbeat task; using monitored fallback",
+      error: error
+    )
+  end
+
+  defp log_heartbeat_fallback({:exit, reason}) do
+    SLog.warning(
+      @log_category,
+      "TaskSupervisor exited during heartbeat task start; using monitored fallback",
+      reason: reason
+    )
   end
 
   defp clear_ping_task(state) do

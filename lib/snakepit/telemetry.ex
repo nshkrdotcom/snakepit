@@ -2,6 +2,15 @@ defmodule Snakepit.Telemetry do
   @moduledoc """
   Telemetry event definitions for Snakepit.
 
+  > #### Legacy Optional Module {: .warning}
+  >
+  > `Snakepit` does not call this module internally. It remains available for
+  > compatibility and may be removed in `v0.16.0` or later.
+  >
+  > Prefer direct `:telemetry` handlers together with
+  > `Snakepit.Telemetry.Events`, `Snakepit.Telemetry.Naming`,
+  > and `Snakepit.Telemetry.GrpcStream`.
+
   This module provides:
   - Complete event catalog (Layer 1: Infrastructure, Layer 2: Python, Layer 3: gRPC)
   - Event handler management
@@ -28,17 +37,27 @@ defmodule Snakepit.Telemetry do
       )
   """
 
+  alias Snakepit.Internal.Deprecation
   alias Snakepit.Logger, as: SLog
   @log_category :telemetry
+  @legacy_replacement "Use Snakepit.Telemetry.Events/Naming/GrpcStream with direct :telemetry handlers"
+  @legacy_remove_after "v0.16.0"
 
   @doc """
   Lists all telemetry events used by Snakepit.
   """
   def events do
+    mark_legacy_usage()
+
     session_events() ++
       program_events() ++
       heartbeat_events() ++
-      pool_events() ++ python_events() ++ grpc_events() ++ script_events() ++ runtime_events()
+      pool_events() ++
+      python_events() ++
+      grpc_events() ++
+      script_events() ++
+      runtime_events() ++
+      deprecation_events()
   end
 
   ## Layer 0: Session Store & Heartbeat (Legacy)
@@ -47,6 +66,8 @@ defmodule Snakepit.Telemetry do
   Session-related telemetry events (session store).
   """
   def session_events do
+    mark_legacy_usage()
+
     [
       [:snakepit, :session_store, :session, :created],
       [:snakepit, :session_store, :session, :accessed],
@@ -59,6 +80,8 @@ defmodule Snakepit.Telemetry do
   Program-related telemetry events (session store).
   """
   def program_events do
+    mark_legacy_usage()
+
     [
       [:snakepit, :session_store, :program, :stored],
       [:snakepit, :session_store, :program, :retrieved],
@@ -70,6 +93,8 @@ defmodule Snakepit.Telemetry do
   Heartbeat and monitor telemetry events.
   """
   def heartbeat_events do
+    mark_legacy_usage()
+
     [
       [:snakepit, :heartbeat, :monitor_started],
       [:snakepit, :heartbeat, :monitor_stopped],
@@ -86,6 +111,8 @@ defmodule Snakepit.Telemetry do
   Pool and worker lifecycle events.
   """
   def pool_events do
+    mark_legacy_usage()
+
     [
       [:snakepit, :pool, :initialized],
       [:snakepit, :pool, :init_started],
@@ -114,6 +141,8 @@ defmodule Snakepit.Telemetry do
   Python worker telemetry events (folded back from Python workers).
   """
   def python_events do
+    mark_legacy_usage()
+
     [
       [:snakepit, :python, :call, :start],
       [:snakepit, :python, :call, :stop],
@@ -135,6 +164,8 @@ defmodule Snakepit.Telemetry do
   gRPC communication events.
   """
   def grpc_events do
+    mark_legacy_usage()
+
     [
       [:snakepit, :grpc, :call, :start],
       [:snakepit, :grpc, :call, :stop],
@@ -152,6 +183,8 @@ defmodule Snakepit.Telemetry do
   Runtime enhancement events (zero-copy, crash barrier, exception translation).
   """
   def runtime_events do
+    mark_legacy_usage()
+
     [
       [:snakepit, :zero_copy, :export],
       [:snakepit, :zero_copy, :import],
@@ -168,6 +201,8 @@ defmodule Snakepit.Telemetry do
   Script shutdown lifecycle telemetry events.
   """
   def script_events do
+    mark_legacy_usage()
+
     [
       [:snakepit, :script, :shutdown, :start],
       [:snakepit, :script, :shutdown, :stop],
@@ -177,9 +212,19 @@ defmodule Snakepit.Telemetry do
   end
 
   @doc """
+  Deprecation lifecycle telemetry events.
+  """
+  def deprecation_events do
+    mark_legacy_usage()
+    [[:snakepit, :deprecated, :module_used]]
+  end
+
+  @doc """
   Attaches default handlers for all events.
   """
   def attach_handlers do
+    mark_legacy_usage()
+
     attach_session_handlers()
     attach_program_handlers()
     attach_heartbeat_handlers()
@@ -189,6 +234,8 @@ defmodule Snakepit.Telemetry do
   Attaches default handlers for session events.
   """
   def attach_session_handlers do
+    mark_legacy_usage()
+
     :telemetry.attach_many(
       "snakepit-session-logger",
       session_events(),
@@ -201,6 +248,8 @@ defmodule Snakepit.Telemetry do
   Attaches default handlers for program events.
   """
   def attach_program_handlers do
+    mark_legacy_usage()
+
     :telemetry.attach_many(
       "snakepit-program-logger",
       program_events(),
@@ -213,6 +262,8 @@ defmodule Snakepit.Telemetry do
   Attaches default handlers for heartbeat events.
   """
   def attach_heartbeat_handlers do
+    mark_legacy_usage()
+
     :telemetry.attach_many(
       "snakepit-heartbeat-logger",
       heartbeat_events(),
@@ -307,6 +358,13 @@ defmodule Snakepit.Telemetry do
     SLog.debug(
       @log_category,
       "Telemetry event: #{inspect(event)} measurements=#{inspect(measurements)} metadata=#{inspect(metadata)}"
+    )
+  end
+
+  defp mark_legacy_usage do
+    Deprecation.emit_legacy_module_used(__MODULE__,
+      replacement: @legacy_replacement,
+      remove_after: @legacy_remove_after
     )
   end
 end

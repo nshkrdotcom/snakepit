@@ -299,7 +299,7 @@ defmodule Snakepit.GRPCWorkerCallbackNonBlockingTest do
     assert :ok = GRPCWorker.terminate(:shutdown, state)
   end
 
-  defp base_state(adapter, channel \\ :mock_channel) do
+  defp base_state(adapter, channel \\ %{mock: true}) do
     %{
       adapter: adapter,
       connection: %{channel: channel},

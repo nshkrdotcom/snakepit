@@ -2,6 +2,14 @@ defmodule Snakepit.HealthMonitor do
   @moduledoc """
   Monitors worker health and crash patterns.
 
+  > #### Legacy Optional Module {: .warning}
+  >
+  > `Snakepit` does not call this module internally. It remains available for
+  > compatibility and may be removed in `v0.16.0` or later.
+  >
+  > Prefer using worker lifecycle telemetry and host-application health policies
+  > for new integrations.
+
   Tracks crashes within a rolling window and determines overall pool health.
   Can be used to trigger circuit breaker actions or alerting.
 
@@ -26,6 +34,7 @@ defmodule Snakepit.HealthMonitor do
   use GenServer
 
   alias Snakepit.Defaults
+  alias Snakepit.Internal.Deprecation
   require Logger
 
   @type worker_stats :: %{
@@ -44,6 +53,9 @@ defmodule Snakepit.HealthMonitor do
           check_timer: reference() | nil
         }
 
+  @legacy_replacement "Use worker lifecycle telemetry and host-managed health policies"
+  @legacy_remove_after "v0.16.0"
+
   # Client API
 
   @doc """
@@ -59,6 +71,7 @@ defmodule Snakepit.HealthMonitor do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
+    mark_legacy_usage()
     name = Keyword.fetch!(opts, :name)
     GenServer.start_link(__MODULE__, opts, name: name)
   end
@@ -68,6 +81,7 @@ defmodule Snakepit.HealthMonitor do
   """
   @spec record_crash(GenServer.server(), String.t(), map()) :: :ok
   def record_crash(server, worker_id, info \\ %{}) do
+    mark_legacy_usage()
     GenServer.cast(server, {:record_crash, worker_id, info})
   end
 
@@ -76,6 +90,7 @@ defmodule Snakepit.HealthMonitor do
   """
   @spec healthy?(GenServer.server()) :: boolean()
   def healthy?(server) do
+    mark_legacy_usage()
     GenServer.call(server, :healthy?)
   end
 
@@ -84,6 +99,7 @@ defmodule Snakepit.HealthMonitor do
   """
   @spec worker_health(GenServer.server(), String.t()) :: map()
   def worker_health(server, worker_id) do
+    mark_legacy_usage()
     GenServer.call(server, {:worker_health, worker_id})
   end
 
@@ -92,6 +108,7 @@ defmodule Snakepit.HealthMonitor do
   """
   @spec stats(GenServer.server()) :: map()
   def stats(server) do
+    mark_legacy_usage()
     GenServer.call(server, :get_stats)
   end
 
@@ -272,5 +289,12 @@ defmodule Snakepit.HealthMonitor do
       |> Map.new()
 
     %{state | workers: workers}
+  end
+
+  defp mark_legacy_usage do
+    Deprecation.emit_legacy_module_used(__MODULE__,
+      replacement: @legacy_replacement,
+      remove_after: @legacy_remove_after
+    )
   end
 end

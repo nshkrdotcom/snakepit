@@ -73,11 +73,9 @@ defmodule Snakepit.Bridge.SessionStore do
   `{:ok, session}` if found, `{:error, :not_found}` if not found.
   """
   @spec get_session(String.t()) :: {:ok, Session.t()} | {:error, :not_found}
-  def get_session(session_id) when is_binary(session_id) do
-    get_session(__MODULE__, session_id)
-  end
-
   @spec get_session(GenServer.server(), String.t()) :: {:ok, Session.t()} | {:error, :not_found}
+  def get_session(server \\ __MODULE__, session_id)
+
   def get_session(server, session_id) when is_binary(session_id) do
     GenServer.call(server, {:get_session, session_id})
   end
@@ -105,13 +103,10 @@ defmodule Snakepit.Bridge.SessionStore do
   """
   @spec update_session(String.t(), (Session.t() -> Session.t())) ::
           {:ok, Session.t()} | {:error, term()}
-  def update_session(session_id, update_fn)
-      when is_binary(session_id) and is_function(update_fn, 1) do
-    update_session(__MODULE__, session_id, update_fn)
-  end
-
   @spec update_session(GenServer.server(), String.t(), (Session.t() -> Session.t())) ::
           {:ok, Session.t()} | {:error, term()}
+  def update_session(server \\ __MODULE__, session_id, update_fn)
+
   def update_session(server, session_id, update_fn)
       when is_binary(session_id) and is_function(update_fn, 1) do
     GenServer.call(server, {:update_session, session_id, update_fn})
@@ -129,11 +124,9 @@ defmodule Snakepit.Bridge.SessionStore do
   `:ok` always (idempotent operation).
   """
   @spec delete_session(String.t()) :: :ok
-  def delete_session(session_id) when is_binary(session_id) do
-    delete_session(__MODULE__, session_id)
-  end
-
   @spec delete_session(GenServer.server(), String.t()) :: :ok
+  def delete_session(server \\ __MODULE__, session_id)
+
   def delete_session(server, session_id) when is_binary(session_id) do
     GenServer.call(server, {:delete_session, session_id})
   end
@@ -146,11 +139,9 @@ defmodule Snakepit.Bridge.SessionStore do
   The number of sessions that were cleaned up.
   """
   @spec cleanup_expired_sessions() :: non_neg_integer()
-  def cleanup_expired_sessions do
-    cleanup_expired_sessions(__MODULE__)
-  end
-
   @spec cleanup_expired_sessions(GenServer.server()) :: non_neg_integer()
+  def cleanup_expired_sessions(server \\ __MODULE__)
+
   def cleanup_expired_sessions(server) do
     GenServer.call(server, :cleanup_expired_sessions)
   end
@@ -163,11 +154,9 @@ defmodule Snakepit.Bridge.SessionStore do
   A map containing various statistics about the session store.
   """
   @spec get_stats() :: map()
-  def get_stats do
-    get_stats(__MODULE__)
-  end
-
   @spec get_stats(GenServer.server()) :: map()
+  def get_stats(server \\ __MODULE__)
+
   def get_stats(server) do
     GenServer.call(server, :get_stats)
   end
@@ -180,11 +169,9 @@ defmodule Snakepit.Bridge.SessionStore do
   A list of all active session IDs.
   """
   @spec list_sessions() :: [String.t()]
-  def list_sessions do
-    list_sessions(__MODULE__)
-  end
-
   @spec list_sessions(GenServer.server()) :: [String.t()]
+  def list_sessions(server \\ __MODULE__)
+
   def list_sessions(server) do
     GenServer.call(server, :list_sessions)
   end
@@ -201,11 +188,9 @@ defmodule Snakepit.Bridge.SessionStore do
   `true` if the session exists, `false` otherwise.
   """
   @spec session_exists?(String.t()) :: boolean()
-  def session_exists?(session_id) when is_binary(session_id) do
-    session_exists?(__MODULE__, session_id)
-  end
-
   @spec session_exists?(GenServer.server(), String.t()) :: boolean()
+  def session_exists?(server \\ __MODULE__, session_id)
+
   def session_exists?(server, session_id) when is_binary(session_id) do
     GenServer.call(server, {:session_exists, session_id})
   end

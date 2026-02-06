@@ -150,8 +150,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
   @impl true
   def handle_call({:register_elixir_tool, session_id, tool_name, handler, metadata}, _from, state) do
     with {:ok, normalized_name} <- validate_tool_name(tool_name),
-         {:ok, normalized_metadata} <- validate_metadata(metadata),
-         :ok <- ensure_tool_not_registered(session_id, normalized_name) do
+         {:ok, normalized_metadata} <- validate_metadata(metadata) do
       tool_spec = %InternalToolSpec{
         name: normalized_name,
         type: :local,
@@ -187,8 +186,7 @@ defmodule Snakepit.Bridge.ToolRegistry do
         state
       ) do
     with {:ok, normalized_name} <- validate_tool_name(tool_name),
-         {:ok, normalized_metadata} <- validate_metadata(metadata),
-         :ok <- ensure_tool_not_registered(session_id, normalized_name) do
+         {:ok, normalized_metadata} <- validate_metadata(metadata) do
       tool_spec = %InternalToolSpec{
         name: normalized_name,
         type: :remote,
@@ -219,7 +217,6 @@ defmodule Snakepit.Bridge.ToolRegistry do
   @impl true
   def handle_call({:register_tools, session_id, tool_specs}, _from, state) do
     with {:ok, normalized_specs} <- build_remote_specs(tool_specs),
-         :ok <- ensure_batch_not_registered(session_id, normalized_specs),
          {:ok, names} <- insert_tool_batch(session_id, normalized_specs) do
       SLog.info(@log_category, "Registered #{length(names)} tools for session: #{session_id}")
       {:reply, {:ok, names}, state}
@@ -289,13 +286,6 @@ defmodule Snakepit.Bridge.ToolRegistry do
     end
   end
 
-  defp ensure_tool_not_registered(session_id, tool_name) do
-    case :ets.lookup(@table_name, {session_id, tool_name}) do
-      [] -> :ok
-      _ -> {:error, {:duplicate_tool, tool_name}}
-    end
-  end
-
   defp build_remote_specs(tool_specs) do
     tool_specs
     |> Enum.reduce_while({:ok, [], MapSet.new()}, &accumulate_remote_spec/2)
@@ -339,15 +329,6 @@ defmodule Snakepit.Bridge.ToolRegistry do
     else
       {:error, _} = error -> error
     end
-  end
-
-  defp ensure_batch_not_registered(session_id, specs) do
-    Enum.reduce_while(specs, :ok, fn spec, :ok ->
-      case :ets.lookup(@table_name, {session_id, spec.name}) do
-        [] -> {:cont, :ok}
-        _ -> {:halt, {:error, {:duplicate_tool, spec.name}}}
-      end
-    end)
   end
 
   defp insert_tool_batch(session_id, specs) do

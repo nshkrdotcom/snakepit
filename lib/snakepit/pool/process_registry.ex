@@ -378,7 +378,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
           if process_alive?(process_pid) do
             updated = mark_terminating(info)
             :ets.insert(state.table, {worker_id, updated})
-            :dets.insert(state.dets_table, {worker_id, updated})
+            persist_put(state.dets_table, worker_id, updated)
 
             schedule_unregister_cleanup(
               worker_id,
@@ -394,7 +394,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
             mark_dets_dirty(state)
           else
             :ets.delete(state.table, worker_id)
-            :dets.delete(state.dets_table, worker_id)
+            persist_delete(state.dets_table, worker_id)
 
             SLog.info(
               @log_category,
@@ -406,7 +406,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
         [] ->
           # Also check DETS in case ETS was cleared
-          :dets.delete(state.dets_table, worker_id)
+          persist_delete(state.dets_table, worker_id)
           # Defensive check: Only log at debug level for unknown workers
           # This is expected during certain race conditions and shouldn't be a warning
           SLog.debug(
@@ -440,7 +440,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
     # Update both ETS and DETS atomically
     :ets.insert(state.table, {worker_id, worker_info})
-    :dets.insert(state.dets_table, {worker_id, worker_info})
+    persist_put(state.dets_table, worker_id, worker_info)
 
     SLog.debug(
       @log_category,
@@ -463,7 +463,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
             |> Map.put(:process_group?, true)
 
           :ets.insert(state.table, {worker_id, updated})
-          :dets.insert(state.dets_table, {worker_id, updated})
+          persist_put(state.dets_table, worker_id, updated)
 
           {:reply, :ok, mark_dets_dirty(state)}
         else
@@ -485,7 +485,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
     }
 
     # CRITICAL: Persist reservation metadata to DETS before worker spawn path advances.
-    :dets.insert(state.dets_table, {worker_id, reservation_info})
+    persist_put(state.dets_table, worker_id, reservation_info)
 
     SLog.info(
       @log_category,
@@ -676,7 +676,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
       true ->
         :ets.delete(state.table, worker_id)
-        :dets.delete(state.dets_table, worker_id)
+        persist_delete(state.dets_table, worker_id)
 
         SLog.info(
           @log_category,
@@ -706,7 +706,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
     # Ensure DETS is properly synced and closed
     if state.dets_table do
-      :dets.sync(state.dets_table)
+      persist_sync(state.dets_table)
       :dets.close(state.dets_table)
     end
 
@@ -760,7 +760,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   defp flush_dets(state) do
-    :dets.sync(state.dets_table)
+    persist_sync(state.dets_table)
     %{state | dets_dirty: false, dets_flush_ref: nil}
   end
 
@@ -816,38 +816,34 @@ defmodule Snakepit.Pool.ProcessRegistry do
   end
 
   defp start_cleanup_task(state, kind) do
-    try do
-      task =
-        Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+    {:ok, task_pid, task_ref} =
+      AsyncFallback.start_nolink_with_fallback(
+        Snakepit.TaskSupervisor,
+        fn ->
           run_cleanup(state)
-
           {:cleanup_complete, kind}
-        end)
+        end,
+        fallback_mode: :fire_and_forget,
+        on_fallback: &log_cleanup_task_fallback/1
+      )
 
-      %{state | cleanup_task_pid: task.pid, cleanup_task_ref: task.ref, cleanup_task_kind: kind}
-    rescue
-      error ->
-        SLog.warning(
-          @log_category,
-          "Cleanup task startup failed; using monitored fallback",
-          error: error
-        )
+    %{state | cleanup_task_pid: task_pid, cleanup_task_ref: task_ref, cleanup_task_kind: kind}
+  end
 
-        {pid, ref} = AsyncFallback.start_monitored_fire_and_forget(fn -> run_cleanup(state) end)
+  defp log_cleanup_task_fallback({:rescue, error}) do
+    SLog.warning(
+      @log_category,
+      "Cleanup task startup failed; using monitored fallback",
+      error: error
+    )
+  end
 
-        %{state | cleanup_task_pid: pid, cleanup_task_ref: ref, cleanup_task_kind: kind}
-    catch
-      :exit, reason ->
-        SLog.warning(
-          @log_category,
-          "TaskSupervisor unavailable for cleanup task; using monitored fallback",
-          reason: reason
-        )
-
-        {pid, ref} = AsyncFallback.start_monitored_fire_and_forget(fn -> run_cleanup(state) end)
-
-        %{state | cleanup_task_pid: pid, cleanup_task_ref: ref, cleanup_task_kind: kind}
-    end
+  defp log_cleanup_task_fallback({:exit, reason}) do
+    SLog.warning(
+      @log_category,
+      "TaskSupervisor unavailable for cleanup task; using monitored fallback",
+      reason: reason
+    )
   end
 
   defp await_cleanup_task_completion(%{cleanup_task_ref: nil} = state), do: state
@@ -1262,13 +1258,13 @@ defmodule Snakepit.Pool.ProcessRegistry do
 
   defp remove_dets_entries(dets_table, entries_to_remove) do
     Enum.each(entries_to_remove, fn {worker_id, _info} ->
-      :dets.delete(dets_table, worker_id)
+      persist_delete(dets_table, worker_id)
     end)
 
     # Sync immediately to ensure deletions are persisted before returning.
     # Without this, the auto_save delay (1000ms) can cause stale entries
     # to appear in DETS queries during rapid restart scenarios.
-    :dets.sync(dets_table)
+    persist_sync(dets_table)
   end
 
   defp log_cleanup_summary(
@@ -1556,10 +1552,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
     entries
     |> dedupe_dets_entries()
     |> Enum.each(fn {worker_id, info} ->
-      :dets.insert(new_table, {worker_id, info})
+      persist_put(new_table, worker_id, info)
     end)
 
-    :dets.sync(new_table)
+    persist_sync(new_table)
     new_table
   end
 
@@ -1654,11 +1650,11 @@ defmodule Snakepit.Pool.ProcessRegistry do
         if process_alive?(process_pid) do
           updated = mark_terminating(info)
           :ets.insert(state.table, {worker_id, updated})
-          :dets.insert(state.dets_table, {worker_id, updated})
+          persist_put(state.dets_table, worker_id, updated)
           {acc, true}
         else
           :ets.delete(state.table, worker_id)
-          :dets.delete(state.dets_table, worker_id)
+          persist_delete(state.dets_table, worker_id)
 
           SLog.info(
             @log_category,
@@ -1680,5 +1676,17 @@ defmodule Snakepit.Pool.ProcessRegistry do
     info
     |> Map.put(:terminating?, true)
     |> Map.put(:terminated_at, System.system_time(:second))
+  end
+
+  defp persist_put(dets_table, worker_id, info) do
+    :dets.insert(dets_table, {worker_id, info})
+  end
+
+  defp persist_delete(dets_table, worker_id) do
+    :dets.delete(dets_table, worker_id)
+  end
+
+  defp persist_sync(dets_table) do
+    :dets.sync(dets_table)
   end
 end

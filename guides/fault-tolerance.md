@@ -8,8 +8,16 @@ Snakepit provides fault tolerance mechanisms to build resilient applications tha
 |-----------|---------|
 | **CircuitBreaker** | Prevents cascading failures by stopping calls to failing services |
 | **RetryPolicy** | Configurable retry with exponential backoff and jitter |
-| **HealthMonitor** | Tracks worker crashes within a rolling time window |
-| **Executor** | Convenience wrappers combining fault tolerance patterns |
+| **HealthMonitor** | Legacy optional compatibility monitor for crash windows |
+| **Executor** | Legacy optional convenience wrapper for retry/timeout patterns |
+
+`Snakepit.HealthMonitor` and `Snakepit.Executor` remain available for
+compatibility, but Snakepit does not call them internally. For new code, prefer
+direct use of `Snakepit.CircuitBreaker`, `Snakepit.RetryPolicy`, worker
+lifecycle telemetry, and host-managed health policy logic.
+
+When either legacy module is used, Snakepit emits one telemetry event per
+module per VM: `[:snakepit, :deprecated, :module_used]`.
 
 ## Circuit Breaker
 
