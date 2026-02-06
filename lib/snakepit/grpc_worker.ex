@@ -371,17 +371,17 @@ defmodule Snakepit.GRPCWorker do
   end
 
   @impl true
-  def handle_call(:get_health, _from, state) do
-    # Make gRPC health check call
-    health_result = make_health_check(state)
-    {:reply, health_result, state}
+  def handle_call(:get_health, from, state) do
+    enqueue_async_rpc_call(from, state, fn ->
+      {make_health_check(state), :none}
+    end)
   end
 
   @impl true
-  def handle_call(:get_info, _from, state) do
-    # Make gRPC info call
-    info_result = make_info_call(state)
-    {:reply, info_result, state}
+  def handle_call(:get_info, from, state) do
+    enqueue_async_rpc_call(from, state, fn ->
+      {make_info_call(state), :none}
+    end)
   end
 
   @impl true
@@ -1272,6 +1272,9 @@ defmodule Snakepit.GRPCWorker do
             | requests: state.stats.requests + 1,
               errors: state.stats.errors + 1
           }
+
+        :none ->
+          state.stats
       end
 
     %{state | stats: stats}

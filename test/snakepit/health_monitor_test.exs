@@ -130,6 +130,16 @@ defmodule Snakepit.HealthMonitorTest do
     end
   end
 
+  describe "timer cleanup" do
+    test "terminate/2 cancels pending cleanup timer" do
+      timer_ref = Process.send_after(self(), :cleanup, 100)
+      state = %{check_timer: timer_ref}
+
+      assert :ok = HealthMonitor.terminate(:shutdown, state)
+      refute_receive :cleanup, 150
+    end
+  end
+
   defp stop_if_alive(pid) do
     if Process.alive?(pid) do
       try do

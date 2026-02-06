@@ -139,6 +139,7 @@ defmodule Snakepit.PythonPackages do
   defmodule Runner.System do
     @moduledoc false
     @behaviour Runner
+    alias Snakepit.Internal.TimeoutRunner
 
     @impl true
     def cmd(command, args, opts) do
@@ -166,42 +167,7 @@ defmodule Snakepit.PythonPackages do
     end
 
     defp run_with_timeout(fun, timeout_ms) when is_function(fun, 0) and is_integer(timeout_ms) do
-      caller = self()
-      result_ref = make_ref()
-
-      {pid, monitor_ref} =
-        spawn_monitor(fn ->
-          result =
-            try do
-              {:ok, fun.()}
-            rescue
-              exception ->
-                {:error, {exception, __STACKTRACE__}}
-            catch
-              kind, reason ->
-                {:error, {kind, reason}}
-            end
-
-          send(caller, {result_ref, result})
-        end)
-
-      receive do
-        {^result_ref, {:ok, result}} ->
-          Process.demonitor(monitor_ref, [:flush])
-          {:ok, result}
-
-        {^result_ref, {:error, reason}} ->
-          Process.demonitor(monitor_ref, [:flush])
-          {:error, reason}
-
-        {:DOWN, ^monitor_ref, :process, ^pid, reason} ->
-          {:error, reason}
-      after
-        timeout_ms ->
-          Process.exit(pid, :kill)
-          Process.demonitor(monitor_ref, [:flush])
-          :timeout
-      end
+      TimeoutRunner.run(fun, timeout_ms)
     end
 
     defp format_cmd_error({exception, _stacktrace}) when is_exception(exception) do

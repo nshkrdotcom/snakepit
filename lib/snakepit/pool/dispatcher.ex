@@ -261,13 +261,12 @@ defmodule Snakepit.Pool.Dispatcher do
   end
 
   def monitor_client_status(ref, client_pid) do
-    if Process.alive?(client_pid) do
-      await_client_down(ref, client_pid)
-    else
-      case await_client_down(ref, client_pid) do
-        :alive -> {:down, :unknown}
-        other -> other
-      end
+    case await_client_down(ref, client_pid) do
+      :alive ->
+        if Process.alive?(client_pid), do: :alive, else: {:down, :unknown}
+
+      other ->
+        other
     end
   end
 

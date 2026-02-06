@@ -76,7 +76,7 @@ These options apply to all pools or the Snakepit application as a whole.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `pooling_enabled` | `boolean()` | `false` | Enable or disable worker pooling. Set to `true` for normal operation. |
-| `adapter_module` | `module()` | `nil` | Default adapter module for pools that do not specify one. |
+| `adapter_module` | `module()` | `nil` | Default adapter module for pools that do not specify one (including adapter timeout fallback). |
 | `pool_size` | `pos_integer()` | `System.schedulers_online() * 2` | Default pool size. Typically 2x CPU cores. |
 | `capacity_strategy` | `:pool \| :profile \| :hybrid` | `:pool` | How worker capacity is managed across pools. |
 | `affinity` | `:hint \| :strict_queue \| :strict_fail_fast` | `:hint` | Default session affinity mode for pools. |
@@ -192,6 +192,11 @@ Each pool can be configured independently with these options.
 | `adapter_env` | `list({String.t(), String.t()})` | `[]` | Environment variables for Python processes. |
 | `adapter_spec` | `String.t()` | `nil` | Python adapter module path (e.g., `"myapp.adapters.MyAdapter"`). |
 | `affinity` | `:hint \| :strict_queue \| :strict_fail_fast` | Global setting | Session affinity behavior for this pool. |
+
+When adapters implement `command_timeout/2`, Snakepit resolves command timeout
+from the selected worker's pool `adapter_module` first. The global
+`config :snakepit, adapter_module: ...` value is used only if a pool does not
+declare its own adapter.
 
 ### Session Affinity Modes
 
@@ -450,6 +455,18 @@ config :snakepit,
 ```
 
 After `failure_threshold` consecutive failures, the circuit opens and requests fail fast for `reset_timeout_ms`.
+
+### Rogue Cleanup
+
+Control startup orphan-process cleanup:
+
+```elixir
+config :snakepit, :rogue_cleanup, enabled: false
+# equivalent map form:
+config :snakepit, rogue_cleanup: %{enabled: false}
+```
+
+`enabled: false` is treated as an explicit disable and is not replaced by defaults.
 
 ---
 

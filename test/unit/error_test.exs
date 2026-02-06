@@ -23,8 +23,14 @@ defmodule Snakepit.ErrorTest do
       valid_categories = [:worker, :timeout, :python_error, :grpc_error, :validation, :pool]
 
       for category <- valid_categories do
-        error = %Error{category: category, message: "test"}
+        error = %Error{category: category, message: "test", details: %{}}
         assert error.category == category
+      end
+    end
+
+    test "enforces required fields at struct construction time" do
+      assert_raise ArgumentError, fn ->
+        struct!(Error, category: :worker, message: "missing details")
       end
     end
   end

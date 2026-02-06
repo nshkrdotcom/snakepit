@@ -50,7 +50,8 @@ defmodule Snakepit.Error do
           grpc_status: atom() | nil
         }
 
-  defstruct [:category, :message, :details, :python_traceback, :grpc_status]
+  @enforce_keys [:category, :message, :details]
+  defstruct category: nil, message: nil, details: %{}, python_traceback: nil, grpc_status: nil
 
   @doc """
   Creates a worker-related error.

@@ -213,15 +213,13 @@ defmodule Snakepit.Bridge.SessionStore do
   @doc """
   Stores worker-session affinity mapping.
   """
-  @spec store_worker_session(String.t(), String.t()) :: :ok | {:error, :session_quota_exceeded}
+  @spec store_worker_session(String.t(), term()) :: :ok | {:error, term()}
   def store_worker_session(session_id, worker_id) do
     GenServer.call(__MODULE__, {:upsert_worker_session, session_id, worker_id})
   end
 
-  @spec store_worker_session(GenServer.server(), String.t(), String.t()) ::
-          :ok | {:error, :session_quota_exceeded}
-  def store_worker_session(server, session_id, worker_id)
-      when is_binary(session_id) and is_binary(worker_id) do
+  @spec store_worker_session(GenServer.server(), String.t(), term()) :: :ok | {:error, term()}
+  def store_worker_session(server, session_id, worker_id) when is_binary(session_id) do
     GenServer.call(server, {:upsert_worker_session, session_id, worker_id})
   end
 
@@ -252,12 +250,13 @@ defmodule Snakepit.Bridge.SessionStore do
     # Strict mode for dev/test - warns loudly on session accumulation
     strict_mode = Keyword.get(opts, :strict_mode, Map.get(quota_config, :strict_mode, false))
 
-    Process.send_after(self(), :cleanup_expired_sessions, cleanup_interval)
+    cleanup_timer_ref = schedule_cleanup_timer(cleanup_interval)
 
     state = %{
       table: table,
       table_name: table_name,
       cleanup_interval: cleanup_interval,
+      cleanup_timer_ref: cleanup_timer_ref,
       default_ttl: default_ttl,
       max_sessions: max_sessions,
       strict_mode: strict_mode,
@@ -430,7 +429,7 @@ defmodule Snakepit.Bridge.SessionStore do
               "Failed to validate session for worker affinity: #{inspect(reason)}"
             )
 
-            {:reply, :ok, state}
+            {:reply, {:error, reason}, state}
         end
     end
   end
@@ -447,8 +446,8 @@ defmodule Snakepit.Bridge.SessionStore do
     # Check session accumulation thresholds and warn if needed
     maybe_warn_session_accumulation(state)
 
-    Process.send_after(self(), :cleanup_expired_sessions, state.cleanup_interval)
-    {:noreply, %{state | stats: new_stats}}
+    cleanup_timer_ref = schedule_cleanup_timer(state.cleanup_interval)
+    {:noreply, %{state | stats: new_stats, cleanup_timer_ref: cleanup_timer_ref}}
   end
 
   @impl true
@@ -457,7 +456,26 @@ defmodule Snakepit.Bridge.SessionStore do
     {:noreply, state}
   end
 
+  @impl true
+  def terminate(_reason, state) do
+    cancel_timer(Map.get(state, :cleanup_timer_ref))
+    :ok
+  end
+
   ## Private Functions
+
+  defp schedule_cleanup_timer(interval_ms) when is_integer(interval_ms) and interval_ms > 0 do
+    Process.send_after(self(), :cleanup_expired_sessions, interval_ms)
+  end
+
+  defp schedule_cleanup_timer(_interval_ms), do: nil
+
+  defp cancel_timer(ref) when is_reference(ref) do
+    Process.cancel_timer(ref, async: true, info: false)
+    :ok
+  end
+
+  defp cancel_timer(_), do: :ok
 
   defp do_cleanup_expired_sessions(table, stats) do
     current_time = System.monotonic_time(:second)

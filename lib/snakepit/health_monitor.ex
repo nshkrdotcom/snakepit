@@ -201,11 +201,24 @@ defmodule Snakepit.HealthMonitor do
     {:noreply, state}
   end
 
+  @impl true
+  def terminate(_reason, state) do
+    cancel_timer(state.check_timer)
+    :ok
+  end
+
   # Private functions
 
   defp schedule_cleanup(interval_ms) do
     Process.send_after(self(), :cleanup, interval_ms)
   end
+
+  defp cancel_timer(ref) when is_reference(ref) do
+    Process.cancel_timer(ref, async: true, info: false)
+    :ok
+  end
+
+  defp cancel_timer(_), do: :ok
 
   defp default_worker_stats do
     %{

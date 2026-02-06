@@ -1537,7 +1537,7 @@ defmodule Snakepit.Pool do
   end
 
   defp execute_on_worker(worker_id, command, args, opts) do
-    timeout = get_command_timeout(command, args, opts)
+    timeout = get_command_timeout(worker_id, command, args, opts)
     worker_module = get_worker_module(worker_id)
 
     try do
@@ -1546,7 +1546,7 @@ defmodule Snakepit.Pool do
           worker_id,
           command,
           args,
-          Keyword.put(opts, :timeout, timeout)
+          normalize_worker_execute_opts(opts, timeout)
         )
 
       # Increment request count for lifecycle management (on success only)
@@ -1698,11 +1698,11 @@ defmodule Snakepit.Pool do
     end
   end
 
-  defp get_command_timeout(command, args, opts) do
+  defp get_command_timeout(worker_id, command, args, opts) do
     # Prefer explicit client timeout, then adapter timeout, then global default
     case opts[:timeout] do
       nil ->
-        case get_adapter_timeout(command, args) do
+        case get_adapter_timeout(worker_id, command, args) do
           # Global default
           nil -> Defaults.default_command_timeout()
           adapter_timeout -> adapter_timeout
@@ -1713,24 +1713,49 @@ defmodule Snakepit.Pool do
     end
   end
 
-  defp get_adapter_timeout(command, args) do
-    case Application.get_env(:snakepit, :adapter_module) do
-      nil ->
-        nil
+  defp get_adapter_timeout(worker_id, command, args) do
+    adapter_module =
+      case PoolRegistry.fetch_worker(worker_id) do
+        {:ok, _pid, metadata} ->
+          Map.get(metadata, :adapter_module) || Application.get_env(:snakepit, :adapter_module)
 
-      adapter_module ->
-        if function_exported?(adapter_module, :command_timeout, 2) do
-          try do
-            adapter_module.command_timeout(command, args)
-          rescue
-            # Fall back to default if adapter timeout fails
-            _ -> nil
-          end
-        else
-          nil
-        end
+        _ ->
+          Application.get_env(:snakepit, :adapter_module)
+      end
+
+    resolve_adapter_timeout(adapter_module, command, args)
+  end
+
+  defp resolve_adapter_timeout(nil, _command, _args), do: nil
+
+  defp resolve_adapter_timeout(adapter_module, command, args) do
+    if function_exported?(adapter_module, :command_timeout, 2) do
+      try do
+        adapter_module.command_timeout(command, args)
+      rescue
+        # Fall back to default if adapter timeout fails
+        _ -> nil
+      end
+    else
+      nil
     end
   end
+
+  defp normalize_worker_execute_opts(opts, timeout) when is_list(opts) do
+    Keyword.put(opts, :timeout, timeout)
+  end
+
+  defp normalize_worker_execute_opts(opts, timeout) when is_map(opts) do
+    Enum.reduce(opts, [timeout: timeout], fn
+      {key, value}, acc when is_atom(key) ->
+        Keyword.put(acc, key, value)
+
+      _entry, acc ->
+        acc
+    end)
+  end
+
+  defp normalize_worker_execute_opts(_opts, timeout), do: [timeout: timeout]
 
   defp async_with_context(fun) when is_function(fun, 0) do
     ctx = :otel_ctx.get_current()
@@ -1752,21 +1777,21 @@ defmodule Snakepit.Pool do
       error ->
         SLog.warning(
           @log_category,
-          "TaskSupervisor unavailable for pool async task; using Task.start fallback",
+          "TaskSupervisor unavailable for pool async task; using monitored fallback",
           error: error
         )
 
-        _ = Task.start(runner)
+        _ = spawn_monitor(fn -> runner.() end)
         :ok
     catch
       :exit, reason ->
         SLog.warning(
           @log_category,
-          "TaskSupervisor exited for pool async task; using Task.start fallback",
+          "TaskSupervisor exited for pool async task; using monitored fallback",
           reason: reason
         )
 
-        _ = Task.start(runner)
+        _ = spawn_monitor(fn -> runner.() end)
         :ok
     end
   end

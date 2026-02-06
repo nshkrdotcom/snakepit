@@ -369,6 +369,15 @@ defmodule Snakepit.Telemetry.GrpcStream do
     {:noreply, state}
   end
 
+  @impl true
+  def terminate(_reason, state) do
+    state
+    |> drop_all_workers()
+    |> drop_orphan_ops()
+
+    :ok
+  end
+
   ## Private Helpers
 
   defp drop_worker(state, worker_id) do
@@ -399,7 +408,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
       stream_info ->
         if is_reference(stream_info[:open_timer_ref]) do
-          Process.cancel_timer(stream_info.open_timer_ref)
+          Process.cancel_timer(stream_info.open_timer_ref, async: true, info: false)
         end
 
         if stream_info.task && Process.alive?(stream_info.task.pid) do
@@ -522,11 +531,35 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
       {op, ops} ->
         if op.timer_ref do
-          Process.cancel_timer(op.timer_ref)
+          Process.cancel_timer(op.timer_ref, async: true, info: false)
         end
 
         {:ok, op, %{state | ops: ops}}
     end
+  end
+
+  defp drop_all_workers(state) do
+    Enum.reduce(Map.keys(state.streams), state, fn worker_id, acc ->
+      drop_worker(acc, worker_id)
+    end)
+  end
+
+  defp drop_orphan_ops(state) do
+    Enum.reduce(Map.keys(state.ops), state, fn ref, acc ->
+      case pop_op(acc, ref) do
+        {:ok, op, acc_without_op} ->
+          Process.demonitor(ref, [:flush])
+
+          if is_pid(op.task_pid) and Process.alive?(op.task_pid) do
+            Process.exit(op.task_pid, :kill)
+          end
+
+          acc_without_op
+
+        :error ->
+          acc
+      end
+    end)
   end
 
   defp handle_stream_op_result(

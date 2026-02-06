@@ -1144,7 +1144,17 @@ defmodule Snakepit.Config do
   end
 
   defp fetch_value(config, key) do
-    Map.get(config, key) || Map.get(config, Atom.to_string(key))
+    if Map.has_key?(config, key) do
+      Map.get(config, key)
+    else
+      string_key = Atom.to_string(key)
+
+      if Map.has_key?(config, string_key) do
+        Map.get(config, string_key)
+      else
+        nil
+      end
+    end
   end
 
   defp normalize_integer(nil), do: nil

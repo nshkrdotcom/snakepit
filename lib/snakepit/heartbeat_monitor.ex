@@ -357,6 +357,9 @@ defmodule Snakepit.HeartbeatMonitor do
           {:snakepit_run_task, ref} ->
             result = fun.()
             send(parent, {ref, result})
+        after
+          1_000 ->
+            :ok
         end
       end)
 

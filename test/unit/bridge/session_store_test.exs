@@ -119,4 +119,26 @@ defmodule SessionStoreTest do
 
     assert {:error, :not_found} = SessionStore.get_session(server_name, "upsert_quota_s2")
   end
+
+  test "store_worker_session propagates validation errors on invalid worker id" do
+    server_name = :session_store_validation_server
+
+    start_supervised!(
+      {SessionStore, name: server_name, table_name: :session_store_validation_table}
+    )
+
+    assert {:error, :invalid_last_worker_id} =
+             SessionStore.store_worker_session(server_name, "session_invalid_worker", 123)
+
+    assert {:error, :not_found} =
+             SessionStore.get_session(server_name, "session_invalid_worker")
+  end
+
+  test "terminate/2 cancels scheduled cleanup timer" do
+    timer_ref = Process.send_after(self(), :cleanup_expired_sessions, 100)
+    state = %{cleanup_timer_ref: timer_ref}
+
+    assert :ok = SessionStore.terminate(:shutdown, state)
+    refute_receive :cleanup_expired_sessions, 150
+  end
 end

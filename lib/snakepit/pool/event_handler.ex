@@ -270,11 +270,7 @@ defmodule Snakepit.Pool.EventHandler do
     %{queued_from: queued_from} = ctx
     {client_pid, _tag} = queued_from
 
-    if Process.alive?(client_pid) do
-      execute_queued_request(ctx, client_pid, command, args, opts)
-    else
-      handle_dead_client(ctx, client_pid)
-    end
+    execute_queued_request(ctx, client_pid, command, args, opts)
   end
 
   defp execute_queued_request(ctx, client_pid, command, args, opts) do
@@ -296,28 +292,35 @@ defmodule Snakepit.Pool.EventHandler do
     context.async_with_context.(fn ->
       ref = Process.monitor(client_pid)
 
-      {result, final_worker_id} =
-        context.execute_with_crash_barrier.(
-          pool_pid,
-          pool_name,
-          worker_id,
-          command,
-          args,
-          opts,
-          pool_state.pool_config
-        )
+      case monitor_client_status(ref, client_pid) do
+        {:down, _reason} ->
+          Process.demonitor(ref, [:flush])
+          context.maybe_checkin_worker.(pool_name, worker_id)
 
-      checkin_worker_id = final_worker_id
+        :alive ->
+          {result, final_worker_id} =
+            context.execute_with_crash_barrier.(
+              pool_pid,
+              pool_name,
+              worker_id,
+              command,
+              args,
+              opts,
+              pool_state.pool_config
+            )
 
-      ClientReply.reply_and_checkin(
-        pool_name,
-        checkin_worker_id,
-        queued_from,
-        ref,
-        client_pid,
-        result,
-        context.maybe_checkin_worker
-      )
+          checkin_worker_id = final_worker_id
+
+          ClientReply.reply_and_checkin(
+            pool_name,
+            checkin_worker_id,
+            queued_from,
+            ref,
+            client_pid,
+            result,
+            context.maybe_checkin_worker
+          )
+      end
     end)
 
     updated_pool_state = %{
@@ -330,27 +333,22 @@ defmodule Snakepit.Pool.EventHandler do
     {:noreply, %{state | pools: updated_pools}}
   end
 
-  defp handle_dead_client(ctx, client_pid) do
-    %{
-      pool_name: pool_name,
-      worker_id: worker_id,
-      pool_state: pool_state,
-      new_queue: new_queue,
-      pruned_cancelled: pruned_cancelled,
-      state: state
-    } = ctx
+  defp monitor_client_status(ref, client_pid) do
+    case await_client_down(ref, client_pid) do
+      :alive ->
+        if Process.alive?(client_pid), do: :alive, else: {:down, :unknown}
 
-    SLog.debug(@log_category, "Discarding request from dead client #{inspect(client_pid)}")
-    GenServer.cast(self(), {:checkin_worker, pool_name, worker_id, :skip_decrement})
+      other ->
+        other
+    end
+  end
 
-    updated_pool_state = %{
-      pool_state
-      | request_queue: new_queue,
-        cancelled_requests: pruned_cancelled
-    }
-
-    updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
-    {:noreply, %{state | pools: updated_pools}}
+  defp await_client_down(ref, client_pid) do
+    receive do
+      {:DOWN, ^ref, :process, ^client_pid, reason} -> {:down, reason}
+    after
+      0 -> :alive
+    end
   end
 
   defp normalize_request({from, command, args, opts, queued_at, timer_ref}) do

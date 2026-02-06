@@ -88,6 +88,18 @@ defmodule Snakepit.GRPCWorkerCallbackNonBlockingTest do
     send(adapter_pid, {:release, gate_ref})
   end
 
+  test "get_health callback is non-blocking" do
+    state = base_state(GatedAdapter)
+
+    assert {:noreply, _state} = GRPCWorker.handle_call(:get_health, {self(), make_ref()}, state)
+  end
+
+  test "get_info callback is non-blocking" do
+    state = base_state(GatedAdapter)
+
+    assert {:noreply, _state} = GRPCWorker.handle_call(:get_info, {self(), make_ref()}, state)
+  end
+
   defp base_state(adapter) do
     %{
       adapter: adapter,
@@ -100,6 +112,7 @@ defmodule Snakepit.GRPCWorkerCallbackNonBlockingTest do
         errors: 0,
         start_time: System.monotonic_time()
       },
+      rpc_request_queue: :queue.new(),
       pending_rpc_calls: %{},
       pending_rpc_monitors: %{}
     }

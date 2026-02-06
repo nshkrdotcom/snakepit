@@ -24,7 +24,8 @@ defmodule Snakepit.Telemetry.GPUProfiler do
           devices: [Hardware.Selector.device()],
           sampler_fun: (Hardware.Selector.device() -> {:ok, map()} | {:error, term()}),
           sample_task_ref: reference() | nil,
-          sample_task_pid: pid() | nil
+          sample_task_pid: pid() | nil,
+          sample_now_waiters: [GenServer.from()]
         }
 
   # Client API
@@ -100,7 +101,8 @@ defmodule Snakepit.Telemetry.GPUProfiler do
       devices: detect_gpu_devices(),
       sampler_fun: Keyword.get(opts, :sampler_fun, &sample_device/1),
       sample_task_ref: nil,
-      sample_task_pid: nil
+      sample_task_pid: nil,
+      sample_now_waiters: []
     }
 
     state =
@@ -114,19 +116,17 @@ defmodule Snakepit.Telemetry.GPUProfiler do
   end
 
   @impl true
-  def handle_call(:sample_now, _from, state) do
-    case do_sample(state) do
-      {:ok, sampled_at_ms} ->
-        new_state =
-          state
-          |> Map.update!(:sample_count, &(&1 + 1))
-          |> Map.put(:last_sample_time, sampled_at_ms)
+  def handle_call(:sample_now, _from, %{devices: []} = state) do
+    {:reply, {:error, :no_gpu}, state}
+  end
 
-        {:reply, :ok, new_state}
+  def handle_call(:sample_now, from, state) do
+    state =
+      state
+      |> enqueue_sample_now_waiter(from)
+      |> maybe_start_sample_task()
 
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
+    {:noreply, state}
   end
 
   def handle_call(:get_stats, _from, state) do
@@ -185,12 +185,14 @@ defmodule Snakepit.Telemetry.GPUProfiler do
       |> Map.update!(:sample_count, &(&1 + 1))
       |> Map.put(:last_sample_time, sampled_at_ms)
 
+    state = reply_sample_now_waiters(state, :ok)
     {:noreply, state}
   end
 
-  def handle_info({:gpu_sample_complete, pid, {:error, _reason}}, %{sample_task_pid: pid} = state) do
+  def handle_info({:gpu_sample_complete, pid, {:error, reason}}, %{sample_task_pid: pid} = state) do
     maybe_demonitor_sample_task(state.sample_task_ref)
-    {:noreply, clear_sample_task(state)}
+    state = state |> clear_sample_task() |> reply_sample_now_waiters({:error, reason})
+    {:noreply, state}
   end
 
   def handle_info({:DOWN, ref, :process, _pid, :normal}, %{sample_task_ref: ref} = state) do
@@ -198,12 +200,20 @@ defmodule Snakepit.Telemetry.GPUProfiler do
     {:noreply, state}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{sample_task_ref: ref} = state) do
-    {:noreply, clear_sample_task(state)}
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{sample_task_ref: ref} = state) do
+    state = state |> clear_sample_task() |> reply_sample_now_waiters({:error, reason})
+    {:noreply, state}
   end
 
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  @impl true
+  def terminate(_reason, state) do
+    state = cancel_timer(state)
+    _state = stop_sample_task(state)
+    :ok
   end
 
   # Private functions
@@ -229,16 +239,8 @@ defmodule Snakepit.Telemetry.GPUProfiler do
   defp cancel_timer(%{timer_ref: nil} = state), do: state
 
   defp cancel_timer(%{timer_ref: ref} = state) do
-    Process.cancel_timer(ref)
+    Process.cancel_timer(ref, async: true, info: false)
     %{state | timer_ref: nil}
-  end
-
-  defp do_sample(%{devices: []} = _state) do
-    {:error, :no_gpu}
-  end
-
-  defp do_sample(state) do
-    do_sample(state.devices, Map.get(state, :sampler_fun, &sample_device/1))
   end
 
   defp do_sample(devices, sampler_fun) when is_list(devices) and is_function(sampler_fun, 1) do
@@ -279,6 +281,20 @@ defmodule Snakepit.Telemetry.GPUProfiler do
     %{state | sample_task_ref: monitor_ref, sample_task_pid: pid}
   end
 
+  defp enqueue_sample_now_waiter(state, from) do
+    Map.update(state, :sample_now_waiters, [from], fn waiters -> [from | waiters] end)
+  end
+
+  defp reply_sample_now_waiters(state, reply) do
+    waiters = Map.get(state, :sample_now_waiters, [])
+
+    Enum.each(waiters, fn from ->
+      GenServer.reply(from, reply)
+    end)
+
+    Map.put(state, :sample_now_waiters, [])
+  end
+
   defp clear_sample_task(state) do
     %{state | sample_task_ref: nil, sample_task_pid: nil}
   end
@@ -288,6 +304,15 @@ defmodule Snakepit.Telemetry.GPUProfiler do
   end
 
   defp maybe_demonitor_sample_task(_), do: :ok
+
+  defp stop_sample_task(state) do
+    if is_pid(state.sample_task_pid) and Process.alive?(state.sample_task_pid) do
+      Process.exit(state.sample_task_pid, :kill)
+    end
+
+    maybe_demonitor_sample_task(state.sample_task_ref)
+    clear_sample_task(state)
+  end
 
   defp sample_device({:cuda, device_id}) do
     query = [

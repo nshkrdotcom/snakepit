@@ -112,6 +112,10 @@ config :snakepit,
   ]
 ```
 
+If your adapter defines `command_timeout/2`, timeout selection is resolved from the
+checked-out worker's pool `adapter_module`. The global `:adapter_module` value is
+used only as a fallback when a pool does not declare one.
+
 ### Logging Configuration
 
 Snakepit is silent by default (errors only):

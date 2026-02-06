@@ -108,6 +108,8 @@ Only processes matching Snakepit's command-line patterns (`grpc_server.py` with 
 config :snakepit, :rogue_cleanup, enabled: false
 ```
 
+`enabled: false` is an explicit disable (also valid as `rogue_cleanup: %{enabled: false}`).
+
 ### Graceful Shutdown
 
 During application shutdown:

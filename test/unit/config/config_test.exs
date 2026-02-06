@@ -287,6 +287,32 @@ defmodule Snakepit.ConfigTest do
     end
   end
 
+  describe "rogue_cleanup_config/0" do
+    test "preserves explicit false for enabled flag" do
+      previous = Application.get_env(:snakepit, :rogue_cleanup)
+
+      on_exit(fn ->
+        restore_env(:rogue_cleanup, previous)
+      end)
+
+      Application.put_env(:snakepit, :rogue_cleanup, %{enabled: false})
+
+      assert Config.rogue_cleanup_config().enabled == false
+    end
+
+    test "preserves explicit false for string-key enabled flag" do
+      previous = Application.get_env(:snakepit, :rogue_cleanup)
+
+      on_exit(fn ->
+        restore_env(:rogue_cleanup, previous)
+      end)
+
+      Application.put_env(:snakepit, :rogue_cleanup, %{"enabled" => false})
+
+      assert Config.rogue_cleanup_config().enabled == false
+    end
+  end
+
   defp restore_env(key, value) do
     if is_nil(value) do
       Application.delete_env(:snakepit, key)
