@@ -16,8 +16,8 @@ defmodule Snakepit.Pool.ClientReply do
         ) :: :ok
   def reply_and_checkin(pool_name, worker_id, from, ref, client_pid, result, maybe_checkin_worker)
       when is_function(maybe_checkin_worker, 2) do
-    receive do
-      {:DOWN, ^ref, :process, ^client_pid, _reason} ->
+    case monitor_client_status(ref, client_pid) do
+      {:down, _reason} ->
         SLog.warning(
           @log_category,
           "Client #{inspect(client_pid)} died before receiving reply. " <>
@@ -25,13 +25,23 @@ defmodule Snakepit.Pool.ClientReply do
         )
 
         maybe_checkin_worker.(pool_name, worker_id)
-    after
-      0 ->
+
+      :alive ->
         Process.demonitor(ref, [:flush])
         GenServer.reply(from, result)
         maybe_checkin_worker.(pool_name, worker_id)
     end
 
     :ok
+  end
+
+  @spec monitor_client_status(reference(), pid()) :: :alive | {:down, term()}
+  def monitor_client_status(ref, client_pid) when is_reference(ref) and is_pid(client_pid) do
+    receive do
+      {:DOWN, ^ref, :process, ^client_pid, reason} -> {:down, reason}
+    after
+      0 ->
+        if Process.alive?(client_pid), do: :alive, else: {:down, :unknown}
+    end
   end
 end

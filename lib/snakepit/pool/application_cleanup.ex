@@ -8,6 +8,7 @@ defmodule Snakepit.Pool.ApplicationCleanup do
 
   use GenServer
   alias Snakepit.Config
+  alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.ProcessKiller
@@ -38,7 +39,49 @@ defmodule Snakepit.Pool.ApplicationCleanup do
   # clean up processes during normal shutdown.
   #
   # If this handler finds orphans, it indicates a bug in the supervision tree.
-  def terminate(reason, _state) do
+  def terminate(reason, state) do
+    cleanup_fun = Map.get(state, :cleanup_fun, &run_emergency_cleanup/1)
+    timeout_ms = Map.get(state, :cleanup_timeout_ms, Defaults.cleanup_on_stop_timeout_ms())
+
+    _ = run_with_timeout(fn -> cleanup_fun.(reason) end, timeout_ms)
+    :ok
+  end
+
+  defp run_with_timeout(fun, timeout_ms) when is_function(fun, 0) do
+    caller = self()
+    result_ref = make_ref()
+
+    {pid, monitor_ref} =
+      spawn_monitor(fn ->
+        send(caller, {result_ref, fun.()})
+      end)
+
+    receive do
+      {^result_ref, _result} ->
+        Process.demonitor(monitor_ref, [:flush])
+        :ok
+
+      {:DOWN, ^monitor_ref, :process, ^pid, reason} ->
+        SLog.warning(@log_category, "Application cleanup task exited before completion",
+          reason: reason
+        )
+
+        :ok
+    after
+      timeout_ms ->
+        SLog.warning(
+          @log_category,
+          "Application cleanup exceeded shutdown budget; forcing cleanup task exit",
+          timeout_ms: timeout_ms
+        )
+
+        Process.exit(pid, :kill)
+        Process.demonitor(monitor_ref, [:flush])
+        :timeout
+    end
+  end
+
+  defp run_emergency_cleanup(reason) do
     SLog.info(@log_category, "🔍 Emergency cleanup check (shutdown reason: #{inspect(reason)})")
 
     SLog.debug(

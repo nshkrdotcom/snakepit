@@ -869,7 +869,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
   defp cancel_stream_open_timer(stream_info) do
     if is_reference(stream_info[:open_timer_ref]) do
-      Process.cancel_timer(stream_info.open_timer_ref)
+      Process.cancel_timer(stream_info.open_timer_ref, async: true, info: false)
     end
 
     Map.put(stream_info, :open_timer_ref, nil)

@@ -60,14 +60,14 @@ defmodule Snakepit.Worker.TaintRegistry do
   def consume_restart(worker_id) when is_binary(worker_id) do
     ensure_table()
 
-    case :ets.lookup(@table, worker_id) do
+    case :ets.take(@table, worker_id) do
       [{^worker_id, record}] ->
         cond do
           expired?(record) ->
-            :ets.delete(@table, worker_id)
             :error
 
           record.restart_notified ->
+            :ets.insert(@table, {worker_id, record})
             :error
 
           true ->
@@ -76,7 +76,7 @@ defmodule Snakepit.Worker.TaintRegistry do
             {:ok, record}
         end
 
-      _ ->
+      [] ->
         :error
     end
   end

@@ -48,4 +48,28 @@ defmodule Snakepit.Pool.ClientReplyFlowTest do
     refute_receive {^tag, _reply}, 100
     assert_receive {:checkin, :pool_b, "worker_b"}, 100
   end
+
+  test "monitor_client_status returns :alive when client is still running" do
+    client_pid =
+      spawn(fn ->
+        receive do
+        end
+      end)
+
+    ref = Process.monitor(client_pid)
+    assert :alive = ClientReply.monitor_client_status(ref, client_pid)
+
+    Process.demonitor(ref, [:flush])
+    Process.exit(client_pid, :kill)
+  end
+
+  test "monitor_client_status returns down reason when DOWN is pending" do
+    client_pid = spawn(fn -> :ok end)
+    ref = Process.monitor(client_pid)
+
+    assert_receive {:DOWN, ^ref, :process, ^client_pid, :normal}, 100
+    send(self(), {:DOWN, ref, :process, client_pid, :normal})
+
+    assert {:down, :normal} = ClientReply.monitor_client_status(ref, client_pid)
+  end
 end

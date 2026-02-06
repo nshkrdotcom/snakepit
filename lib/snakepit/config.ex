@@ -238,10 +238,6 @@ defmodule Snakepit.Config do
   def normalize_pool_config(config) do
     profile = Map.get(config, :worker_profile, Defaults.default_worker_profile())
 
-    capacity_strategy =
-      Map.get(config, :capacity_strategy) ||
-        Application.get_env(:snakepit, :capacity_strategy, Defaults.default_capacity_strategy())
-
     base_config =
       config
       |> Map.put_new(:worker_profile, Defaults.default_worker_profile())
@@ -250,7 +246,7 @@ defmodule Snakepit.Config do
       |> Map.put_new(:adapter_env, [])
       |> Map.put_new(:worker_ttl, :infinity)
       |> Map.put_new(:worker_max_requests, :infinity)
-      |> Map.put(:capacity_strategy, capacity_strategy)
+      |> Map.put(:capacity_strategy, capacity_strategy(config))
       |> Map.put(
         :affinity,
         normalize_affinity(Map.get(config, :affinity, Defaults.default_affinity_mode()))
@@ -346,6 +342,67 @@ defmodule Snakepit.Config do
   end
 
   @doc """
+  Returns true when the application is configured with explicit multi-pool mode.
+  """
+  @spec multi_pool_mode?() :: boolean()
+  def multi_pool_mode? do
+    is_list(Application.get_env(:snakepit, :pools))
+  end
+
+  @doc """
+  Resolve adapter module with consistent precedence:
+  explicit override, pool config, legacy pool_config, global adapter, then optional default.
+  """
+  @spec adapter_module(map(), keyword()) :: module() | nil
+  def adapter_module(pool_config \\ %{}, opts \\ []) when is_map(pool_config) and is_list(opts) do
+    explicit = Keyword.get(opts, :override) || Keyword.get(opts, :adapter_module)
+    default = Keyword.get(opts, :default)
+
+    first_non_nil([
+      explicit,
+      Map.get(pool_config, :adapter_module),
+      legacy_pool_config_value(:adapter_module),
+      Application.get_env(:snakepit, :adapter_module),
+      default
+    ])
+  end
+
+  @doc """
+  Resolve capacity strategy with consistent precedence:
+  pool config, legacy pool_config, global strategy, then defaults.
+  """
+  @spec capacity_strategy(map()) :: :pool | :profile | :hybrid
+  def capacity_strategy(pool_config \\ %{}) when is_map(pool_config) do
+    strategy =
+      first_non_nil([
+        Map.get(pool_config, :capacity_strategy),
+        legacy_pool_config_value(:capacity_strategy),
+        Application.get_env(:snakepit, :capacity_strategy)
+      ])
+
+    case strategy do
+      :pool -> :pool
+      :profile -> :profile
+      :hybrid -> :hybrid
+      _ -> Defaults.default_capacity_strategy()
+    end
+  end
+
+  @doc """
+  Resolve adapter args from normalized pool config or legacy single-pool config.
+  """
+  @spec adapter_args(map()) :: list()
+  def adapter_args(pool_config \\ %{}) when is_map(pool_config) do
+    case first_non_nil([
+           Map.get(pool_config, :adapter_args),
+           legacy_pool_config_value(:adapter_args)
+         ]) do
+      args when is_list(args) -> args
+      _ -> []
+    end
+  end
+
+  @doc """
   Returns the normalized default heartbeat configuration, merged with application env overrides.
 
   This shape is shared with `snakepit_bridge.heartbeat.HeartbeatConfig`. When adding new keys,
@@ -375,8 +432,7 @@ defmodule Snakepit.Config do
       adapter_module: Application.get_env(:snakepit, :adapter_module),
       adapter_args: [],
       adapter_env: [],
-      capacity_strategy:
-        Application.get_env(:snakepit, :capacity_strategy, Defaults.default_capacity_strategy()),
+      capacity_strategy: capacity_strategy(legacy_pool_config),
       affinity: affinity
     }
 
@@ -555,6 +611,17 @@ defmodule Snakepit.Config do
   end
 
   defp normalize_heartbeat_overrides(_), do: %{}
+
+  defp legacy_pool_config_value(key) when is_atom(key) do
+    case Application.get_env(:snakepit, :pool_config, %{}) do
+      %{} = pool_config -> Map.get(pool_config, key)
+      _ -> nil
+    end
+  end
+
+  defp first_non_nil(values) when is_list(values) do
+    Enum.find(values, fn value -> not is_nil(value) end)
+  end
 
   defp default_heartbeat_config do
     Map.merge(@base_heartbeat_config_template, %{

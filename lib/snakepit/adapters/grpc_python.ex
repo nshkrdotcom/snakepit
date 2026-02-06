@@ -48,6 +48,7 @@ defmodule Snakepit.Adapters.GRPCPython do
   @behaviour Snakepit.Adapter
 
   alias Snakepit.Bridge.ToolChunk
+  alias Snakepit.Config
   alias Snakepit.Defaults
   alias Snakepit.GRPC.Client
   alias Snakepit.Logger, as: SLog
@@ -68,17 +69,14 @@ defmodule Snakepit.Adapters.GRPCPython do
 
   @impl true
   def script_args do
-    # Check if custom adapter args are provided in pool config
-    pool_config = Application.get_env(:snakepit, :pool_config, %{})
-    adapter_args = Map.get(pool_config, :adapter_args, nil)
+    case Config.adapter_args() do
+      [] ->
+        # Default to ShowcaseAdapter - fully functional reference implementation
+        # For custom adapters, set pool_config.adapter_args or use TemplateAdapter as starting point
+        ["--adapter", "snakepit_bridge.adapters.showcase.ShowcaseAdapter"]
 
-    if adapter_args do
-      # Use custom adapter args if provided
-      adapter_args
-    else
-      # Default to ShowcaseAdapter - fully functional reference implementation
-      # For custom adapters, set pool_config.adapter_args or use TemplateAdapter as starting point
-      ["--adapter", "snakepit_bridge.adapters.showcase.ShowcaseAdapter"]
+      adapter_args ->
+        adapter_args
     end
   end
 

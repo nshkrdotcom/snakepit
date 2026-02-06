@@ -242,4 +242,73 @@ defmodule Snakepit.HeartbeatMonitorTest do
     assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, {:shutdown, :ping_failed}}, 500
     assert_receive {:DOWN, ^monitor_ref, :process, ^monitor, {:shutdown, :ping_failed}}, 500
   end
+
+  test "heartbeat ping fallback works when TaskSupervisor is unavailable" do
+    on_exit(fn ->
+      Application.ensure_all_started(:snakepit)
+    end)
+
+    Application.stop(:snakepit)
+
+    worker_pid = spawn_worker()
+    ping_counter = :counters.new(1, [:atomics])
+
+    {:ok, monitor} =
+      HeartbeatMonitor.start_link(
+        worker_pid: worker_pid,
+        worker_id: "worker-fallback-ping",
+        ping_interval_ms: 20,
+        timeout_ms: 120,
+        max_missed_heartbeats: 1,
+        dependent: false,
+        ping_fun: fn timestamp ->
+          :counters.add(ping_counter, 1, 1)
+          HeartbeatMonitor.notify_pong(self(), timestamp)
+          :ok
+        end
+      )
+
+    assert_eventually(
+      fn ->
+        :counters.get(ping_counter, 1) >= 2 and Process.alive?(monitor)
+      end,
+      timeout: 500,
+      interval: 20
+    )
+
+    :ok = GenServer.stop(monitor)
+    send(worker_pid, :halt)
+  end
+
+  test "ping timeout path demonitor flushes ping task monitor messages" do
+    worker_pid = spawn_worker()
+    ping_task_pid = spawn(fn -> Process.sleep(:infinity) end)
+    ping_task_ref = Process.monitor(ping_task_pid)
+
+    state = %HeartbeatMonitor{
+      worker_pid: worker_pid,
+      worker_id: "worker-timeout-flush",
+      ping_interval: 1_000,
+      timeout: 100,
+      max_missed_heartbeats: 1,
+      ping_fun: fn _timestamp -> :ok end,
+      ping_task_ref: ping_task_ref,
+      ping_task_pid: ping_task_pid,
+      ping_task_timer: nil,
+      dependent: true,
+      missed_heartbeats: 0,
+      stats: %{pings_sent: 0, pongs_received: 0, timeouts: 0}
+    }
+
+    assert {:stop, {:shutdown, :ping_failed}, _new_state} =
+             HeartbeatMonitor.handle_info({:ping_task_timeout, ping_task_ref}, state)
+
+    refute_receive {:DOWN, ^ping_task_ref, :process, ^ping_task_pid, _reason}, 100
+
+    receive do
+      {:EXIT, ^worker_pid, _reason} -> :ok
+    after
+      0 -> :ok
+    end
+  end
 end

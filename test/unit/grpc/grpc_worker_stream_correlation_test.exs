@@ -58,4 +58,58 @@ defmodule Snakepit.GRPCWorkerStreamCorrelationTest do
 
     assert_receive {^tag, :ok}, 500
   end
+
+  test "DOWN cleanup removes orphaned pending monitor entries" do
+    monitor_ref = make_ref()
+    token = make_ref()
+
+    state = %{
+      id: "worker-monitor-cleanup",
+      stats: %{requests: 0, errors: 0},
+      pending_rpc_calls: %{},
+      pending_rpc_monitors: %{monitor_ref => token}
+    }
+
+    assert {:noreply, new_state} =
+             Snakepit.GRPCWorker.handle_info(
+               {:DOWN, monitor_ref, :process, self(), :simulated_crash},
+               state
+             )
+
+    refute Map.has_key?(new_state.pending_rpc_monitors, monitor_ref)
+    assert new_state.pending_rpc_calls == %{}
+  end
+
+  test "async result followed by DOWN keeps pending monitor maps clean" do
+    monitor_ref = make_ref()
+    token = make_ref()
+    from = {self(), make_ref()}
+    tag = elem(from, 1)
+
+    state = %{
+      id: "worker-rpc-ordering",
+      stats: %{requests: 0, errors: 0},
+      pending_rpc_calls: %{token => %{from: from, monitor_ref: monitor_ref, task_pid: self()}},
+      pending_rpc_monitors: %{monitor_ref => token}
+    }
+
+    assert {:noreply, after_result} =
+             Snakepit.GRPCWorker.handle_info(
+               {:grpc_async_rpc_result, token, {:ok, {{:ok, :done}, :success}}},
+               state
+             )
+
+    assert_receive {^tag, {:ok, :done}}, 500
+    assert after_result.pending_rpc_calls == %{}
+    assert after_result.pending_rpc_monitors == %{}
+
+    assert {:noreply, after_down} =
+             Snakepit.GRPCWorker.handle_info(
+               {:DOWN, monitor_ref, :process, self(), :simulated_crash},
+               after_result
+             )
+
+    assert after_down.pending_rpc_calls == %{}
+    assert after_down.pending_rpc_monitors == %{}
+  end
 end

@@ -438,7 +438,7 @@ defmodule Snakepit.EnvDoctor do
   defp ensure_default_adapter(adapters) do
     case adapters do
       [] ->
-        default = parse_adapter_from_args(GRPCPython.script_args() || [])
+        default = parse_adapter_from_args(GRPCPython.script_args())
 
         if default do
           [default]

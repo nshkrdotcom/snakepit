@@ -145,7 +145,7 @@ defmodule Snakepit.Pool.Dispatcher do
       ref = Process.monitor(client_pid)
       start_time = System.monotonic_time(:microsecond)
 
-      case monitor_client_status(ref, client_pid) do
+      case ClientReply.monitor_client_status(ref, client_pid) do
         {:down, reason} ->
           handle_client_already_down(
             pool_name,
@@ -258,23 +258,5 @@ defmodule Snakepit.Pool.Dispatcher do
       result,
       context.maybe_checkin_worker
     )
-  end
-
-  def monitor_client_status(ref, client_pid) do
-    case await_client_down(ref, client_pid) do
-      :alive ->
-        if Process.alive?(client_pid), do: :alive, else: {:down, :unknown}
-
-      other ->
-        other
-    end
-  end
-
-  defp await_client_down(ref, client_pid) do
-    receive do
-      {:DOWN, ^ref, :process, ^client_pid, reason} -> {:down, reason}
-    after
-      0 -> :alive
-    end
   end
 end

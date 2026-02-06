@@ -54,6 +54,7 @@ defmodule Snakepit.Pool.Worker.Starter do
   """
 
   use Supervisor
+  alias Snakepit.Config
   alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Pool.Worker.StarterRegistry
@@ -149,7 +150,7 @@ defmodule Snakepit.Pool.Worker.Starter do
       "Starting worker starter for #{worker_id} with module #{inspect(worker_module)}"
     )
 
-    adapter = adapter_module || Application.get_env(:snakepit, :adapter_module)
+    adapter = Config.adapter_module(worker_config, override: adapter_module)
 
     # CRITICAL FIX: Pass pool_name to worker so it knows which pool to notify when ready
     # Default to Snakepit.Pool for backward compatibility (production use)
@@ -186,13 +187,9 @@ defmodule Snakepit.Pool.Worker.Starter do
 
   defp maybe_put_pool_identifier(opts, pool_name, worker_config) do
     identifier =
-      if is_map(worker_config) do
-        worker_config
-        |> Map.get(:pool_identifier)
-        |> normalize_identifier()
-      else
-        normalize_identifier(pool_name)
-      end
+      worker_config
+      |> Map.get(:pool_identifier, pool_name)
+      |> normalize_identifier()
 
     if identifier do
       Keyword.put(opts, :pool_identifier, identifier)

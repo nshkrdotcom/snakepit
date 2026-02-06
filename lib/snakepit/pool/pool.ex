@@ -422,7 +422,7 @@ defmodule Snakepit.Pool do
       ])
 
     # Check if we're in multi-pool mode (explicit :pools config)
-    multi_pool_mode? = Application.get_env(:snakepit, :pools) != nil
+    multi_pool_mode? = Config.multi_pool_mode?()
 
     # Create initial pool states (not yet initialized with workers)
     pools =
@@ -1176,14 +1176,20 @@ defmodule Snakepit.Pool do
        when is_reference(ref) and is_pid(pid) do
     Process.demonitor(ref, [:flush])
 
-    if Process.alive?(pid) do
-      Process.exit(pid, :shutdown)
-    end
+    maybe_exit_process(pid, :shutdown)
 
     :ok
   end
 
   defp maybe_stop_init_task(_state), do: :ok
+
+  defp maybe_exit_process(pid, reason) when is_pid(pid) do
+    Process.exit(pid, reason)
+    :ok
+  catch
+    :exit, {:noproc, _} -> :ok
+    :exit, _ -> :ok
+  end
 
   defp clear_init_task_state(state) do
     %{state | init_task_ref: nil, init_task_pid: nil, init_resource_baseline: nil}
@@ -1717,10 +1723,10 @@ defmodule Snakepit.Pool do
     adapter_module =
       case PoolRegistry.fetch_worker(worker_id) do
         {:ok, _pid, metadata} ->
-          Map.get(metadata, :adapter_module) || Application.get_env(:snakepit, :adapter_module)
+          Config.adapter_module(%{}, override: Map.get(metadata, :adapter_module))
 
         _ ->
-          Application.get_env(:snakepit, :adapter_module)
+          Config.adapter_module()
       end
 
     resolve_adapter_timeout(adapter_module, command, args)

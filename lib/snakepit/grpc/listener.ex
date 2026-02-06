@@ -312,7 +312,7 @@ defmodule Snakepit.GRPC.Listener do
   defp parse_ip(_), do: :error
 
   defp reuse_existing_listener(config, pid, timeout_ms, endpoint_module) do
-    if Process.alive?(pid) do
+    if process_available?(pid) do
       case port_from_listener_info(endpoint_module) do
         {:ok, port} ->
           case validate_existing_port(config, port) do
@@ -443,12 +443,12 @@ defmodule Snakepit.GRPC.Listener do
   defp wait_for_existing_port(pid, ref, deadline, endpoint_module) do
     case port_from_listener_info(endpoint_module) do
       {:ok, port} ->
-        if Process.alive?(pid), do: {:ok, port}, else: {:error, :listener_stale}
+        if process_available?(pid), do: {:ok, port}, else: {:error, :listener_stale}
 
       :error ->
         case existing_listener_port(endpoint_module) do
           {:ok, port} ->
-            if Process.alive?(pid), do: {:ok, port}, else: {:error, :listener_stale}
+            if process_available?(pid), do: {:ok, port}, else: {:error, :listener_stale}
 
           :error ->
             if System.monotonic_time(:millisecond) >= deadline do
@@ -464,6 +464,20 @@ defmodule Snakepit.GRPC.Listener do
             end
         end
     end
+  end
+
+  defp process_available?(pid) when is_pid(pid) do
+    ref = Process.monitor(pid)
+
+    available? =
+      receive do
+        {:DOWN, ^ref, :process, ^pid, _reason} -> false
+      after
+        0 -> true
+      end
+
+    Process.demonitor(ref, [:flush])
+    available?
   end
 
   defp handle_existing_listener(config, pid, port, state, attempts_left) do

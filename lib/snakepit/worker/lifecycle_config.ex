@@ -8,6 +8,8 @@ defmodule Snakepit.Worker.LifecycleConfig do
   normalizes that subset into a struct so the contract is explicit and tested.
   """
 
+  alias Snakepit.Config
+
   @enforce_keys [:pool_name, :worker_module, :adapter_module, :profile_module]
   defstruct [
     :pool_name,
@@ -69,10 +71,10 @@ defmodule Snakepit.Worker.LifecycleConfig do
     worker_module = Map.get(config, :worker_module) || opts[:worker_module] || Snakepit.GRPCWorker
 
     adapter_module =
-      Map.get(config, :adapter_module) ||
-        opts[:adapter_module] ||
-        Application.get_env(:snakepit, :adapter_module) ||
-        Snakepit.Adapters.GRPCPython
+      Config.adapter_module(config,
+        override: opts[:adapter_module] || Map.get(config, :adapter_module),
+        default: Snakepit.Adapters.GRPCPython
+      )
 
     worker_profile_value = Map.get(config, :worker_profile, :process)
     {worker_profile, profile_module} = resolve_profile(worker_profile_value)

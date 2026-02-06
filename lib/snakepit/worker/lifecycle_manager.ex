@@ -55,6 +55,7 @@ defmodule Snakepit.Worker.LifecycleManager do
   use GenServer
   alias Snakepit.Config
   alias Snakepit.Defaults
+  alias Snakepit.Internal.TimeoutRunner
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Worker.LifecycleConfig
 
@@ -396,9 +397,10 @@ defmodule Snakepit.Worker.LifecycleManager do
 
   @impl true
   def handle_info(:health_check, state) do
-    # Perform health checks on all workers
+    health_check_timeout_ms = Config.lifecycle_worker_action_timeout_ms()
+
     Enum.each(state.workers, fn {worker_id, worker_state} ->
-      check_worker_health(worker_id, worker_state)
+      start_health_check_task(worker_id, worker_state, health_check_timeout_ms)
     end)
 
     # Schedule next health check
@@ -574,9 +576,6 @@ defmodule Snakepit.Worker.LifecycleManager do
           {:snakepit_run_task, ref} ->
             result = fun.()
             send(parent, {ref, result})
-        after
-          1_000 ->
-            :ok
         end
       end)
 
@@ -758,6 +757,56 @@ defmodule Snakepit.Worker.LifecycleManager do
             pool: worker_state.pool,
             reason: reason
           }
+        )
+    end
+  end
+
+  defp start_health_check_task(worker_id, worker_state, timeout_ms) do
+    runner = fn -> run_health_check_with_timeout(worker_id, worker_state, timeout_ms) end
+
+    try do
+      _ = Task.Supervisor.start_child(Snakepit.TaskSupervisor, runner)
+      :ok
+    rescue
+      error ->
+        SLog.warning(
+          @log_category,
+          "TaskSupervisor unavailable for health check task; using spawn fallback",
+          error: error
+        )
+
+        _ = spawn(runner)
+        :ok
+    catch
+      :exit, reason ->
+        SLog.warning(
+          @log_category,
+          "TaskSupervisor exited during health check task start; using spawn fallback",
+          reason: reason
+        )
+
+        _ = spawn(runner)
+        :ok
+    end
+  end
+
+  defp run_health_check_with_timeout(worker_id, worker_state, timeout_ms) do
+    case TimeoutRunner.run(fn -> check_worker_health(worker_id, worker_state) end, timeout_ms) do
+      {:ok, _result} ->
+        :ok
+
+      :timeout ->
+        SLog.warning(
+          @log_category,
+          "Worker #{worker_id} health check timed out",
+          timeout_ms: timeout_ms
+        )
+
+      {:error, reason} ->
+        SLog.warning(
+          @log_category,
+          "Worker #{worker_id} health check task crashed",
+          reason: reason
         )
     end
   end

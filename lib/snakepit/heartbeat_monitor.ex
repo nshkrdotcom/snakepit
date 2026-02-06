@@ -357,9 +357,6 @@ defmodule Snakepit.HeartbeatMonitor do
           {:snakepit_run_task, ref} ->
             result = fun.()
             send(parent, {ref, result})
-        after
-          1_000 ->
-            :ok
         end
       end)
 
@@ -371,6 +368,7 @@ defmodule Snakepit.HeartbeatMonitor do
 
   defp clear_ping_task(state) do
     cancel_timer(state.ping_task_timer)
+    maybe_demonitor_ping_task(state.ping_task_ref)
 
     %{
       state
@@ -379,6 +377,13 @@ defmodule Snakepit.HeartbeatMonitor do
         ping_task_timer: nil
     }
   end
+
+  defp maybe_demonitor_ping_task(ref) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    :ok
+  end
+
+  defp maybe_demonitor_ping_task(_), do: :ok
 
   defp ping_task_timeout_ms(timeout_ms) when is_integer(timeout_ms) and timeout_ms > 1 do
     max(1, timeout_ms - 1)

@@ -12,17 +12,10 @@ defmodule Snakepit.GRPC.ClientSupervisor do
   end
 
   def start_link(opts \\ []) do
-    whereis_fun = Keyword.get(opts, :whereis_fun, &Process.whereis/1)
+    _whereis_fun = Keyword.get(opts, :whereis_fun, &Process.whereis/1)
     start_fun = Keyword.get(opts, :start_fun, &start_grpc_client_supervisor/0)
 
-    case whereis_fun.(GRPC.Client.Supervisor) do
-      nil ->
-        normalize_start_result(start_fun.())
-
-      _pid ->
-        SLog.debug(:startup, "GRPC.Client.Supervisor already running; skipping start")
-        :ignore
-    end
+    normalize_start_result(start_fun.())
   end
 
   defp start_grpc_client_supervisor do
@@ -36,6 +29,13 @@ defmodule Snakepit.GRPC.ClientSupervisor do
     end
   end
 
-  defp normalize_start_result({:error, {:already_started, _pid}}), do: :ignore
+  defp normalize_start_result({:error, {:already_started, pid}}) do
+    SLog.debug(:startup, "GRPC.Client.Supervisor already running; startup is idempotent",
+      pid: inspect(pid)
+    )
+
+    :ignore
+  end
+
   defp normalize_start_result(result), do: result
 end

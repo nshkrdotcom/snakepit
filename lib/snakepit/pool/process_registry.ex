@@ -674,9 +674,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
   def terminate(reason, state) do
     SLog.info(@log_category, "Snakepit Pool Process Registry terminating: #{inspect(reason)}")
 
-    if state.dets_flush_ref do
-      Process.cancel_timer(state.dets_flush_ref)
-    end
+    cancel_timer(state.dets_flush_ref)
 
     state = await_cleanup_task_completion(%{state | dets_flush_ref: nil})
     state = flush_dets(state)
@@ -749,6 +747,13 @@ defmodule Snakepit.Pool.ProcessRegistry do
     %{state | dets_dirty: false, dets_flush_ref: nil}
   end
 
+  defp cancel_timer(nil), do: :ok
+
+  defp cancel_timer(timer_ref) do
+    Process.cancel_timer(timer_ref, async: true, info: false)
+    :ok
+  end
+
   defp enqueue_cleanup_task(%{cleanup_task_ref: nil} = state, kind),
     do: start_cleanup_task(state, kind)
 
@@ -790,7 +795,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
           state
       end
 
-    %{state | cleanup_task_pid: nil, cleanup_task_ref: nil, cleanup_task_kind: nil}
+    clear_cleanup_task_state(state)
   end
 
   defp start_cleanup_task(state, kind) do
@@ -844,10 +849,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
     receive do
       {^ref, {:cleanup_complete, _kind}} ->
         Process.demonitor(ref, [:flush])
-        %{state | cleanup_task_pid: nil, cleanup_task_ref: nil, cleanup_task_kind: nil}
+        clear_cleanup_task_state(state)
 
       {:DOWN, ^ref, :process, _pid, _reason} ->
-        %{state | cleanup_task_pid: nil, cleanup_task_ref: nil, cleanup_task_kind: nil}
+        clear_cleanup_task_state(state)
     after
       timeout_ms ->
         SLog.warning(
@@ -862,7 +867,7 @@ defmodule Snakepit.Pool.ProcessRegistry do
           Process.exit(pid, :kill)
         end
 
-        %{state | cleanup_task_pid: nil, cleanup_task_ref: nil, cleanup_task_kind: nil}
+        clear_cleanup_task_state(state)
     end
   end
 
@@ -959,6 +964,10 @@ defmodule Snakepit.Pool.ProcessRegistry do
       fun when is_function(fun, 7) -> fun
       _ -> &cleanup_orphaned_processes/7
     end
+  end
+
+  defp clear_cleanup_task_state(state) do
+    %{state | cleanup_task_pid: nil, cleanup_task_ref: nil, cleanup_task_kind: nil}
   end
 
   defp find_stale_entries(all_entries, current_beam_run_id, current_beam_os_pid) do

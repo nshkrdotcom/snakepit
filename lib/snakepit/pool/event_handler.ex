@@ -292,7 +292,7 @@ defmodule Snakepit.Pool.EventHandler do
     context.async_with_context.(fn ->
       ref = Process.monitor(client_pid)
 
-      case monitor_client_status(ref, client_pid) do
+      case ClientReply.monitor_client_status(ref, client_pid) do
         {:down, _reason} ->
           Process.demonitor(ref, [:flush])
           context.maybe_checkin_worker.(pool_name, worker_id)
@@ -331,24 +331,6 @@ defmodule Snakepit.Pool.EventHandler do
 
     updated_pools = Map.put(state.pools, pool_name, updated_pool_state)
     {:noreply, %{state | pools: updated_pools}}
-  end
-
-  defp monitor_client_status(ref, client_pid) do
-    case await_client_down(ref, client_pid) do
-      :alive ->
-        if Process.alive?(client_pid), do: :alive, else: {:down, :unknown}
-
-      other ->
-        other
-    end
-  end
-
-  defp await_client_down(ref, client_pid) do
-    receive do
-      {:DOWN, ^ref, :process, ^client_pid, reason} -> {:down, reason}
-    after
-      0 -> :alive
-    end
   end
 
   defp normalize_request({from, command, args, opts, queued_at, timer_ref}) do

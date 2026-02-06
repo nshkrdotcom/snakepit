@@ -51,6 +51,39 @@ defmodule Snakepit.Worker.LifecycleManagerTest do
     end
   end
 
+  defmodule SlowHealthProfile do
+    @behaviour Snakepit.WorkerProfile
+    @health_hook_key {__MODULE__, :health_hook}
+
+    def start_worker(_config), do: {:error, :not_implemented}
+    def stop_worker(_worker), do: :ok
+    def execute_request(_worker, _request, _timeout), do: {:ok, %{}}
+    def get_capacity(_worker), do: 1
+    def get_load(_worker), do: 0
+    def get_metadata(_worker), do: {:ok, %{profile: :slow_health}}
+
+    def health_check(worker_pid) do
+      maybe_wait_for_release(worker_pid)
+      :ok
+    end
+
+    defp maybe_wait_for_release(worker_pid) do
+      case :persistent_term.get(@health_hook_key, nil) do
+        {test_pid, gate_ref} ->
+          send(test_pid, {:health_check_started, gate_ref, self(), worker_pid})
+
+          receive do
+            {:allow_health_check, ^gate_ref} -> :ok
+          after
+            1_000 -> :ok
+          end
+
+        _ ->
+          :ok
+      end
+    end
+  end
+
   test "untrack demonitor flushes tracked worker monitor" do
     worker_pid = spawn_worker()
     worker_id = "worker_#{System.unique_integer([:positive])}"
@@ -115,6 +148,59 @@ defmodule Snakepit.Worker.LifecycleManagerTest do
     assert_receive {:DOWN, ^worker_monitor, :process, ^worker_pid, :normal}, 1_000
   end
 
+  test "recycle fallback task still runs when TaskSupervisor is unavailable" do
+    on_exit(fn ->
+      Application.ensure_all_started(:snakepit)
+    end)
+
+    Application.stop(:snakepit)
+
+    worker_pid = spawn_worker()
+    worker_monitor = Process.monitor(worker_pid)
+    worker_id = "worker_#{System.unique_integer([:positive])}"
+    gate_ref = install_stop_hook()
+
+    {:noreply, tracked_state} =
+      LifecycleManager.handle_cast(
+        {:track, :test_pool, worker_id, worker_pid, lifecycle_config(SlowStopProfile)},
+        base_state()
+      )
+
+    {:noreply, _new_state} =
+      LifecycleManager.handle_cast({:recycle_worker, worker_id, :fallback_recycle}, tracked_state)
+
+    assert_receive {:stop_worker_called, ^gate_ref, stopper_pid, ^worker_pid}, 1_000
+    send(stopper_pid, {:allow_stop, gate_ref})
+
+    assert_receive {:DOWN, ^worker_monitor, :process, ^worker_pid, :normal}, 1_000
+  end
+
+  test "health checks are bounded and do not block callback mailbox under slow profiles" do
+    worker_pid = spawn_worker()
+    worker_id = "worker_#{System.unique_integer([:positive])}"
+    gate_ref = install_health_hook()
+
+    {:noreply, tracked_state} =
+      LifecycleManager.handle_cast(
+        {:track, :test_pool, worker_id, worker_pid, lifecycle_config(SlowHealthProfile)},
+        base_state()
+      )
+
+    start_ms = System.monotonic_time(:millisecond)
+
+    {:noreply, state_after_health} =
+      LifecycleManager.handle_info(:health_check, tracked_state)
+
+    elapsed_ms = System.monotonic_time(:millisecond) - start_ms
+
+    assert elapsed_ms < 100
+    assert_receive {:health_check_started, ^gate_ref, checker_pid, ^worker_pid}, 1_000
+    send(checker_pid, {:allow_health_check, gate_ref})
+
+    Process.cancel_timer(state_after_health.health_ref)
+    Process.exit(worker_pid, :kill)
+  end
+
   defp lifecycle_config(profile_module) do
     %{
       worker_profile: profile_module,
@@ -149,6 +235,18 @@ defmodule Snakepit.Worker.LifecycleManagerTest do
 
     on_exit(fn ->
       :persistent_term.erase(stop_hook_key)
+    end)
+
+    gate_ref
+  end
+
+  defp install_health_hook do
+    gate_ref = make_ref()
+    health_hook_key = {SlowHealthProfile, :health_hook}
+    :persistent_term.put(health_hook_key, {self(), gate_ref})
+
+    on_exit(fn ->
+      :persistent_term.erase(health_hook_key)
     end)
 
     gate_ref

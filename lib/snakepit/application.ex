@@ -112,30 +112,9 @@ defmodule Snakepit.Application do
         SLog.info(:startup, "Starting Snakepit with pooling enabled", pool_size: pool_size)
 
         [
-          # GRPC client supervisor - required for connecting to Python workers
-          # Must be started before any gRPC client connections are attempted
-          Snakepit.GRPC.ClientSupervisor,
-
-          # Start the central gRPC listener and publish its assigned port
-          Snakepit.GRPC.Listener,
-
-          # Telemetry gRPC stream manager (for Python worker telemetry)
-          Snakepit.Telemetry.GrpcStream,
-
-          # Registry for worker starter supervisors
-          Snakepit.Pool.Worker.StarterRegistry,
-
-          # Thread profile capacity tracking
-          Snakepit.WorkerProfile.Thread.CapacityStore,
-
-          # Worker supervisor for managing worker processes
-          Snakepit.Pool.WorkerSupervisor,
-
-          # Worker lifecycle manager for automatic recycling
-          Snakepit.Worker.LifecycleManager,
-
-          # Main pool manager
-          {Snakepit.Pool, [size: pool_size]}
+          # Dependent pool runtime children are grouped under rest_for_one so listener/client
+          # failures restart downstream pool components in order.
+          {Snakepit.Pool.RuntimeSupervisor, [pool_size: pool_size]}
         ]
       else
         SLog.info(:startup, "Starting Snakepit with pooling disabled", pooling_enabled: false)

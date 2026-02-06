@@ -250,6 +250,28 @@ defmodule Snakepit.GRPC.BridgeServerTest do
       assert %ExecuteElixirToolResponse{success: false, error_message: message} = response
       assert message == "Tool missing_tool not found for session #{session_id}"
     end
+
+    test "normalizes raised tool exception errors at API boundary", %{session_id: session_id} do
+      ensure_tool_registry_started()
+      {:ok, _session} = SessionStore.create_session(session_id)
+
+      :ok =
+        ToolRegistry.register_elixir_tool(session_id, "boom_tool", fn _params ->
+          raise ArgumentError, "boom argument"
+        end)
+
+      request = %ExecuteElixirToolRequest{
+        session_id: session_id,
+        tool_name: "boom_tool",
+        parameters: %{},
+        metadata: %{}
+      }
+
+      response = BridgeServer.execute_elixir_tool(request, nil)
+
+      assert %ExecuteElixirToolResponse{success: false, error_message: message} = response
+      assert message == "Tool execution failed: boom argument"
+    end
   end
 
   describe "execute_streaming_tool/2" do

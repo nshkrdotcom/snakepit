@@ -41,10 +41,7 @@ defmodule Snakepit.Pool.State do
 
     worker_module = opts[:worker_module] || Snakepit.GRPCWorker
 
-    adapter_module =
-      opts[:adapter_module] ||
-        Map.get(pool_config, :adapter_module) ||
-        Application.get_env(:snakepit, :adapter_module)
+    adapter_module = Config.adapter_module(pool_config, override: opts[:adapter_module])
 
     %__MODULE__{
       name: pool_name,
@@ -167,8 +164,7 @@ defmodule Snakepit.Pool.State do
   end
 
   defp resolve_capacity_strategy(pool_config) do
-    Map.get(pool_config, :capacity_strategy) ||
-      Application.get_env(:snakepit, :capacity_strategy, Defaults.default_capacity_strategy())
+    Config.capacity_strategy(pool_config)
   end
 
   defp worker_load(pool_state, worker_id) do

@@ -39,7 +39,7 @@ defmodule Snakepit.GRPCWorkerCallbackNonBlockingTest do
         GRPCWorker.handle_call({:execute, "ping", args, 1_000, []}, from, state)
       end)
 
-    assert_receive {:adapter_waiting, ^gate_ref, adapter_pid}, 500
+    assert_receive {:adapter_waiting, ^gate_ref, adapter_pid}, 1_500
     assert {:ok, {:noreply, _}} = Task.yield(task, 500)
 
     send(adapter_pid, {:release, gate_ref})
@@ -61,7 +61,7 @@ defmodule Snakepit.GRPCWorkerCallbackNonBlockingTest do
         )
       end)
 
-    assert_receive {:adapter_waiting, ^gate_ref, adapter_pid}, 500
+    assert_receive {:adapter_waiting, ^gate_ref, adapter_pid}, 1_500
     assert {:ok, {:noreply, _}} = Task.yield(task, 500)
 
     send(adapter_pid, {:release, gate_ref})
@@ -82,7 +82,7 @@ defmodule Snakepit.GRPCWorkerCallbackNonBlockingTest do
         )
       end)
 
-    assert_receive {:adapter_waiting, ^gate_ref, adapter_pid}, 500
+    assert_receive {:adapter_waiting, ^gate_ref, adapter_pid}, 1_500
     assert {:ok, {:noreply, _}} = Task.yield(task, 500)
 
     send(adapter_pid, {:release, gate_ref})

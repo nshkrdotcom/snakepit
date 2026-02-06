@@ -497,6 +497,9 @@ defmodule Snakepit.GRPCWorker do
         GenServer.reply(pending_call.from, reply)
         {:noreply, new_state |> update_stats(:error) |> maybe_start_next_rpc_call()}
 
+      {:error, new_state} ->
+        {:noreply, new_state}
+
       :error ->
         {:noreply, state}
     end
@@ -758,7 +761,8 @@ defmodule Snakepit.GRPCWorker do
   defp cancel_health_check_timer(nil), do: :ok
 
   defp cancel_health_check_timer(health_check_ref) do
-    Process.cancel_timer(health_check_ref)
+    Process.cancel_timer(health_check_ref, async: true, info: false)
+    :ok
   end
 
   defp close_server_port(nil), do: :ok
@@ -1242,8 +1246,8 @@ defmodule Snakepit.GRPCWorker do
       {token, pending_monitors} ->
         case Map.pop(Map.get(state, :pending_rpc_calls, %{}), token) do
           {nil, _pending_calls} ->
-            _new_state = Map.put(state, :pending_rpc_monitors, pending_monitors)
-            :error
+            new_state = Map.put(state, :pending_rpc_monitors, pending_monitors)
+            {:error, new_state}
 
           {pending_call, pending_calls} ->
             new_state =

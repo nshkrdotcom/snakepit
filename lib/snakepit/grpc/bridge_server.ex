@@ -739,6 +739,8 @@ defmodule Snakepit.GRPC.BridgeServer do
 
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(reason) when is_atom(reason), do: to_string(reason)
+  defp format_error(%Snakepit.Error{message: message}), do: message
+  defp format_error(%{__exception__: true} = exception), do: Exception.message(exception)
   defp format_error({:error, reason}), do: format_error(reason)
 
   defp format_error({:tool_not_found, session_id, tool_name}),
@@ -747,7 +749,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   defp format_error({:tool_not_local, tool_name}), do: "Tool #{tool_name} is not a local tool"
 
   defp format_error({:tool_execution_failed, reason}),
-    do: "Tool execution failed: #{inspect(reason)}"
+    do: "Tool execution failed: #{format_nested_reason(reason)}"
 
   defp format_error({:unknown_type, type}), do: "Unknown type: #{inspect(type)}"
   defp format_error({:invalid_constraints, reason}), do: "Invalid constraints: #{reason}"
@@ -769,7 +771,7 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   defp format_error({:remote_execution_failed, reason}) do
-    "Remote tool execution failed: #{inspect(reason)}"
+    "Remote tool execution failed: #{format_nested_reason(reason)}"
   end
 
   defp format_error({:validation_failed, details}) when is_map(details) do
@@ -777,6 +779,12 @@ defmodule Snakepit.GRPC.BridgeServer do
   end
 
   defp format_error(reason), do: inspect(reason)
+
+  defp format_nested_reason(reason) when is_binary(reason), do: reason
+  defp format_nested_reason(%Snakepit.Error{message: message}), do: message
+  defp format_nested_reason(%{__exception__: true} = exception), do: Exception.message(exception)
+  defp format_nested_reason({:error, reason}), do: format_nested_reason(reason)
+  defp format_nested_reason(reason), do: inspect(reason)
 
   # Tool Registration & Discovery
 
