@@ -81,12 +81,13 @@ defmodule Snakepit.HeartbeatMonitorTest do
     HeartbeatMonitor.notify_pong(monitor, ts)
     send(monitor, :heartbeat_timeout)
 
-    receive do
-    after
-      30 -> :ok
-    end
-
-    assert :sys.get_state(monitor).missed_heartbeats == 0
+    assert_eventually(
+      fn ->
+        :sys.get_state(monitor).missed_heartbeats == 0
+      end,
+      timeout: 200,
+      interval: 10
+    )
 
     :ok = GenServer.stop(monitor)
     send(worker_pid, :halt)

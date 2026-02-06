@@ -294,13 +294,13 @@ defmodule Snakepit.Worker.LifecycleManager do
   def handle_info(:lifecycle_check, state) do
     now = System.monotonic_time(:second)
 
-    task =
-      Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+    {:ok, _pid, task_ref} =
+      start_nolink_task(fn ->
         recycled_workers = run_lifecycle_checks(state.workers, now)
         {:lifecycle_check_complete, recycled_workers}
       end)
 
-    {:noreply, %{state | lifecycle_task_ref: task.ref}}
+    {:noreply, %{state | lifecycle_task_ref: task_ref}}
   end
 
   @impl true
@@ -453,31 +453,7 @@ defmodule Snakepit.Worker.LifecycleManager do
     max_concurrency = Config.lifecycle_check_max_concurrency()
     worker_timeout = Config.lifecycle_worker_action_timeout_ms()
 
-    Task.Supervisor.async_stream_nolink(
-      Snakepit.TaskSupervisor,
-      workers,
-      fn {worker_id, worker_state} ->
-        case recycle_decision(worker_state, now) do
-          {:recycle, reason, extra_metadata} ->
-            log_recycle_reason(worker_id, reason, extra_metadata)
-            emit_recycle_telemetry(worker_state, reason, extra_metadata)
-
-            if reason == :memory_threshold do
-              send(__MODULE__, {:memory_recycle_detected, worker_state.pool})
-            end
-
-            _ = do_recycle_worker(worker_state)
-            {:recycled, worker_id, worker_state.pool, reason}
-
-          :keep ->
-            :keep
-        end
-      end,
-      timeout: worker_timeout,
-      max_concurrency: max_concurrency,
-      on_timeout: :kill_task,
-      ordered: false
-    )
+    lifecycle_check_results_stream(workers, now, worker_timeout, max_concurrency)
     |> Enum.reduce([], fn
       {:ok, {:recycled, worker_id, pool_name, reason}}, worker_ids ->
         [{worker_id, pool_name, reason} | worker_ids]
@@ -492,25 +468,7 @@ defmodule Snakepit.Worker.LifecycleManager do
   end
 
   defp start_recycle_task(state, worker_state) do
-    task_ref =
-      try do
-        task =
-          Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
-            do_recycle_worker(worker_state)
-          end)
-
-        task.ref
-      rescue
-        _ ->
-          {_pid, ref} =
-            spawn_monitor(fn ->
-              _ = do_recycle_worker(worker_state)
-              :ok
-            end)
-
-          ref
-      end
-
+    {:ok, _pid, task_ref} = start_nolink_task(fn -> do_recycle_worker(worker_state) end)
     task_meta = %{worker_id: worker_state.worker_id}
     recycle_task_refs = Map.put(state.recycle_task_refs, task_ref, task_meta)
     %{state | recycle_task_refs: recycle_task_refs}
@@ -518,6 +476,111 @@ defmodule Snakepit.Worker.LifecycleManager do
 
   defp drop_recycle_task_ref(state, ref) do
     %{state | recycle_task_refs: Map.delete(state.recycle_task_refs, ref)}
+  end
+
+  defp lifecycle_check_results_stream(workers, now, worker_timeout, max_concurrency) do
+    try do
+      Task.Supervisor.async_stream_nolink(
+        Snakepit.TaskSupervisor,
+        workers,
+        &run_single_lifecycle_check(&1, now),
+        timeout: worker_timeout,
+        max_concurrency: max_concurrency,
+        on_timeout: :kill_task,
+        ordered: false
+      )
+    rescue
+      error ->
+        SLog.warning(
+          @log_category,
+          "TaskSupervisor unavailable for lifecycle async stream; using sequential fallback",
+          error: error
+        )
+
+        sequential_lifecycle_check_results(workers, now)
+    catch
+      :exit, reason ->
+        SLog.warning(
+          @log_category,
+          "TaskSupervisor exited during lifecycle async stream; using sequential fallback",
+          reason: reason
+        )
+
+        sequential_lifecycle_check_results(workers, now)
+    end
+  end
+
+  defp sequential_lifecycle_check_results(workers, now) do
+    Enum.map(workers, &run_lifecycle_check_worker_safe(&1, now))
+  end
+
+  defp run_lifecycle_check_worker_safe(worker_entry, now) do
+    try do
+      {:ok, run_single_lifecycle_check(worker_entry, now)}
+    rescue
+      exception ->
+        {:exit, {exception, __STACKTRACE__}}
+    catch
+      kind, reason ->
+        {:exit, {kind, reason}}
+    end
+  end
+
+  defp run_single_lifecycle_check({worker_id, worker_state}, now) do
+    case recycle_decision(worker_state, now) do
+      {:recycle, reason, extra_metadata} ->
+        log_recycle_reason(worker_id, reason, extra_metadata)
+        emit_recycle_telemetry(worker_state, reason, extra_metadata)
+
+        if reason == :memory_threshold do
+          send(__MODULE__, {:memory_recycle_detected, worker_state.pool})
+        end
+
+        _ = do_recycle_worker(worker_state)
+        {:recycled, worker_id, worker_state.pool, reason}
+
+      :keep ->
+        :keep
+    end
+  end
+
+  defp start_nolink_task(fun) when is_function(fun, 0) do
+    try do
+      task = Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fun)
+      {:ok, task.pid, task.ref}
+    rescue
+      error ->
+        SLog.warning(@log_category, "TaskSupervisor unavailable; using monitored fallback task",
+          error: error
+        )
+
+        start_monitored_fallback_task(fun)
+    catch
+      :exit, reason ->
+        SLog.warning(@log_category, "TaskSupervisor exited; using monitored fallback task",
+          reason: reason
+        )
+
+        start_monitored_fallback_task(fun)
+    end
+  end
+
+  defp start_monitored_fallback_task(fun) when is_function(fun, 0) do
+    parent = self()
+
+    pid =
+      spawn(fn ->
+        receive do
+          {:snakepit_run_task, ref} ->
+            result = fun.()
+            send(parent, {ref, result})
+        end
+      end)
+
+    ref = Process.monitor(pid)
+    send(pid, {:snakepit_run_task, ref})
+
+    {:ok, pid, ref}
   end
 
   defp pop_worker(workers, worker_id) do

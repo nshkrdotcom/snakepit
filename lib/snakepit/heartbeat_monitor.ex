@@ -289,8 +289,8 @@ defmodule Snakepit.HeartbeatMonitor do
   defp start_ping_task(state, timestamp) do
     monitor_pid = self()
 
-    task =
-      Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
+    {:ok, task_pid, task_ref} =
+      start_nolink_task(fn ->
         # Preserve compatibility for ping_fun callbacks that call
         # HeartbeatMonitor.notify_pong(self(), timestamp) from the ping process.
         Process.put(@ping_monitor_pid_key, monitor_pid)
@@ -305,15 +305,12 @@ defmodule Snakepit.HeartbeatMonitor do
     timeout_ref =
       Process.send_after(
         self(),
-        {:ping_task_timeout, task.ref},
+        {:ping_task_timeout, task_ref},
         ping_task_timeout_ms(state.timeout)
       )
 
     {:ok,
-     %{state | ping_task_ref: task.ref, ping_task_pid: task.pid, ping_task_timer: timeout_ref}}
-  rescue
-    error ->
-      {:error, error}
+     %{state | ping_task_ref: task_ref, ping_task_pid: task_pid, ping_task_timer: timeout_ref}}
   end
 
   defp execute_ping(ping_fun, timestamp) do
@@ -324,6 +321,49 @@ defmodule Snakepit.HeartbeatMonitor do
   catch
     kind, reason ->
       {:error, {kind, reason}}
+  end
+
+  defp start_nolink_task(fun) when is_function(fun, 0) do
+    try do
+      task = Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fun)
+      {:ok, task.pid, task.ref}
+    rescue
+      error ->
+        SLog.warning(
+          @log_category,
+          "TaskSupervisor unavailable for heartbeat task; using monitored fallback",
+          error: error
+        )
+
+        start_monitored_fallback_task(fun)
+    catch
+      :exit, reason ->
+        SLog.warning(
+          @log_category,
+          "TaskSupervisor exited during heartbeat task start; using monitored fallback",
+          reason: reason
+        )
+
+        start_monitored_fallback_task(fun)
+    end
+  end
+
+  defp start_monitored_fallback_task(fun) when is_function(fun, 0) do
+    parent = self()
+
+    pid =
+      spawn(fn ->
+        receive do
+          {:snakepit_run_task, ref} ->
+            result = fun.()
+            send(parent, {ref, result})
+        end
+      end)
+
+    ref = Process.monitor(pid)
+    send(pid, {:snakepit_run_task, ref})
+
+    {:ok, pid, ref}
   end
 
   defp clear_ping_task(state) do

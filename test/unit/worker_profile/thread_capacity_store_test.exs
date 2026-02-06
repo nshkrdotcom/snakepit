@@ -53,6 +53,12 @@ defmodule ThreadCapacityStoreTest do
     on_exit(fn -> Process.exit(worker_pid, :kill) end)
 
     assert {:error, :capacity_store_unavailable} =
-             CapacityStore.check_and_increment_load(worker_pid)
+             CapacityStore.check_and_increment_load(pid, worker_pid)
+
+    # Name-based calls can observe either unavailable store or a restarted empty store.
+    assert CapacityStore.check_and_increment_load(worker_pid) in [
+             {:error, :capacity_store_unavailable},
+             {:error, :unknown_worker}
+           ]
   end
 end
