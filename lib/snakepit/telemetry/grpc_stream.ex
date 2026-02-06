@@ -138,16 +138,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
     new_state =
       state
       |> drop_worker(worker_id)
-      |> put_in([:streams, worker_id], %{
-        stream: nil,
-        task: nil,
-        worker_ctx: worker_ctx,
-        started_at: System.monotonic_time(),
-        connecting?: true,
-        pending_controls: [],
-        control_ref: nil
-      })
-      |> start_register_op(worker_id, channel, worker_ctx)
+      |> start_stream_task(worker_id, channel, worker_ctx)
 
     {:noreply, new_state}
   end
@@ -261,6 +252,75 @@ defmodule Snakepit.Telemetry.GrpcStream do
   end
 
   @impl true
+  def handle_info({:stream_ready, worker_id, stream_ref, result}, state)
+      when is_reference(stream_ref) do
+    case get_in(state, [:streams, worker_id]) do
+      %{stream_ref: ^stream_ref} = stream_info ->
+        stream_info = cancel_stream_open_timer(stream_info)
+
+        case result do
+          {:ok, stream} ->
+            worker_ctx = stream_info.worker_ctx
+
+            next_state =
+              state
+              |> put_in([:streams, worker_id], %{
+                stream_info
+                | stream: stream,
+                  connecting?: false,
+                  started_at: System.monotonic_time()
+              })
+              |> start_next_control_op(worker_id)
+
+            SLog.info(
+              @log_category,
+              "Telemetry stream registered for worker #{worker_id}",
+              worker_id: worker_id,
+              pool_name: worker_ctx.pool_name
+            )
+
+            {:noreply, next_state}
+
+          {:error, reason} ->
+            SLog.warning(
+              @log_category,
+              "Failed to register telemetry stream for worker #{worker_id}: #{inspect(reason)}",
+              worker_id: worker_id,
+              reason: reason
+            )
+
+            {:noreply, drop_worker(put_in(state, [:streams, worker_id], stream_info), worker_id)}
+        end
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:stream_open_timeout, worker_id, stream_ref}, state)
+      when is_reference(stream_ref) do
+    case get_in(state, [:streams, worker_id]) do
+      %{stream_ref: ^stream_ref} = stream_info ->
+        if is_pid(stream_info.task && stream_info.task.pid) and
+             Process.alive?(stream_info.task.pid) do
+          Process.exit(stream_info.task.pid, :kill)
+        end
+
+        SLog.warning(
+          @log_category,
+          "Timed out opening telemetry stream for worker #{worker_id}",
+          worker_id: worker_id
+        )
+
+        {:noreply, drop_worker(state, worker_id)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  @impl true
   def handle_info({:EXIT, pid, reason}, state) do
     case pop_stream_by_pid(state, pid) do
       {:ok, worker_id, new_state} ->
@@ -338,6 +398,10 @@ defmodule Snakepit.Telemetry.GrpcStream do
         state
 
       stream_info ->
+        if is_reference(stream_info[:open_timer_ref]) do
+          Process.cancel_timer(stream_info.open_timer_ref)
+        end
+
         if stream_info.task && Process.alive?(stream_info.task.pid) do
           Task.shutdown(stream_info.task, :brutal_kill)
         end
@@ -350,25 +414,42 @@ defmodule Snakepit.Telemetry.GrpcStream do
     end
   end
 
-  defp start_register_op(state, worker_id, channel, worker_ctx) do
+  defp start_stream_task(state, worker_id, channel, worker_ctx) do
+    stream_ref = make_ref()
+    manager = self()
+
     task =
       Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fn ->
-        initiate_stream(channel, worker_ctx)
+        result = initiate_stream(channel, worker_ctx)
+        send(manager, {:stream_ready, worker_id, stream_ref, result})
+
+        case result do
+          {:ok, stream} ->
+            consume_stream(stream, worker_ctx)
+
+          {:error, _reason} ->
+            :ok
+        end
       end)
 
-    op = %{
-      kind: :register,
-      worker_id: worker_id,
-      task_pid: task.pid,
-      timer_ref:
+    stream_info = %{
+      stream: nil,
+      task: task,
+      worker_ctx: worker_ctx,
+      started_at: System.monotonic_time(),
+      connecting?: true,
+      pending_controls: [],
+      control_ref: nil,
+      stream_ref: stream_ref,
+      open_timer_ref:
         Process.send_after(
           self(),
-          {:stream_op_timeout, task.ref},
+          {:stream_open_timeout, worker_id, stream_ref},
           Config.grpc_stream_open_timeout_ms()
         )
     }
 
-    put_in(state, [:ops, task.ref], op)
+    put_in(state, [:streams, worker_id], stream_info)
   end
 
   defp enqueue_control_message(state, worker_id, control_msg, metadata) do
@@ -448,49 +529,6 @@ defmodule Snakepit.Telemetry.GrpcStream do
     end
   end
 
-  defp handle_stream_op_result(%{kind: :register, worker_id: worker_id}, {:ok, stream}, state) do
-    case Map.get(state.streams, worker_id) do
-      nil ->
-        state
-
-      %{worker_ctx: worker_ctx} = stream_info ->
-        task =
-          Task.Supervisor.async(
-            Snakepit.TaskSupervisor,
-            fn -> consume_stream(stream, worker_ctx) end
-          )
-
-        new_state =
-          put_in(state, [:streams, worker_id], %{
-            stream_info
-            | stream: stream,
-              task: task,
-              connecting?: false,
-              started_at: System.monotonic_time()
-          })
-
-        SLog.info(
-          @log_category,
-          "Telemetry stream registered for worker #{worker_id}",
-          worker_id: worker_id,
-          pool_name: worker_ctx.pool_name
-        )
-
-        start_next_control_op(new_state, worker_id)
-    end
-  end
-
-  defp handle_stream_op_result(%{kind: :register, worker_id: worker_id}, {:error, reason}, state) do
-    SLog.warning(
-      @log_category,
-      "Failed to register telemetry stream for worker #{worker_id}: #{inspect(reason)}",
-      worker_id: worker_id,
-      reason: reason
-    )
-
-    update_in(state, [:streams], &Map.delete(&1, worker_id))
-  end
-
   defp handle_stream_op_result(
          %{kind: :control, worker_id: worker_id, metadata: metadata},
          result,
@@ -518,21 +556,6 @@ defmodule Snakepit.Telemetry.GrpcStream do
     end
   end
 
-  defp handle_stream_op_down(%{kind: :register, worker_id: worker_id}, reason, state) do
-    if reason not in [:normal, :shutdown] do
-      SLog.warning(
-        @log_category,
-        "Telemetry stream registration task exited for worker #{worker_id}",
-        worker_id: worker_id,
-        reason: reason
-      )
-
-      update_in(state, [:streams], &Map.delete(&1, worker_id))
-    else
-      state
-    end
-  end
-
   defp handle_stream_op_down(%{kind: :control, worker_id: worker_id}, reason, state) do
     if reason not in [:normal, :shutdown] do
       SLog.warning(
@@ -552,16 +575,6 @@ defmodule Snakepit.Telemetry.GrpcStream do
         |> put_in([:streams, worker_id], %{stream_info | control_ref: nil})
         |> start_next_control_op(worker_id)
     end
-  end
-
-  defp handle_stream_op_timeout(%{kind: :register, worker_id: worker_id}, state) do
-    SLog.warning(
-      @log_category,
-      "Timed out opening telemetry stream for worker #{worker_id}",
-      worker_id: worker_id
-    )
-
-    update_in(state, [:streams], &Map.delete(&1, worker_id))
   end
 
   defp handle_stream_op_timeout(
@@ -658,6 +671,18 @@ defmodule Snakepit.Telemetry.GrpcStream do
           {:ok, %TelemetryEvent{} = event} ->
             translate_and_emit(event, worker_ctx)
 
+          %TelemetryEvent{} = event ->
+            # Defensive compatibility: some adapters may yield decoded events directly.
+            translate_and_emit(event, worker_ctx)
+
+          {:ok, other} ->
+            SLog.warning(
+              @log_category,
+              "Unexpected telemetry stream payload for worker #{worker_ctx.worker_id}",
+              worker_id: worker_ctx.worker_id,
+              payload: inspect(other)
+            )
+
           {:error, reason} ->
             SLog.warning(
               @log_category,
@@ -669,6 +694,14 @@ defmodule Snakepit.Telemetry.GrpcStream do
           {:trailers, trailers} ->
             SLog.debug(@log_category, "Telemetry stream trailers: #{inspect(trailers)}",
               worker_id: worker_ctx.worker_id
+            )
+
+          other ->
+            SLog.warning(
+              @log_category,
+              "Unexpected telemetry stream item for worker #{worker_ctx.worker_id}",
+              worker_id: worker_ctx.worker_id,
+              item: inspect(other)
             )
         end)
 
@@ -799,6 +832,14 @@ defmodule Snakepit.Telemetry.GrpcStream do
     SLog.debug(@log_category, "Telemetry stream consumer task exited: #{inspect(reason)}",
       worker_id: worker_id
     )
+  end
+
+  defp cancel_stream_open_timer(stream_info) do
+    if is_reference(stream_info[:open_timer_ref]) do
+      Process.cancel_timer(stream_info.open_timer_ref)
+    end
+
+    Map.put(stream_info, :open_timer_ref, nil)
   end
 
   defp shutdown_exit?(reason) when reason == :shutdown, do: true

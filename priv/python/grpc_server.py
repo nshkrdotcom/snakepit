@@ -969,6 +969,10 @@ class BridgeServiceServicer(pb2_grpc.BridgeServiceServicer):
         logger.debug("StreamTelemetry stream opened")
 
         try:
+            # Unblock clients waiting on response headers before any telemetry event is emitted.
+            if hasattr(context, "send_initial_metadata"):
+                await context.send_initial_metadata(())
+
             # Delegate to the TelemetryStream's stream handler
             # This handles control message consumption and event yielding
             async for event in self.telemetry_stream.stream(request_iterator, context):

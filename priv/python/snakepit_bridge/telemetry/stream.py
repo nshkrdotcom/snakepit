@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+from collections import deque
+from threading import Lock
 from typing import Any, AsyncIterable, Dict, Optional
 import fnmatch
 
@@ -36,11 +38,15 @@ class TelemetryStream:
         """
         self.enabled = True
         self.sampling_rate = 1.0
+        self._max_buffer = max_buffer
         self._queue: asyncio.Queue[Optional[pb.TelemetryEvent]] = asyncio.Queue(
             maxsize=max_buffer
         )
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._dropped_count = 0
+        self._pre_stream_events: deque[pb.TelemetryEvent] = deque()
+        self._state_lock = Lock()
+        self._closed = False
         self._allow_patterns: list[str] = []
         self._deny_patterns: list[str] = []
 
@@ -64,6 +70,7 @@ class TelemetryStream:
         """
 
         self._loop = asyncio.get_running_loop()
+        self._flush_pre_stream_events()
 
         async def consume_control() -> None:
             """Background task to consume control messages from Elixir."""
@@ -150,8 +157,7 @@ class TelemetryStream:
         loop = self._loop
 
         if loop is None:
-            # Stream is not active yet; drop instead of blocking worker execution.
-            self._dropped_count += 1
+            self._enqueue_pre_stream(event)
             return
 
         try:
@@ -197,7 +203,12 @@ class TelemetryStream:
         This pushes a sentinel value (None) to the queue, which signals the
         stream consumer to terminate.
         """
-        loop = self._loop
+        with self._state_lock:
+            if self._closed:
+                return
+
+            self._closed = True
+            loop = self._loop
 
         if loop is None:
             return
@@ -244,3 +255,28 @@ class TelemetryStream:
             self._queue.put_nowait(event)
         except asyncio.QueueFull:
             self._dropped_count += 1
+
+    def _enqueue_pre_stream(self, event: pb.TelemetryEvent) -> None:
+        """Buffer events emitted before StreamTelemetry attaches."""
+        with self._state_lock:
+            if self._closed:
+                return
+
+            if len(self._pre_stream_events) >= self._max_buffer:
+                self._dropped_count += 1
+                return
+
+            self._pre_stream_events.append(event)
+
+    def _flush_pre_stream_events(self) -> None:
+        """Move buffered pre-stream events into the live queue."""
+        with self._state_lock:
+            buffered = list(self._pre_stream_events)
+            self._pre_stream_events.clear()
+            closed = self._closed
+
+        for event in buffered:
+            self._enqueue_nowait(event)
+
+        if closed:
+            self._enqueue_nowait(None)
