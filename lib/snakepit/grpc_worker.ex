@@ -37,10 +37,12 @@ defmodule Snakepit.GRPCWorker do
   alias Snakepit.GRPCWorker.Bootstrap
   alias Snakepit.GRPCWorker.Instrumentation
   alias Snakepit.GRPC.Client
+  alias Snakepit.Internal.AsyncFallback
   alias Snakepit.Logger, as: SLog
   alias Snakepit.Logger.Redaction
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.Pool.Registry, as: PoolRegistry
+  alias Snakepit.Shutdown
   alias Snakepit.Telemetry.GrpcStream
   alias Snakepit.Worker.Configuration
   alias Snakepit.Worker.LifecycleManager
@@ -507,6 +509,13 @@ defmodule Snakepit.GRPCWorker do
   end
 
   @impl true
+  def handle_info({ref, _task_result}, state) when is_reference(ref) do
+    # async_nolink emits `{ref, result}` on completion. We keep the existing
+    # custom message contract (`:grpc_async_rpc_result`) for downstream handling.
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info(:health_check, state) do
     health_ref = schedule_health_check()
 
@@ -524,7 +533,7 @@ defmodule Snakepit.GRPCWorker do
       state.shutting_down or
         shutdown_pending_in_mailbox?() or
         not pool_alive?(state.pool_name) or
-        Snakepit.Shutdown.in_progress?() or
+        Shutdown.in_progress?() or
         system_stopping?()
 
     state =
@@ -606,7 +615,7 @@ defmodule Snakepit.GRPCWorker do
       state.shutting_down or
         shutdown_pending_in_mailbox?() or
         not pool_alive?(state.pool_name) or
-        Snakepit.Shutdown.in_progress?() or
+        Shutdown.in_progress?() or
         system_stopping?()
 
     # Update state if we detected shutdown via mailbox peek or pool check
@@ -730,7 +739,7 @@ defmodule Snakepit.GRPCWorker do
 
     SLog.debug(@log_category, "gRPC worker #{state.id} terminating: #{inspect(reason)}")
 
-    planned? = shutdown_reason?(reason) or reason == :normal
+    planned? = Shutdown.shutdown_reason?(reason) or reason == :normal
     Instrumentation.emit_worker_terminated_telemetry(state, reason, planned?)
     cancel_pending_rpc_calls(state, reason)
     cleanup_heartbeat(state, reason)
@@ -1024,12 +1033,10 @@ defmodule Snakepit.GRPCWorker do
   defp maybe_stop_heartbeat_monitor(nil), do: :ok
 
   defp maybe_stop_heartbeat_monitor(pid) when is_pid(pid) do
-    if Process.alive?(pid) do
-      try do
-        GenServer.stop(pid, :shutdown)
-      catch
-        :exit, _ -> :ok
-      end
+    try do
+      GenServer.stop(pid, :shutdown)
+    catch
+      :exit, _ -> :ok
     end
 
     :ok
@@ -1244,29 +1251,57 @@ defmodule Snakepit.GRPCWorker do
     call_token = make_ref()
     parent = self()
 
-    {task_pid, monitor_ref} =
-      spawn_monitor(fn ->
-        ctx_token = :otel_ctx.attach(otel_ctx)
+    rpc_runner = fn ->
+      ctx_token = :otel_ctx.attach(otel_ctx)
 
-        result =
-          try do
-            {:ok, callback_fun.()}
-          rescue
-            exception ->
-              {:exception, exception, __STACKTRACE__}
-          catch
-            kind, reason ->
-              {:caught, kind, reason, __STACKTRACE__}
-          after
-            :otel_ctx.detach(ctx_token)
-          end
+      result =
+        try do
+          {:ok, callback_fun.()}
+        rescue
+          exception ->
+            {:exception, exception, __STACKTRACE__}
+        catch
+          kind, reason ->
+            {:caught, kind, reason, __STACKTRACE__}
+        after
+          :otel_ctx.detach(ctx_token)
+        end
 
-        send(parent, {:grpc_async_rpc_result, call_token, result})
-      end)
+      send(parent, {:grpc_async_rpc_result, call_token, result})
+    end
+
+    {task_pid, monitor_ref} = start_nolink_rpc_task(rpc_runner)
 
     pending_call = %{from: from, monitor_ref: monitor_ref, task_pid: task_pid}
 
     put_pending_rpc_call(state, call_token, pending_call)
+  end
+
+  defp start_nolink_rpc_task(fun) when is_function(fun, 0) do
+    try do
+      task = Task.Supervisor.async_nolink(Snakepit.TaskSupervisor, fun)
+      {task.pid, task.ref}
+    rescue
+      error ->
+        SLog.warning(
+          @log_category,
+          "TaskSupervisor unavailable for async RPC task; using fallback",
+          error: error
+        )
+
+        start_monitored_rpc_fallback(fun)
+    catch
+      :exit, reason ->
+        SLog.warning(@log_category, "TaskSupervisor exited for async RPC task; using fallback",
+          reason: reason
+        )
+
+        start_monitored_rpc_fallback(fun)
+    end
+  end
+
+  defp start_monitored_rpc_fallback(fun) when is_function(fun, 0) do
+    AsyncFallback.start_monitored_fire_and_forget(fun)
   end
 
   defp put_pending_rpc_call(state, token, pending_call) do
@@ -1355,12 +1390,6 @@ defmodule Snakepit.GRPCWorker do
   # These eliminate race conditions between port exit messages and shutdown signals
 
   @doc false
-  # Matches both :shutdown and {:shutdown, term} which supervisors use
-  defp shutdown_reason?(:shutdown), do: true
-  defp shutdown_reason?({:shutdown, _}), do: true
-  defp shutdown_reason?(_), do: false
-
-  @doc false
   # Peek into mailbox to detect if a shutdown signal is pending but not yet processed.
   # This handles the race where port exit arrives before the EXIT message is processed.
   # Only called on rare port-exit path, not on hot request paths.
@@ -1368,7 +1397,7 @@ defmodule Snakepit.GRPCWorker do
     case Process.info(self(), :messages) do
       {:messages, msgs} ->
         Enum.any?(msgs, fn
-          {:EXIT, _from, reason} -> shutdown_reason?(reason)
+          {:EXIT, _from, reason} -> Shutdown.shutdown_reason?(reason)
           _ -> false
         end)
 

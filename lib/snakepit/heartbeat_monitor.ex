@@ -169,7 +169,7 @@ defmodule Snakepit.HeartbeatMonitor do
 
   @impl true
   def handle_info({:ping_task_timeout, ref}, %{ping_task_ref: ref} = state) do
-    if is_pid(state.ping_task_pid) and Process.alive?(state.ping_task_pid) do
+    if is_pid(state.ping_task_pid) do
       Process.exit(state.ping_task_pid, :kill)
     end
 
@@ -254,7 +254,7 @@ defmodule Snakepit.HeartbeatMonitor do
     cancel_timer(state.timeout_timer)
     cancel_timer(state.ping_task_timer)
 
-    if is_pid(state.ping_task_pid) and Process.alive?(state.ping_task_pid) do
+    if is_pid(state.ping_task_pid) do
       Process.exit(state.ping_task_pid, :kill)
     end
 
@@ -387,7 +387,7 @@ defmodule Snakepit.HeartbeatMonitor do
   defp ping_task_timeout_ms(_timeout_ms), do: 1
 
   defp stop_ping_task(state) do
-    if is_pid(state.ping_task_pid) and Process.alive?(state.ping_task_pid) do
+    if is_pid(state.ping_task_pid) do
       Process.exit(state.ping_task_pid, :kill)
     end
 

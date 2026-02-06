@@ -25,6 +25,12 @@ defmodule Snakepit.Shutdown do
   end
 
   @doc false
+  @spec shutdown_reason?(term()) :: boolean()
+  def shutdown_reason?(:shutdown), do: true
+  def shutdown_reason?({:shutdown, _}), do: true
+  def shutdown_reason?(_), do: false
+
+  @doc false
   def mark_in_progress do
     marker = {self(), make_ref()}
     :persistent_term.put(@shutdown_flag_key, marker)

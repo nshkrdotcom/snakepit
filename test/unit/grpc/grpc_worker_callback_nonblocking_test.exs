@@ -1,7 +1,18 @@
 defmodule Snakepit.GRPCWorkerCallbackNonBlockingTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Snakepit.GRPCWorker
+
+  defmodule ImmediateAdapter do
+    def grpc_execute(_conn, _session_id, _command, _args, _timeout, _opts) do
+      {:ok, %{"ok" => true}}
+    end
+
+    def grpc_execute_stream(_conn, _session_id, _command, _args, callback_fn, _timeout, _opts) do
+      _ = callback_fn.(%{"chunk" => 1})
+      :ok
+    end
+  end
 
   defmodule GatedAdapter do
     def grpc_execute(_conn, _session_id, _command, args, _timeout, _opts) do
@@ -43,6 +54,37 @@ defmodule Snakepit.GRPCWorkerCallbackNonBlockingTest do
     assert {:ok, {:noreply, _}} = Task.yield(task, 500)
 
     send(adapter_pid, {:release, gate_ref})
+  end
+
+  test "execute callback startup uses Task.Supervisor.async_nolink" do
+    state = base_state(GatedAdapter)
+    from = {self(), make_ref()}
+    tag = elem(from, 1)
+    gate_ref = make_ref()
+    args = %{"test_pid" => self(), "gate_ref" => gate_ref}
+
+    assert {:noreply, queued_state} =
+             GRPCWorker.handle_call({:execute, "ping", args, 1_000, []}, from, state)
+
+    [{_token, pending}] = Map.to_list(queued_state.pending_rpc_calls)
+    monitor_ref = pending.monitor_ref
+
+    assert_receive {:adapter_waiting, ^gate_ref, adapter_pid}, 1_000
+    send(adapter_pid, {:release, gate_ref})
+
+    # Task.Supervisor.async_nolink emits `{ref, result}` on completion.
+    assert_receive {^monitor_ref, _task_result}, 1_000
+
+    assert_receive {:grpc_async_rpc_result, token, {:ok, {reply, :success}}}, 1_000
+    assert {:ok, %{"ok" => true}} = reply
+
+    assert {:noreply, _} =
+             GRPCWorker.handle_info(
+               {:grpc_async_rpc_result, token, {:ok, {reply, :success}}},
+               queued_state
+             )
+
+    assert_receive {^tag, ^reply}, 1_000
   end
 
   test "execute_stream callback is non-blocking" do
@@ -159,6 +201,32 @@ defmodule Snakepit.GRPCWorkerCallbackNonBlockingTest do
     assert_receive {^tag, ^reply}, 1_000
   end
 
+  test "async RPC fallback still works when TaskSupervisor is unavailable" do
+    on_exit(fn ->
+      Application.ensure_all_started(:snakepit)
+    end)
+
+    Application.stop(:snakepit)
+
+    state = base_state(ImmediateAdapter)
+    from = {self(), make_ref()}
+    tag = elem(from, 1)
+
+    assert {:noreply, queued_state} =
+             GRPCWorker.handle_call({:execute, "ping", %{}, 1_000, []}, from, state)
+
+    assert_receive {:grpc_async_rpc_result, token, {:ok, {reply, :success}}}, 1_000
+    assert {:ok, %{"ok" => true}} = reply
+
+    assert {:noreply, _} =
+             GRPCWorker.handle_info(
+               {:grpc_async_rpc_result, token, {:ok, {reply, :success}}},
+               queued_state
+             )
+
+    assert_receive {^tag, ^reply}, 1_000
+  end
+
   test "terminate cancels pending async RPC calls and replies waiting callers" do
     pending_from = {self(), make_ref()}
     pending_tag = elem(pending_from, 1)
@@ -204,6 +272,31 @@ defmodule Snakepit.GRPCWorkerCallbackNonBlockingTest do
     assert_receive {^queued_tag, {:error, %Snakepit.Error{category: :worker}}}, 1_000
 
     refute Process.alive?(task_pid)
+  end
+
+  test "terminate is safe when heartbeat monitor pid is already dead" do
+    heartbeat_monitor = spawn(fn -> :ok end)
+    monitor_ref = Process.monitor(heartbeat_monitor)
+    assert_receive {:DOWN, ^monitor_ref, :process, ^heartbeat_monitor, _reason}, 200
+
+    state =
+      base_state(ImmediateAdapter)
+      |> Map.merge(%{
+        ready_file:
+          Path.join(
+            System.tmp_dir!(),
+            "snakepit_dead_heartbeat_#{System.unique_integer([:positive])}"
+          ),
+        heartbeat_monitor: heartbeat_monitor,
+        heartbeat_config: %{},
+        server_port: nil,
+        process_pid: nil,
+        pending_rpc_calls: %{},
+        pending_rpc_monitors: %{},
+        rpc_request_queue: :queue.new()
+      })
+
+    assert :ok = GRPCWorker.terminate(:shutdown, state)
   end
 
   defp base_state(adapter, channel \\ :mock_channel) do

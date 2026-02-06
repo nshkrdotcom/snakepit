@@ -183,24 +183,22 @@ defmodule Snakepit.Application do
   end
 
   defp safe_stop_supervisor(pid) when is_pid(pid) do
-    if Process.alive?(pid) do
-      try do
-        Process.unlink(pid)
-      rescue
-        _ -> :ok
-      end
+    try do
+      Process.unlink(pid)
+    rescue
+      _ -> :ok
+    end
 
-      ref = Process.monitor(pid)
-      Process.exit(pid, :shutdown)
+    ref = Process.monitor(pid)
+    Process.exit(pid, :shutdown)
 
-      receive do
-        {:DOWN, ^ref, :process, ^pid, _reason} ->
-          :ok
-      after
-        Defaults.graceful_shutdown_timeout_ms() + Defaults.shutdown_margin_ms() ->
-          Process.demonitor(ref, [:flush])
-          :ok
-      end
+    receive do
+      {:DOWN, ^ref, :process, ^pid, _reason} ->
+        :ok
+    after
+      Defaults.graceful_shutdown_timeout_ms() + Defaults.shutdown_margin_ms() ->
+        Process.demonitor(ref, [:flush])
+        :ok
     end
   end
 

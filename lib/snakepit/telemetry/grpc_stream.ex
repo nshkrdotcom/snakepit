@@ -15,6 +15,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
   use GenServer
   alias Snakepit.Config
   alias Snakepit.Logger, as: SLog
+  alias Snakepit.Shutdown
 
   alias GRPC.Channel
   alias Snakepit.Bridge.{BridgeService, TelemetryEvent}
@@ -328,7 +329,7 @@ defmodule Snakepit.Telemetry.GrpcStream do
         {:noreply, new_state}
 
       :error ->
-        if shutdown_exit?(reason) do
+        if Shutdown.shutdown_reason?(reason) do
           {:stop, reason, state}
         else
           {:noreply, state}
@@ -783,11 +784,9 @@ defmodule Snakepit.Telemetry.GrpcStream do
   end
 
   defp shutdown_reason?(%GRPC.RPCError{}), do: false
-  defp shutdown_reason?(:shutdown), do: true
-  defp shutdown_reason?({:shutdown, _}), do: true
   defp shutdown_reason?({:down, :shutdown}), do: true
   defp shutdown_reason?({:error, reason}), do: shutdown_reason?(reason)
-  defp shutdown_reason?(_), do: false
+  defp shutdown_reason?(reason), do: Shutdown.shutdown_reason?(reason)
 
   defp translate_and_emit(event, worker_ctx) do
     with {:ok, event_name} <- Naming.from_parts(event.event_parts),
@@ -874,8 +873,4 @@ defmodule Snakepit.Telemetry.GrpcStream do
 
     Map.put(stream_info, :open_timer_ref, nil)
   end
-
-  defp shutdown_exit?(reason) when reason == :shutdown, do: true
-  defp shutdown_exit?({:shutdown, _}), do: true
-  defp shutdown_exit?(_), do: false
 end

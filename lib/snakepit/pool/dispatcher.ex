@@ -13,8 +13,8 @@ defmodule Snakepit.Pool.Dispatcher do
          :ok <- check_pool_initialized(pool_state) do
       handle_execute_in_pool(pool_name, pool_state, command, args, opts, from, state, context)
     else
-      {:error, :pool_not_found} ->
-        {:reply, {:error, {:pool_not_found, pool_name}}, state}
+      {:error, {:pool_not_found, missing_pool_name}} ->
+        {:reply, {:error, {:pool_not_found, missing_pool_name}}, state}
 
       {:error, :pool_not_initialized} ->
         {:reply, {:error, :pool_not_initialized}, state}
@@ -23,7 +23,7 @@ defmodule Snakepit.Pool.Dispatcher do
 
   defp get_pool(pools, pool_name) do
     case Map.get(pools, pool_name) do
-      nil -> {:error, :pool_not_found}
+      nil -> {:error, {:pool_not_found, pool_name}}
       pool_state -> {:ok, pool_state}
     end
   end

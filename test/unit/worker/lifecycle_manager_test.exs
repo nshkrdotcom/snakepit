@@ -201,6 +201,53 @@ defmodule Snakepit.Worker.LifecycleManagerTest do
     Process.exit(worker_pid, :kill)
   end
 
+  test "terminate cancels timers and cleans tracked task refs" do
+    lifecycle_task_pid = spawn(fn -> Process.sleep(:infinity) end)
+    lifecycle_task_ref = Process.monitor(lifecycle_task_pid)
+    lifecycle_assert_ref = Process.monitor(lifecycle_task_pid)
+
+    recycle_task_pid = spawn(fn -> Process.sleep(:infinity) end)
+    recycle_task_ref = Process.monitor(recycle_task_pid)
+    recycle_assert_ref = Process.monitor(recycle_task_pid)
+
+    check_ref = Process.send_after(self(), :lifecycle_timer_tick, 100)
+    health_ref = Process.send_after(self(), :health_timer_tick, 100)
+
+    state =
+      base_state()
+      |> Map.put(:check_ref, check_ref)
+      |> Map.put(:health_ref, health_ref)
+      |> Map.put(:lifecycle_task_ref, lifecycle_task_ref)
+      |> Map.put(:lifecycle_task_pid, lifecycle_task_pid)
+      |> Map.put(:recycle_task_refs, %{
+        recycle_task_ref => %{worker_id: "worker_1", task_pid: recycle_task_pid}
+      })
+
+    assert :ok = LifecycleManager.terminate(:shutdown, state)
+
+    assert_receive {:DOWN, ^lifecycle_assert_ref, :process, ^lifecycle_task_pid, _reason}, 500
+    assert_receive {:DOWN, ^recycle_assert_ref, :process, ^recycle_task_pid, _reason}, 500
+    refute_receive {:DOWN, ^lifecycle_task_ref, :process, ^lifecycle_task_pid, _reason}, 100
+    refute_receive {:DOWN, ^recycle_task_ref, :process, ^recycle_task_pid, _reason}, 100
+    refute_receive :lifecycle_timer_tick, 150
+    refute_receive :health_timer_tick, 150
+  end
+
+  test "terminate remains idempotent under partial initialization" do
+    stale_ref = make_ref()
+
+    state =
+      base_state()
+      |> Map.put(:check_ref, nil)
+      |> Map.put(:health_ref, nil)
+      |> Map.put(:lifecycle_task_ref, stale_ref)
+      |> Map.put(:lifecycle_task_pid, nil)
+      |> Map.put(:recycle_task_refs, %{stale_ref => %{worker_id: "worker_1"}})
+
+    assert :ok = LifecycleManager.terminate(:shutdown, state)
+    assert :ok = LifecycleManager.terminate(:shutdown, state)
+  end
+
   defp lifecycle_config(profile_module) do
     %{
       worker_profile: profile_module,
@@ -216,7 +263,8 @@ defmodule Snakepit.Worker.LifecycleManagerTest do
       check_ref: nil,
       health_ref: nil,
       memory_recycle_counts: %{},
-      lifecycle_task_ref: nil
+      lifecycle_task_ref: nil,
+      recycle_task_refs: %{}
     }
   end
 

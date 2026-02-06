@@ -69,6 +69,7 @@ defmodule Snakepit.Worker.LifecycleManager do
     :health_ref,
     :memory_recycle_counts,
     :lifecycle_task_ref,
+    :lifecycle_task_pid,
     recycle_task_refs: %{}
   ]
 
@@ -142,6 +143,7 @@ defmodule Snakepit.Worker.LifecycleManager do
       health_ref: health_ref,
       memory_recycle_counts: %{},
       lifecycle_task_ref: nil,
+      lifecycle_task_pid: nil,
       recycle_task_refs: %{}
     }
 
@@ -297,13 +299,13 @@ defmodule Snakepit.Worker.LifecycleManager do
   def handle_info(:lifecycle_check, state) do
     now = System.monotonic_time(:second)
 
-    {:ok, _pid, task_ref} =
+    {:ok, task_pid, task_ref} =
       start_nolink_task(fn ->
         recycled_workers = run_lifecycle_checks(state.workers, now)
         {:lifecycle_check_complete, recycled_workers}
       end)
 
-    {:noreply, %{state | lifecycle_task_ref: task_ref}}
+    {:noreply, %{state | lifecycle_task_ref: task_ref, lifecycle_task_pid: task_pid}}
   end
 
   @impl true
@@ -327,7 +329,8 @@ defmodule Snakepit.Worker.LifecycleManager do
        state
        | workers: new_workers,
          check_ref: check_ref,
-         lifecycle_task_ref: nil
+         lifecycle_task_ref: nil,
+         lifecycle_task_pid: nil
      }}
   end
 
@@ -339,7 +342,9 @@ defmodule Snakepit.Worker.LifecycleManager do
     else
       SLog.warning(@log_category, "Lifecycle check task exited unexpectedly", reason: reason)
       check_ref = schedule_lifecycle_check()
-      {:noreply, %{state | check_ref: check_ref, lifecycle_task_ref: nil}}
+
+      {:noreply,
+       %{state | check_ref: check_ref, lifecycle_task_ref: nil, lifecycle_task_pid: nil}}
     end
   end
 
@@ -411,6 +416,15 @@ defmodule Snakepit.Worker.LifecycleManager do
     {:noreply, %{state | health_ref: health_ref}}
   end
 
+  @impl true
+  def terminate(_reason, state) do
+    cancel_timer(state.check_ref)
+    cancel_timer(state.health_ref)
+    cleanup_tracked_task(state.lifecycle_task_ref, state.lifecycle_task_pid)
+    cleanup_recycle_tasks(state.recycle_task_refs)
+    :ok
+  end
+
   defp handle_worker_down_by_pid(state, pid, reason) when is_pid(pid) do
     # Find worker by PID
     case Enum.find(state.workers, fn {_id, worker} -> worker.pid == pid end) do
@@ -472,8 +486,8 @@ defmodule Snakepit.Worker.LifecycleManager do
   end
 
   defp start_recycle_task(state, worker_state) do
-    {:ok, _pid, task_ref} = start_nolink_task(fn -> do_recycle_worker(worker_state) end)
-    task_meta = %{worker_id: worker_state.worker_id}
+    {:ok, task_pid, task_ref} = start_nolink_task(fn -> do_recycle_worker(worker_state) end)
+    task_meta = %{worker_id: worker_state.worker_id, task_pid: task_pid}
     recycle_task_refs = Map.put(state.recycle_task_refs, task_ref, task_meta)
     %{state | recycle_task_refs: recycle_task_refs}
   end
@@ -575,6 +589,46 @@ defmodule Snakepit.Worker.LifecycleManager do
 
   defp pop_worker(workers, worker_id) do
     Map.pop(workers, worker_id)
+  end
+
+  defp cleanup_recycle_tasks(recycle_task_refs) when is_map(recycle_task_refs) do
+    Enum.each(recycle_task_refs, fn {ref, task_meta} ->
+      cleanup_tracked_task(ref, recycle_task_pid(task_meta))
+    end)
+  end
+
+  defp cleanup_recycle_tasks(_), do: :ok
+
+  defp cleanup_tracked_task(ref, pid) do
+    maybe_demonitor_ref(ref)
+    maybe_kill_task_pid(pid)
+    :ok
+  end
+
+  defp recycle_task_pid(%{task_pid: pid}) when is_pid(pid), do: pid
+  defp recycle_task_pid(_), do: nil
+
+  defp maybe_demonitor_ref(ref) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    :ok
+  end
+
+  defp maybe_demonitor_ref(_), do: :ok
+
+  defp maybe_kill_task_pid(pid) when is_pid(pid) do
+    Process.exit(pid, :kill)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp maybe_kill_task_pid(_), do: :ok
+
+  defp cancel_timer(nil), do: :ok
+
+  defp cancel_timer(timer_ref) do
+    Process.cancel_timer(timer_ref, async: true, info: false)
+    :ok
   end
 
   defp maybe_demonitor_worker(%{monitor_ref: ref}) when is_reference(ref) do

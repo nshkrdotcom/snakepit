@@ -311,4 +311,36 @@ defmodule Snakepit.HeartbeatMonitorTest do
       0 -> :ok
     end
   end
+
+  test "ping timeout path is safe when ping task pid is already dead" do
+    worker_pid = spawn_worker()
+    ping_task_pid = spawn(fn -> :ok end)
+    ping_task_ref = Process.monitor(ping_task_pid)
+
+    assert_receive {:DOWN, ^ping_task_ref, :process, ^ping_task_pid, _reason}, 200
+
+    state = %HeartbeatMonitor{
+      worker_pid: worker_pid,
+      worker_id: "worker-timeout-dead-pid",
+      ping_interval: 1_000,
+      timeout: 100,
+      max_missed_heartbeats: 1,
+      ping_fun: fn _timestamp -> :ok end,
+      ping_task_ref: ping_task_ref,
+      ping_task_pid: ping_task_pid,
+      ping_task_timer: nil,
+      dependent: true,
+      missed_heartbeats: 0,
+      stats: %{pings_sent: 0, pongs_received: 0, timeouts: 0}
+    }
+
+    assert {:stop, {:shutdown, :ping_failed}, _new_state} =
+             HeartbeatMonitor.handle_info({:ping_task_timeout, ping_task_ref}, state)
+
+    receive do
+      {:EXIT, ^worker_pid, _reason} -> :ok
+    after
+      0 -> :ok
+    end
+  end
 end

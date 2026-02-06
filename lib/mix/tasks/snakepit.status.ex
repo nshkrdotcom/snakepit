@@ -44,12 +44,14 @@ defmodule Mix.Tasks.Snakepit.Status do
     workers =
       case Snakepit.Pool.list_workers(Snakepit.Pool, pool_name) do
         {:error, :pool_not_found} -> []
+        {:error, {:pool_not_found, _missing_pool}} -> []
         list -> list
       end
 
     stats =
       case Snakepit.Pool.get_stats(Snakepit.Pool, pool_name) do
         {:error, :pool_not_found} -> %{}
+        {:error, {:pool_not_found, _missing_pool}} -> %{}
         map -> map
       end
 

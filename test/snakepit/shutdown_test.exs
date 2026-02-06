@@ -128,4 +128,13 @@ defmodule Snakepit.ShutdownTest do
     Process.exit(supervisor_pid, :shutdown)
     refute_receive {:DOWN, _ref, :process, ^supervisor_pid, _reason}, 50
   end
+
+  test "shutdown_reason?/1 matches canonical shutdown reasons" do
+    assert Shutdown.shutdown_reason?(:shutdown)
+    assert Shutdown.shutdown_reason?({:shutdown, :normal})
+
+    refute Shutdown.shutdown_reason?({:down, :shutdown})
+    refute Shutdown.shutdown_reason?(:normal)
+    refute Shutdown.shutdown_reason?({:error, :shutdown})
+  end
 end

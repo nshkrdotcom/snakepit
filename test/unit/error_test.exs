@@ -159,4 +159,26 @@ defmodule Snakepit.ErrorTest do
       end
     end
   end
+
+  describe "normalize_public_result/2" do
+    test "normalizes bare pool_not_found reason with metadata" do
+      assert {:error, %Error{category: :pool, details: details}} =
+               Error.normalize_public_result({:error, :pool_not_found}, %{pool_name: :alpha})
+
+      assert details.reason == :pool_not_found
+      assert details.pool_name == :alpha
+    end
+
+    test "normalizes tuple pool_not_found reason and preserves pool name" do
+      assert {:error, %Error{category: :pool, details: details}} =
+               Error.normalize_public_result(
+                 {:error, {:pool_not_found, :alpha}},
+                 %{command: "ping"}
+               )
+
+      assert details.reason == :pool_not_found
+      assert details.pool_name == :alpha
+      assert details.command == "ping"
+    end
+  end
 end

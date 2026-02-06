@@ -727,7 +727,7 @@ defmodule Snakepit.Pool do
   def handle_call({:get_stats, pool_name}, _from, state) do
     case Map.get(state.pools, pool_name) do
       nil ->
-        {:reply, {:error, :pool_not_found}, state}
+        {:reply, {:error, {:pool_not_found, pool_name}}, state}
 
       pool_state ->
         stats =
@@ -755,7 +755,7 @@ defmodule Snakepit.Pool do
   def handle_call({:list_workers, pool_name}, _from, state) do
     case Map.get(state.pools, pool_name) do
       nil ->
-        {:reply, {:error, :pool_not_found}, state}
+        {:reply, {:error, {:pool_not_found, pool_name}}, state}
 
       pool_state ->
         {:reply, pool_state.workers, state}
@@ -796,7 +796,7 @@ defmodule Snakepit.Pool do
   def handle_call({:await_ready, pool_name}, from, state) do
     case Map.get(state.pools, pool_name) do
       nil ->
-        {:reply, {:error, :pool_not_found}, state}
+        {:reply, {:error, {:pool_not_found, pool_name}}, state}
 
       pool_state ->
         cond do
@@ -839,7 +839,7 @@ defmodule Snakepit.Pool do
           "Worker #{worker_id} reported ready but pool #{pool_name} not found!"
         )
 
-        {:error, :pool_not_found, state}
+        {:error, {:pool_not_found, pool_name}, state}
 
       pool_state ->
         # Ensure worker is in workers list
@@ -1838,7 +1838,7 @@ defmodule Snakepit.Pool do
   defp handle_checkout_worker_call(state, pool_name, session_id, opts) do
     case Map.get(state.pools, pool_name) do
       nil ->
-        {:reply, {:error, :pool_not_found}, state}
+        {:reply, {:error, {:pool_not_found, pool_name}}, state}
 
       pool_state ->
         case checkout_worker(pool_state, session_id, state.affinity_cache, opts) do
