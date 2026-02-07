@@ -292,6 +292,12 @@ defmodule Snakepit.Pool.EventHandler do
     context.async_with_context.(fn ->
       ref = Process.monitor(client_pid)
 
+      :telemetry.execute(
+        [:snakepit, :pool, :call, :dispatched],
+        %{system_time: System.system_time()},
+        %{pool: pool_name, worker_id: worker_id, command: command, queued: true}
+      )
+
       case ClientReply.monitor_client_status(ref, client_pid) do
         {:down, _reason} ->
           Process.demonitor(ref, [:flush])

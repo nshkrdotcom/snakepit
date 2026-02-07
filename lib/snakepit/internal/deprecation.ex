@@ -1,5 +1,11 @@
 defmodule Snakepit.Internal.Deprecation do
-  @moduledoc false
+  @moduledoc """
+  Telemetry-based deprecation tracking for legacy modules.
+
+  Emits `[:snakepit, :deprecated, :module_used]` telemetry events once per VM
+  lifetime when a deprecated legacy module is used. Uses an ETS set to ensure
+  each module triggers at most one event.
+  """
 
   @table :snakepit_legacy_deprecation_usage
   @event [:snakepit, :deprecated, :module_used]

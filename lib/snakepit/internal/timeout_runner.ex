@@ -1,5 +1,11 @@
 defmodule Snakepit.Internal.TimeoutRunner do
-  @moduledoc false
+  @moduledoc """
+  Bounded-time function execution using `spawn_monitor` and `receive`.
+
+  Provides a single `run/2` function that executes a zero-arity function in a
+  monitored process with an explicit timeout. Used by the executor, Python
+  package runner, and shutdown modules as a replacement for `Task.async`/`yield`.
+  """
 
   @spec run((-> term()), non_neg_integer()) :: {:ok, term()} | :timeout | {:error, term()}
   def run(fun, timeout_ms)

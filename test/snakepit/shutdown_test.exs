@@ -129,6 +129,17 @@ defmodule Snakepit.ShutdownTest do
     refute_receive {:DOWN, _ref, :process, ^supervisor_pid, _reason}, 50
   end
 
+  test "stop_supervisor/2 handles :terminating from stop_fun" do
+    supervisor_pid = self()
+
+    assert :ok =
+             Shutdown.stop_supervisor(supervisor_pid,
+               timeout_ms: 5,
+               label: "terminating",
+               stop_fun: fn -> exit(:terminating) end
+             )
+  end
+
   test "shutdown_reason?/1 matches canonical shutdown reasons" do
     assert Shutdown.shutdown_reason?(:shutdown)
     assert Shutdown.shutdown_reason?({:shutdown, :normal})

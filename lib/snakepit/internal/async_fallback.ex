@@ -1,5 +1,10 @@
 defmodule Snakepit.Internal.AsyncFallback do
-  @moduledoc false
+  @moduledoc """
+  Supervised task helpers with automatic fallback to bare monitors.
+
+  When `TaskSupervisor` is unavailable (not yet started or crashed), these
+  helpers fall back to `spawn_monitor` instead of crashing the caller.
+  """
 
   @type monitored_task :: {:ok, pid(), reference()}
   @type fallback_mode :: :monitored | :fire_and_forget

@@ -92,16 +92,15 @@ defmodule Snakepit.ExecutorTest do
 
   describe "execute_with_circuit_breaker/3" do
     setup do
-      {:ok, cb} =
-        Snakepit.CircuitBreaker.start_link(
-          name: :"cb_exec_#{System.unique_integer([:positive])}",
-          failure_threshold: 2,
-          reset_timeout_ms: 100
+      cb =
+        start_supervised!(
+          {Snakepit.CircuitBreaker,
+           [
+             name: :"cb_exec_#{System.unique_integer([:positive])}",
+             failure_threshold: 2,
+             reset_timeout_ms: 100
+           ]}
         )
-
-      on_exit(fn ->
-        if Process.alive?(cb), do: GenServer.stop(cb)
-      end)
 
       {:ok, cb: cb}
     end

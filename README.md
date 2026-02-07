@@ -50,7 +50,7 @@ For higher-level Python integration with compile-time type generation, use [Snak
 
 ```elixir
 def deps do
-  [{:snakebridge, "~> 0.15.0"}]
+  [{:snakebridge, "~> 0.16.0"}]
 end
 
 def project do

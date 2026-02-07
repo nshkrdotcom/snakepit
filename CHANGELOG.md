@@ -7,36 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.13.0] - 2026-02-05
+## [0.13.0] - 2026-02-06
+
+This release is primarily internal hardening: non-blocking GenServer callbacks,
+structured public API errors, centralized configuration, and a deprecation
+framework for legacy optional modules. No new user-facing features are
+introduced beyond instance isolation tokens and the structured error contract.
 
 ### Added
 
-- New runtime-configurable defaults and config normalization for:
-  - `process_registry_dets_flush_interval_ms`
-  - `grpc_stream_open_timeout_ms`
-  - `grpc_stream_control_timeout_ms`
-  - `lifecycle_check_max_concurrency`
-  - `lifecycle_worker_action_timeout_ms`
+- **Instance isolation tokens** - `instance_token` configuration (and `SNAKEPIT_INSTANCE_TOKEN` env var) provides per-VM isolation when multiple Snakepit instances share a host or deployment directory. Each concurrent VM must use a unique token so cleanup logic never targets another live instance's workers.
+- **Structured public API errors** - `Error.normalize_public_result/2` converts internal atom/tuple error codes (`:queue_timeout`, `:pool_saturated`, `:worker_busy`, `:session_worker_unavailable`, `:pool_not_initialized`, `:pool_not_found`, `:worker_exit`) into categorized `%Snakepit.Error{}` structs. All public returns from `Snakepit.execute/3`, `Pool.execute/3`, and `Pool.execute_stream/3` are now `{:error, %Snakepit.Error{}}`.
+- **Legacy module deprecation framework** - `Snakepit.Internal.Deprecation` provides telemetry-based once-per-VM deprecation events (`[:snakepit, :deprecated, :module_used]`) for legacy optional modules: `Snakepit.Compatibility`, `Snakepit.Executor`, `Snakepit.HealthMonitor`, `Snakepit.PythonVersion`, `Snakepit.Telemetry`, `Snakepit.Telemetry.GPUProfiler`, `Snakepit.Telemetry.Handlers.Logger`, and `Snakepit.Telemetry.Handlers.Metrics`.
+- **Centralized timeout runner** - `Snakepit.Internal.TimeoutRunner` standardizes execution with timeouts across the executor, Python package runner, and shutdown modules using `spawn_monitor`+`receive` instead of `Task.async`/`yield`/`shutdown`.
+- **Async fallback helpers** - `Snakepit.Internal.AsyncFallback` consolidates duplicated supervisor-unavailable fallback logic (`start_nolink_with_fallback/3`, `start_child_with_fallback/3`, `start_monitored/1`, `start_monitored_fire_and_forget/1`).
+- **Pool RuntimeSupervisor** - pool-dependent children are grouped under a `rest_for_one` supervisor ensuring dependency-order restarts.
+- **Enriched pool_not_found errors** - `Dispatcher.get_pool` now returns `{:error, {:pool_not_found, pool_name}}` carrying the missing pool name for diagnostics.
+- **Pre-stream telemetry buffering** - Python `TelemetryStream` buffers events emitted before the gRPC stream is attached and flushes them once the async loop is initialized, preventing dropped startup events.
+- **Session quota enforcement** in `SessionStore` to protect against resource exhaustion during high-volume worker assignments.
+- **Supervisor fallbacks for heartbeat and lifecycle tasks** - when `TaskSupervisor` is unavailable, heartbeat pings and lifecycle checks fall back to manually monitored processes instead of crashing.
+- **Dispatch telemetry event** - `[:snakepit, :pool, :call, :dispatched]` is emitted when a request is assigned to a worker and execution begins. Metadata includes `pool`, `worker_id`, `command`, and `queued` (boolean indicating whether the request waited in the queue). Enables deterministic synchronization for contention-aware consumers.
+- New runtime-configurable defaults: `process_registry_dets_flush_interval_ms`, `grpc_stream_open_timeout_ms`, `grpc_stream_control_timeout_ms`, `lifecycle_check_max_concurrency`, `lifecycle_worker_action_timeout_ms`, `grpc_worker_health_check_timeout_ms`.
+- `@enforce_keys` on `Pool`, `Pool.State`, `ProcessRegistry`, `HeartbeatMonitor`, and `LifecycleManager` structs.
+- Generated getters in `Defaults` for `pool_reconcile_interval_ms`, `pool_reconcile_batch_size`, and supervisor restart intensity values.
 
 ### Changed
 
-- **ProcessRegistry DETS persistence is now batched** - sync operations are deferred behind a short flush interval instead of running directly inside GenServer callbacks.
-- **Manual orphan cleanup is now asynchronous** - `manual_orphan_cleanup` requests are queued and executed in supervised tasks, with callers replied to when cleanup completes.
-- **Pool initialization startup path now uses supervised async tasks** - initialization is launched with `Task.Supervisor.async_nolink/2` and tracked by task ref, reducing EXIT-link coupling.
-- **Lifecycle checks now run off the GenServer callback path** with bounded per-worker concurrency and action timeouts.
+- **GRPCWorker is fully non-blocking** - long-running gRPC calls execute in async tasks with an internal request queue, keeping workers responsive to health checks and state queries during active calls. `get_health` and `get_info` calls also use non-blocking async mechanisms.
+- **Periodic health checks route through async RPC queue** instead of running synchronously in `handle_info`.
+- **ProcessRegistry DETS persistence is now batched** - sync operations are deferred behind a configurable flush interval instead of running directly inside GenServer callbacks. Startup cleanup deferred to `handle_continue` to avoid blocking the supervisor.
+- **Pool initialization uses supervised async tasks** - initialization is launched with `Task.Supervisor.async_nolink/2` with explicit crash attribution instead of `spawn_link`.
+- **Lifecycle checks run off the GenServer callback path** with bounded per-worker concurrency via `async_stream_nolink`. Worker recycle operations run in supervised tasks tracked via `recycle_task_refs`. `LifecycleManager.terminate/2` cancels timers and kills tracked tasks.
+- **GRPCWorker terminate cleans up pending calls** - iterates `pending_rpc_calls` and `rpc_request_queue`, killing in-flight task PIDs, demonitoring refs, and replying to waiting callers with structured shutdown errors.
+- **Telemetry stream operations are asynchronous** - gRPC stream open and control operations execute in supervised tasks with explicit operation timeouts. Connection lifecycle driven by a dedicated task with stream_ready/timeout messages.
+- **Heartbeat pings run in supervised tasks** instead of blocking the `HeartbeatMonitor` GenServer.
+- **GPU profiling moved to asynchronous model** to prevent slow hardware queries from stalling telemetry collection.
+- **Config resolution centralized** - `Snakepit.Config.adapter_module/2`, `Snakepit.Config.capacity_strategy/1`, `Snakepit.Config.adapter_args/1` resolve with explicit precedence (override -> pool -> legacy -> global -> default). All consumers delegate to these helpers.
+- **Shutdown module consolidation** - `Shutdown.shutdown_reason?/1` replaces duplicated private implementations across `GRPCWorker` and `GrpcStream`. `Shutdown.stop_supervisor/2` extracted for reusable supervisor stop logic.
+- **Application compile-time env replaced with runtime function** to prevent stale environment values.
+- **Legacy pool_size precedence fixed** - top-level `:pool_size` now wins over `pool_config.pool_size` when both are set.
+- **GRPC Client mock channel dispatch tightened** - mock response logic extracted into `ClientMock`; `Client.mock_channel?/1` no longer silently treats non-map channels as mocks.
+- **ToolRegistry errors use tagged tuples** instead of string messages; `BridgeServer` formats them at the API boundary.
+- **SessionStore default arguments consolidated** using Elixir default argument syntax.
+- **ClientSupervisor startup race normalization** - `{:error, {:already_started, pid}}` normalized to `:ignore`.
+- **TaintRegistry consume_restart atomicity** - uses `:ets.take/2` instead of lookup-then-delete for single-consumer semantics.
+- **ProcessRegistry DETS access indirection** - direct `:dets` calls replaced with `persist_put/3`, `persist_delete/2`, `persist_sync/1` wrappers.
+
+### Deprecated
+
+- **`Snakepit.HealthMonitor`** - use worker lifecycle telemetry and host-managed health policy. Emits `[:snakepit, :deprecated, :module_used]` once per VM.
+- **`Snakepit.Executor`** - use `Snakepit.RetryPolicy`, `Snakepit.CircuitBreaker`, and timeout helpers directly. Emits deprecation event once per VM.
+- **`Snakepit.Compatibility`**, **`Snakepit.PythonVersion`**, **`Snakepit.Telemetry`** (legacy module), **`Snakepit.Telemetry.GPUProfiler`**, **`Snakepit.Telemetry.Handlers.Logger`**, **`Snakepit.Telemetry.Handlers.Metrics`** - all emit deprecation events on first use; see event metadata for replacement guidance.
 
 ### Fixed
 
-- **Telemetry stream callback blocking risks** - gRPC stream open and control operations now execute asynchronously with explicit operation timeouts, eliminating blocking network calls from cast handlers.
-- **Heartbeat ping callback blocking risks** - heartbeat ping RPC execution now runs in supervised tasks with bounded timeout handling and cleanup.
-- **Heartbeat pong routing under async ping execution** - `notify_pong(self(), timestamp)` remains backward-compatible when `ping_fun` executes in a task by routing self-targeted pongs back to the owning monitor process.
-- **SessionStore callback containment** - `update_session` now safely catches `throw` and `exit` in addition to rescued exceptions.
-- **Dynamic atom creation from telemetry config keys** - OpenTelemetry and metrics config normalization no longer creates atoms from arbitrary strings at runtime.
+- **Shutdown flag stickiness** - `mark_in_progress` now stores a `{pid, ref}` marker with owner monitoring. Stale flags from crashed processes are automatically cleared and no longer block worker startup.
+- **Process.alive? TOCTOU races** removed from `HeartbeatMonitor`, `GRPCWorker`, `Application`, `WorkerSupervisor`, `Initializer`, `Listener`, `Shutdown`, and `LifecycleManager` in favor of monitor-based or catch-based patterns.
+- **CapacityStore :noproc crashes during shutdown** - all public APIs catch exits and return typed fallback values.
+- **GRPCWorker orphaned monitor growth** - orphaned RPC task monitors are now cleaned from `pending_rpc_monitors` when no matching pending call exists.
+- **HeartbeatMonitor stale timeout messages** - ignores `:heartbeat_timeout` when `timeout_timer` is `nil`. Demonitors ping task refs on timeout to prevent stale `:DOWN` delivery.
+- **ApplicationCleanup bounded termination** - cleanup runs in a spawned process with a configurable timeout budget, preventing blocked supervision tree shutdown.
+- **Listener process liveness detection** - replaced `Process.alive?/1` with monitor-and-receive to correctly detect remote node processes.
+- **ProcessRegistry cleanup task lifecycle** - catches `TaskSupervisor` `:noproc`, falls back to `spawn_monitor`, drains in-flight cleanup on terminate with configurable timeout.
+- **Telemetry stream callback blocking** - gRPC stream open and control operations now execute asynchronously with explicit operation timeouts.
+- **Heartbeat ping callback blocking** - pings run in supervised tasks with bounded timeout handling and cleanup.
+- **Heartbeat pong routing under async execution** - `notify_pong` remains backward-compatible when `ping_fun` executes in a task by routing self-targeted pongs back to the owning monitor process.
+- **SessionStore callback containment** - `update_session` now catches `throw` and `exit` in addition to rescued exceptions.
+- **Dynamic atom creation from telemetry config keys** - config normalization uses template-driven key matching instead of `String.to_atom`.
 - **Async task monitor hygiene in Pool** - tracked async task refs are demonitor/flushed and no longer misrouted through worker `:DOWN` handling.
-- **Worker supervisor shutdown race handling** - `WorkerSupervisor` APIs now return structured errors when the supervisor is unavailable instead of raising `:noproc` exits during shutdown/startup races.
-- **Pool initialization shutdown cleanup** - in-flight async initialization tasks are now explicitly cancelled when `Snakepit.Pool` terminates, preventing startup work from continuing into shutdown.
-- **Initialization resource delta telemetry** - startup resource deltas now compare against the baseline captured at initialization start (instead of sampling baseline and peak at completion).
-- **Port reservation race in tests** - test helper table reservation now tolerates ETS owner races during concurrent full-suite execution.
+- **WorkerSupervisor shutdown race handling** - APIs return structured errors when the supervisor is unavailable instead of raising `:noproc`.
+- **Pool initialization shutdown cleanup** - in-flight async initialization tasks are cancelled when `Pool` terminates.
+- **Initialization resource delta telemetry** - baseline captured at start instead of sampling both values at completion.
+- **Python telemetry events dropped during startup** - pre-stream buffering ensures events emitted before gRPC connection are preserved.
+- **Thread-safe Python telemetry emission** - uses `loop.call_soon_threadsafe` with loop state checks.
+- **Rogue cleanup configuration** - correctly handles explicit `false` values and string-key variations.
+- **GrpcStream and Snakepit.cleanup `:noproc` tolerance** - catch exits instead of pre-checking `Process.whereis`.
+- **Port reservation race in tests** - test helper table reservation tolerates ETS owner races during concurrent execution.
 
 ## [0.12.0] - 2026-01-25
 
@@ -1681,7 +1727,18 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 [0.7.3]: https://github.com/nshkrdotcom/snakepit/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/nshkrdotcom/snakepit/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.7.0...v0.7.1
-[0.7.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.0...v0.7.0
+[0.7.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.11...v0.7.0
+[0.6.11]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.10...v0.6.11
+[0.6.10]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.9...v0.6.10
+[0.6.9]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.8...v0.6.9
+[0.6.8]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.7...v0.6.8
+[0.6.7]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.6...v0.6.7
+[0.6.6]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.5...v0.6.6
+[0.6.5]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.4...v0.6.5
+[0.6.4]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.3...v0.6.4
+[0.6.3]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.4.3...v0.5.0

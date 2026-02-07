@@ -20,6 +20,7 @@ Key features:
 ```elixir
 [:snakepit, :pool, :initialized]        # Pool initialization complete
 [:snakepit, :pool, :status]             # Periodic pool status snapshot
+[:snakepit, :pool, :call, :dispatched]  # Call assigned to worker
 [:snakepit, :pool, :queue, :enqueued]   # Request queued
 [:snakepit, :pool, :queue, :dequeued]   # Request dequeued
 [:snakepit, :pool, :queue, :timeout]    # Request timed out in queue

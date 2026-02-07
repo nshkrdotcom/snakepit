@@ -145,6 +145,12 @@ defmodule Snakepit.Pool.Dispatcher do
       ref = Process.monitor(client_pid)
       start_time = System.monotonic_time(:microsecond)
 
+      :telemetry.execute(
+        [:snakepit, :pool, :call, :dispatched],
+        %{system_time: System.system_time()},
+        %{pool: pool_name, worker_id: worker_id, command: command, queued: false}
+      )
+
       case ClientReply.monitor_client_status(ref, client_pid) do
         {:down, reason} ->
           handle_client_already_down(

@@ -132,12 +132,12 @@ defmodule Snakepit.Shutdown do
 
     case resolve_supervisor_pid(supervisor) do
       nil ->
-        invoke_stop_fun(stop_fun, app)
+        invoke_stop_fun(stop_fun, app, label)
         SLog.info(:shutdown, "#{label} complete (supervisor already terminated).")
 
       supervisor_pid ->
         ref = Process.monitor(supervisor_pid)
-        invoke_stop_fun(stop_fun, app)
+        invoke_stop_fun(stop_fun, app, label)
 
         receive do
           {:DOWN, ^ref, :process, ^supervisor_pid, _reason} ->
@@ -231,8 +231,23 @@ defmodule Snakepit.Shutdown do
   defp resolve_supervisor_pid(name) when is_atom(name), do: Process.whereis(name)
   defp resolve_supervisor_pid(_), do: nil
 
-  defp invoke_stop_fun(stop_fun, app) when is_function(stop_fun, 1), do: stop_fun.(app)
-  defp invoke_stop_fun(stop_fun, _app) when is_function(stop_fun, 0), do: stop_fun.()
+  defp invoke_stop_fun(stop_fun, app, label) when is_function(stop_fun, 1) do
+    invoke_stop_fun(fn -> stop_fun.(app) end, label)
+  end
+
+  defp invoke_stop_fun(stop_fun, _app, label) when is_function(stop_fun, 0) do
+    invoke_stop_fun(stop_fun, label)
+  end
+
+  defp invoke_stop_fun(fun, label) when is_function(fun, 0) do
+    fun.()
+  catch
+    :exit, :terminating ->
+      # External SIGTERM during script shutdown can make application_controller
+      # reject stop calls while the VM is already terminating.
+      SLog.info(:shutdown, "#{label} stop call skipped (system terminating).")
+      :ok
+  end
 
   defp shutdown_mark_active? do
     case :persistent_term.get(@shutdown_flag_key, false) do

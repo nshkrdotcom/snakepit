@@ -35,7 +35,7 @@ defmodule Snakepit.MixProject do
   defp deps do
     [
       {:jason, "~> 1.0"},
-      {:grpc, "0.11.5"},
+      {:grpc, "~> 0.11.5"},
       # {:grpc_core,
       # github: "nshkrdotcom/grpc",
       # ref: "3cec4f8c010c7869e20ccc5068872e29faecd1a9",
@@ -271,6 +271,11 @@ defmodule Snakepit.MixProject do
           Snakepit.RunID,
           Snakepit.Config,
           Snakepit.Error
+        ],
+        Internal: [
+          Snakepit.Internal.AsyncFallback,
+          Snakepit.Internal.Deprecation,
+          Snakepit.Internal.TimeoutRunner
         ]
       ],
       before_closing_head_tag: &docs_before_closing_head_tag/1,

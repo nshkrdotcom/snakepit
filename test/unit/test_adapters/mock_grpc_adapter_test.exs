@@ -14,6 +14,7 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapterTest do
   end
 
   test "adapter exposes grpc_heartbeat for heartbeat monitor compatibility" do
+    Code.ensure_loaded!(MockGRPCAdapter)
     assert function_exported?(MockGRPCAdapter, :grpc_heartbeat, 2)
     assert function_exported?(MockGRPCAdapter, :grpc_heartbeat, 3)
   end
