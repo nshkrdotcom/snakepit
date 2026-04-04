@@ -106,7 +106,9 @@ defmodule Snakepit.MixProject do
         # Root documentation
         "README.md",
         "CHANGELOG.md",
-        "LICENSE*"
+        "LICENSE*",
+        "assets/snakepit-icon.svg",
+        "assets/snakepit-logo.svg"
       ],
       exclude_patterns: [
         "**/__pycache__",
