@@ -107,7 +107,8 @@ defmodule Snakepit.MixProject do
         "README.md",
         "CHANGELOG.md",
         "LICENSE*",
-        "assets"
+        "assets",
+        "guides"
       ],
       exclude_patterns: [
         "**/__pycache__",
