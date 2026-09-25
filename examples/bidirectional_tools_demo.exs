@@ -98,10 +98,9 @@ defmodule BidirectionalToolsDemo do
     Process.unlink(listener)
     {:ok, info} = Snakepit.GRPC.Listener.await_ready(5_000)
     grpc_address = "#{info.host}:#{info.port}"
-    session_id = nil
+    session_id = "bidirectional-demo-#{:os.system_time(:millisecond)}"
 
     try do
-      session_id = "bidirectional-demo-#{:os.system_time(:millisecond)}"
 
       {:ok, _session} =
         SessionStore.create_session(
@@ -242,11 +241,8 @@ defmodule BidirectionalToolsDemo do
 
       wait_for_exit(auto_stop_ms)
     after
-      if is_binary(session_id) do
-        SessionStore.delete_session(session_id)
-        ToolRegistry.cleanup_session(session_id)
-      end
-
+      SessionStore.delete_session(session_id)
+      ToolRegistry.cleanup_session(session_id)
       stop_grpc_supervisor(listener)
       IO.puts("Server stopped and session cleaned up.")
     end

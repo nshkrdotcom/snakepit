@@ -144,19 +144,11 @@ defmodule Snakepit.ErrorTest do
     test "pattern matching works with old and new formats" do
       # Old format
       old_result = {:error, :worker_not_found}
-
-      case old_result do
-        {:error, :worker_not_found} -> assert true
-        _ -> flunk("Pattern match failed")
-      end
+      assert match?({:error, :worker_not_found}, old_result)
 
       # New format
       new_result = {:error, Error.worker_error("Worker not found")}
-
-      case new_result do
-        {:error, %Error{category: :worker}} -> assert true
-        _ -> flunk("Pattern match failed")
-      end
+      assert match?({:error, %Error{category: :worker}}, new_result)
     end
   end
 
@@ -179,6 +171,30 @@ defmodule Snakepit.ErrorTest do
       assert details.reason == :pool_not_found
       assert details.pool_name == :alpha
       assert details.command == "ping"
+    end
+
+    test "preserves structured Python exception structs" do
+      value_error = %Error.ValueError{
+        message: "Invalid argument",
+        context: %{"tool_name" => "test"},
+        python_type: "ValueError"
+      }
+
+      assert {:error, %Error.ValueError{} = error} =
+               Error.normalize_public_result({:error, value_error}, %{command: "test"})
+
+      assert error.message == "Invalid argument"
+      assert error.python_type == "ValueError"
+
+      python_exception = %Error.PythonException{
+        message: "Generic error",
+        python_type: "CustomError"
+      }
+
+      assert {:error, %Error.PythonException{} = error} =
+               Error.normalize_public_result({:error, python_exception}, %{command: "test"})
+
+      assert error.message == "Generic error"
     end
   end
 end

@@ -181,7 +181,8 @@ done
 
 if [[ "${RUN_SHOWCASE}" -eq 1 ]]; then
   if ! run_cmd "examples/snakepit_showcase (run_all)" bash -c \
-    "cd \"${ROOT_DIR}/examples/snakepit_showcase\" && mix deps.get && \
+    "cd \"${ROOT_DIR}/examples/snakepit_showcase\" && \
+     (mix deps >/dev/null 2>&1 || mix deps.get) && \
      mix run --eval 'Snakepit.run_as_script(fn -> SnakepitShowcase.DemoRunner.run_all() end, halt: true)'"; then
     failures+=("examples/snakepit_showcase")
   fi
@@ -194,7 +195,8 @@ if [[ "${RUN_LOADTEST}" -eq 1 ]]; then
   LOADTEST_SUSTAINED_WORKERS="${LOADTEST_SUSTAINED_WORKERS:-5}"
 
   if ! run_cmd "examples/snakepit_loadtest (basic)" bash -c \
-    "cd \"${ROOT_DIR}/examples/snakepit_loadtest\" && mix deps.get && \
+    "cd \"${ROOT_DIR}/examples/snakepit_loadtest\" && \
+     (mix deps >/dev/null 2>&1 || mix deps.get) && \
      mix run --eval 'Snakepit.run_as_script(fn -> SnakepitLoadtest.Demos.BasicLoadDemo.run(${LOADTEST_BASIC_WORKERS}) end, halt: true)'"; then
     failures+=("examples/snakepit_loadtest basic")
   fi

@@ -131,22 +131,12 @@ defmodule HardwareDetectionExample do
     IO.puts(String.duplicate("-", 40))
 
     # Auto selection
-    case Selector.select(:auto) do
-      {:ok, device} ->
-        IO.puts("   Auto-selected device: #{format_device(device)}")
-
-      {:error, reason} ->
-        IO.puts("   Auto-selection failed: #{reason}")
-    end
+    {:ok, device} = Selector.select(:auto)
+    IO.puts("   Auto-selected device: #{format_device(device)}")
 
     # CPU is always available
-    case Selector.select(:cpu) do
-      {:ok, :cpu} ->
-        IO.puts("   CPU selection: Success (always available)")
-
-      {:error, reason} ->
-        IO.puts("   CPU selection failed: #{reason}")
-    end
+    {:ok, :cpu} = Selector.select(:cpu)
+    IO.puts("   CPU selection: Success (always available)")
 
     # Try CUDA selection
     case Selector.select(:cuda) do

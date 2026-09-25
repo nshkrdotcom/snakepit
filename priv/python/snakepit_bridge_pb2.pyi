@@ -49,7 +49,7 @@ class SessionConfig(_message.Message):
     enable_caching: bool
     cache_ttl_seconds: int
     enable_telemetry: bool
-    def __init__(self, enable_caching: bool = ..., cache_ttl_seconds: _Optional[int] = ..., enable_telemetry: bool = ...) -> None: ...
+    def __init__(self, enable_caching: _Optional[bool] = ..., cache_ttl_seconds: _Optional[int] = ..., enable_telemetry: _Optional[bool] = ...) -> None: ...
 
 class InitializeSessionResponse(_message.Message):
     __slots__ = ("success", "error_message", "available_tools")
@@ -66,7 +66,7 @@ class InitializeSessionResponse(_message.Message):
     success: bool
     error_message: str
     available_tools: _containers.MessageMap[str, ToolSpec]
-    def __init__(self, success: bool = ..., error_message: _Optional[str] = ..., available_tools: _Optional[_Mapping[str, ToolSpec]] = ...) -> None: ...
+    def __init__(self, success: _Optional[bool] = ..., error_message: _Optional[str] = ..., available_tools: _Optional[_Mapping[str, ToolSpec]] = ...) -> None: ...
 
 class CleanupSessionRequest(_message.Message):
     __slots__ = ("session_id", "force")
@@ -74,7 +74,7 @@ class CleanupSessionRequest(_message.Message):
     FORCE_FIELD_NUMBER: _ClassVar[int]
     session_id: str
     force: bool
-    def __init__(self, session_id: _Optional[str] = ..., force: bool = ...) -> None: ...
+    def __init__(self, session_id: _Optional[str] = ..., force: _Optional[bool] = ...) -> None: ...
 
 class CleanupSessionResponse(_message.Message):
     __slots__ = ("success", "resources_cleaned")
@@ -82,7 +82,7 @@ class CleanupSessionResponse(_message.Message):
     RESOURCES_CLEANED_FIELD_NUMBER: _ClassVar[int]
     success: bool
     resources_cleaned: int
-    def __init__(self, success: bool = ..., resources_cleaned: _Optional[int] = ...) -> None: ...
+    def __init__(self, success: _Optional[bool] = ..., resources_cleaned: _Optional[int] = ...) -> None: ...
 
 class ToolSpec(_message.Message):
     __slots__ = ("name", "description", "parameters", "metadata", "supports_streaming")
@@ -103,7 +103,7 @@ class ToolSpec(_message.Message):
     parameters: _containers.RepeatedCompositeFieldContainer[ParameterSpec]
     metadata: _containers.ScalarMap[str, str]
     supports_streaming: bool
-    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., parameters: _Optional[_Iterable[_Union[ParameterSpec, _Mapping]]] = ..., metadata: _Optional[_Mapping[str, str]] = ..., supports_streaming: bool = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., parameters: _Optional[_Iterable[_Union[ParameterSpec, _Mapping]]] = ..., metadata: _Optional[_Mapping[str, str]] = ..., supports_streaming: _Optional[bool] = ...) -> None: ...
 
 class ParameterSpec(_message.Message):
     __slots__ = ("name", "type", "description", "required", "default_value", "validation_json")
@@ -119,7 +119,7 @@ class ParameterSpec(_message.Message):
     required: bool
     default_value: _any_pb2.Any
     validation_json: str
-    def __init__(self, name: _Optional[str] = ..., type: _Optional[str] = ..., description: _Optional[str] = ..., required: bool = ..., default_value: _Optional[_Union[_any_pb2.Any, _Mapping]] = ..., validation_json: _Optional[str] = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., type: _Optional[str] = ..., description: _Optional[str] = ..., required: _Optional[bool] = ..., default_value: _Optional[_Union[_any_pb2.Any, _Mapping]] = ..., validation_json: _Optional[str] = ...) -> None: ...
 
 class ExecuteToolRequest(_message.Message):
     __slots__ = ("session_id", "tool_name", "parameters", "metadata", "stream", "binary_parameters")
@@ -156,7 +156,7 @@ class ExecuteToolRequest(_message.Message):
     metadata: _containers.ScalarMap[str, str]
     stream: bool
     binary_parameters: _containers.ScalarMap[str, bytes]
-    def __init__(self, session_id: _Optional[str] = ..., tool_name: _Optional[str] = ..., parameters: _Optional[_Mapping[str, _any_pb2.Any]] = ..., metadata: _Optional[_Mapping[str, str]] = ..., stream: bool = ..., binary_parameters: _Optional[_Mapping[str, bytes]] = ...) -> None: ...
+    def __init__(self, session_id: _Optional[str] = ..., tool_name: _Optional[str] = ..., parameters: _Optional[_Mapping[str, _any_pb2.Any]] = ..., metadata: _Optional[_Mapping[str, str]] = ..., stream: _Optional[bool] = ..., binary_parameters: _Optional[_Mapping[str, bytes]] = ...) -> None: ...
 
 class ExecuteToolResponse(_message.Message):
     __slots__ = ("success", "result", "error_message", "metadata", "execution_time_ms", "binary_result")
@@ -179,7 +179,7 @@ class ExecuteToolResponse(_message.Message):
     metadata: _containers.ScalarMap[str, str]
     execution_time_ms: int
     binary_result: bytes
-    def __init__(self, success: bool = ..., result: _Optional[_Union[_any_pb2.Any, _Mapping]] = ..., error_message: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., execution_time_ms: _Optional[int] = ..., binary_result: _Optional[bytes] = ...) -> None: ...
+    def __init__(self, success: _Optional[bool] = ..., result: _Optional[_Union[_any_pb2.Any, _Mapping]] = ..., error_message: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., execution_time_ms: _Optional[int] = ..., binary_result: _Optional[bytes] = ...) -> None: ...
 
 class ToolChunk(_message.Message):
     __slots__ = ("chunk_id", "data", "is_final", "metadata")
@@ -198,7 +198,7 @@ class ToolChunk(_message.Message):
     data: bytes
     is_final: bool
     metadata: _containers.ScalarMap[str, str]
-    def __init__(self, chunk_id: _Optional[str] = ..., data: _Optional[bytes] = ..., is_final: bool = ..., metadata: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    def __init__(self, chunk_id: _Optional[str] = ..., data: _Optional[bytes] = ..., is_final: _Optional[bool] = ..., metadata: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class GetSessionRequest(_message.Message):
     __slots__ = ("session_id",)
@@ -239,7 +239,7 @@ class HeartbeatResponse(_message.Message):
     SESSION_VALID_FIELD_NUMBER: _ClassVar[int]
     server_time: _timestamp_pb2.Timestamp
     session_valid: bool
-    def __init__(self, server_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., session_valid: bool = ...) -> None: ...
+    def __init__(self, server_time: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., session_valid: _Optional[bool] = ...) -> None: ...
 
 class RegisterToolsRequest(_message.Message):
     __slots__ = ("session_id", "tools", "worker_id")
@@ -270,7 +270,7 @@ class ToolRegistration(_message.Message):
     parameters: _containers.RepeatedCompositeFieldContainer[ParameterSpec]
     metadata: _containers.ScalarMap[str, str]
     supports_streaming: bool
-    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., parameters: _Optional[_Iterable[_Union[ParameterSpec, _Mapping]]] = ..., metadata: _Optional[_Mapping[str, str]] = ..., supports_streaming: bool = ...) -> None: ...
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., parameters: _Optional[_Iterable[_Union[ParameterSpec, _Mapping]]] = ..., metadata: _Optional[_Mapping[str, str]] = ..., supports_streaming: _Optional[bool] = ...) -> None: ...
 
 class RegisterToolsResponse(_message.Message):
     __slots__ = ("success", "tool_ids", "error_message")
@@ -287,7 +287,7 @@ class RegisterToolsResponse(_message.Message):
     success: bool
     tool_ids: _containers.ScalarMap[str, str]
     error_message: str
-    def __init__(self, success: bool = ..., tool_ids: _Optional[_Mapping[str, str]] = ..., error_message: _Optional[str] = ...) -> None: ...
+    def __init__(self, success: _Optional[bool] = ..., tool_ids: _Optional[_Mapping[str, str]] = ..., error_message: _Optional[str] = ...) -> None: ...
 
 class GetExposedElixirToolsRequest(_message.Message):
     __slots__ = ("session_id",)
@@ -348,7 +348,7 @@ class ExecuteElixirToolResponse(_message.Message):
     metadata: _containers.ScalarMap[str, str]
     execution_time_ms: int
     binary_result: bytes
-    def __init__(self, success: bool = ..., result: _Optional[_Union[_any_pb2.Any, _Mapping]] = ..., error_message: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., execution_time_ms: _Optional[int] = ..., binary_result: _Optional[bytes] = ...) -> None: ...
+    def __init__(self, success: _Optional[bool] = ..., result: _Optional[_Union[_any_pb2.Any, _Mapping]] = ..., error_message: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., execution_time_ms: _Optional[int] = ..., binary_result: _Optional[bytes] = ...) -> None: ...
 
 class TelemetryEvent(_message.Message):
     __slots__ = ("event_parts", "measurements", "metadata", "timestamp_ns", "correlation_id")
@@ -402,7 +402,7 @@ class TelemetryToggle(_message.Message):
     __slots__ = ("enabled",)
     ENABLED_FIELD_NUMBER: _ClassVar[int]
     enabled: bool
-    def __init__(self, enabled: bool = ...) -> None: ...
+    def __init__(self, enabled: _Optional[bool] = ...) -> None: ...
 
 class TelemetrySamplingUpdate(_message.Message):
     __slots__ = ("sampling_rate", "event_patterns")

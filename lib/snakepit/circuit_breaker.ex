@@ -25,7 +25,6 @@ defmodule Snakepit.CircuitBreaker do
   use GenServer
 
   alias Snakepit.Defaults
-  require Logger
 
   @type state :: :closed | :open | :half_open
 

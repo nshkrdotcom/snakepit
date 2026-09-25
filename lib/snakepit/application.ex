@@ -12,7 +12,6 @@ defmodule Snakepit.Application do
   """
 
   use Application
-  require Logger
   alias Snakepit.Config
   alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog

@@ -25,8 +25,6 @@ Snakepit.Examples.Bootstrap.ensure_mix!([
 ])
 
 defmodule ProcessVsThreadComparison do
-  require Logger
-
   def run do
     IO.puts("\n" <> String.duplicate("=", 70))
     IO.puts("Snakepit v0.7.1 - Process vs Thread Profile Comparison")

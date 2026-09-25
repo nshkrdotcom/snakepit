@@ -16,8 +16,6 @@ defmodule Snakepit.Telemetry.GPUProfiler do
 
   use GenServer
 
-  require Logger
-
   alias Snakepit.Hardware
   alias Snakepit.Internal.Deprecation
 

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-25
+
+### Changed
+- Replaced deprecated `asyncio.iscoroutinefunction` with standard library `inspect.iscoroutinefunction` in `grpc_server.py`, ensuring full compatibility with Python 3.12 through 3.16+ without deprecation warnings.
+- Upgraded to `grpc ~> 1.0`, `grpc_server ~> 1.0`, and `gun ~> 2.4.0` from Hex.pm.
+- Updated dependencies to latest available Hex releases (telemetry 1.4.2, stream_data 1.4.0, supertester 0.6.0, dialyxir 1.4.8, ex_doc 0.40.4, credo 1.7.19).
+- Resolved all Elixir compiler warnings, unused requires, and redundant pattern match clauses for warning-free compilation under Elixir 1.18+.
+
 ## [0.13.0] - 2026-02-06
 
 This release is primarily internal hardening: non-blocking GenServer callbacks,
@@ -1701,7 +1709,8 @@ This release also rolls up the previously undocumented fail-fast docs/tests work
 - Configurable pool sizes and timeouts
 - Built-in bridge scripts for Python and JavaScript
 
-[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/nshkrdotcom/snakepit/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/nshkrdotcom/snakepit/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/nshkrdotcom/snakepit/compare/v0.11.0...v0.11.1

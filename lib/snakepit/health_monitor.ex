@@ -35,7 +35,6 @@ defmodule Snakepit.HealthMonitor do
 
   alias Snakepit.Defaults
   alias Snakepit.Internal.Deprecation
-  require Logger
 
   @type worker_stats :: %{
           crash_count: non_neg_integer(),

@@ -30,7 +30,6 @@ defmodule Snakepit.GRPCWorker do
   """
 
   use GenServer
-  require Logger
   alias Snakepit.Config
   alias Snakepit.Defaults
   alias Snakepit.Error

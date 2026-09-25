@@ -1902,6 +1902,10 @@ defmodule Snakepit.Pool do
     extract_pool_name_by_type(pool_name, metadata, pid)
   end
 
+  defp extract_pool_name_by_type(nil, metadata, pid) do
+    {:error, {:pool_metadata_missing, %{metadata_keys: Map.keys(metadata), worker_pid: pid}}}
+  end
+
   defp extract_pool_name_by_type(pool_name, _metadata, _pid) when is_atom(pool_name) do
     validate_atom_pool_name(pool_name)
   end
@@ -1912,10 +1916,6 @@ defmodule Snakepit.Pool do
 
   defp extract_pool_name_by_type(pool_name, _metadata, _pid) when is_binary(pool_name) do
     convert_string_to_pool_name(pool_name)
-  end
-
-  defp extract_pool_name_by_type(nil, metadata, pid) do
-    {:error, {:pool_metadata_missing, %{metadata_keys: Map.keys(metadata), worker_pid: pid}}}
   end
 
   defp validate_atom_pool_name(pool_name) do

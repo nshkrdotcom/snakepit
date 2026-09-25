@@ -51,7 +51,8 @@ defmodule Snakepit do
     * `:session_id` - Execute with session affinity
     * `:affinity` - Override affinity mode (`:hint`, `:strict_queue`, `:strict_fail_fast`)
   """
-  @spec execute(command(), args(), keyword()) :: {:ok, result()} | {:error, Snakepit.Error.t()}
+  @spec execute(command(), args(), keyword()) ::
+          {:ok, result()} | {:error, Snakepit.Error.t() | Exception.t()}
   def execute(command, args, opts \\ []) do
     Snakepit.Pool.execute(command, args, opts)
     |> Error.normalize_public_result(%{command: command, pool: opts[:pool] || Snakepit.Pool})
@@ -71,7 +72,7 @@ defmodule Snakepit do
   Args are passed through unchanged - no domain-specific enhancement.
   """
   @spec execute_in_session(session_id(), command(), args(), keyword()) ::
-          {:ok, result()} | {:error, Snakepit.Error.t()}
+          {:ok, result()} | {:error, Snakepit.Error.t() | Exception.t()}
   def execute_in_session(session_id, command, args, opts \\ []) do
     # Add session_id to opts for session affinity
     opts_with_session = Keyword.put(opts, :session_id, session_id)

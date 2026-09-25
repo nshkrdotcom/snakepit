@@ -30,8 +30,6 @@ Snakepit.Examples.Bootstrap.ensure_mix!([
 ])
 
 defmodule ThreadedProfileDemo do
-  require Logger
-
   def run do
     IO.puts("\n" <> String.duplicate("=", 70))
     IO.puts("Snakepit v0.7.1 - Threaded Profile Demonstration")

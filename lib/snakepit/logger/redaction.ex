@@ -44,13 +44,13 @@ defmodule Snakepit.Logger.Redaction do
     "tuple(size: #{tuple_size(tuple)})"
   end
 
+  def describe(nil), do: "nil"
   def describe(number) when is_number(number), do: inspect(number)
   def describe(atom) when is_atom(atom), do: Atom.to_string(atom)
   def describe(pid) when is_pid(pid), do: inspect(pid)
   def describe(ref) when is_reference(ref), do: inspect(ref)
   def describe(port) when is_port(port), do: inspect(port)
   def describe(fun) when is_function(fun), do: "function/arity=#{:erlang.fun_info(fun)[:arity]}"
-  def describe(nil), do: "nil"
 
   def describe(term) do
     type_label(term)
@@ -85,6 +85,7 @@ defmodule Snakepit.Logger.Redaction do
     "struct(#{module})"
   end
 
+  defp type_label(nil), do: "nil"
   defp type_label(term) when is_map(term), do: "map"
   defp type_label(term) when is_binary(term), do: "binary"
   defp type_label(term) when is_list(term), do: "list"
@@ -95,6 +96,5 @@ defmodule Snakepit.Logger.Redaction do
   defp type_label(term) when is_pid(term), do: "pid"
   defp type_label(term) when is_reference(term), do: "reference"
   defp type_label(term) when is_function(term), do: "function"
-  defp type_label(nil), do: "nil"
   defp type_label(_term), do: "unknown"
 end

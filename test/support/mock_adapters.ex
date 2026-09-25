@@ -4,7 +4,6 @@ defmodule Snakepit.TestAdapters.MockGRPCAdapter do
   """
 
   @behaviour Snakepit.Adapter
-  require Logger
 
   @impl true
   def executable_path do

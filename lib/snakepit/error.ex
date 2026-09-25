@@ -176,7 +176,7 @@ defmodule Snakepit.Error do
   only at public boundaries.
   """
   @spec normalize_public_result(:ok | {:ok, term()} | {:error, term()}, map()) ::
-          :ok | {:ok, term()} | {:error, t()}
+          :ok | {:ok, term()} | {:error, t() | Exception.t()}
   def normalize_public_result(result, metadata \\ %{})
 
   def normalize_public_result(:ok, _metadata), do: :ok
@@ -186,12 +186,19 @@ defmodule Snakepit.Error do
     {:error, error}
   end
 
+  def normalize_public_result({:error, exception}, _metadata) when is_exception(exception) do
+    {:error, exception}
+  end
+
   def normalize_public_result({:error, reason}, metadata) do
     {:error, normalize_public_error(reason, metadata)}
   end
 
-  @spec normalize_public_error(term(), map()) :: t()
+  @spec normalize_public_error(term(), map()) :: t() | Exception.t()
   def normalize_public_error(reason, metadata \\ %{})
+
+  def normalize_public_error(%__MODULE__{} = error, _metadata), do: error
+  def normalize_public_error(exception, _metadata) when is_exception(exception), do: exception
 
   def normalize_public_error(reason, metadata) when reason in [:queue_timeout, :worker_timeout] do
     timeout_error(timeout_message(reason), Map.put(metadata, :reason, reason))

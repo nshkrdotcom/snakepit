@@ -12,8 +12,6 @@ defmodule Snakepit.Integration.TelemetryFlowTest do
   @moduletag :integration
   @moduletag timeout: 60_000
 
-  require Logger
-
   setup do
     # Attach a test telemetry handler to capture events
     test_pid = self()

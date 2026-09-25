@@ -299,7 +299,7 @@ def grpc_error_handler(func):
             )
     
     # Handle both sync and async functions
-    if asyncio.iscoroutinefunction(func):
+    if inspect.iscoroutinefunction(func):
         return wrapper
     else:
         @functools.wraps(func)

@@ -26,8 +26,6 @@ Snakepit.Examples.Bootstrap.ensure_mix!([
 ])
 
 defmodule TelemetryIntegrationDemo do
-  require Logger
-
   def run do
     IO.puts("\n" <> String.duplicate("=", 70))
     IO.puts("Snakepit Telemetry Integration Demo")

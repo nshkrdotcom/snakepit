@@ -5,7 +5,7 @@ import warnings
 
 import snakepit_bridge_pb2 as snakepit__bridge__pb2
 
-GRPC_GENERATED_VERSION = '1.76.0'
+GRPC_GENERATED_VERSION = '1.84.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -25,7 +25,7 @@ if _version_not_supported:
     )
 
 
-class BridgeServiceStub(object):
+class BridgeServiceStub:
     """Missing associated documentation comment in .proto file."""
 
     def __init__(self, channel):
@@ -91,7 +91,7 @@ class BridgeServiceStub(object):
                 _registered_method=True)
 
 
-class BridgeServiceServicer(object):
+class BridgeServiceServicer:
     """Missing associated documentation comment in .proto file."""
 
     def Ping(self, request, context):
@@ -230,7 +230,7 @@ def add_BridgeServiceServicer_to_server(servicer, server):
 
 
  # This class is part of an EXPERIMENTAL API.
-class BridgeService(object):
+class BridgeService:
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod

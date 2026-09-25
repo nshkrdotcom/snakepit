@@ -6,14 +6,6 @@ defmodule Snakepit.Pool.ErrorShapeTest do
   setup do
     cache = :ets.new(:pool_error_shape_cache, [:set, :public, {:read_concurrency, true}])
 
-    on_exit(fn ->
-      try do
-        :ets.delete(cache)
-      catch
-        :error, :badarg -> :ok
-      end
-    end)
-
     state = %Pool{pools: %{}, affinity_cache: cache, default_pool: :default}
     {:ok, state: state}
   end

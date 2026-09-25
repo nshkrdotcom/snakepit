@@ -4,7 +4,6 @@ defmodule SnakepitLoadtest.Demos.BasicLoadDemo do
   """
 
   alias SnakepitLoadtest
-  require Logger
 
   def run(worker_count \\ 10) do
     IO.puts("\n🚀 Basic Load Test Demo")

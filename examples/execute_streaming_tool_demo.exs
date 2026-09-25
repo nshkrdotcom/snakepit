@@ -54,8 +54,6 @@ defmodule StreamingToolDemo do
   This demo shows the Pool streaming path (#1).
   """
 
-  require Logger
-
   def run do
     IO.puts("=== Streaming Tool Demo ===\n")
     IO.puts("This demo uses Snakepit.execute_stream/3 (Pool → Worker streaming)\n")

@@ -30,8 +30,8 @@ defmodule SnakepitShowcase.MixProject do
 
       # Core dependencies
       {:jason, "~> 1.4"},
-      {:telemetry_metrics, "~> 1.0"},
-      {:telemetry_poller, "~> 1.0"},
+      {:telemetry_metrics, "~> 1.2"},
+      {:telemetry_poller, "~> 1.3"},
 
       # Testing
       {:ex_unit_notifier, "~> 1.3", only: :test},

@@ -23,8 +23,6 @@ Snakepit.Examples.Bootstrap.ensure_mix!([
 ])
 
 defmodule TTLRecyclingDemo do
-  require Logger
-
   def run do
     IO.puts("\n" <> String.duplicate("=", 70))
     IO.puts("Worker Lifecycle Management - TTL Recycling Demo")

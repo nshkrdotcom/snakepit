@@ -110,7 +110,6 @@ defmodule Snakepit.Config do
 
   """
 
-  require Logger
   alias Snakepit.Defaults
   alias Snakepit.Logger, as: SLog
 

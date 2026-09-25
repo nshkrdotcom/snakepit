@@ -1,8 +1,6 @@
 defmodule Snakepit.Examples.Bootstrap do
   @moduledoc false
 
-  require Logger
-
   @spec ensure_mix!([term()]) :: :ok
   def ensure_mix!(deps) when is_list(deps) do
     mix_started =

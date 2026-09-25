@@ -1,7 +1,7 @@
 defmodule Snakepit.MixProject do
   use Mix.Project
 
-  @version "0.13.0"
+  @version "0.14.0"
   @source_url "https://github.com/nshkrdotcom/snakepit"
 
   def project do
@@ -34,38 +34,18 @@ defmodule Snakepit.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:jason, "~> 1.0"},
-      {:grpc, "~> 0.11.5"},
-      # {:grpc_core,
-      # github: "nshkrdotcom/grpc",
-      # ref: "3cec4f8c010c7869e20ccc5068872e29faecd1a9",
-      # sparse: "grpc_core",
-      # override: true},
-      # {:grpc_server,
-      # github: "nshkrdotcom/grpc",
-      # ref: "3cec4f8c010c7869e20ccc5068872e29faecd1a9",
-      # sparse: "grpc_server",
-      # override: true},
-      # {:grpc_client,
-      # github: "nshkrdotcom/grpc",
-      # ref: "3cec4f8c010c7869e20ccc5068872e29faecd1a9",
-      # sparse: "grpc_client",
-      # override: true},
-
-      # {:protobuf, "0.16.0", override: true},
-      # {:protobuf,
-      # github: "nshkrdotcom/protobuf",
-      # ref: "250e4693ce50f4ef897fcb6e27e777dc6bdfa75c",
-      # override: true},
-
-      {:telemetry_metrics, "~> 1.0"},
-      {:telemetry_poller, "~> 1.0"},
+      {:jason, "~> 1.4"},
+      {:grpc, "~> 1.0"},
+      {:grpc_server, "~> 1.0"},
+      {:gun, "~> 2.4.0"},
+      {:telemetry_metrics, "~> 1.2"},
+      {:telemetry_poller, "~> 1.3"},
       {:telemetry_metrics_prometheus, "~> 1.1"},
-      {:opentelemetry, "~> 1.3"},
-      {:opentelemetry_exporter, "~> 1.6"},
-      {:opentelemetry_telemetry, "~> 1.0"},
-      {:stream_data, "~> 1.0", only: [:test]},
-      {:supertester, "~> 0.5.1", only: :test},
+      {:opentelemetry, "~> 1.7"},
+      {:opentelemetry_exporter, "~> 1.11"},
+      {:opentelemetry_telemetry, "~> 1.1"},
+      {:stream_data, "~> 1.4", only: [:test]},
+      {:supertester, "~> 0.6.0", only: :test},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
@@ -108,14 +88,23 @@ defmodule Snakepit.MixProject do
         "CHANGELOG.md",
         "LICENSE*",
         "assets",
-        "guides"
+        "guides",
+        "examples"
       ],
       exclude_patterns: [
-        "**/__pycache__",
-        "**/__pycache__/**",
-        "**/*.pyc",
-        "**/*.egg-info",
-        "**/*.bak",
+        # Build artifacts, dependencies, and caches
+        ~r/_build/,
+        ~r/(^|\/)deps(\/|$)/,
+        ~r/\.snakebridge/,
+        # Python environments, bytecode, and cache directories
+        ~r/priv\/snakepit/,
+        ~r/\.venv/,
+        ~r/__pycache__/,
+        ~r/\.pyc$/,
+        ~r/\.pytest_cache/,
+        ~r/\.egg-info/,
+        ~r/\.bak$/,
+        # Snakepit specific
         "priv/plts",
         "priv/data",
         "docs/archive"

@@ -1,7 +1,6 @@
 defmodule Snakepit.GRPCWorker.Bootstrap do
   @moduledoc false
 
-  require Logger
   alias Snakepit.Defaults
   alias Snakepit.Error
   alias Snakepit.Logger, as: SLog

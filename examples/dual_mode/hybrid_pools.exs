@@ -24,8 +24,6 @@ Snakepit.Examples.Bootstrap.ensure_mix!([
 ])
 
 defmodule HybridPoolsDemo do
-  require Logger
-
   def run do
     IO.puts("\n" <> String.duplicate("=", 70))
     IO.puts("Hybrid Pools - Best of Both Worlds")

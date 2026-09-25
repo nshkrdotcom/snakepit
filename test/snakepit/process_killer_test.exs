@@ -1,6 +1,5 @@
 defmodule Snakepit.ProcessKillerTest do
   use ExUnit.Case
-  require Logger
 
   alias Snakepit.Pool.ProcessRegistry
   alias Snakepit.Test.ProcessLeakTracker

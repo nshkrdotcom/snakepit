@@ -212,28 +212,6 @@ defmodule SnakepitShowcase.Demos.MLWorkflowDemo do
     """)
   end
 
-  defp handle_ml_error({:training_failed, reason}) do
-    IO.puts("""
-
-    💡 Tip: Training failures can occur due to:
-       - Insufficient memory
-       - Incompatible hyperparameters
-       - Numerical instabilities
-       
-    Error details: #{inspect(reason)}
-    """)
-  end
-
-  defp handle_ml_error({:stream_error, _reason}) do
-    IO.puts("""
-
-    💡 Tip: Streaming errors often indicate:
-       - Network connectivity issues
-       - Worker process crashes
-       - Serialization problems
-    """)
-  end
-
   defp handle_ml_error(_) do
     IO.puts("\n💡 Tip: Check the logs for more details")
   end

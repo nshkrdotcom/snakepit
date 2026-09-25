@@ -1,0 +1,36 @@
+{
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "topFilesLength": 5
+  },
+  "include": [
+    "lib/**",
+    "test/**",
+    "priv/python/**",
+    "priv/proto/**",
+    "config/*.exs",
+    "mix.exs",
+    ".formatter.exs",
+    "pytest.ini",
+    "README.md",
+    "AGENTS.md"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "**/__pycache__/**",
+      "**/*.pyc",
+      "priv/python/.venv/**",
+      "priv/python/venv/**",
+      "priv/plts/**",
+      "priv/data/**",
+      "_build/**",
+      "deps/**",
+      "doc/**"
+    ]
+  }
+}

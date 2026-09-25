@@ -48,16 +48,6 @@ defmodule Snakepit.Pool.QueueManagementTest do
       default_pool: :queue_pool
     }
 
-    on_exit(fn ->
-      # Avoid check-then-act race when async code tears down the table first.
-      try do
-        _ = :ets.delete(cache)
-        :ok
-      catch
-        :error, :badarg -> :ok
-      end
-    end)
-
     %{state: state}
   end
 

@@ -8,7 +8,7 @@ defmodule Snakepit.Telemetry.OpenTelemetry do
   spans are created but not shipped anywhere.
   """
 
-  require OpenTelemetry.Tracer, as: Tracer
+  alias OpenTelemetry.Tracer, as: Tracer
 
   alias OpenTelemetry.Span
   alias OpentelemetryTelemetry, as: OTelBridge

@@ -307,8 +307,6 @@ defmodule Snakepit.GRPC.BridgeServer do
     end)
   end
 
-  defp merge_binary_parameters(decoded, _binary_params), do: {:ok, decoded}
-
   defp normalize_param_key(key) when is_atom(key), do: Atom.to_string(key)
   defp normalize_param_key(key) when is_binary(key), do: key
   defp normalize_param_key(key), do: to_string(key)

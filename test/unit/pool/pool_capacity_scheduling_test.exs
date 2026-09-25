@@ -5,10 +5,6 @@ defmodule Snakepit.Pool.CapacitySchedulingTest do
   alias Snakepit.Pool.State
 
   setup do
-    if Process.whereis(Snakepit.TaskSupervisor) == nil do
-      start_supervised!({Task.Supervisor, name: Snakepit.TaskSupervisor})
-    end
-
     cache =
       :ets.new(:capacity_scheduling_test_cache, [
         :set,
@@ -50,13 +46,6 @@ defmodule Snakepit.Pool.CapacitySchedulingTest do
       affinity_cache: cache,
       default_pool: :capacity_pool
     }
-
-    on_exit(fn ->
-      case :ets.info(cache) do
-        :undefined -> :ok
-        _ -> :ets.delete(cache)
-      end
-    end)
 
     %{state: state}
   end
